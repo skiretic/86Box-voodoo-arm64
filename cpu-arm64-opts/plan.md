@@ -104,20 +104,20 @@ produce only ~8 bits, which is below AMD 3DNow!'s 14-15 bit guarantee. One
 Newton-Raphson step doubles precision to ~16 bits, safely exceeding the AMD spec
 on ALL conformant ARMv8.0 implementations.
 
-PFRCP with refinement:
+PFRCP with refinement (aliasing-safe: estimate goes to REG_V_TEMP):
 ```c
-host_arm64_FRECPE_V2S(block, dest_reg, src_reg_a);              // dest ≈ 1/src (~8-12 bit)
-host_arm64_FRECPS_V2S(block, REG_V_TEMP, dest_reg, src_reg_a);  // step = 2 - dest*src
-host_arm64_FMUL_V2S(block, dest_reg, dest_reg, REG_V_TEMP);     // dest *= step (~16 bit)
+host_arm64_FRECPE_V2S(block, REG_V_TEMP, src_reg_a);           // temp = x0 ≈ 1/src (src preserved)
+host_arm64_FRECPS_V2S(block, dest_reg, REG_V_TEMP, src_reg_a); // dest = 2 - x0*src (~16 bit)
+host_arm64_FMUL_V2S(block, dest_reg, REG_V_TEMP, dest_reg);    // dest = x0 * (2 - x0*src)
 host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);               // broadcast
 ```
 
-PFRSQRT with refinement:
+PFRSQRT with refinement (aliasing-safe: compute x0\*a, not x0², per aliasing-audit Option B):
 ```c
-host_arm64_FRSQRTE_V2S(block, dest_reg, src_reg_a);             // dest ≈ 1/sqrt(src) (~8-12 bit)
-host_arm64_FMUL_V2S(block, REG_V_TEMP, dest_reg, dest_reg);     // temp = dest²
-host_arm64_FRSQRTS_V2S(block, REG_V_TEMP, REG_V_TEMP, src_reg_a); // step = (3 - temp*src) / 2
-host_arm64_FMUL_V2S(block, dest_reg, dest_reg, REG_V_TEMP);     // dest *= step (~16 bit)
+host_arm64_FRSQRTE_V2S(block, REG_V_TEMP, src_reg_a);          // temp = x0 ≈ 1/sqrt(src) (src preserved)
+host_arm64_FMUL_V2S(block, dest_reg, REG_V_TEMP, src_reg_a);   // dest = x0*src (last read of src)
+host_arm64_FRSQRTS_V2S(block, dest_reg, dest_reg, REG_V_TEMP); // dest = (3 - x0*src*x0) / 2
+host_arm64_FMUL_V2S(block, dest_reg, dest_reg, REG_V_TEMP);    // dest = step * x0 (~16 bit)
 host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);               // broadcast
 ```
 
@@ -172,9 +172,11 @@ The JIT memory pool is a single contiguous 120MB mmap
 - `codegen_mem_load_byte/word/long/quad/single/double` (6 stubs)
 - `codegen_mem_store_byte/word/long/quad/single/double` (6 stubs)
 - `codegen_fp_round/codegen_fp_round_quad` (2 stubs)
-- `codegen_gpf_rout` (1 stub)
 
-These are called from 23 sites in `codegen_backend_arm64_uops.c`.
+Note: `codegen_gpf_rout` is intra-pool but is a **branch target** (reached via
+CBNZ), not a BL call target. It is NOT converted to `host_arm64_call_intrapool`.
+
+These are called from 26 sites in `codegen_backend_arm64_uops.c`.
 
 **New function**: `host_arm64_call_intrapool`
 ```c
@@ -238,7 +240,8 @@ etc.):
 host_arm64_MOVX_IMM(block, REG_ARG0, uop->imm_data);  // Up to 4 insns for small values!
 ```
 
-Since `uop->imm_data` is a `uint32_t`, it never needs more than 32 bits.
+Note: `uop->imm_data` is `uintptr_t` (64-bit) on ARM64, but all callers pass
+values that fit in 32 bits. The optimization is safe in practice.
 Replace with `host_arm64_mov_imm`:
 
 ```c

@@ -52,9 +52,9 @@ Added to `codegen_backend_arm64_ops.c` + declared in `codegen_backend_arm64_ops.
 **codegen_PFRCP** (AMD 3DNow! reciprocal estimate):
 
 ```
-FRECPE  dest, src           // ~8-12 bit estimate
-FRECPS  temp, dest, src     // Newton-Raphson: step = 2 - dest*src
-FMUL    dest, dest, temp    // dest *= step → ~16-24 bit precision
+FRECPE  temp, src           // ~8-12 bit estimate (src preserved for aliasing safety)
+FRECPS  dest, temp, src     // Newton-Raphson: dest = 2 - x0*src
+FMUL    dest, temp, dest    // dest = x0 * (2 - x0*src) → ~16-24 bit precision
 DUP     dest, dest[0]       // broadcast lane 0 (3DNow! scalar semantic)
 ```
 
@@ -63,15 +63,20 @@ Was: `FMOV_S_ONE + FDIV_S` (10-30 cycle latency). Now: ~6 cycles.
 **codegen_PFRSQRT** (AMD 3DNow! reciprocal sqrt estimate):
 
 ```
-FRSQRTE dest, src           // ~8-12 bit estimate
-FMUL    temp, dest, dest    // temp = dest²
-FRSQRTS temp, temp, src     // Newton-Raphson: step = (3 - temp*src) / 2
-FMUL    dest, dest, temp    // dest *= step → ~16-24 bit precision
+FRSQRTE temp, src           // ~8-12 bit estimate (src preserved for aliasing safety)
+FMUL    dest, temp, src     // dest = x0*src (consumes src before clobber)
+FRSQRTS dest, dest, temp    // Newton-Raphson: dest = (3 - x0*src*x0) / 2
+FMUL    dest, dest, temp    // dest = step * x0 → ~16-24 bit precision
 DUP     dest, dest[0]       // broadcast lane 0 (3DNow! scalar semantic)
 ```
 
 Was: `FSQRT_S + FMOV_S_ONE + FDIV_S` (21-65 cycle latency, **plus wrong
 results** due to clobber bug). Now: ~6 cycles + correct.
+
+**NOTE**: The initial commit (`53e5658b2`) had a dest==src register aliasing bug
+in both sequences (estimate written to dest_reg, clobbering src_reg_a when they
+alias). Fixed by placing estimate in REG_V_TEMP and using x0\*a instead of x0²
+for PFRSQRT (see `cross-validation.md` §1 and `aliasing-audit.md` Option B).
 
 ### Why Newton-Raphson is Mandatory
 
