@@ -4,6 +4,81 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Readability Review + Comment Pass (2026-02-18)
+
+### Comprehensive comment additions for readability and graphics concept documentation
+
+**Motivation:** Code review found the ARM64 codegen was functionally correct but lacked
+high-level explanations of what each pipeline stage does from a 3D graphics perspective,
+and several implementation comments were missing or misleading.
+
+**Review document:** `voodoo-arm64-port/code-review-readability.md`
+
+#### Changes applied (36 findings + 5 follow-up fixes):
+
+**Graphics concept block comments (G1-G15):**
+- Added file-level overview explaining what a pixel pipeline JIT is and how it works
+- Added block comments before every pipeline stage: stipple, tiled framebuffer, W/Z depth,
+  depth test, texture fetch, color combine, alpha combine, fog, alpha test, alpha blend,
+  dither + FB write, per-pixel increments, JIT cache, and codegen init
+- Each comment explains the 3D graphics concept, not just the ARM64 implementation
+
+**High priority fixes (H1-H5):**
+- H1: Expanded `tca_reverse_blend_1` divergence comment to clearly explain the upstream bug
+- H1: Removed false `0x8E` opcode bug claim at line 1303 (upstream was correct; they also
+  independently fixed the `tc_reverse_blend_1` issue after we reported it)
+- H2: Added rounding algorithm explanation for the 10+ repeated alpha multiply sequences
+- H3: Changed `cc_mselect == 1` to `cc_mselect == CC_MSELECT_CLOCAL` (named constant)
+- H4: Documented `dest_aafunc == 4` and `src_aafunc == 4` as `AFUNC_AONE`
+- H5: Added variable origin comment at top of `voodoo_generate()` explaining that `tc_*`,
+  `cc_*`, `dither*`, `logtable`, `rgb565`, `depth_op` etc. come from the enclosing
+  `vid_voodoo_render.c` scope via `#include`
+
+**Medium priority fixes (M1-M9):**
+- M1: Added 22-line pipeline stage map at top of `voodoo_generate()`
+- M2: Added algorithm overview comment for `voodoo_get_block()` (cache + JIT + fallback)
+- M3: Added `voodoo_arm64_data_t` struct purpose comment (valid vs rejected)
+- M4: Added bilinear weight geometric explanation (4-corner sub-texel formula)
+- M5: Fixed section numbering conflict (two "Section 12" → 12 and 12b)
+- M6: Restructured W-depth comment from scratch-pad to reference format
+- M7: Explained why depth write is split into two sections (alpha vs Z path)
+- M8: Added `loop_jump_pos = block_pos` inline comment marking loop head
+- M9: Explained why NEON constants are re-initialized every codegen call
+
+**Low priority fixes (L1-L7):**
+- L1: Added semantic purpose for each NEON lookup table (alookup, aminuslookup, etc.)
+- L2: Added x16/x17 (IP0/IP1) usage safety note after register table
+- L3: Enhanced `STATE_ib` comment to explain the contiguous LD1 4xS32 trick
+- L4: Added `1<<48` perspective division rationale (Q12.48 fixed-point format)
+- L5: Clarified point-sample LOD+4 (strips 4-bit sub-texel fraction)
+- L6: Added `EMIT_MOV_IMM64` scoping note + explanation at later inline repetitions
+- L7: Added forward branch patching ordering rationale
+
+**Follow-up fixes from second review pass:**
+- Fixed `tc_*/tca_*` inside block comment causing premature `*/` termination (build break)
+- Clarified skip patch point comment (skipped pixels commit no data but increments still run)
+- Added `IMM7_X` macro comment explaining the divide-by-8 scaled immediate encoding
+
+**Accuracy corrections from third verification pass:**
+- Fixed rotating stipple: "rotates each scanline" → "rotates once per pixel" (ROR is inside pixel loop)
+- Fixed ADDP description: was claiming lanes [0]+[4], [1]+[5]; corrected to adjacent pairs [0]+[1], [2]+[3]
+- Fixed tile dimensions: "128×32 pixels" → "64×32 pixels" (128 is bytes, not pixels at 16bpp)
+- Fixed pattern stipple: "bit N corresponds to pixel X & 31" → bit index depends on both X and Y (8×4 pattern)
+- Fixed fog blend formula: `(pixel * (255-fog)) + (fogColor * fog)` → actual fixed-point math with denominator 256
+- Reworded macro "scoped here" → "#undef'd after use" (C macros aren't scoped by braces)
+
+#### Code change:
+- `cc_mselect == 1` → `cc_mselect == CC_MSELECT_CLOCAL` (identical at compile time)
+
+#### Files modified:
+- `src/include/86box/vid_voodoo_codegen_arm64.h` — All comment additions
+
+#### Testing:
+- Clean build from scratch (cmake configure + full build + codesign)
+- Manual regression test: Windows 98 VM with Voodoo card, 3D rendering verified working
+
+---
+
 ## Instance State Migration (2026-02-16)
 
 ### Moved JIT cache/counter state from file-scope globals to per-instance voodoo_t

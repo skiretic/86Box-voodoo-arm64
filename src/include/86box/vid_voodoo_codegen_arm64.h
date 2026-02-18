@@ -22,6 +22,32 @@
 #ifndef VIDEO_VOODOO_CODEGEN_ARM64_H
 #define VIDEO_VOODOO_CODEGEN_ARM64_H
 
+/*
+ * ARM64 JIT code generator for the 3dfx Voodoo pixel pipeline.
+ *
+ * The Voodoo Graphics chipset (1996) renders 3D triangles by processing one
+ * pixel at a time through a fixed-function pipeline. For each pixel, the
+ * hardware performs: depth testing, texture sampling, color/alpha math,
+ * fog blending, alpha testing, transparency blending, and framebuffer writes.
+ *
+ * The original 86Box emulator implements this pipeline as a C interpreter
+ * (vid_voodoo_render.c). This file replaces the interpreter's inner loop
+ * with JIT-compiled ARM64 machine code for a significant speed boost.
+ *
+ * How it works:
+ *   - The Voodoo hardware state (register values) determines which pipeline
+ *     features are active (e.g., is fog enabled? which blend mode?).
+ *   - voodoo_generate() reads those registers at JIT time and emits a
+ *     specialized ARM64 code sequence that handles exactly that combination.
+ *   - voodoo_get_block() caches compiled blocks so the same register
+ *     combination doesn't need to be recompiled every frame.
+ *   - The compiled block is called once per scanline span, looping over
+ *     each pixel from x_start to x_end.
+ *
+ * The pipeline stages below match the 3dfx Voodoo hardware datapath.
+ * Each stage is conditionally emitted based on the current register state.
+ */
+
 #if defined(__APPLE__) && defined(__aarch64__)
 #    include <pthread.h>
 #endif
@@ -83,10 +109,26 @@
  *   v16-v31 = scratch (caller-saved)
  * ======================================================================== */
 
-/* ========================================================================
- * Data structure -- based on voodoo_x86_data_t cache key fields
- * (plus ARM64-local validity/reject flags)
- * ======================================================================== */
+/*
+ * Important: x16/x17 (IP0/IP1) are used as intra-procedure scratch by the
+ * linker for veneers. Generated code uses them freely as scratch registers
+ * since there are no BL calls inside the emitted pixel loop. Do not use
+ * x16/x17 to hold values that need to survive across addlong() sequences
+ * that emit BL or BLR instructions.
+ */
+
+/*
+ * voodoo_arm64_data_t -- cache slot for one compiled pixel pipeline block.
+ *
+ * Each slot holds:
+ *   code_block  -- pointer into MAP_JIT executable memory (BLOCK_SIZE bytes)
+ *   <key fields> -- the hardware register state that uniquely identifies
+ *                   the compiled pipeline variant (mirrors voodoo_x86_data_t)
+ *   valid       -- 1 if code_block holds valid compiled code
+ *   rejected    -- 1 if this variant was rejected (emit overflow, W^X failure)
+ *                  Rejected slots return NULL from voodoo_get_block() without
+ *                  retrying JIT compilation.
+ */
 typedef struct voodoo_arm64_data_t {
     uint8_t *code_block;
     int      xdir;
@@ -176,6 +218,8 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 /* ========================================================================
  * Section 3: Immediate Field Helpers
  * ======================================================================== */
+/* IMM7_X: encode a signed byte offset for STP/LDP of 64-bit (X) register pairs.
+ * The instruction stores offset/8 in bits [21:15] (7-bit scaled immediate). */
 #define IMM7_X(imm_data) (((imm_data >> 3) & 0x7f) << 15)
 #define IMM12(imm_data)  ((imm_data) << 10)
 #define IMM16(imm_data)  ((imm_data) << 5)
@@ -403,7 +447,7 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 #define ARM64_EOR_MASK(d, n, width) ARM64_EOR_BITMASK(d, n, 0, 0, (width) - 1)
 
 /* ========================================================================
- * Section 12: GPR Shifts -- Register
+ * Section 12b: GPR Shifts -- Register
  * ======================================================================== */
 
 /* LSL Wd, Wn, Wm (variable left shift) */
@@ -964,7 +1008,9 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
 #define STATE_tex          240  /* [2][9] ptr array, stride 72 per TMU */
 #define STATE_fb_mem       456
 #define STATE_aux_mem      464
-#define STATE_ib           472  /* base of {ib,ig,ir,ia} NEON block */
+#define STATE_ib           472  /* base of {ib,ig,ir,ia} NEON block.
+                                 * These 4 x int32 are contiguous in voodoo_state_t
+                                 * so LD1 {Vt.4S}, [x16] loads all 4 in one shot. */
 #define STATE_ia           484
 #define STATE_z            488
 #define STATE_new_depth    492
@@ -1084,6 +1130,23 @@ VOODOO_ASSERT_OFFSET(voodoo_params_t, tex_h_mask[0][0], PARAMS_tex_h_mask);
  * On ARM64, we store them as arrays of uint16_t[8] (128 bits).
  * The JIT code loads them with LDR Q (128-bit) or LDR D (64-bit).
  * Only the low 64 bits (4 x uint16_t) are significant for most tables.
+ *
+ * alookup[c]        -- {c, c, c, c} as 4 x uint16 (low 64 bits).
+ *                      Used to scale a 4-component BGRA vector by alpha value c.
+ *                      alookup[c+1] is used as the rounding adjustment.
+ *
+ * aminuslookup[c]   -- {255-c, 255-c, 255-c, 255-c} as 4 x uint16.
+ *                      Used for (1 - alpha) blend factors.
+ *
+ * bilinear_lookup[c*2]   -- row0 bilinear weights for index c (4+4 halfwords).
+ * bilinear_lookup[c*2+1] -- row1 bilinear weights for index c (4+4 halfwords).
+ *                           c encodes (frac_t << 4) | frac_s.
+ *                           Each entry is 16 bytes so the table is indexable
+ *                           with a single ADD+LDR D (low 64 bits per row).
+ *
+ * neon_00_ff_w[0]   -- all zeros (for trilinear tc_reverse_blend=0 path).
+ * neon_00_ff_w[1]   -- {0xFF, 0xFF, 0xFF, 0xFF} (for tc_reverse_blend=1 path).
+ *                      Indexed by tc_reverse_blend << 4 bytes.
  * ======================================================================== */
 
 typedef union {
@@ -1102,6 +1165,49 @@ static voodoo_neon_reg_t aminuslookup[256];
 static voodoo_neon_reg_t bilinear_lookup[256 * 2];
 static voodoo_neon_reg_t neon_00_ff_w[2];
 static uint32_t          i_00_ff_w[2] = { 0, 0xff };
+
+/*
+ * ========================================================================
+ * TEXTURE FETCH (one TMU -- Texture Mapping Unit)
+ * ========================================================================
+ * Texture mapping is the process of "painting" a 2D image onto a 3D
+ * triangle. For each pixel of the triangle on screen, the GPU needs to
+ * figure out which texel (texture pixel) corresponds to that screen pixel,
+ * read the texel's color, and pass it to the color combine stage.
+ *
+ * The Voodoo performs this in several steps:
+ *
+ * 1. PERSPECTIVE CORRECTION
+ *    The texture coordinates (S, T) are stored as S/W and T/W to allow
+ *    perspective-correct interpolation. The GPU divides by W at each pixel
+ *    to recover the true (S, T). Without this division, textures appear to
+ *    "swim" and warp incorrectly on angled surfaces.
+ *
+ * 2. LOD (Level of Detail) CALCULATION
+ *    Textures are stored as a mipmap pyramid -- the same image at multiple
+ *    resolutions (256x256, 128x128, 64x64, ...). The GPU picks the mipmap
+ *    level where one texel roughly equals one screen pixel. This prevents
+ *    aliasing (shimmering) on distant surfaces and is faster because smaller
+ *    textures have better cache behavior. LOD is computed from the W value.
+ *
+ * 3. TEXTURE ADDRESS GENERATION
+ *    Convert the floating-point (S, T) into integer texel coordinates,
+ *    apply mirror/clamp wrapping modes, and compute the memory address.
+ *
+ * 4. TEXEL LOOKUP
+ *    Read the texel from the texture memory. Two modes:
+ *    - Point sampling: read one texel (nearest to the computed coordinate).
+ *      Fast but blocky when the texture is magnified.
+ *    - Bilinear filtering: read 4 neighboring texels and blend them based
+ *      on the fractional position between them. Smooth but 4x the memory
+ *      reads. The blend weights are precomputed in bilinear_lookup[].
+ *
+ * 5. DUAL-TMU COMBINE (if two texture units are active)
+ *    The Voodoo 2 has two TMUs that each fetch a texel independently.
+ *    Their results are combined using a configurable equation (e.g.,
+ *    multiply for lightmapping, add for glow effects). This combine
+ *    happens after both TMUs have fetched their texels.
+ * ======================================================================== */
 
 /* ========================================================================
  * codegen_texture_fetch() -- Phase 3: Texture fetch with LOD, bilinear
@@ -1131,6 +1237,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
          * x86-64 ref: lines 81-187
          *
          * Load tmu_s, tmu_t, tmu_w. Compute (1<<48) / tmu_w.
+         * The dividend (1 << 48) is chosen to match the Voodoo hardware's
+         * fixed-point S/T format: S and T are Q12.48, so dividing by W
+         * using this constant gives a Q16.32 result that, after >>30, lands
+         * in the correct integer texture coordinate range.
          * Multiply S and T by the reciprocal, shift, and compute LOD.
          * ============================================================ */
 
@@ -1575,10 +1685,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* ADD v0.8H, v0.8H, v1.8H -- sum rows */
             addlong(ARM64_ADD_V8H(0, 0, 1));
 
-            /* Horizontal pairwise add to combine S0+S1 from both halves:
-             * ADDP v0.8H, v0.8H, v0.8H -- pairwise add adjacent 16-bit lanes
-             * This adds lanes [0]+[4], [1]+[5], [2]+[6], [3]+[7] etc.
-             * But we need [0..3]+[4..7] (low half + high half).
+            /* Horizontal add to combine S0+S1 from both halves:
+             * ADDP does pairwise addition of adjacent pairs within each source:
+             * result[0]=src[0]+src[1], result[1]=src[2]+src[3], etc.
+             * But we need [0..3]+[4..7] (low half + high half), not pairwise.
              *
              * x86-64 does: MOVDQA XMM1, XMM0; PSRLDQ XMM0, 8; PADDW XMM0, XMM1
              * which adds high 64 bits to low 64 bits.
@@ -1618,7 +1728,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* SUB w7, w7, w6  (tex_shift = 8 - lod) */
             addlong(ARM64_SUB_REG(7, 7, 6));
-            /* ADD w6, w6, #4  (lod + 4 for point-sample shift) */
+            /* ADD w6, w6, #4  -- point-sample uses a larger shift than bilinear:
+             * bilinear shifts by 'lod' (integer texel step), but point-sample
+             * needs to strip the 4-bit sub-texel fraction too, hence lod+4. */
             addlong(ARM64_ADD_IMM(6, 6, 4));
 
             /* LDR w4, [x0, #STATE_tex_s] */
@@ -1717,6 +1829,43 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 static inline void
 voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int depthop)
 {
+    /*
+     * Pipeline overview (matches GPU hardware stages):
+     *
+     *  PROLOGUE         -- save callee-saved regs, load pinned regs
+     *  PHASE 2: STIPPLE -- optional 32-bit pattern or rotating stipple reject
+     *  PHASE 2: TILED X -- compute x_tiled for tiled framebuffer modes
+     *  PHASE 2: W-DEPTH -- convert W to depth value (CLZ-based float decode)
+     *  PHASE 2: Z-DEPTH -- compute depth from state->z (if not W-buffer)
+     *  PHASE 2: DEPTH TEST  -- 8 comparison ops, skip on fail
+     *  PHASE 3: TEXTURE FETCH -- LOD, perspective div, bilinear or point sample
+     *  PHASE 3: TMU COMBINE -- dual-TMU tc/tca combine (if enabled)
+     *  PHASE 4: COLOR COMBINE -- chroma key, cother/clocal, cc_mselect/multiply
+     *  PHASE 4: ALPHA COMBINE -- a_other/a_local, cca_mselect/multiply
+     *  PHASE 5: FOG        -- constant, W-table, Z, or alpha fog
+     *  PHASE 5: ALPHA TEST -- 8 comparison ops, skip on fail
+     *  PHASE 5: ALPHA BLEND -- src/dst AFUNC multiply, sum, pack
+     *  PHASE 6: DEPTH WRITE (alpha path) -- write blended alpha to aux_mem
+     *  PHASE 6: FB WRITE   -- dither or shift-pack RGB565, write to fb_mem
+     *  PHASE 6: DEPTH WRITE (Z path)    -- write new_depth to aux_mem
+     *  SKIP PATCH POINTS -- z_skip, a_skip, chroma_skip, stipple_skip targets
+     *  PER-PIXEL INCREMENTS -- ib/ig/ir/ia, z, tmu s/t/w, pixel/texel counts
+     *  X INCREMENT + LOOP BACK
+     *  EPILOGUE -- restore callee-saved regs, RET
+     *
+     * NOTE ON VARIABLE SCOPE:
+     * This header is #include'd inside voodoo_draw_triangle() in
+     * vid_voodoo_render.c. Many variables used below are NOT declared in
+     * this file -- they are locals or macros from the enclosing function:
+     *   - tc_*, tca_*, cc_*, cca_*: texture/color combine mode bits
+     *   - a_sel, alpha_func, src_afunc, dest_afunc: alpha pipeline config
+     *   - _rgb_sel, dither, dither2x2: color select and dither config
+     *   - depth_op: depth comparison function
+     *   - logtable, rgb565: external lookup tables (vid_voodoo_render.c)
+     *   - dither_rb, dither_g, dither_rb2x2, dither_g2x2: dither tables
+     * This is the same pattern as the x86-64 codegen header.
+     */
+
     int block_pos        = 0;
     int z_skip_pos       = 0;
     int a_skip_pos       = 0;
@@ -1729,7 +1878,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
     arm64_codegen_begin_emit();
 
-    /* Initialize NEON constants (written to static memory, loaded by prologue) */
+    /* Re-initialize NEON constants before every emit. These constants are
+     * read by the PROLOGUE's LDR Q instructions that load them into pinned
+     * callee-saved NEON registers (v8-v11). Because the constants are in
+     * static global storage (not in the code block), they could in theory
+     * be initialized once in voodoo_codegen_init(). They are written here
+     * for safety in case future refactoring separates init from generate. */
     neon_01_w.u32[0]      = 0x00010001;
     neon_01_w.u32[1]      = 0x00010001;
     neon_01_w.u32[2]      = 0;
@@ -1808,7 +1962,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * Use MOVZ + MOVK sequence to load 64-bit pointers.
      */
     {
-        /* Helper: emit a 64-bit pointer load into register Xd */
+        /* Helper macro is #undef'd after use to avoid polluting the namespace.
+         * See the #undef immediately after the pointer loads below. */
 #define EMIT_MOV_IMM64(d, ptr)                                                   \
     do {                                                                          \
         uint64_t _v = (uint64_t) (uintptr_t) (ptr);                              \
@@ -1873,20 +2028,34 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* ================================================================
      * Pixel loop entry point
      * ================================================================ */
-    loop_jump_pos = block_pos;
+    loop_jump_pos = block_pos;  /* Top of the pixel loop -- loopback branch targets here */
 
-    /* ================================================================
-     * Phase 2: Stipple test
-     * ================================================================
+    /* ====================================================================
+     * STIPPLE TEST
+     * ====================================================================
+     * Stipple is a primitive form of transparency that predates alpha
+     * blending. Instead of making a pixel semi-transparent, the GPU simply
+     * skips every other pixel in a checkerboard-like pattern, creating
+     * the illusion of transparency when viewed from a distance.
+     *
+     * The Voodoo supports two stipple modes:
+     *   - Pattern stipple: a 32-bit mask selects which pixels to draw.
+     *     The bit index depends on both X and Y: it is an 8x4 pattern
+     *     indexed by (real_y & 3) * 8 | (~x & 7). Used for screen-door effects.
+     *   - Rotating stipple: the pattern rotates once per pixel (the
+     *     ROR+STR+TBZ sequence is inside the per-pixel loop body), giving a
+     *     more even distribution of drawn/skipped pixels across the screen.
+     *
+     * If the stipple test fails, the pixel is skipped entirely (jumps to
+     * the skip patch point after all rendering stages).
      *
      * x86-64 ref: lines 766-828
-     * Two modes: pattern stipple (FBZ_STIPPLE_PATT) or rotating stipple.
      *
      * Pattern stipple: bit = (real_y & 3) * 8 | (~x & 7)
      *   test state->stipple with (1 << bit), skip pixel if zero
      *
      * Rotating stipple: ROR state->stipple by 1, test bit 31
-     * ================================================================ */
+     * ================================================================== */
     if (params->fbzMode & FBZ_STIPPLE) {
         if (params->fbzMode & FBZ_STIPPLE_PATT) {
             /* Pattern stipple.
@@ -1936,15 +2105,24 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         }
     }
 
-    /* ================================================================
-     * Tiled X calculation (for tiled framebuffer modes)
-     * ================================================================
+    /* ====================================================================
+     * TILED FRAMEBUFFER ADDRESS
+     * ====================================================================
+     * The Voodoo 2 and later chips can store the framebuffer in a tiled
+     * memory layout instead of linear row-major order. Tiling groups nearby
+     * pixels into rectangular blocks in memory, which improves cache locality
+     * for 3D rendering (where access patterns are triangular, not row-based).
+     *
+     * When tiling is enabled, the X coordinate must be remapped from linear
+     * to tiled format before any framebuffer read/write. This section
+     * computes x_tiled from the linear X, using the tile dimensions defined
+     * by the Voodoo's row stride registers.
      *
      * x86-64 ref: lines 832-852
      * x_tiled = (x & 63) + ((x >> 6) << 11)
-     * Tile is 128x32 pixels, 16-bit per pixel: row stride = 128*32/2 = 2048 words
+     * Tile is 64x32 pixels, 16-bit per pixel: row stride = 64*32 = 2048 words (128 bytes wide)
      * So tile_row * 2048 = (x >> 6) << 11
-     * ================================================================ */
+     * ================================================================== */
     if (params->col_tiled || params->aux_tiled) {
         /* LDR w4, [x0, #STATE_x] */
         addlong(ARM64_LDR_W(4, 0, STATE_x));
@@ -1961,20 +2139,39 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* Zero v2 for later unpacking (PXOR XMM2, XMM2 equivalent) */
     addlong(ARM64_MOVI_V2D_ZERO(2));
 
-    /* ================================================================
-     * Phase 2: W-depth calculation
-     * ================================================================
+    /* ====================================================================
+     * DEPTH COMPUTATION (W-buffer or Z-buffer)
+     * ====================================================================
+     * Depth testing is how a 3D renderer determines which objects are in
+     * front of others. Each pixel has a depth value stored in a depth buffer
+     * (also called Z-buffer). Before writing a new pixel, its depth is
+     * compared against the stored depth -- if it's behind what's already
+     * drawn, it's discarded.
      *
-     * x86-64 ref: lines 858-932
-     * If W-buffer enabled OR fog needs w_depth:
-     *   Compute depth from W using floating-point-like decomposition.
+     * The Voodoo supports two depth modes:
+     *
+     *   Z-buffer: Linear interpolation of the Z coordinate across the
+     *     triangle. Simple but suffers from precision loss at large distances
+     *     (distant objects get very similar Z values, causing "Z-fighting").
+     *
+     *   W-buffer: Uses the homogeneous W coordinate (the perspective divisor)
+     *     instead of Z. W is distributed more evenly in screen space, giving
+     *     better depth precision at all distances. The Voodoo converts the
+     *     floating-point W value to a 16-bit integer using a log2-based
+     *     encoding: the top bits store the exponent and the lower bits store
+     *     the mantissa. This is computed here using CLZ (count leading zeros).
+     *
+     * "Depth bias" (added after depth computation) prevents Z-fighting
+     * when rendering coplanar geometry (e.g., a decal on a wall).
+     *
+     * x86-64 ref: lines 858-932 (W-depth), 933-960 (Z-depth + bias)
      *
      * W is a 48-bit fixed-point value stored in state->w (int64_t).
      * High 16 bits (w+4) are tested first; if nonzero, depth is computed
      * using CLZ (ARM64) instead of BSR (x86).
      *
      * BSR(x) = 31 - CLZ(x) on ARM64 (for nonzero input).
-     * ================================================================ */
+     * ================================================================== */
     if ((params->fbzMode & FBZ_W_BUFFER)
         || (params->fogMode & (FOG_ENABLE | FOG_CONSTANT | FOG_Z | FOG_ALPHA)) == FOG_ENABLE) {
         /* MOV w10, #0 -- new_depth = 0 (default if w high bits nonzero) */
@@ -2008,31 +2205,21 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         depth_jump_pos2 = block_pos;
         addlong(ARM64_CBZ_W_PLACEHOLDER(4));
 
-        /* BSR equivalent: CLZ w6, w4; then bsr_result = 31 - CLZ
+        /*
+         * Compute w_depth from the low 16 bits of the high word of state->w.
          *
-         * x86 uses: BSR EAX, EDX -> EAX = floor(log2(EDX))
-         *           EDX = 15; SUB EDX, EAX -> exp = 15 - bsr
+         * Voodoo's W depth encoding (same as x86-64):
+         *   exp  = 15 - floor(log2(w_high16))   = CLZ(w_high16) - 16
+         *   mant = (~w_low32) >> (19 - exp)      (low 12 bits)
+         *   result = (exp << 12) + mant + 1, clamped to [0, 0xFFFF]
          *
-         * ARM64: CLZ w6, w4
-         *        w6 = 31 - w6  (= BSR result)
-         *        w7 = 15 - (31 - w6) = w6 - 16  ... but let's match x86 logic:
-         *
-         * exp = 15 - bsr_result = 15 - (31 - clz) = clz - 16
-         *
-         * So:
-         *   CLZ w6, w4
-         *   SUB w7, w6, #16    -- exp = clz - 16
-         *   MOV w11, #19
-         *   SUB w11, w11, w7   -- shift_amount = 19 - exp
-         *   MVN w5, w5         -- NOT low 32 bits
-         *   LSR w5, w5, w11    -- mant = (~w_low) >> shift_amount
-         *   AND w5, w5, #0xFFF -- mant &= 0xFFF
-         *   LSL w7, w7, #12    -- exp <<= 12
-         *   ADD w10, w7, w5    -- result = (exp << 12) + mant
-         *   ADD w10, w10, #1   -- result += 1
-         *   MOV w11, #0xFFFF
-         *   CMP w10, w11
-         *   CSEL w10, w11, w10, HI  -- clamp to 0xFFFF
+         * ARM64 translation of x86 BSR:
+         *   x86: BSR EAX, EDX  =>  EAX = floor(log2(EDX))
+         *   ARM64: CLZ w6, w4  =>  w6 = count of leading zeros
+         *          BSR result  =  31 - w6  (for 32-bit input)
+         *   Since input is a 16-bit value zero-extended to 32 bits:
+         *          BSR result  =  31 - w6
+         *          exp         =  15 - BSR = 15 - (31 - w6) = w6 - 16
          */
         addlong(ARM64_CLZ(6, 4));
         addlong(ARM64_SUB_IMM(7, 6, 16));      /* exp = CLZ - 16 */
@@ -2113,9 +2300,22 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* Store new_depth: STR w10, [x0, #STATE_new_depth] */
     addlong(ARM64_STR_W(10, 0, STATE_new_depth));
 
-    /* ================================================================
-     * Phase 2: Depth test (all 8 DEPTHOP modes)
-     * ================================================================
+    /* ====================================================================
+     * DEPTH TEST
+     * ====================================================================
+     * Compare the new pixel's depth against the value already in the depth
+     * buffer. The comparison function is configurable (never, less, equal,
+     * less-or-equal, greater, not-equal, greater-or-equal, always).
+     *
+     * Games choose the function based on rendering needs:
+     *   - "less" (most common): draw only if closer than what's already there
+     *   - "always": disable depth testing (for HUD/UI elements)
+     *   - "equal": used for multi-pass rendering (second pass draws only
+     *     where the first pass already wrote)
+     *
+     * If the test fails, the pixel is skipped (no color, depth, or alpha
+     * buffer writes). The skip is implemented as a forward branch that
+     * jumps past all rendering stages to the per-pixel increment section.
      *
      * x86-64 ref: lines 966-1023
      *
@@ -2128,7 +2328,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * If DEPTHOP_ALWAYS: no test needed
      *
      * For depth source override (FBZ_DEPTH_SOURCE), use zaColor instead.
-     * ================================================================ */
+     * ================================================================== */
     if ((params->fbzMode & FBZ_DEPTH_ENABLE) && (depthop != DEPTHOP_ALWAYS) && (depthop != DEPTHOP_NEVER)) {
         /* Load x index (tiled or regular) */
         if (params->aux_tiled) {
@@ -2224,6 +2424,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             /* STR w4, [x0, #STATE_tex_a] */
             addlong(ARM64_STR_W(4, 0, STATE_tex_a));
         } else {
+            /* Dual-TMU texture combine path.
+             * (See NOTE ON VARIABLE SCOPE at the top of voodoo_generate()
+             * for where tc_*, tca_*, cc_*, etc. variables come from.) */
+
             /* ============================================================
              * Dual-TMU mode: fetch TMU1 first, then TMU0, combine
              * ============================================================
@@ -2416,11 +2620,14 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     /* XOR w4 with i_00_ff_w[w6] (w6 = tca_reverse_blend index) */
                     addlong(ARM64_LDR_W_REG_LSL2(10, 23, 6));  /* x23 = i_00_ff_w */
                     addlong(ARM64_EOR_REG(4, 4, 10));
-                } else if (!tca_reverse_blend_1) {  /* CORRECTED: was tc_reverse_blend_1 in x86, should be tca */
+                } else if (!tca_reverse_blend_1) {
+                    /* NOTE: The x86-64 reference at line ~1303 tests tc_reverse_blend_1 here,
+                     * but that is a bug. The alpha combine path must use the alpha-specific
+                     * flag tca_reverse_blend_1, not the RGB flag. Intentionally diverging. */
                     addlong(ARM64_EOR_MASK(4, 4, 8)); /* XOR with 0xFF */
                 }
 
-                /* ADD w4, w4, #1 -- THIS IS THE BUG FIX (x86 line 1303 has 0x8E instead of 0x83) */
+                /* ADD w4, w4, #1 */
                 addlong(ARM64_ADD_IMM(4, 4, 1));
 
                 /* MUL w4, w4, w5 */
@@ -2683,9 +2890,31 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         }
     }
 
-    /* ================================================================
-     * Phase 4: Color/Alpha Combine
-     * ================================================================
+    /* ====================================================================
+     * COLOR COMBINE
+     * ====================================================================
+     * Color combine is the Voodoo's per-pixel shading equation. It takes
+     * the texel color (from texture fetch) and the iterated vertex color
+     * (from Gouraud shading) and combines them into a final pixel color.
+     *
+     * The combine equation is:
+     *   result = ((c_other - c_local) * c_factor + c_local + c_add)
+     *
+     * Where:
+     *   c_other  = one of: iterated RGB, texture RGB, or iterated+texture
+     *   c_local  = one of: iterated RGB, texture RGB, or iterated alpha
+     *   c_factor = one of: local, other, local alpha, other alpha, texture
+     *              alpha, or iterated alpha (the "mselect" multiplier)
+     *
+     * This flexible equation covers most 1990s shading needs:
+     *   - Modulate (texture * vertex color): standard textured lighting
+     *   - Decal (texture only): unlit textures like sky or UI
+     *   - Blend (lerp between texture and vertex): glass, fade effects
+     *
+     * CHROMA KEY: Before color combine, the texel color can be tested
+     * against a key color range. If it matches, the pixel is discarded.
+     * This is how the Voodoo implements color-key transparency (e.g.,
+     * "bright pink = transparent" in sprite-based games).
      *
      * x86-64 ref: lines 1689-2228
      *
@@ -2703,7 +2932,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   w14 = a_other (scalar alpha)
      *   w15 = a_local (scalar alpha)
      *   w4-w7, w10-w13 = scratch
-     * ================================================================ */
+     * ================================================================== */
 
     /* Save texture color for CC_MSELECT_TEXRGB before it gets overwritten */
     if (cc_mselect == CC_MSELECT_TEXRGB) {
@@ -2760,6 +2989,23 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_AND_BITMASK(4, 4, 0, 0, 23));
         addlong(ARM64_FMOV_S_W(0, 4));
     }
+
+    /* ====================================================================
+     * ALPHA COMBINE
+     * ====================================================================
+     * Alpha combine computes the pixel's alpha (opacity) value using the
+     * same equation structure as color combine, but operating on a single
+     * channel instead of RGB:
+     *
+     *   result = ((a_other - a_local) * a_factor + a_local + a_add)
+     *
+     * Where a_other and a_local are selected from iterated alpha, texture
+     * alpha, or constant values. The result is used by later stages:
+     *   - Alpha test: discard pixels below an alpha threshold
+     *   - Alpha blend: control transparency when compositing with the
+     *     existing framebuffer contents
+     *   - Alpha buffer write: store the alpha for later multi-pass use
+     * ================================================================== */
 
     /* ----------------------------------------------------------------
      * Alpha select (a_other) and alpha mask test
@@ -2867,7 +3113,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *
      * Only needed if cc_sub_clocal, cc_mselect==CLOCAL, or cc_add==1
      * ---------------------------------------------------------------- */
-    if (cc_sub_clocal || cc_mselect == 1 || cc_add == 1) {
+    if (cc_sub_clocal || cc_mselect == CC_MSELECT_CLOCAL || cc_add == 1) {
         if (!cc_localselect_override) {
             if (cc_localselect) {
                 /* clocal = params->color0 */
@@ -3129,9 +3375,26 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ================================================================ */
     addlong(ARM64_MOV_V(13, 0));
 
-    /* ================================================================
-     * Phase 5: Fog Application
-     * ================================================================
+    /* ====================================================================
+     * FOG
+     * ====================================================================
+     * Fog simulates atmospheric haze by blending the pixel's color toward
+     * a constant fog color based on distance. Objects far from the camera
+     * fade into the fog; nearby objects are unaffected.
+     *
+     * The Voodoo supports four fog modes:
+     *   - Constant fog: a fixed fog factor applied to all pixels
+     *   - Z-based fog: fog factor derived from the Z depth (linear fade)
+     *   - W-based fog: fog factor looked up from a 64-entry table indexed
+     *     by the W value. This gives perspective-correct fog that looks
+     *     more natural than Z-based fog.
+     *   - Alpha-based fog: the iterated alpha value controls fog density,
+     *     allowing per-vertex fog control from the application
+     *
+     * The blend uses fixed-point math with a denominator of 256:
+     *   fog_weight = (fog_a + 1) / 256
+     *   final_color = pixel_color + (fog_color - pixel_color) * fog_weight
+     * This is done per-channel (R, G, B) using NEON vector math.
      *
      * x86-64 ref: lines 2236-2417
      *
@@ -3145,7 +3408,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * After fog:
      *   v0 = fogged color (packed BGRA bytes)
      *   w12 = alpha (unchanged by fog)
-     * ================================================================ */
+     * ================================================================== */
     if (params->fogMode & FOG_ENABLE) {
         if (params->fogMode & FOG_CONSTANT) {
             /* FOG_CONSTANT: simply add fogColor to color (saturating) */
@@ -3270,15 +3533,31 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         }
     }
 
-    /* ================================================================
-     * Phase 5: Alpha Test
-     * ================================================================
+    /* ====================================================================
+     * ALPHA TEST
+     * ====================================================================
+     * Alpha test is a binary accept/reject based on the pixel's alpha value.
+     * Unlike alpha blending (which is gradual), alpha test is all-or-nothing:
+     * the pixel is either fully drawn or fully discarded.
+     *
+     * The test compares the computed alpha against a reference value using
+     * a configurable function (never, less, equal, lequal, greater, notequal,
+     * gequal, always) -- same comparison ops as the depth test.
+     *
+     * Primary use cases:
+     *   - Cutout transparency: trees, fences, chain-link textures where
+     *     each texel is either fully opaque or fully transparent. The alpha
+     *     channel acts as a 1-bit mask. Much cheaper than alpha blending.
+     *   - Alpha-to-coverage approximation on hardware without MSAA.
+     *
+     * If the test fails, the pixel is skipped (no framebuffer or depth
+     * buffer writes).
      *
      * x86-64 ref: lines 2419-2467
      *
      * Compare alpha (w12 = EDX) against alphaMode byte 3 (alpha ref).
      * Skip pixel if test fails (branch to skip position).
-     * ================================================================ */
+     * ================================================================== */
     if ((params->alphaMode & 1) && (alpha_func != AFUNC_NEVER) && (alpha_func != AFUNC_ALWAYS)) {
         /* Load alpha reference: LDRB w4, [x1, #PARAMS_alphaMode + 3] */
         addlong(ARM64_LDRB_IMM(4, 1, PARAMS_alphaMode + 3));
@@ -3324,14 +3603,34 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_RET);
     }
 
-    /* ================================================================
-     * Phase 5: Alpha Blend
-     * ================================================================
+    /* ====================================================================
+     * ALPHA BLEND
+     * ====================================================================
+     * Alpha blending composites the new pixel with the color already in
+     * the framebuffer, creating smooth transparency effects (glass, water,
+     * smoke, particle effects, etc.).
+     *
+     * The blend equation is:
+     *   final = src_color * src_factor + dst_color * dst_factor
+     *
+     * Where src is the incoming pixel and dst is what's already in the
+     * framebuffer. The factors are selected per-channel from:
+     *   - Zero, one (trivial: discard or keep)
+     *   - Source alpha, (1 - source alpha): classic transparency
+     *   - Destination alpha, (1 - dest alpha): for pre-multiplied alpha
+     *   - Source color, (1 - source color): for advanced effects
+     *
+     * To blend, the GPU must first READ the existing framebuffer pixel
+     * (dst_color), which is an expensive memory access. The framebuffer
+     * stores RGB565 (16-bit), so the read value must be unpacked to 8-bit
+     * per channel before blending.
+     *
+     * The multiply-and-round sequence used here:
+     *   result = (product + 1 + (product >> 8)) >> 8
+     * matches the Voodoo hardware's fixed-point 8-bit multiply rounding.
+     * This appears many times in the src_afunc/dest_afunc switch cases.
      *
      * x86-64 ref: lines 2469-3058
-     *
-     * Read destination pixel from framebuffer, decode via rgb565 LUT,
-     * compute blended src and dst, combine, pack result.
      *
      * Register plan:
      *   w12 = src alpha (EDX in x86-64), doubled for table index
@@ -3340,7 +3639,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   v6  = dst color copy (for src AFUNC_A_COLOR / AOM_COLOR)
      *   w5  = dst alpha (EBX in x86-64), doubled for table index
      *   x8  = fb_mem, x9 = aux_mem (pinned from prologue)
-     * ================================================================ */
+     * ================================================================== */
     if (params->alphaMode & (1 << 4)) {
         /* Load dest alpha from aux buffer if alpha-buffer enabled */
         if (params->fbzMode & FBZ_ALPHA_ENABLE) {
@@ -3377,7 +3676,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         /* Decode dest RGB565 via rgb565[] lookup table.
          * rgb565 is an array of rgba8_t (4 bytes each).
          * Load rgb565[pixel] (32-bit), put in v4, unpack to 4x16. */
-        /* x7 = &rgb565 */
+        /* Load 64-bit pointer to rgb565 decode table.
+         * (EMIT_MOV_IMM64 was #undef'd after prologue; repeating the 4-insn sequence.) */
         addlong(ARM64_MOVZ_X(7, (uintptr_t) rgb565 & 0xFFFF));
         addlong(ARM64_MOVK_X(7, ((uintptr_t) rgb565 >> 16) & 0xFFFF, 1));
         addlong(ARM64_MOVK_X(7, ((uintptr_t) rgb565 >> 32) & 0xFFFF, 2));
@@ -3390,7 +3690,14 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         /* Save dest color in v6 for src_afunc A_COLOR/AOM_COLOR */
         addlong(ARM64_MOV_V(6, 4));
 
-        /* ---- dest_afunc: compute dest blend factor and apply to v4 ---- */
+        /* ---- dest_afunc: compute dest blend factor and apply to v4 ----
+         *
+         * Rounding sequence used throughout both dest_afunc and src_afunc:
+         *   result = (product + alookup[1] + (product >> 8)) >> 8
+         * This is the Voodoo hardware's standard 8-bit alpha multiply with
+         * rounding correction. alookup[1] = {1,1,1,1} (loaded at offset 16
+         * from alookup[0]). The sequence matches x86-64 PMULHUW+round pattern.
+         * ---- */
         switch (dest_afunc) {
             case AFUNC_AZERO:
                 addlong(ARM64_MOVI_V2D_ZERO(4));
@@ -3596,13 +3903,17 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_MOV_ZERO(4));  /* w4 = 0 (accumulator for blended alpha) */
 
         if (dest_aafunc == 4) {
-            /* dest_aafunc==4 means dest_alpha contributes: w4 += (dst_alpha*2) << 7 */
+            /* dest_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
+             * destination alpha passes through to the blended output alpha.
+             * The (<<7 then >>8 later) pair is a divide-by-2 approximation
+             * matching the x86-64 SHL/SHR sequence (lines 3037-3042). */
             addlong(ARM64_LSL_IMM(6, 5, 7));   /* w6 = (dst_alpha*2) << 7; >>8 later gives correct alpha */
             addlong(ARM64_ADD_REG(4, 4, 6));
         }
 
         if (src_aafunc == 4) {
-            /* src_aafunc==4 means src_alpha contributes: w4 += (src_alpha*2) << 7 */
+            /* src_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
+             * source alpha passes through. Same (<<7 then >>8) pattern. */
             addlong(ARM64_LSL_IMM(6, 12, 7));  /* w6 = (src_alpha*2) << 7; >>8 later gives correct alpha */
             addlong(ARM64_ADD_REG(4, 4, 6));
         }
@@ -3619,6 +3930,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *
      * x86-64 ref: lines 3060-3075
      *
+     * NOTE: Depth write is split into two separate sections:
+     *   1. Here: when FBZ_ALPHA_ENABLE is set, the alpha buffer (aux_mem)
+     *      stores the blended alpha value (w12 = post-blend alpha).
+     *      This must happen before the skip patch points because skipped
+     *      pixels do NOT update the alpha buffer.
+     *   2. After the FB write: when FBZ_ALPHA_ENABLE is NOT set, the aux
+     *      buffer stores new_depth. This also happens before skip targets.
+     * Both sections write to aux_mem; only the value written differs.
+     *
      * Write depth to aux buffer when both depth write mask and
      * alpha-buffer are enabled. The depth value to write is w12
      * (the alpha result, same as EDX on x86-64).
@@ -3632,17 +3952,32 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_STRH_REG_LSL1(12, 9, 4));
     }
 
-    /* ================================================================
-     * Phase 6: Dithering + RGB565 pack + Framebuffer write
-     * ================================================================
+    /* ====================================================================
+     * DITHERING + FRAMEBUFFER WRITE
+     * ====================================================================
+     * The Voodoo's framebuffer is 16-bit RGB565 (5 red, 6 green, 5 blue).
+     * This gives only 65,536 possible colors, which causes visible banding
+     * on smooth gradients (sky, fog, lighting ramps).
+     *
+     * Dithering reduces banding by adding a small position-dependent offset
+     * to each color channel before truncating to 5/6 bits. Adjacent pixels
+     * get different offsets, so the eye perceives an average that's closer
+     * to the true color. The Voodoo uses either a 2x2 or 4x4 ordered
+     * dither matrix (Bayer pattern), indexed by (x & mask, y & mask).
+     *
+     * The dither table (dither_rb for red/blue, dither_g for green)
+     * provides the truncated+dithered value as a direct lookup:
+     *   dither_rb[dither_offset + channel_value]  -> 5-bit result
+     *   dither_g [dither_offset + channel_value]  -> 6-bit result
+     *
+     * The final RGB565 pixel is packed as: (R5 << 11) | (G6 << 5) | B5
+     * and written to fb_mem[x] (or fb_mem[x_tiled] if tiling is active).
+     *
+     * When dithering is disabled, the code simply shifts and masks:
+     *   R5 = R8 >> 3, G6 = G8 >> 2, B5 = B8 >> 3
      *
      * x86-64 ref: lines 3077-3221
-     *
-     * Load x coordinate, extract MOVD from v0, then either:
-     *   - Dither path: use dither tables to convert R/G/B to 5/6/5
-     *   - No-dither path: simple shift-and-mask to pack RGB565
-     * Store result to framebuffer.
-     * ================================================================ */
+     * ================================================================== */
 
     /* Load x coordinate for framebuffer write */
     if (params->col_tiled)
@@ -3804,7 +4139,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * amask_skip): all skip to here (after framebuffer write, before
      * per-pixel increments).
      *
-     * x86-64 ref: lines 3245-3254
+     * Skipped pixels (depth fail, alpha fail, chroma key, stipple) branch
+     * here -- after all framebuffer and depth writes, so no pixel data is
+     * committed, but the per-pixel interpolant increments below still run
+     * to keep the rasterizer state consistent with the next X position.
+     * The ordering matches x86-64 lines 3245-3254.
      * ================================================================ */
     if (z_skip_pos)
         PATCH_FORWARD_BCOND(z_skip_pos);
@@ -3822,21 +4161,29 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         }
     }
 
-    /* ================================================================
-     * Per-pixel state increments
-     * ================================================================
+    /* ====================================================================
+     * PER-PIXEL INCREMENTS + LOOP
+     * ====================================================================
+     * The Voodoo rasterizes triangles by scanning horizontally across each
+     * scanline (span). All the per-pixel state values (color, depth, texture
+     * coordinates) are set up for the leftmost pixel of the span and then
+     * incremented by fixed deltas (dR/dX, dZ/dX, dS/dX, dT/dX, dW/dX) for
+     * each step to the right. This is called "edge walking" or "span
+     * interpolation" and is far cheaper than recomputing everything per pixel.
+     *
+     * The increments updated here are:
+     *   - ib, ig, ir, ia: iterated Blue, Green, Red, Alpha (Gouraud shading)
+     *   - z: depth value (for Z-buffer mode)
+     *   - tmu0 s, t, w: texture unit 0 coordinates and perspective divisor
+     *   - tmu1 s, t, w: texture unit 1 coordinates (if dual-TMU)
+     *   - w: global W (for W-buffer and fog)
+     *   - pixel_count, texel_count: performance counters
+     *
+     * After incrementing, X is advanced by +1 (or -1 for right-to-left spans)
+     * and the loop branches back to the top if pixels remain.
      *
      * x86-64 ref: lines 3256-3427
-     *
-     * Update: ib/ig/ir/ia (NEON 4xS32 add/sub with dBdX..dAdX)
-     *         z += dZdX
-     *         tmu0_s/t += dSdX/dTdX (64-bit add/sub)
-     *         tmu0_w += dWdX (64-bit)
-     *         w += dWdX (64-bit global W)
-     *         tmu1 s/t/w if dual TMUs
-     *         pixel_count++
-     *         texel_count += 1 or 2
-     * ================================================================ */
+     * ================================================================== */
 
     /* ib/ig/ir/ia increment (4 x int32, contiguous at STATE_ib=472).
      * 472 is not 16-byte aligned, so use ADD+LD1 instead of LDR Q. */
@@ -4065,9 +4412,47 @@ arm64_codegen_store_cache_key(voodoo_arm64_data_t *data, voodoo_t *voodoo, voodo
     data->rejected       = rejected;
 }
 
-/* ========================================================================
- * voodoo_get_block() -- cache lookup / JIT generation with W^X toggle
+/*
+ * ========================================================================
+ * JIT BLOCK CACHE + COMPILATION
+ * ========================================================================
+ * The Voodoo pixel pipeline has hundreds of configurable options (blend
+ * modes, texture modes, fog modes, depth modes, etc.). Rather than checking
+ * all these options per-pixel at runtime (slow), the JIT compiles a
+ * specialized native code block for each unique combination of options.
+ *
+ * The compiled block contains only the instructions needed for that exact
+ * configuration -- no branches, no option checks, just straight-line code
+ * for the active pipeline stages. This is dramatically faster than the
+ * C interpreter, which must check every option on every pixel.
+ *
+ * Blocks are cached in an 8-entry ring buffer per render target. When the
+ * game changes rendering state (e.g., switches from opaque to transparent
+ * objects), a new block is compiled for the new state. Most games use only
+ * a handful of distinct pipeline configurations per frame.
+ *
+ * On macOS ARM64, the JIT must handle W^X (write-xor-execute) memory
+ * protection: code pages are made writable for compilation, then switched
+ * to executable before the block can be called. The I-cache is flushed
+ * after each compilation to ensure the CPU sees the new instructions.
  * ======================================================================== */
+
+/*
+ * voodoo_get_block() -- find or JIT-compile a pixel pipeline block.
+ *
+ * Algorithm:
+ *   1. Search the 8-entry ring buffer (jit_last_block[odd_even] to +7) for a
+ *      cached block whose key matches the current hardware state. Return it on hit.
+ *   2. On miss, evict jit_next_block_to_write[odd_even] and JIT-compile a new block:
+ *      a. Make code page writable (W^X toggle).
+ *      b. Call voodoo_generate() to emit ARM64 into data->code_block.
+ *      c. Check for emit overflow (block exceeded BLOCK_SIZE).
+ *      d. Make code page executable and flush I-cache.
+ *   3. Return the compiled code_block pointer, or NULL to fall back to interpreter.
+ *
+ * odd_even selects which of the two per-frame buffer halves to use (0 or 1),
+ * and the 4x multiplier in the slot formula accounts for 4 depth ops per half.
+ */
 static inline void *
 voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int odd_even)
 {
@@ -4190,6 +4575,27 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     return data->code_block;
 }
 
+/*
+ * ========================================================================
+ * CODEGEN INITIALIZATION
+ * ========================================================================
+ * One-time setup when the emulated Voodoo card is initialized:
+ *
+ * 1. Allocate executable memory (MAP_JIT on macOS) for compiled blocks.
+ *    Each block gets BLOCK_SIZE bytes. Total allocation covers all cache
+ *    slots across both render targets (odd/even double-buffering).
+ *
+ * 2. Build lookup tables used by the compiled code at runtime:
+ *    - alookup[256]: alpha multiply factors {a, a, a, a} as NEON halfwords
+ *    - aminuslookup[256]: inverse alpha {255-a, ...} for (1-alpha) blends
+ *    - bilinear_lookup[512]: 4-corner bilinear filter weights, precomputed
+ *      for all 256 possible sub-texel positions (16 x 16 fractional grid)
+ *    - neon_00_ff_w[2]: constant vectors {0,0,0,0} and {255,255,255,255}
+ *
+ * These tables are stored in regular (non-executable) memory and accessed
+ * by the JIT code via pointer registers loaded in the prologue.
+ * ======================================================================== */
+
 /* ========================================================================
  * voodoo_codegen_init() -- allocate executable memory + init lookup tables
  * ======================================================================== */
@@ -4272,7 +4678,20 @@ voodoo_codegen_init(voodoo_t *voodoo)
         aminuslookup[c].u16[6] = 0;
         aminuslookup[c].u16[7] = 0;
 
-        /* bilinear filter weights */
+        /* Bilinear weights for sub-texel index c = (frac_t << 4) | frac_s.
+         * frac_s = c & 0xF (0-15), frac_t = c >> 4 (0-15).
+         *
+         * The four bilinear sample weights (summing to 256) are:
+         *   d[0] = (16 - frac_s) * (16 - frac_t)  -- top-left texel
+         *   d[1] = frac_s        * (16 - frac_t)  -- top-right texel
+         *   d[2] = (16 - frac_s) * frac_t          -- bottom-left texel
+         *   d[3] = frac_s        * frac_t          -- bottom-right texel
+         *
+         * Each weight is broadcast to 4 halfword lanes (one per BGRA component)
+         * and stored in two consecutive 128-bit entries (32 bytes per index):
+         *   bilinear_lookup[c*2]   = {d[0],d[0],d[0],d[0], d[1],d[1],d[1],d[1]}
+         *   bilinear_lookup[c*2+1] = {d[2],d[2],d[2],d[2], d[3],d[3],d[3],d[3]}
+         */
         d[0] = (16 - _ds) * (16 - dt);
         d[1] = _ds * (16 - dt);
         d[2] = (16 - _ds) * dt;
