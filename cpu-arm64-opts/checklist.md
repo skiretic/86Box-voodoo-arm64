@@ -32,17 +32,17 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 
 ## Phase 2: PC-Relative BL for Intra-Pool Calls
 
-- [ ] Add OPCODE_BL define to `codegen_backend_arm64_ops.c`
-- [ ] Implement host_arm64_call_intrapool with codegen_alloc BEFORE offset capture
-- [ ] Replace 23 stub calls in `codegen_backend_arm64_uops.c` with call_intrapool
-- [ ] Replace host_arm64_jump in codegen_JMP with host_arm64_B
-- [ ] Verify codegen_alloc is called BEFORE offset computation (critical!)
+- [x] Add OPCODE_BL define to `codegen_backend_arm64_ops.c`
+- [x] Implement host_arm64_call_intrapool with codegen_alloc BEFORE offset capture
+- [x] Replace 26 stub calls in `codegen_backend_arm64_uops.c` with call_intrapool
+- [x] Replace host_arm64_jump in codegen_JMP with host_arm64_B
+- [x] Verify codegen_alloc is called BEFORE offset computation (critical!)
 - [ ] Build + test full boot cycle
 - [ ] Measure generated code size reduction
 
 ### Phase 2 Testing
 
-- [ ] **BUILD**: Compiles on ARM64
+- [x] **BUILD**: Compiles on ARM64
 - [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
 - [ ] **RUN TEST**: Run 3DMark 99 or similar workload
 - [ ] Create PR for Phase 2
