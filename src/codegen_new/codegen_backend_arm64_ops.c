@@ -1561,13 +1561,6 @@ host_arm64_call_intrapool(codeblock_t *block, void *dest)
 }
 
 void
-host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
-{
-    host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
-    host_arm64_BR(block, REG_X16);
-}
-
-void
 host_arm64_mov_imm(codeblock_t *block, int reg, uint32_t imm_data)
 {
     if (imm_is_imm16(imm_data))

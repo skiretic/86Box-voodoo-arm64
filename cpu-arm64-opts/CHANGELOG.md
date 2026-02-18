@@ -1,5 +1,60 @@
 # ARM64 CPU JIT Backend Optimization — Changelog
 
+## Phase 1+2 Follow-up: P0 Aliasing Fixes + Dead Code Removal
+
+**Branch**: `86box-arm64-cpu`
+
+### P0 Fix: PFRCP dest==src Register Aliasing
+
+The register allocator can assign the same host register for both `dest_reg`
+and `src_reg_a` (when the IR has dest==src). The original PFRCP sequence wrote
+the estimate directly to `dest_reg`, clobbering `src_reg_a` before the
+Newton-Raphson step could read it.
+
+**Fix**: Place the FRECPE estimate in `REG_V_TEMP` instead of `dest_reg`.
+The FRECPS step then reads both `REG_V_TEMP` (x0) and `src_reg_a` (still
+valid), and writes its result to `dest_reg`. The final FMUL reads
+`REG_V_TEMP` and `dest_reg` (the FRECPS result), completing the refinement.
+
+```
+FRECPE  REG_V_TEMP, src_reg_a          // temp = x0 (src preserved)
+FRECPS  dest_reg, REG_V_TEMP, src_reg_a // dest = 2 - x0*src (src last read)
+FMUL    dest_reg, REG_V_TEMP, dest_reg  // dest = x0 * step = x1
+DUP     dest_reg, dest_reg[0]           // broadcast
+```
+
+### P0 Fix: PFRSQRT dest==src Register Aliasing
+
+Same root cause as PFRCP. The original sequence computed `x0*x0` (step 2),
+which required reading `dest_reg` (holding x0) after it had already been
+written when dest==src. It also placed the estimate directly in `dest_reg`.
+
+**Fix** (aliasing-audit Option B): Place the FRSQRTE estimate in `REG_V_TEMP`
+and compute `x0*a` (instead of `x0*x0`) in step 2. This consumes `src_reg_a`
+in step 2 (before any write to `dest_reg`), and all subsequent steps only
+read from `REG_V_TEMP` and `dest_reg`.
+
+```
+FRSQRTE REG_V_TEMP, src_reg_a          // temp = x0 (src preserved)
+FMUL    dest_reg, REG_V_TEMP, src_reg_a // dest = x0*a (src consumed, safe)
+FRSQRTS dest_reg, dest_reg, REG_V_TEMP  // dest = (3 - x0*a*x0)/2
+FMUL    dest_reg, dest_reg, REG_V_TEMP  // dest = step * x0 = x1
+DUP     dest_reg, dest_reg[0]           // broadcast
+```
+
+Mathematical equivalence: `FRSQRTS(x0*a, x0) = (3 - (x0*a)*x0)/2 =
+(3 - x0^2*a)/2`, identical to the standard Newton-Raphson refinement factor.
+
+### Dead Code Removal: host_arm64_jump
+
+Removed `host_arm64_jump()` (function + declaration) from
+`codegen_backend_arm64_ops.c` and `codegen_backend_arm64_ops.h`. This
+function materialized a 64-bit address via MOVX_IMM then BR, and was the
+only caller pattern for unconditional jumps before Phase 2 replaced it with
+`host_arm64_B()` (single B instruction). Zero callers remained after Phase 2.
+
+---
+
 ## Phase 1: PFRSQRT Bug Fix + 3DNow! Estimates
 
 **Branch**: `86box-arm64-cpu`

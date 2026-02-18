@@ -256,7 +256,6 @@ void host_arm64_ZIP2_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src
 
 void host_arm64_call(codeblock_t *block, void *dst_addr);
 void host_arm64_call_intrapool(codeblock_t *block, void *dest);
-void host_arm64_jump(codeblock_t *block, uintptr_t dst_addr);
 void host_arm64_mov_imm(codeblock_t *block, int reg, uint32_t imm_data);
 
 #define in_range7_x(offset)  (((offset) >= -0x200) && ((offset) < (0x200)) && !((offset) &7))

@@ -20,8 +20,8 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [x] Add host_arm64_FMUL_V2S emitter (already existed)
 - [x] Rewrite codegen_PFRCP: FRECPE + FRECPS + FMUL + DUP (mandatory refinement)
 - [x] Rewrite codegen_PFRSQRT: FRSQRTE + FMUL + FRSQRTS + FMUL + DUP (mandatory refinement)
-- [ ] **P0 FIX**: Patch PFRCP dest==src aliasing — estimate to REG_V_TEMP first (cross-validation §1.2)
-- [ ] **P0 FIX**: Patch PFRSQRT dest==src aliasing — use x0\*a not x0² (aliasing-audit Option B, cross-validation §1.3-1.4)
+- [x] **P0 FIX**: Patch PFRCP dest==src aliasing — estimate to REG_V_TEMP first (cross-validation §1.2)
+- [x] **P0 FIX**: Patch PFRSQRT dest==src aliasing — use x0\*a not x0² (aliasing-audit Option B, cross-validation §1.3-1.4)
 - [ ] Build + test with 3DNow! workload
 - [ ] Verify PFRCP accuracy ≥ 14-bit precision (AMD spec requirement)
 - [ ] Verify PFRSQRT accuracy ≥ 15-bit precision (AMD spec requirement)
@@ -40,7 +40,7 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [x] Replace host_arm64_jump in codegen_JMP with host_arm64_B
 - [x] Verify codegen_alloc is called BEFORE offset computation (critical!)
 - [ ] Build + test full boot cycle
-- [ ] Remove dead `host_arm64_jump` function + declaration (zero callers, confirmed by cross-validation §3.5)
+- [x] Remove dead `host_arm64_jump` function + declaration (zero callers, confirmed by cross-validation §3.5)
 - [ ] Measure generated code size reduction
 
 ### Phase 2 Testing

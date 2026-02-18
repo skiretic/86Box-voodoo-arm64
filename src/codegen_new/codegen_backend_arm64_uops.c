@@ -1859,10 +1859,12 @@ codegen_PFRCP(codeblock_t *block, uop_t *uop)
         /* FRECPE + Newton-Raphson refinement step.
            Raw FRECPE gives ~8-12 bit precision (implementation-defined).
            One FRECPS+FMUL step doubles it to ~16-24 bits, safely exceeding
-           AMD 3DNow! PFRCP's 14-bit mantissa requirement on all ARMv8.0 cores. */
-        host_arm64_FRECPE_V2S(block, dest_reg, src_reg_a);
-        host_arm64_FRECPS_V2S(block, REG_V_TEMP, dest_reg, src_reg_a);
-        host_arm64_FMUL_V2S(block, dest_reg, dest_reg, REG_V_TEMP);
+           AMD 3DNow! PFRCP's 14-bit mantissa requirement on all ARMv8.0 cores.
+           Estimate goes to REG_V_TEMP (not dest_reg) so src_reg_a is preserved
+           when dest==src — the register allocator may alias them. */
+        host_arm64_FRECPE_V2S(block, REG_V_TEMP, src_reg_a);
+        host_arm64_FRECPS_V2S(block, dest_reg, REG_V_TEMP, src_reg_a);
+        host_arm64_FMUL_V2S(block, dest_reg, REG_V_TEMP, dest_reg);
         host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);
     } else
         fatal("PFRCP %02x\n", uop->dest_reg_a_real);
@@ -1883,10 +1885,13 @@ codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
            One FRSQRTS+FMUL step doubles it to ~16-24 bits, safely exceeding
            AMD 3DNow! PFRSQRT's 15-bit mantissa requirement on all ARMv8.0 cores.
            Note: FRSQRTS computes (3 - Vn*Vm) / 2, which is the Newton-Raphson
-           refinement factor for reciprocal square root. */
-        host_arm64_FRSQRTE_V2S(block, dest_reg, src_reg_a);
-        host_arm64_FMUL_V2S(block, REG_V_TEMP, dest_reg, dest_reg);
-        host_arm64_FRSQRTS_V2S(block, REG_V_TEMP, REG_V_TEMP, src_reg_a);
+           refinement factor for reciprocal square root.
+           Estimate goes to REG_V_TEMP and we compute x0*a (not x0*x0) so
+           src_reg_a is consumed before dest_reg is written — safe when
+           dest==src (the register allocator may alias them). */
+        host_arm64_FRSQRTE_V2S(block, REG_V_TEMP, src_reg_a);
+        host_arm64_FMUL_V2S(block, dest_reg, REG_V_TEMP, src_reg_a);
+        host_arm64_FRSQRTS_V2S(block, dest_reg, dest_reg, REG_V_TEMP);
         host_arm64_FMUL_V2S(block, dest_reg, dest_reg, REG_V_TEMP);
         host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);
     } else
