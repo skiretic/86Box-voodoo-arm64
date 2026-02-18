@@ -113,6 +113,7 @@
 #    define OPCODE_AND_V              (0x0e201c00)
 #    define OPCODE_ASR                (0x1ac02800)
 #    define OPCODE_BIC_V              (0x0e601c00)
+#    define OPCODE_BL                 (0x94000000)
 #    define OPCODE_BLR                (0xd63f0000)
 #    define OPCODE_BR                 (0xd61f0000)
 #    define OPCODE_CMEQ_V8B           (0x2e208c00)
@@ -1544,6 +1545,19 @@ host_arm64_call(codeblock_t *block, void *dst_addr)
 {
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BLR(block, REG_X16);
+}
+
+void
+host_arm64_call_intrapool(codeblock_t *block, void *dest)
+{
+    int offset;
+
+    codegen_alloc(block, 4); /* MUST reserve BEFORE capturing PC */
+    offset = (uintptr_t) dest - (uintptr_t) &block_write_data[block_pos];
+
+    if (!offset_is_26bit(offset))
+        fatal("host_arm64_call_intrapool - offset out of range %x\n", offset);
+    codegen_addlong(block, OPCODE_BL | OFFSET26(offset));
 }
 
 void
