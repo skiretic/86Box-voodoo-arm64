@@ -153,6 +153,10 @@
 #    define OPCODE_FMOV_S_ONE         (0x1e2e1000)
 #    define OPCODE_FMUL_D             (0x1e600800)
 #    define OPCODE_FMUL_V2S           (0x2e20dc00)
+#    define OPCODE_FRECPE_V2S         (0x0ea1d800)
+#    define OPCODE_FRECPS_V2S         (0x0e20fc00)
+#    define OPCODE_FRSQRTE_V2S        (0x2ea1d800)
+#    define OPCODE_FRSQRTS_V2S        (0x0ea0fc00)
 #    define OPCODE_FNEG_D             (0x1e614000)
 #    define OPCODE_FRINTX_D           (0x1e674000)
 #    define OPCODE_FSQRT_D            (0x1e61c000)
@@ -877,6 +881,27 @@ void
 host_arm64_FMUL_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
 {
     codegen_addlong(block, OPCODE_FMUL_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
+}
+
+void
+host_arm64_FRECPE_V2S(codeblock_t *block, int dst_reg, int src_reg)
+{
+    codegen_addlong(block, OPCODE_FRECPE_V2S | Rd(dst_reg) | Rn(src_reg));
+}
+void
+host_arm64_FRECPS_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
+{
+    codegen_addlong(block, OPCODE_FRECPS_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
+}
+void
+host_arm64_FRSQRTE_V2S(codeblock_t *block, int dst_reg, int src_reg)
+{
+    codegen_addlong(block, OPCODE_FRSQRTE_V2S | Rd(dst_reg) | Rn(src_reg));
+}
+void
+host_arm64_FRSQRTS_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
+{
+    codegen_addlong(block, OPCODE_FRSQRTS_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
 }
 
 void

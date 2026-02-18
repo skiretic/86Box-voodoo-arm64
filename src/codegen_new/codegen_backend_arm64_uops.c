@@ -1856,9 +1856,13 @@ codegen_PFRCP(codeblock_t *block, uop_t *uop)
     int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
 
     if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
-        /*TODO: This could be improved (use VRECPE/VRECPS)*/
-        host_arm64_FMOV_S_ONE(block, REG_V_TEMP);
-        host_arm64_FDIV_S(block, dest_reg, REG_V_TEMP, src_reg_a);
+        /* FRECPE + Newton-Raphson refinement step.
+           Raw FRECPE gives ~8-12 bit precision (implementation-defined).
+           One FRECPS+FMUL step doubles it to ~16-24 bits, safely exceeding
+           AMD 3DNow! PFRCP's 14-bit mantissa requirement on all ARMv8.0 cores. */
+        host_arm64_FRECPE_V2S(block, dest_reg, src_reg_a);
+        host_arm64_FRECPS_V2S(block, REG_V_TEMP, dest_reg, src_reg_a);
+        host_arm64_FMUL_V2S(block, dest_reg, dest_reg, REG_V_TEMP);
         host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);
     } else
         fatal("PFRCP %02x\n", uop->dest_reg_a_real);
@@ -1874,10 +1878,16 @@ codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
     int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
 
     if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
-        /*TODO: This could be improved (use VRSQRTE/VRSQRTS)*/
-        host_arm64_FSQRT_S(block, REG_V_TEMP, src_reg_a);
-        host_arm64_FMOV_S_ONE(block, REG_V_TEMP);
-        host_arm64_FDIV_S(block, dest_reg, dest_reg, REG_V_TEMP);
+        /* FRSQRTE + Newton-Raphson refinement step.
+           Raw FRSQRTE gives ~8-12 bit precision (implementation-defined).
+           One FRSQRTS+FMUL step doubles it to ~16-24 bits, safely exceeding
+           AMD 3DNow! PFRSQRT's 15-bit mantissa requirement on all ARMv8.0 cores.
+           Note: FRSQRTS computes (3 - Vn*Vm) / 2, which is the Newton-Raphson
+           refinement factor for reciprocal square root. */
+        host_arm64_FRSQRTE_V2S(block, dest_reg, src_reg_a);
+        host_arm64_FMUL_V2S(block, REG_V_TEMP, dest_reg, dest_reg);
+        host_arm64_FRSQRTS_V2S(block, REG_V_TEMP, REG_V_TEMP, src_reg_a);
+        host_arm64_FMUL_V2S(block, dest_reg, dest_reg, REG_V_TEMP);
         host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);
     } else
         fatal("PFRSQRT %02x\n", uop->dest_reg_a_real);
