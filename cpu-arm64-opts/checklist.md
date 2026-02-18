@@ -7,26 +7,26 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 
 ## Phase 1: PFRSQRT Bug Fix + 3DNow! Estimates
 
-- [ ] Fix PFRSQRT register clobber bug in `codegen_backend_arm64_uops.c:1879`
-- [ ] Add OPCODE_FRECPE_V2S to `codegen_backend_arm64_ops.c`
-- [ ] Add OPCODE_FRSQRTE_V2S to `codegen_backend_arm64_ops.c`
-- [ ] Add host_arm64_FRECPE_V2S emitter
-- [ ] Add host_arm64_FRSQRTE_V2S emitter
-- [ ] Add OPCODE_FRECPS_V2S to `codegen_backend_arm64_ops.c`
-- [ ] Add OPCODE_FRSQRTS_V2S to `codegen_backend_arm64_ops.c`
-- [ ] Add OPCODE_FMUL_V2S to `codegen_backend_arm64_ops.c`
-- [ ] Add host_arm64_FRECPS_V2S emitter (Newton-Raphson step)
-- [ ] Add host_arm64_FRSQRTS_V2S emitter (Newton-Raphson step)
-- [ ] Add host_arm64_FMUL_V2S emitter
-- [ ] Rewrite codegen_PFRCP: FRECPE + FRECPS + FMUL + DUP (mandatory refinement)
-- [ ] Rewrite codegen_PFRSQRT: FRSQRTE + FMUL + FRSQRTS + FMUL + DUP (mandatory refinement)
+- [x] Fix PFRSQRT register clobber bug in `codegen_backend_arm64_uops.c:1879`
+- [x] Add OPCODE_FRECPE_V2S to `codegen_backend_arm64_ops.c`
+- [x] Add OPCODE_FRSQRTE_V2S to `codegen_backend_arm64_ops.c`
+- [x] Add host_arm64_FRECPE_V2S emitter
+- [x] Add host_arm64_FRSQRTE_V2S emitter
+- [x] Add OPCODE_FRECPS_V2S to `codegen_backend_arm64_ops.c`
+- [x] Add OPCODE_FRSQRTS_V2S to `codegen_backend_arm64_ops.c`
+- [x] Add OPCODE_FMUL_V2S to `codegen_backend_arm64_ops.c` (already existed)
+- [x] Add host_arm64_FRECPS_V2S emitter (Newton-Raphson step)
+- [x] Add host_arm64_FRSQRTS_V2S emitter (Newton-Raphson step)
+- [x] Add host_arm64_FMUL_V2S emitter (already existed)
+- [x] Rewrite codegen_PFRCP: FRECPE + FRECPS + FMUL + DUP (mandatory refinement)
+- [x] Rewrite codegen_PFRSQRT: FRSQRTE + FMUL + FRSQRTS + FMUL + DUP (mandatory refinement)
 - [ ] Build + test with 3DNow! workload
 - [ ] Verify PFRCP accuracy ≥ 14-bit precision (AMD spec requirement)
 - [ ] Verify PFRSQRT accuracy ≥ 15-bit precision (AMD spec requirement)
 
 ### Phase 1 Testing
 
-- [ ] **BUILD**: Compiles on ARM64
+- [x] **BUILD**: Compiles on ARM64
 - [ ] **RUN TEST**: Boot Windows 98 VM with AMD K6-2, verify normal operation
 - [ ] Create PR for Phase 1
 
