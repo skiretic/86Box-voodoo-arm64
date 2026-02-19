@@ -373,13 +373,15 @@ Open an issue at: https://github.com/yourusername/86Box-voodoo-arm64/issues
 
 ### Interpreter vs JIT
 
-| Scenario | Interpreter (OFF) | JIT (ON) | Speedup |
-|----------|-------------------|----------|---------|
-| 3DMark 99 | ~5 FPS | ~40 FPS | 8x |
-| Quake timedemo | ~8 FPS | ~60 FPS | 7.5x |
-| Unreal | ~3 FPS | ~25 FPS | 8x |
+| Scenario | Interpreter (OFF) | JIT (ON) | FPS Gain | CPU Reduction |
+|----------|-------------------|----------|----------|---------------|
+| 3DMark 99 | ~12-22 FPS | ~15-30 FPS | ~30% | 20-50% |
+| Quake timedemo | ~35-63 FPS | ~50-90 FPS | ~30% | 20-50% |
+| Unreal (Glide) | ~10-18 FPS | ~14-25 FPS | ~30% | 20-50% |
 
-**Note:** Actual performance varies by game, resolution, and Mac model. M3/M4 Macs with more performance cores see better results.
+**The main win is CPU utilization, not raw FPS.** The JIT offloads pixel pipeline work from the emulation thread, freeing host CPU cycles for the guest CPU, chipset, and other emulated devices. Expect 20-50% lower host CPU usage with the JIT enabled, which translates to smoother overall emulation and less thermal throttling on laptops.
+
+FPS ranges depend on the scene complexity, resolution, and Mac model. M3/M4 Macs with more performance cores see better results.
 
 ### JIT Compilation Overhead
 
@@ -445,9 +447,10 @@ First frame in a new scene may stutter briefly (1-3 frames) as the JIT compiles 
 ## Additional Resources
 
 - **86Box Wiki:** https://86box.readthedocs.io/
-- **3Dfx Archive:** http://www.3dfxarchive.com/
+- **VOGONS Wiki (3dfx):** https://www.vogonswiki.com/index.php/3dfx
+- **VOGONS Vintage Driver Library:** https://vogonsdrivers.com/index.php?catid=12
 - **Glide API Reference:** Available in project docs
 
 ---
 
-**Happy testing!** Report bugs, share screenshots, and help make this port solid. 🚀
+**Happy testing!** Report bugs, share screenshots, and help make this port solid.
