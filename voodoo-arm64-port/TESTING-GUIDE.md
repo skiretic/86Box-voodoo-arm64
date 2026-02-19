@@ -459,6 +459,18 @@ First frame in a new scene may stutter briefly (1-3 frames) as the JIT compiles 
 
 ---
 
+## Building a Linux ARM64 AppImage
+
+To build a fully-bundled AppImage for Linux ARM64 (e.g., Raspberry Pi 5), see [`appimage/README.md`](../appimage/README.md). Requires Docker on an Apple Silicon Mac or ARM64 Linux host.
+
+```bash
+./appimage/build.sh          # Build the AppImage
+```
+
+The output AppImage bundles glibc, Qt5 with Wayland support, and all runtime dependencies — no install needed on the target machine.
+
+---
+
 ## Additional Resources
 
 - **86Box Wiki:** https://86box.readthedocs.io/
