@@ -1,5 +1,19 @@
 # ARM64 CPU JIT Backend Optimization — Changelog
 
+## Documentation Consolidation (2026-02-18)
+
+Merged 7 separate research/validation files (analysis.md, aliasing-audit.md,
+cross-validation.md, impl-review.md, validation-report.md, arch-research.md,
+compat-audit.md) into a single `validation.md` (2600+ lines, 8 sections).
+
+All claims verified against source code (65 tool calls across 7+ files).
+Fixed stale line numbers, updated verdicts to reflect applied fixes, aligned
+plan.md and checklist.md with validated findings.
+
+`validation.md` is now the single source of truth for all technical findings.
+
+---
+
 ## Phase 3: LOAD_FUNC_ARG*_IMM Width Fix
 
 **Branch**: `86box-arm64-cpu`
