@@ -56,10 +56,10 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 
 ## Phase 3: LOAD_FUNC_ARG*_IMM Width Fix
 
-- [ ] Change LOAD_FUNC_ARG0_IMM to use host_arm64_mov_imm
-- [ ] Change LOAD_FUNC_ARG1_IMM to use host_arm64_mov_imm
-- [ ] Change LOAD_FUNC_ARG2_IMM to use host_arm64_mov_imm
-- [ ] Change LOAD_FUNC_ARG3_IMM to use host_arm64_mov_imm
+- [x] Change LOAD_FUNC_ARG0_IMM to use host_arm64_mov_imm
+- [x] Change LOAD_FUNC_ARG1_IMM to use host_arm64_mov_imm
+- [x] Change LOAD_FUNC_ARG2_IMM to use host_arm64_mov_imm
+- [x] Change LOAD_FUNC_ARG3_IMM to use host_arm64_mov_imm
 - [ ] Build + test
 
 ### Phase 3 Testing

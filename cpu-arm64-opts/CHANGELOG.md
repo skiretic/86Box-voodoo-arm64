@@ -1,5 +1,54 @@
 # ARM64 CPU JIT Backend Optimization — Changelog
 
+## Phase 3: LOAD_FUNC_ARG*_IMM Width Fix
+
+**Branch**: `86box-arm64-cpu`
+**Files changed**: 1 (+4, -4)
+
+### Problem
+
+The four `LOAD_FUNC_ARG*_IMM` UOP handlers in `codegen_backend_arm64_uops.c`
+used `host_arm64_MOVX_IMM()` to load immediate values into argument registers.
+`MOVX_IMM` always emits a 4-instruction 64-bit immediate load sequence
+(MOVZ + up to 3 MOVK), even though all callers pass values that fit in 32 bits.
+
+### Solution
+
+Changed all four handlers to use `host_arm64_mov_imm()` instead. This function
+intelligently selects the minimal encoding:
+- Values fitting in 16 bits: 1 instruction (MOVZ)
+- Values fitting in 32 bits: 2 instructions (MOVZ + MOVK)
+
+The `uop->imm_data` field is `uintptr_t` (64-bit on ARM64), but all callers
+pass values that fit in 32 bits. The `host_arm64_mov_imm` parameter is
+`uint32_t`, so the implicit truncation is safe (validated in validation.md
+sections 5.1 and 7.1.3).
+
+### Handlers Modified
+
+| Handler | Register | Change |
+|---------|----------|--------|
+| `codegen_LOAD_FUNC_ARG0_IMM` | REG_ARG0 (X0) | MOVX_IMM -> mov_imm |
+| `codegen_LOAD_FUNC_ARG1_IMM` | REG_ARG1 (X1) | MOVX_IMM -> mov_imm |
+| `codegen_LOAD_FUNC_ARG2_IMM` | REG_ARG2 (X2) | MOVX_IMM -> mov_imm |
+| `codegen_LOAD_FUNC_ARG3_IMM` | REG_ARG3 (X3) | MOVX_IMM -> mov_imm |
+
+### Performance Impact
+
+| Scenario | Before (insns) | After (insns) | Savings |
+|----------|---------------|---------------|---------|
+| imm < 0x10000 | 4 (MOVZ+3xMOVK) | 1 (MOVZ) | 3 insns (12 bytes) |
+| imm < 0x100000000 | 4 (MOVZ+3xMOVK) | 2 (MOVZ+MOVK) | 2 insns (8 bytes) |
+
+Most immediate arguments are small constants (segment selectors, flag masks,
+enum values), so the typical saving is 3 instructions per call site.
+
+### ISA Requirement
+
+All instructions are **ARMv8.0-A baseline**. No change to minimum spec.
+
+---
+
 ## Phase 1+2 Follow-up: P0 Aliasing Fixes + Dead Code Removal
 
 **Branch**: `86box-arm64-cpu`
