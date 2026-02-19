@@ -291,6 +291,8 @@ Experiment with different thread counts for performance testing:
 3. Close 86Box
 4. Open `<vm_directory>/voodoo_jit.log`
 
+**Warning:** The log file grows very quickly — every JIT compilation and cache hit is logged. A few minutes of gameplay can produce hundreds of megabytes. Only enable logging when actively debugging, and delete the log file when you're done.
+
 ### Log Contents
 
 ```
