@@ -68,21 +68,22 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
 - [ ] Create PR for Phase 3
 
-## Phase 4: New ARM64 Emitters
+## Phase 4: New ARM64 Emitters — INVESTIGATED AND REJECTED
 
-- [ ] Add CSEL_NE, CSEL_GE, CSEL_GT, CSEL_LT, CSEL_LE emitters
-- [ ] Add ADDS_REG / SUBS_REG emitters (flag-setting variants)
-- [ ] Add ADDS_IMM / SUBS_IMM emitters
-- [ ] Add CLZ emitter (for BSR/BSF optimization)
-- [ ] (Optional) Add CSINC / CSINV / CSNEG emitters
-- [ ] (Optional) Add MADD / MSUB emitters
-- [ ] Build + test
+All proposed emitters were audited for concrete UOP consumers. None found.
+Root causes: IR separates compute/flag-test UOPs (no ADDS fusion), BSR/BSF not
+in IR (interpreter-only, no CLZ opportunity), CSEL conditions already cover all
+x87 FCMP outcomes (EQ/CC/VS), no conditional increment/invert/negate patterns
+in UOP handlers. See "Investigated and Rejected" section below for per-item details.
 
-### Phase 4 Testing
+- [x] Add CSEL_NE, CSEL_GE, CSEL_GT, CSEL_LT, CSEL_LE emitters — REJECTED (only FTST/FCOM use CSEL; existing EQ/CC/VS already cover all x87 FCMP outcomes)
+- [x] Add ADDS_REG / SUBS_REG emitters (flag-setting variants) — REJECTED (IR separates compute + flag-test into distinct UOPs; no peephole window)
+- [x] Add ADDS_IMM / SUBS_IMM emitters — REJECTED (same reason as ADDS_REG/SUBS_REG)
+- [x] Add CLZ emitter (for BSR/BSF optimization) — REJECTED (BSR/BSF not in IR, interpreter-only)
+- [x] (Optional) Add CSINC / CSINV / CSNEG emitters — REJECTED (no conditional increment/invert/negate patterns in UOP handlers)
+- [x] (Optional) Add MADD / MSUB emitters — REJECTED (IR doesn't expose MUL+ADD patterns; already noted in Investigated and Rejected)
 
-- [ ] **BUILD**: Compiles on ARM64
-- [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
-- [ ] Create PR for Phase 4
+**Phase 4 Verdict: REJECTED** — All proposed emitters audited for concrete UOP consumers. None found. No code changes required.
 
 ## Phase 5: C-Level Interpreter/Dispatch Optimizations
 
@@ -135,3 +136,7 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [x] LDP for read+write lookup — REJECTED (arrays not adjacent)
 - [x] UDIV/SDIV for x86 DIV — REJECTED (complex x86 semantics negate savings)
 - [x] MADD/MSUB fusion — REJECTED (IR doesn't expose MUL+ADD patterns)
+- [x] CSEL (more conditions) — REJECTED (only FTST/FCOM use CSEL; existing EQ/CC/VS already cover all x87 FCMP outcomes)
+- [x] ADDS/SUBS fusion — REJECTED (IR separates compute + flag-test into distinct UOPs; no peephole window)
+- [x] CLZ/RBIT for BSR/BSF — REJECTED (BSR/BSF not in IR, interpreter-only)
+- [x] CSINC/CSINV/CSNEG — REJECTED (no conditional increment/invert/negate patterns in UOP handlers)

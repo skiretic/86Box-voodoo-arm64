@@ -1,5 +1,53 @@
 # ARM64 CPU JIT Backend Optimization — Changelog
 
+## Phase 4: New ARM64 Emitters — Investigated and Rejected
+
+**Branch**: `86box-arm64-cpu`
+**Files changed**: 0 (documentation only)
+
+### Audit Results
+
+All proposed Phase 4 emitters were audited for concrete UOP consumers in the
+ARM64 JIT backend (`codegen_backend_arm64_uops.c`). Every emitter was rejected
+due to lack of consumers in the existing IR/UOP layer.
+
+| Proposed Emitter | Rejection Reason |
+|---|---|
+| CSEL_NE/GE/GT/LT/LE | Only FTST/FCOM use CSEL; existing EQ/CC/VS already cover all x87 FCMP outcomes |
+| ADDS_REG/SUBS_REG | IR separates compute + flag-test into distinct UOPs; no peephole fusion window |
+| ADDS_IMM/SUBS_IMM | Same as ADDS_REG/SUBS_REG |
+| CLZ | BSR/BSF not in IR, handled by interpreter only |
+| CSINC/CSINV/CSNEG | No conditional increment/invert/negate patterns exist in UOP handlers |
+| MADD/MSUB | IR doesn't expose MUL+ADD patterns; already rejected in earlier analysis |
+
+### Root Causes
+
+The fundamental issue is that the NEW_DYNAREC IR layer decomposes x86
+instructions into simple micro-operations. Each UOP performs exactly one
+operation (compute OR flag-test, never both). This means:
+
+1. **No ADDS/SUBS fusion**: The IR emits separate `ADD` + `CMP` UOPs, not a
+   combined `ADDS` that sets flags and writes a result. There is no peephole
+   optimizer to fuse adjacent UOPs.
+
+2. **No CLZ opportunity**: BSR/BSF are not translated to IR UOPs -- they fall
+   through to the interpreter. Adding CLZ would require IR-level changes.
+
+3. **CSEL conditions complete**: The x87 compare path (FTST/FCOM) only needs
+   EQ, CC (unsigned less-than), and VS (overflow) conditions. These map directly
+   to the three FCMP flag outcomes. No signed conditions are needed.
+
+4. **No conditional arithmetic patterns**: CSINC/CSINV/CSNEG require patterns
+   like "if (cond) x++ else x" which do not appear in the UOP handlers.
+
+### Decision
+
+Phase 4 is closed with no code changes. The emitters remain available as
+potential future work if the IR layer is ever extended with peephole
+optimization or BSR/BSF UOPs.
+
+---
+
 ## Phase 5: LIKELY/UNLIKELY + Interpreter Hot Path Optimizations
 
 **Branch**: `86box-arm64-cpu`

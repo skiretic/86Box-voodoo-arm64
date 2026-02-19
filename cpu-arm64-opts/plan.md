@@ -263,7 +263,12 @@ host_arm64_mov_imm(block, REG_ARG0, uop->imm_data);  // 1-2 insns for 32-bit val
 
 ---
 
-## Phase 4: New ARM64 Emitters (Moderate Effort)
+## Phase 4: New ARM64 Emitters — INVESTIGATED AND REJECTED
+
+> **Status**: All proposed emitters audited for concrete UOP consumers. All
+> rejected -- no consumers found. Root causes: IR separates compute/flag-test
+> UOPs (no ADDS fusion), BSR/BSF not in IR (no CLZ), CSEL conditions already
+> complete for x87 FCMP. See `CHANGELOG.md` Phase 4 entry for full details.
 
 ### 4.1 CSEL with More Conditions
 
@@ -427,6 +432,10 @@ VRECPE/VRSQRTE. These are addressed by Phase 1 of this plan.
 | **LDP for readlookup2+writelookup2** | Arrays not adjacent in memory; would require struct reorganization |
 | **UDIV/SDIV for x86 DIV** | x86 DIV has complex semantics (flags, exception on zero, 64:32 division); guard code negates savings |
 | **MADD/MSUB fusion** | IR doesn't expose MUL+ADD patterns; would need peephole optimizer at IR level |
+| **CSEL (more conditions)** | Only FTST/FCOM use CSEL; existing EQ/CC/VS already cover all x87 FCMP outcomes (Phase 4) |
+| **ADDS/SUBS fusion** | IR separates compute + flag-test into distinct UOPs; no peephole window (Phase 4) |
+| **CLZ/RBIT for BSR/BSF** | BSR/BSF not in IR, interpreter-only (Phase 4) |
+| **CSINC/CSINV/CSNEG** | No conditional increment/invert/negate patterns in UOP handlers (Phase 4) |
 
 ---
 
