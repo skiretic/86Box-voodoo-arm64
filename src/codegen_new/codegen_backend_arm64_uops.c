@@ -77,23 +77,23 @@
  *   - Emits a single ARM64 NEON instruction: ARM64_INSN(block, dest, src_a, src_b)
  *   - Calls fatal() with a diagnostic if sizes don't match (should never happen)
  */
-#    define DEFINE_MMX_BINARY_OP(OP_NAME, ARM64_INSN, FATAL_NAME)                                                                    \
-        static int                                                                                                                    \
-        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
-        {                                                                                                                             \
-            int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);                                                                      \
-            int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);                                                                       \
-            int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);                                                                       \
-            int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                     \
-            int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);                                                                      \
-            int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);                                                                      \
-                                                                                                                                      \
-            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {                                               \
-                ARM64_INSN(block, dest_reg, src_reg_a, src_reg_b);                                                                    \
-            } else                                                                                                                    \
-                fatal(FATAL_NAME " %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);               \
-                                                                                                                                      \
-            return 0;                                                                                                                 \
+#    define DEFINE_MMX_BINARY_OP(OP_NAME, ARM64_INSN, FATAL_NAME)                                                      \
+        static int                                                                                                     \
+            codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                          \
+        {                                                                                                              \
+            int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);                                                       \
+            int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);                                                        \
+            int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);                                                        \
+            int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);                                                      \
+            int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);                                                       \
+            int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);                                                       \
+                                                                                                                       \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {                                 \
+                ARM64_INSN(block, dest_reg, src_reg_a, src_reg_b);                                                     \
+            } else                                                                                                     \
+                fatal(FATAL_NAME " %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real); \
+                                                                                                                       \
+            return 0;                                                                                                  \
         }
 
 /*
@@ -110,21 +110,21 @@
  *   - Emits a single ARM64 NEON instruction: ARM64_INSN(block, dest, src_a)
  *   - Calls fatal() with a diagnostic if sizes don't match
  */
-#    define DEFINE_MMX_UNARY_OP(OP_NAME, ARM64_INSN, FATAL_NAME)                                                                     \
-        static int                                                                                                                    \
-        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
-        {                                                                                                                             \
-            int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);                                                                      \
-            int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);                                                                       \
-            int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                     \
-            int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);                                                                      \
-                                                                                                                                      \
-            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {                                                                        \
-                ARM64_INSN(block, dest_reg, src_reg_a);                                                                               \
-            } else                                                                                                                    \
-                fatal(FATAL_NAME " %02x\n", uop->dest_reg_a_real);                                                                    \
-                                                                                                                                      \
-            return 0;                                                                                                                 \
+#    define DEFINE_MMX_UNARY_OP(OP_NAME, ARM64_INSN, FATAL_NAME)   \
+        static int                                                 \
+            codegen_##OP_NAME(codeblock_t *block, uop_t *uop)      \
+        {                                                          \
+            int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);   \
+            int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);    \
+            int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);  \
+            int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);   \
+                                                                   \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {     \
+                ARM64_INSN(block, dest_reg, src_reg_a);            \
+            } else                                                 \
+                fatal(FATAL_NAME " %02x\n", uop->dest_reg_a_real); \
+                                                                   \
+            return 0;                                              \
         }
 
 /*
@@ -140,26 +140,26 @@
  * Overflow behavior: shifts >= MAX_SHIFT zero the register (EOR with itself).
  * Zero-shift: FMOV_D_D (64-bit move, preserving upper bits for dest!=src).
  */
-#    define DEFINE_MMX_SHIFT_LEFT_IMM(OP_NAME, ARM64_SHL, MAX_SHIFT, FATAL_NAME)                                                     \
-        static int                                                                                                                    \
-        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
-        {                                                                                                                             \
-            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                                                                       \
-            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                                                                        \
-            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                      \
-            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                                                                       \
-                                                                                                                                      \
-            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                                                          \
-                if (uop->imm_data == 0)                                                                                               \
-                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                                                                    \
-                else if (uop->imm_data > (MAX_SHIFT - 1))                                                                            \
-                    host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);                                                        \
-                else                                                                                                                  \
-                    ARM64_SHL(block, dest_reg, src_reg, uop->imm_data);                                                               \
-            } else                                                                                                                    \
-                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);                                          \
-                                                                                                                                      \
-            return 0;                                                                                                                 \
+#    define DEFINE_MMX_SHIFT_LEFT_IMM(OP_NAME, ARM64_SHL, MAX_SHIFT, FATAL_NAME)             \
+        static int                                                                           \
+            codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                \
+        {                                                                                    \
+            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                              \
+            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                               \
+            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                             \
+            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                              \
+                                                                                             \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                 \
+                if (uop->imm_data == 0)                                                      \
+                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                           \
+                else if (uop->imm_data > (MAX_SHIFT - 1))                                    \
+                    host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);               \
+                else                                                                         \
+                    ARM64_SHL(block, dest_reg, src_reg, uop->imm_data);                      \
+            } else                                                                           \
+                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real); \
+                                                                                             \
+            return 0;                                                                        \
         }
 
 /*
@@ -178,26 +178,26 @@
  * This matches x86 PSRAW/PSRAD semantics where excessive shifts produce
  * all-zeros or all-ones depending on the sign bit.
  */
-#    define DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM(OP_NAME, ARM64_SSHR, MAX_SHIFT, FATAL_NAME)                                             \
-        static int                                                                                                                    \
-        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
-        {                                                                                                                             \
-            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                                                                       \
-            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                                                                        \
-            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                      \
-            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                                                                       \
-                                                                                                                                      \
-            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                                                          \
-                if (uop->imm_data == 0)                                                                                               \
-                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                                                                    \
-                else if (uop->imm_data > (MAX_SHIFT - 1))                                                                            \
-                    ARM64_SSHR(block, dest_reg, src_reg, (MAX_SHIFT - 1));                                                            \
-                else                                                                                                                  \
-                    ARM64_SSHR(block, dest_reg, src_reg, uop->imm_data);                                                              \
-            } else                                                                                                                    \
-                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);                                          \
-                                                                                                                                      \
-            return 0;                                                                                                                 \
+#    define DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM(OP_NAME, ARM64_SSHR, MAX_SHIFT, FATAL_NAME)     \
+        static int                                                                           \
+            codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                \
+        {                                                                                    \
+            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                              \
+            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                               \
+            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                             \
+            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                              \
+                                                                                             \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                 \
+                if (uop->imm_data == 0)                                                      \
+                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                           \
+                else if (uop->imm_data > (MAX_SHIFT - 1))                                    \
+                    ARM64_SSHR(block, dest_reg, src_reg, (MAX_SHIFT - 1));                   \
+                else                                                                         \
+                    ARM64_SSHR(block, dest_reg, src_reg, uop->imm_data);                     \
+            } else                                                                           \
+                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real); \
+                                                                                             \
+            return 0;                                                                        \
         }
 
 /*
@@ -214,26 +214,26 @@
  * Overflow behavior: shifts >= MAX_SHIFT zero the register (EOR with itself).
  * This is identical to left-shift overflow behavior.
  */
-#    define DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(OP_NAME, ARM64_USHR, MAX_SHIFT, FATAL_NAME)                                             \
-        static int                                                                                                                    \
-        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
-        {                                                                                                                             \
-            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                                                                       \
-            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                                                                        \
-            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                      \
-            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                                                                       \
-                                                                                                                                      \
-            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                                                          \
-                if (uop->imm_data == 0)                                                                                               \
-                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                                                                    \
-                else if (uop->imm_data > (MAX_SHIFT - 1))                                                                            \
-                    host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);                                                        \
-                else                                                                                                                  \
-                    ARM64_USHR(block, dest_reg, src_reg, uop->imm_data);                                                              \
-            } else                                                                                                                    \
-                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);                                          \
-                                                                                                                                      \
-            return 0;                                                                                                                 \
+#    define DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(OP_NAME, ARM64_USHR, MAX_SHIFT, FATAL_NAME)     \
+        static int                                                                           \
+            codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                \
+        {                                                                                    \
+            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                              \
+            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                               \
+            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                             \
+            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                              \
+                                                                                             \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                 \
+                if (uop->imm_data == 0)                                                      \
+                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                           \
+                else if (uop->imm_data > (MAX_SHIFT - 1))                                    \
+                    host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);               \
+                else                                                                         \
+                    ARM64_USHR(block, dest_reg, src_reg, uop->imm_data);                     \
+            } else                                                                           \
+                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real); \
+                                                                                             \
+            return 0;                                                                        \
         }
 
 static int
@@ -1708,33 +1708,33 @@ codegen_PACKUSWB(codeblock_t *block, uop_t *uop)
  */
 
 /* MMX packed-integer add: wrapping, signed-saturating, unsigned-saturating */
-DEFINE_MMX_BINARY_OP(PADDB,   host_arm64_ADD_V8B,   "PADDB")   /* x86 PADDB   -> NEON ADD 8B  */
-DEFINE_MMX_BINARY_OP(PADDW,   host_arm64_ADD_V4H,   "PADDW")   /* x86 PADDW   -> NEON ADD 4H  */
-DEFINE_MMX_BINARY_OP(PADDD,   host_arm64_ADD_V2S,   "PADDD")   /* x86 PADDD   -> NEON ADD 2S  */
-DEFINE_MMX_BINARY_OP(PADDSB,  host_arm64_SQADD_V8B, "PADDSB")  /* x86 PADDSB  -> NEON SQADD 8B (signed saturating) */
-DEFINE_MMX_BINARY_OP(PADDSW,  host_arm64_SQADD_V4H, "PADDSW")  /* x86 PADDSW  -> NEON SQADD 4H (signed saturating) */
+DEFINE_MMX_BINARY_OP(PADDB, host_arm64_ADD_V8B, "PADDB")       /* x86 PADDB   -> NEON ADD 8B  */
+DEFINE_MMX_BINARY_OP(PADDW, host_arm64_ADD_V4H, "PADDW")       /* x86 PADDW   -> NEON ADD 4H  */
+DEFINE_MMX_BINARY_OP(PADDD, host_arm64_ADD_V2S, "PADDD")       /* x86 PADDD   -> NEON ADD 2S  */
+DEFINE_MMX_BINARY_OP(PADDSB, host_arm64_SQADD_V8B, "PADDSB")   /* x86 PADDSB  -> NEON SQADD 8B (signed saturating) */
+DEFINE_MMX_BINARY_OP(PADDSW, host_arm64_SQADD_V4H, "PADDSW")   /* x86 PADDSW  -> NEON SQADD 4H (signed saturating) */
 DEFINE_MMX_BINARY_OP(PADDUSB, host_arm64_UQADD_V8B, "PADDUSB") /* x86 PADDUSB -> NEON UQADD 8B (unsigned saturating) */
 DEFINE_MMX_BINARY_OP(PADDUSW, host_arm64_UQADD_V4H, "PADDUSW") /* x86 PADDUSW -> NEON UQADD 4H (unsigned saturating) */
 
 /* MMX packed-integer compare: equality and signed greater-than */
-DEFINE_MMX_BINARY_OP(PCMPEQB, host_arm64_CMEQ_V8B,  "PCMPEQB") /* x86 PCMPEQB -> NEON CMEQ 8B */
-DEFINE_MMX_BINARY_OP(PCMPEQW, host_arm64_CMEQ_V4H,  "PCMPEQW") /* x86 PCMPEQW -> NEON CMEQ 4H */
-DEFINE_MMX_BINARY_OP(PCMPEQD, host_arm64_CMEQ_V2S,  "PCMPEQD") /* x86 PCMPEQD -> NEON CMEQ 2S */
-DEFINE_MMX_BINARY_OP(PCMPGTB, host_arm64_CMGT_V8B,  "PCMPGTB") /* x86 PCMPGTB -> NEON CMGT 8B (signed GT) */
-DEFINE_MMX_BINARY_OP(PCMPGTW, host_arm64_CMGT_V4H,  "PCMPGTW") /* x86 PCMPGTW -> NEON CMGT 4H (signed GT) */
-DEFINE_MMX_BINARY_OP(PCMPGTD, host_arm64_CMGT_V2S,  "PCMPGTD") /* x86 PCMPGTD -> NEON CMGT 2S (signed GT) */
+DEFINE_MMX_BINARY_OP(PCMPEQB, host_arm64_CMEQ_V8B, "PCMPEQB") /* x86 PCMPEQB -> NEON CMEQ 8B */
+DEFINE_MMX_BINARY_OP(PCMPEQW, host_arm64_CMEQ_V4H, "PCMPEQW") /* x86 PCMPEQW -> NEON CMEQ 4H */
+DEFINE_MMX_BINARY_OP(PCMPEQD, host_arm64_CMEQ_V2S, "PCMPEQD") /* x86 PCMPEQD -> NEON CMEQ 2S */
+DEFINE_MMX_BINARY_OP(PCMPGTB, host_arm64_CMGT_V8B, "PCMPGTB") /* x86 PCMPGTB -> NEON CMGT 8B (signed GT) */
+DEFINE_MMX_BINARY_OP(PCMPGTW, host_arm64_CMGT_V4H, "PCMPGTW") /* x86 PCMPGTW -> NEON CMGT 4H (signed GT) */
+DEFINE_MMX_BINARY_OP(PCMPGTD, host_arm64_CMGT_V2S, "PCMPGTD") /* x86 PCMPGTD -> NEON CMGT 2S (signed GT) */
 
 /* 3DNow! float-to-int conversion (unary) */
 DEFINE_MMX_UNARY_OP(PF2ID, host_arm64_FCVTZS_V2S, "PF2ID") /* 3DNow! PF2ID -> NEON FCVTZS 2S (float-to-int truncate) */
 
 /* 3DNow! binary floating-point arithmetic and comparisons */
-DEFINE_MMX_BINARY_OP(PFADD,   host_arm64_FADD_V2S,  "PFADD")   /* 3DNow! PFADD   -> NEON FADD 2S  */
+DEFINE_MMX_BINARY_OP(PFADD, host_arm64_FADD_V2S, "PFADD")      /* 3DNow! PFADD   -> NEON FADD 2S  */
 DEFINE_MMX_BINARY_OP(PFCMPEQ, host_arm64_FCMEQ_V2S, "PFCMPEQ") /* 3DNow! PFCMPEQ -> NEON FCMEQ 2S */
 DEFINE_MMX_BINARY_OP(PFCMPGE, host_arm64_FCMGE_V2S, "PFCMPGE") /* 3DNow! PFCMPGE -> NEON FCMGE 2S */
 DEFINE_MMX_BINARY_OP(PFCMPGT, host_arm64_FCMGT_V2S, "PFCMPGT") /* 3DNow! PFCMPGT -> NEON FCMGT 2S */
-DEFINE_MMX_BINARY_OP(PFMAX,   host_arm64_FMAX_V2S,  "PFMAX")   /* 3DNow! PFMAX   -> NEON FMAX 2S  */
-DEFINE_MMX_BINARY_OP(PFMIN,   host_arm64_FMIN_V2S,  "PFMIN")   /* 3DNow! PFMIN   -> NEON FMIN 2S  */
-DEFINE_MMX_BINARY_OP(PFMUL,   host_arm64_FMUL_V2S,  "PFMUL")   /* 3DNow! PFMUL   -> NEON FMUL 2S  */
+DEFINE_MMX_BINARY_OP(PFMAX, host_arm64_FMAX_V2S, "PFMAX")      /* 3DNow! PFMAX   -> NEON FMAX 2S  */
+DEFINE_MMX_BINARY_OP(PFMIN, host_arm64_FMIN_V2S, "PFMIN")      /* 3DNow! PFMIN   -> NEON FMIN 2S  */
+DEFINE_MMX_BINARY_OP(PFMUL, host_arm64_FMUL_V2S, "PFMUL")      /* 3DNow! PFMUL   -> NEON FMUL 2S  */
 static int
 codegen_PFRCP(codeblock_t *block, uop_t *uop)
 {
@@ -1858,11 +1858,11 @@ DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(PSRLD_IMM, host_arm64_USHR_V2S, 32, "PSRLD_IMM"
 DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(PSRLQ_IMM, host_arm64_USHR_V2D, 64, "PSRLQ_IMM") /* x86 PSRLQ -> NEON USHR 2D */
 
 /* MMX packed-integer subtract: wrapping, signed-saturating, unsigned-saturating */
-DEFINE_MMX_BINARY_OP(PSUBB,   host_arm64_SUB_V8B,   "PSUBB")   /* x86 PSUBB   -> NEON SUB 8B  */
-DEFINE_MMX_BINARY_OP(PSUBW,   host_arm64_SUB_V4H,   "PSUBW")   /* x86 PSUBW   -> NEON SUB 4H  */
-DEFINE_MMX_BINARY_OP(PSUBD,   host_arm64_SUB_V2S,   "PSUBD")   /* x86 PSUBD   -> NEON SUB 2S  */
-DEFINE_MMX_BINARY_OP(PSUBSB,  host_arm64_SQSUB_V8B, "PSUBSB")  /* x86 PSUBSB  -> NEON SQSUB 8B (signed saturating) */
-DEFINE_MMX_BINARY_OP(PSUBSW,  host_arm64_SQSUB_V4H, "PSUBSW")  /* x86 PSUBSW  -> NEON SQSUB 4H (signed saturating) */
+DEFINE_MMX_BINARY_OP(PSUBB, host_arm64_SUB_V8B, "PSUBB")       /* x86 PSUBB   -> NEON SUB 8B  */
+DEFINE_MMX_BINARY_OP(PSUBW, host_arm64_SUB_V4H, "PSUBW")       /* x86 PSUBW   -> NEON SUB 4H  */
+DEFINE_MMX_BINARY_OP(PSUBD, host_arm64_SUB_V2S, "PSUBD")       /* x86 PSUBD   -> NEON SUB 2S  */
+DEFINE_MMX_BINARY_OP(PSUBSB, host_arm64_SQSUB_V8B, "PSUBSB")   /* x86 PSUBSB  -> NEON SQSUB 8B (signed saturating) */
+DEFINE_MMX_BINARY_OP(PSUBSW, host_arm64_SQSUB_V4H, "PSUBSW")   /* x86 PSUBSW  -> NEON SQSUB 4H (signed saturating) */
 DEFINE_MMX_BINARY_OP(PSUBUSB, host_arm64_UQSUB_V8B, "PSUBUSB") /* x86 PSUBUSB -> NEON UQSUB 8B (unsigned saturating) */
 DEFINE_MMX_BINARY_OP(PSUBUSW, host_arm64_UQSUB_V4H, "PSUBUSW") /* x86 PSUBUSW -> NEON UQSUB 4H (unsigned saturating) */
 

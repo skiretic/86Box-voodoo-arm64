@@ -25,12 +25,13 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [ ] Build + test with 3DNow! workload
 - [x] Verify PFRCP accuracy ≥ 14-bit precision (AMD spec requirement) — PASS: 16.0 bits worst case at ARM minimum 8-bit initial estimate (validation.md §2.4, §3.6)
 - [x] Verify PFRSQRT accuracy ≥ 15-bit precision (AMD spec requirement) — PASS (tight): 15.41 bits worst case at ARM minimum 8-bit initial estimate, +0.41 bit margin (validation.md §2.4, §3.6)
+- [x] Build + test with 3DNow! workload
 
 ### Phase 1 Testing
 
 - [x] **BUILD**: Compiles on ARM64
-- [ ] **RUN TEST**: Boot Windows 98 VM with AMD K6-2, verify normal operation
-- [ ] Create PR for Phase 1
+- [x] **RUN TEST**: Boot Windows 98 VM with AMD K6-2, verify normal operation
+- ~~Create PR~~ (not doing PRs for this branch)
 
 **Phase 1 Verdict: PASS** — All opcode encodings (FRECPE/FRSQRTE/FRECPS/FRSQRTS), Newton-Raphson math, precision margins, and ARMv8.0 baseline compliance verified correct. Both P0 aliasing bugs fixed in commit d26977069. (validation.md §2.6)
 
@@ -41,16 +42,16 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [x] Replace 26 stub calls in `codegen_backend_arm64_uops.c` with call_intrapool
 - [x] Replace host_arm64_jump in codegen_JMP with host_arm64_B
 - [x] Verify codegen_alloc is called BEFORE offset computation (critical!)
-- [ ] Build + test full boot cycle
+- [x] Build + test full boot cycle
 - [x] Remove dead `host_arm64_jump` function + declaration (zero callers, confirmed by cross-validation §3.5)
-- [ ] Measure generated code size reduction
+- [x] Measure generated code size reduction
 
 ### Phase 2 Testing
 
 - [x] **BUILD**: Compiles on ARM64
-- [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
-- [ ] **RUN TEST**: Run 3DMark 99 or similar workload
-- [ ] Create PR for Phase 2
+- [x] **RUN TEST**: Boot Windows 98 VM, verify normal operation
+- [x] **RUN TEST**: Run 3DMark 99 or similar workload
+- ~~Create PR~~ (not doing PRs for this branch)
 
 **Phase 2 Verdict: PASS** — OPCODE_BL encoding verified, OFFSET26 macro correct, pool size (120 MB) within BL range (+/-128 MB), codegen_alloc ordering correct, all 26 intra-pool call sites verified, all 6 external calls correctly preserved, codegen_JMP to host_arm64_B verified, dead code (host_arm64_jump) removed. (validation.md §4.11)
 
@@ -60,13 +61,13 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [x] Change LOAD_FUNC_ARG1_IMM to use host_arm64_mov_imm
 - [x] Change LOAD_FUNC_ARG2_IMM to use host_arm64_mov_imm
 - [x] Change LOAD_FUNC_ARG3_IMM to use host_arm64_mov_imm
-- [ ] Build + test
+- [x] Build + test
 
 ### Phase 3 Testing
 
-- [ ] **BUILD**: Compiles on ARM64
-- [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
-- [ ] Create PR for Phase 3
+- [x] **BUILD**: Compiles on ARM64
+- [x] **RUN TEST**: Boot Windows 98 VM, verify normal operation
+- ~~Create PR~~ (not doing PRs for this branch)
 
 ## Phase 4: New ARM64 Emitters — INVESTIGATED AND REJECTED
 
@@ -98,8 +99,8 @@ in UOP handlers. See "Investigated and Rejected" section below for per-item deta
 ### Phase 5 Testing
 
 - [x] **BUILD**: Compiles on ARM64
-- [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
-- [ ] Create PR for Phase 5
+- [x] **RUN TEST**: Boot Windows 98 VM, verify normal operation
+- ~~Create PR~~ (not doing PRs for this branch)
 
 ## Phase 6: Benchmarking
 
@@ -119,13 +120,13 @@ in UOP handlers. See "Investigated and Rejected" section below for per-item deta
 
 ## Refactoring Items
 
-- [ ] R1: MMX/NEON handler macro templates (~400 LOC savings)
-- [ ] R2: Comparison operation consolidation (~150 LOC savings)
-- [ ] R3: Shift-immediate handler factory (~150-200 LOC savings)
-- [ ] R4: HOST_REG_GET boilerplate macro (~200 LOC savings)
-- [ ] R5: Load/store stub generalization (~80 LOC savings)
-- [ ] R6: Exception dispatch tail call (I-cache improvement)
-- [ ] R7: Verify PUNPCKLDQ/ZIP1 endianness equivalence
+- [x] R1: MMX/NEON handler macro templates — DONE (35 binary + 2 unary ops consolidated, ~500 LOC savings)
+- [x] R2: Comparison operation consolidation — DONE (6 compare ops folded into R1's DEFINE_MMX_BINARY_OP macro)
+- [x] R3: Shift-immediate handler factory — DONE (9 shift handlers consolidated via 3 shift-specific macros, ~160 LOC savings)
+- [x] R4: HOST_REG_GET boilerplate macro — ADDRESSED BY R1-R3 (the 46 handlers with simple Q-size patterns now use macros that embed the unpack; remaining handlers have complex size dispatch that macros can't help with)
+- [x] R5: Load/store stub generalization — DEFERRED (load/store routines use different register sets, different operation ordering for float conversion before/after the slow-path call; merging them for ~80 LOC savings isn't worth the correctness risk to stubs that run on every JIT memory access)
+- [x] R6: Exception dispatch tail call — DONE (noinline function on ARM64, guarded with #if defined(__aarch64__) || defined(_M_ARM64))
+- [x] R7: Verify PUNPCKLDQ/ZIP1 endianness equivalence — VERIFIED CORRECT (documented in comment above PUNPCK handler block; ZIP1/ZIP2 and PUNPCKL/PUNPCKH are semantically equivalent on little-endian ARM64)
 
 ## Investigated and Rejected
 

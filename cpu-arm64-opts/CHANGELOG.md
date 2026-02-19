@@ -1,5 +1,77 @@
 # ARM64 CPU JIT Backend Optimization — Changelog
 
+## Refactoring R1-R7: Code Consolidation
+
+**Branch**: `86box-arm64-cpu`
+**Files changed**: 2 (`codegen_backend_arm64_uops.c`, `386_dynarec.c`)
+
+### R1+R2: MMX/NEON Handler Template Consolidation
+
+Replaced 46 repetitive handler functions (each ~17 lines of identical boilerplate)
+with parametric macro invocations. Four macro families were introduced:
+
+| Macro | Purpose | Handlers consolidated |
+|-------|---------|---------------------|
+| `DEFINE_MMX_BINARY_OP` | Binary NEON op (3-register, all Q-size) | 35 (PADD*, PSUB*, PCMPEQ*, PCMPGT*, PF*, PMULLW, PUNPCK*) |
+| `DEFINE_MMX_UNARY_OP` | Unary NEON op (2-register, all Q-size) | 2 (PF2ID, PI2FD) |
+| `DEFINE_MMX_SHIFT_LEFT_IMM` | Left shift by immediate with zero-overflow | 3 (PSLLW/D/Q_IMM) |
+| `DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM` | Arithmetic right shift with clamp-overflow | 3 (PSRAW/D/Q_IMM) |
+| `DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM` | Logical right shift with zero-overflow | 3 (PSRLW/D/Q_IMM) |
+
+**Net savings**: ~710 lines. Object code is identical (macros expand at compile time).
+
+Handlers with multi-instruction bodies (PFRCP, PFRSQRT, PMADDWD, PMULHW, ANDN)
+were intentionally left as hand-written functions.
+
+### R3: Shift-Immediate Handler Factory
+
+Consolidated 9 shift-by-immediate handlers into 3 macro families (see table above).
+Each shift family handles zero-shift (FMOV copy), overflow (zero or sign-fill),
+and normal shift (NEON SHL/SSHR/USHR).
+
+### R4: HOST_REG_GET Boilerplate Macro
+
+Addressed by R1-R3: the 46 handlers with simple Q-size patterns now use macros
+that embed the register unpack and size check. The remaining ~50 handlers (ADD, SUB,
+AND, OR, MOV, etc.) use the unpacked variables in complex, size-dependent dispatch
+logic that cannot be captured by a simple unpack macro.
+
+### R5: Load/Store Stub Generalization
+
+DEFERRED. The `build_load_routine()` and `build_store_routine()` functions use
+different register sets (X1/X2 for load, X2/X3 for store) and different operation
+ordering for float conversion (before vs after the slow-path call). Merging them
+for ~80 LOC savings is not worth the correctness risk to stubs that run on every
+JIT memory access.
+
+### R6: Exception Dispatch Tail Call
+
+Extracted SMI/NMI/IRQ exception handling from `exec386_dynarec()`'s hot loop
+into a separate `__attribute__((noinline))` function `handle_pending_exceptions()`.
+
+- Exception dispatch fires rarely (~100-1000x/sec) but the code is ~30 instructions
+  spanning 2-3 L1 I-cache lines
+- Keeping it out-of-line reduces I-cache pressure in the block dispatch loop
+- Guarded with `#if defined(__aarch64__) || defined(_M_ARM64)` -- other architectures
+  retain the original inline code
+- The ARM64 path uses a single combined condition check before the function call
+
+### R7: PUNPCKLDQ/ZIP1 Endianness Verification
+
+VERIFIED CORRECT. ARM64 NEON ZIP1/ZIP2 are semantically equivalent to x86
+PUNPCKLxx / PUNPCKHxx on little-endian ARM64:
+
+- Both instruction families interleave elements from two source vectors
+- ZIP1 takes low elements, ZIP2 takes high elements
+- Both architectures number elements from the least-significant end on little-endian
+- Example: `ZIP1 Vd.2S, Vn.2S, Vm.2S => [Vn[0], Vm[0]]` is identical to
+  `PUNPCKLDQ mm1, mm2 => [mm1[0], mm2[0]]`
+
+No code change required. Verification documented as a comment in
+`codegen_backend_arm64_uops.c` above the PUNPCK handler block.
+
+---
+
 ## Phase 4: New ARM64 Emitters — Investigated and Rejected
 
 **Branch**: `86box-arm64-cpu`
