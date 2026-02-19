@@ -23,14 +23,16 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [x] **P0 FIX**: Patch PFRCP dest==src aliasing — estimate to REG_V_TEMP first (cross-validation §1.2)
 - [x] **P0 FIX**: Patch PFRSQRT dest==src aliasing — use x0\*a not x0² (aliasing-audit Option B, cross-validation §1.3-1.4)
 - [ ] Build + test with 3DNow! workload
-- [ ] Verify PFRCP accuracy ≥ 14-bit precision (AMD spec requirement)
-- [ ] Verify PFRSQRT accuracy ≥ 15-bit precision (AMD spec requirement)
+- [x] Verify PFRCP accuracy ≥ 14-bit precision (AMD spec requirement) — PASS: 16.0 bits worst case at ARM minimum 8-bit initial estimate (validation.md §2.4, §3.6)
+- [x] Verify PFRSQRT accuracy ≥ 15-bit precision (AMD spec requirement) — PASS (tight): 15.41 bits worst case at ARM minimum 8-bit initial estimate, +0.41 bit margin (validation.md §2.4, §3.6)
 
 ### Phase 1 Testing
 
 - [x] **BUILD**: Compiles on ARM64
 - [ ] **RUN TEST**: Boot Windows 98 VM with AMD K6-2, verify normal operation
 - [ ] Create PR for Phase 1
+
+**Phase 1 Verdict: PASS** — All opcode encodings (FRECPE/FRSQRTE/FRECPS/FRSQRTS), Newton-Raphson math, precision margins, and ARMv8.0 baseline compliance verified correct. Both P0 aliasing bugs fixed in commit d26977069. (validation.md §2.6)
 
 ## Phase 2: PC-Relative BL for Intra-Pool Calls
 
@@ -49,6 +51,8 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 - [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
 - [ ] **RUN TEST**: Run 3DMark 99 or similar workload
 - [ ] Create PR for Phase 2
+
+**Phase 2 Verdict: PASS** — OPCODE_BL encoding verified, OFFSET26 macro correct, pool size (120 MB) within BL range (+/-128 MB), codegen_alloc ordering correct, all 26 intra-pool call sites verified, all 6 external calls correctly preserved, codegen_JMP to host_arm64_B verified, dead code (host_arm64_jump) removed. (validation.md §4.11)
 
 ## Phase 3: LOAD_FUNC_ARG*_IMM Width Fix
 

@@ -176,6 +176,8 @@ The JIT memory pool is a single contiguous 120MB mmap
 Note: `codegen_gpf_rout` is intra-pool but is a **branch target** (reached via
 CBNZ), not a BL call target. It is NOT converted to `host_arm64_call_intrapool`.
 
+> **Correction (validated 2026-02-18):** Validation confirmed `codegen_gpf_rout` is reached exclusively via CBNZ branches from UOP handlers (e.g., `host_arm64_CBNZ(block, REG_X1, ...)`), not via direct `host_arm64_call` invocations. It is a branch target, not a BL call target. The note above is correct; the earlier mention in the executive summary's "call sites" context could be misleading. See `codegen_backend_arm64.c` lines 312-315.
+
 These are called from 26 sites in `codegen_backend_arm64_uops.c`.
 
 **New function**: `host_arm64_call_intrapool`
@@ -201,12 +203,17 @@ Then modify all 23 call sites in `codegen_backend_arm64_uops.c` that call
 `host_arm64_call(block, codegen_mem_load_*)` / `codegen_mem_store_*` /
 `codegen_fp_round*` to use `host_arm64_call_intrapool` instead.
 
+> **Correction (validated 2026-02-18):** The actual verified count is 26 intra-pool call sites (not 23), plus 6 external C function calls left unchanged. Independently confirmed via grep: 26 `host_arm64_call_intrapool` + 6 `host_arm64_call`. (validation.md §4.6, §7.1.4)
+
 The stubs' internal calls to external C functions (readmembl, writemembl, etc.)
 remain MOVX_IMM+BLR since those are NOT in the JIT pool.
 
 **Instruction savings per stub call**: 2-4 instructions (from 3-5 down to 1)
 **Total savings**: With 23 stub call sites, each emitted per recompiled block,
 this saves **46-92 instructions per block** in generated code size.
+
+> **Correction (validated 2026-02-18):** Per the corrected count above, the actual total savings are based on 26 stub call sites, not 23.
+
 **Risk**: MEDIUM (offset computation must be correct; see safety note above)
 
 ### 2.3 host_arm64_jump Optimization
@@ -251,6 +258,8 @@ host_arm64_mov_imm(block, REG_ARG0, uop->imm_data);  // 1-2 insns for 32-bit val
 **Affected sites**: Lines 853, 860, 867, 874 in `codegen_backend_arm64_uops.c`
 **Instruction savings**: 1-2 instructions per LOAD_FUNC_ARG*_IMM
 **Risk**: VERY LOW (imm_data is uint32_t, cannot exceed 32 bits)
+
+> **Correction (validated 2026-02-18):** `uop->imm_data` is NOT `uint32_t` on ARM64. It is `uintptr_t` (64-bit), as defined in `codegen_ir_defs.h` lines 339-343 under the guard `#if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64`. On x86-64 it is `uint32_t`. The optimization is still safe because all callers pass values that fit in 32 bits, and `host_arm64_mov_imm` takes `uint32_t` — the truncation is harmless. The x86-64 backend confirms this by using `host_x86_MOV32_REG_IMM` (32-bit MOV) for the same handlers.
 
 ---
 

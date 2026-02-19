@@ -132,9 +132,9 @@ because macOS ASLR makes the distance between JIT pool and global variables
 unpredictable — ADRP's ±4GB range is not guaranteed. This was investigated
 and correctly rejected.
 
-#### 1.2.3 Jump Overhead
+#### 1.2.3 Jump Overhead (Resolved)
 
-`host_arm64_jump()` uses the same MOVX_IMM+BR pattern:
+`host_arm64_jump()` originally used the same MOVX_IMM+BR pattern:
 
 ```c
 void host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
@@ -144,8 +144,9 @@ void host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
 }
 ```
 
-Since jump targets are always within the JIT pool, this can be replaced with
+Since jump targets are always within the JIT pool, this was replaced with
 a single B (unconditional branch, ±128MB range), saving 3-4 instructions.
+The function was subsequently removed as dead code (commit d26977069).
 
 #### 1.2.4 Conditional Branch Patterns
 
@@ -168,11 +169,17 @@ rare given the 1MB CBNZ range.
 
 ### 1.3 3DNow! Analysis
 
-#### 1.3.1 PFRSQRT Register Clobber Bug
+#### 1.3.1 PFRSQRT Register Clobber Bug (Historical)
 
-**Severity**: HIGH (produces wrong results for all PFRSQRT operations)
+**Severity**: HIGH (produced wrong results for all PFRSQRT operations)
 
-The bug in `codegen_PFRSQRT` (`codegen_backend_arm64_uops.c:1867-1885`):
+> **Note**: This bug existed in the original FSQRT+FDIV implementation and was
+> resolved when the code was replaced with the FRSQRTE + Newton-Raphson sequence
+> (Phase 1 commit d26977069). The aliasing bugs in that replacement are covered
+> in Section 3.
+
+The original bug in `codegen_PFRSQRT` (formerly at
+`codegen_backend_arm64_uops.c:1867-1885`, before the FRSQRTE rewrite):
 
 ```c
 host_arm64_FSQRT_S(block, REG_V_TEMP, src_reg_a);    // V_TEMP = sqrt(src)
@@ -184,7 +191,7 @@ The second instruction overwrites `REG_V_TEMP` which was just set to `sqrt(src)`
 The division then computes `dest / 1.0` (identity) instead of `1.0 / sqrt(src)`.
 
 **Impact**: Any 3DNow!-enabled game or application running on an emulated AMD
-K6-2 or K6-III will get incorrect reciprocal square root results. This affects
+K6-2 or K6-III would get incorrect reciprocal square root results. This affects
 3D lighting, normalization, and distance calculations. Games affected include
 Unreal, Quake III Arena, and other late-90s titles that detect and use 3DNow!.
 
@@ -588,7 +595,7 @@ word operation, the upper bits of the destination register would be corrupted.
 
 #### 1.11.2 Offset Range Macros — Unsigned Only
 
-**File**: `src/codegen_new/codegen_backend_arm64_ops.h` lines 257-261
+**File**: `src/codegen_new/codegen_backend_arm64_ops.h` lines 261-265
 **Severity**: MEDIUM — potential missed optimization
 
 ```c
@@ -613,7 +620,7 @@ optimization with marginal benefit.
 
 #### 1.11.3 MOVK_IMM Validation
 
-**File**: `src/codegen_new/codegen_backend_arm64_ops.c` lines 1108-1109
+**File**: `src/codegen_new/codegen_backend_arm64_ops.c` lines 1134-1135
 **Severity**: LOW — overly strict but harmless
 
 ```c
@@ -629,21 +636,25 @@ the error message could be more descriptive.
 
 **Status**: Not a bug. Validation is correct for the encoding.
 
-#### 1.11.4 Source TODO Comments
+#### 1.11.4 Source TODO Comments (Resolved)
 
-Two TODO comments exist in the source code indicating known optimization gaps:
+Two TODO comments were present in the original source code indicating known
+optimization gaps:
 
 **File**: `src/codegen_new/codegen_backend_arm64_uops.c`
 
 ```c
-// Line 1859 (codegen_PFRCP):
+// Formerly at line 1859 (codegen_PFRCP):
 /*TODO: This could be improved (use VRECPE/VRECPS)*/
 
-// Line 1877 (codegen_PFRSQRT):
+// Formerly at line 1877 (codegen_PFRSQRT):
 /*TODO: This could be improved (use VRSQRTE/VRSQRTS)*/
 ```
 
-These are addressed by Phase 1 of the optimization plan (FRECPE/FRSQRTE).
+These TODO comments have been addressed and removed. The FRECPE/FRSQRTE +
+Newton-Raphson implementation (commit d26977069) replaced the naive FDIV/FSQRT
+sequences, and descriptive block comments now explain the algorithm in their
+place (see `codegen_PFRCP` at line 1859 and `codegen_PFRSQRT` at line 1883).
 
 #### 1.11.5 Refactoring Opportunities (Code Quality)
 
@@ -678,7 +689,7 @@ The following items were flagged during the audit but determined to be non-issue
 
 | Item | Why it's fine |
 |------|--------------|
-| **X16/X17 as call scratch** | These are ARM64's designated intra-procedure-call scratch registers (IP0/IP1). The register allocator never assigns guest registers to them. They are explicitly reserved for use by `host_arm64_call()`, `host_arm64_jump()`, and ALU immediate fallback paths. No conflict possible. |
+| **X16/X17 as call scratch** | These are ARM64's designated intra-procedure-call scratch registers (IP0/IP1). The register allocator never assigns guest registers to them. They are explicitly reserved for use by `host_arm64_call()` and ALU immediate fallback paths. (`host_arm64_jump()` also used them but has since been removed as dead code.) No conflict possible. |
 | **REG_CPUSTATE = X29** | X29 (frame pointer) is repurposed as the cpu_state base pointer. This is safe because the JIT prologue/epilogue doesn't generate frame pointer-based stack frames — it uses SP-relative addressing for saves/restores. The compiler-generated code (C functions called by BLR) uses its own frame pointer which is saved/restored by the callee. |
 | **Excessive fatal() calls** | These are unreachable-state assertions that fire when the IR generates uop combinations the backend doesn't support (e.g., unsupported register sizes). They are development-time safety nets, not error handling gaps. Every backend (x86-64 included) uses the same pattern. |
 | **in_range7_x naming** | Named for the 7-bit signed field in STP/LDP immediate encoding (`imm7`), not the number 7 as a range. The ±512 range with 8-byte alignment is correct for `STP X, X, [Xn, #simm7*8]`. |
@@ -747,9 +758,9 @@ All instructions (FRECPE, FRSQRTE, FRECPS, FRSQRTS, FMUL vector) are ARMv8.0-A b
 | PFRCP precision >= 14-bit | PASS |
 | PFRSQRT precision >= 15-bit | PASS (tight: 15.4 bits worst case) |
 | ARMv8.0 baseline compliance | PASS |
-| Same-register edge case (dest==src) | **FAIL** -- see Section 3 |
+| Same-register edge case (dest==src) | **PASS** (fixed in commit d26977069) -- see Section 3 |
 
-**Phase 1 Verdict: CONDITIONAL PASS** -- fix same-register clobber before merging. All opcode encodings, NR math, and precision margins are verified correct. The only issue is the dest==src aliasing bug, covered exhaustively in Section 3.
+**Phase 1 Verdict: PASS** -- All opcode encodings, NR math, and precision margins are verified correct. The dest==src aliasing bugs (covered in Section 3) have been fixed (commit d26977069).
 
 ---
 
@@ -795,8 +806,8 @@ The ARM64 backend uses NEON three-operand form: `dest = src_a OP src_b`. This me
 | **PFMIN** | `FMIN_V2S` | 1 | SAFE | SAFE | OK |
 | **PF2ID** | `FCVTZS_V2S` | 1 | SAFE | N/A (unary) | OK |
 | **PI2FD** | `SCVTF_V2S` | 1 | SAFE | N/A (unary) | OK |
-| **PFRCP** | `FRECPE`+`FRECPS`+`FMUL`+`DUP` | 4 | **BUGGY** | N/A (unary) | **FIX NEEDED** |
-| **PFRSQRT** | `FRSQRTE`+`FMUL`+`FRSQRTS`+`FMUL`+`DUP` | 5 | **BUGGY** | N/A (unary) | **FIX NEEDED** |
+| **PFRCP** | `FRECPE`+`FRECPS`+`FMUL`+`DUP` | 4 | **FIXED** | N/A (unary) | Fixed (d26977069) |
+| **PFRSQRT** | `FRSQRTE`+`FMUL`+`FRSQRTS`+`FMUL`+`DUP` | 5 | **FIXED** | N/A (unary) | Fixed (d26977069) |
 
 #### MMX Instructions (Multi-Instruction Handlers)
 
@@ -1065,7 +1076,7 @@ If a specific ARMv8.0-A implementation is found where PFRSQRT accuracy is proble
 
 While the primary scope is 3DNow!, three MMX handlers use multi-instruction sequences that deserve examination.
 
-#### PMULHW (line 1949) -- SAFE
+#### PMULHW (line 1954) -- SAFE
 
 ```c
 host_arm64_SMULL_V4S_4H(block, dest_reg, src_reg_a, src_reg_b);  // (1) dest = widening_mul(a, b)
@@ -1082,7 +1093,7 @@ SMULL is a widening multiply: it reads the lower 64 bits of `Vn` and `Vm` (as 4x
 
 **Verdict**: SAFE.
 
-#### PMADDWD (line 1931) -- SAFE
+#### PMADDWD (line 1936) -- SAFE
 
 ```c
 host_arm64_SMULL_V4S_4H(block, REG_V_TEMP, src_reg_a, src_reg_b);  // (1) temp = widening_mul
@@ -1117,10 +1128,10 @@ The only aliasing concern would be `dest_reg == src_reg_b`, but that would mean 
 
 #### Fix Status
 
-| Instruction | Correct Fix | Source |
-|-------------|------------|--------|
-| **PFRCP** | Estimate to REG_V_TEMP first (Section 3.3) | All reports agree |
-| **PFRSQRT** | Option B: compute x0*a instead of x0^2 (Section 3.5) | aliasing-audit.md only; impl-review/validation-report fixes are **wrong** |
+| Instruction | Correct Fix | Source | Applied? |
+|-------------|------------|--------|----------|
+| **PFRCP** | Estimate to REG_V_TEMP first (Section 3.3) | All reports agree | Done (commit d26977069) |
+| **PFRSQRT** | Option B: compute x0*a instead of x0^2 (Section 3.5) | aliasing-audit.md only; impl-review/validation-report fixes are **wrong** | Done (commit d26977069) |
 
 #### No Other Bugs Found
 
@@ -1234,13 +1245,12 @@ All correctly use absolute addressing. None were incorrectly converted to BL. --
 
 `codegen_JMP` now calls `host_arm64_B(block, uop->p)` directly. All `uop_JMP` targets (verified in `codegen_ops_branch.c`) pass `codegen_exit_rout` which is always intra-pool. -- PASS
 
-### 4.9 Dead Code: host_arm64_jump
+### 4.9 Dead Code: host_arm64_jump (Removed)
 
-`host_arm64_jump` at `codegen_backend_arm64_ops.c` lines 1564-1568 has zero
-callers (confirmed via grep). It was made dead by the `codegen_JMP` change
-at line 813 which now calls `host_arm64_B(block, uop->p)` directly. It still
-has a declaration in the header file at `codegen_backend_arm64_ops.h` line 259.
-Both should be removed as cleanup.
+`host_arm64_jump` was dead code (zero callers) made obsolete by the
+`codegen_JMP` change which now calls `host_arm64_B(block, uop->p)` directly.
+Both the function definition and its header declaration have since been removed
+(commit d26977069).
 
 ### 4.10 codegen_gpf_rout Clarification
 
@@ -1272,7 +1282,7 @@ No code impact -- minor doc fix only.
 | All 26 call sites intra-pool | PASS |
 | No external C function incorrectly converted | PASS |
 | codegen_JMP -> host_arm64_B | PASS |
-| Dead code identified (host_arm64_jump) | P1 cleanup |
+| Dead code identified (host_arm64_jump) | Removed (commit d26977069) |
 
 **Phase 2 Verdict: PASS** -- No bugs found. Dead code cleanup recommended.
 
@@ -1314,8 +1324,8 @@ On ARM64, `uop->imm_data` is `uintptr_t` (64-bit), NOT `uint32_t`:
 
 ```c
 // src/codegen_new/codegen_ir_defs.h lines 339-343:
-#if defined __aarch64__ || defined _M_ARM64
-    uintptr_t     imm_data;    // 64-bit on ARM64
+#if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64
+    uintptr_t     imm_data;    // 64-bit on ARM64 (also uintptr_t on ARM32)
 #else
     uint32_t      imm_data;    // 32-bit on x86-64
 #endif
@@ -1324,7 +1334,7 @@ On ARM64, `uop->imm_data` is `uintptr_t` (64-bit), NOT `uint32_t`:
 `host_arm64_mov_imm` takes `uint32_t`:
 
 ```c
-// src/codegen_new/codegen_backend_arm64_ops.h line 260:
+// src/codegen_new/codegen_backend_arm64_ops.h line 259:
 void host_arm64_mov_imm(codeblock_t *block, int reg, uint32_t imm_data);
 ```
 
@@ -1348,7 +1358,7 @@ silently truncate. However, this is safe because:
 #### 5.1.3 host_arm64_mov_imm Edge Case Analysis
 
 ```c
-// src/codegen_new/codegen_backend_arm64_ops.c lines 1571-1579:
+// src/codegen_new/codegen_backend_arm64_ops.c lines 1564-1572:
 host_arm64_mov_imm(codeblock_t *block, int reg, uint32_t imm_data)
 {
     if (imm_is_imm16(imm_data))
@@ -2126,7 +2136,7 @@ causes confusion in documentation.
 
 **Codebase status**: The current code uses FRECPE_V2S, FRSQRTE_V2S,
 FRECPS_V2S, FRSQRTS_V2S, and FMUL_V2S unconditionally in
-`codegen_backend_arm64_uops.c` (lines 1863-1866 for PFRCP, lines 1887-1891
+`codegen_backend_arm64_uops.c` (lines 1865-1868 for PFRCP, lines 1892-1896
 for PFRSQRT). This is correct -- no runtime feature detection is needed.
 
 **Status**: PASS -- no changes required.
@@ -2450,9 +2460,9 @@ Independently verified via grep: 26 `host_arm64_call_intrapool` + 6 `host_arm64_
 | impl-review.md | Lists it as P1 dead code to remove |
 | validation-report.md | Not mentioned |
 
-The `host_arm64_jump` function at `codegen_backend_arm64_ops.c` lines 1564-1568
-is confirmed dead (zero callers). It still has a declaration in the header file
-at `codegen_backend_arm64_ops.h` line 259. Both should be removed.
+The `host_arm64_jump` function was confirmed dead (zero callers). Both the
+function definition and its header declaration have since been removed
+(commit d26977069).
 
 #### 7.1.6 codegen_gpf_rout as BL Target (MINOR DOC ERROR)
 
@@ -2485,9 +2495,9 @@ misleading here.
 
 | Priority | Item | Status |
 |----------|------|--------|
-| **P0** | Fix PFRCP aliasing: use impl-review fix (estimate to REG_V_TEMP) | Verified correct |
-| **P0** | Fix PFRSQRT aliasing: use aliasing-audit Option B (x0*a, NOT x0^2) | Verified correct |
-| P1 | Remove dead `host_arm64_jump` (function + declaration) | Confirmed dead |
+| **P0** | Fix PFRCP aliasing: use impl-review fix (estimate to REG_V_TEMP) | Done (commit d26977069) |
+| **P0** | Fix PFRSQRT aliasing: use aliasing-audit Option B (x0*a, NOT x0^2) | Done (commit d26977069) |
+| P1 | Remove dead `host_arm64_jump` (function + declaration) | Done (commit d26977069) |
 | P1 | Fix plan.md: `imm_data` is `uintptr_t` on ARM64, not `uint32_t` | Doc fix only |
 | P2 | Proceed with Phase 3 (LOAD_FUNC_ARG_IMM width) | Safe to proceed |
 | P2 | Proceed with Phase 5 (LIKELY/UNLIKELY) before Phase 4 | Agreed |
@@ -2537,9 +2547,10 @@ No safety concerns.
 
 ### 7.6 Overall Verdict
 
-**Phase 1**: CONDITIONAL PASS -- two P0 bugs must be fixed first (PFRCP and
-PFRSQRT aliasing). The PFRCP fix from impl-review.md is correct. The PFRSQRT
-fix MUST use aliasing-audit.md Option B, NOT the impl-review.md version.
+**Phase 1**: PASS -- both P0 bugs (PFRCP and PFRSQRT dest==src aliasing)
+have been fixed (commit d26977069). The PFRCP fix uses the estimate-to-temp
+approach from impl-review.md. The PFRSQRT fix uses the aliasing-audit.md
+Option B (x0*a instead of x0^2), which is the only correct variant.
 
 **Phase 2**: PASS -- no bugs found. Dead code cleanup recommended.
 
