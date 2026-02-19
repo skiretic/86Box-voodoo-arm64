@@ -29,6 +29,213 @@
 #    define REG_IS_D(size)    (size == IREG_SIZE_D)
 #    define REG_IS_Q(size)    (size == IREG_SIZE_Q)
 
+/*
+ * ============================================================================
+ * MMX/3DNow!/NEON Handler Template Macros (R1, R2, R4 refactoring)
+ * ============================================================================
+ *
+ * The majority of MMX, 3DNow!, and NEON UOP handlers follow one of a small
+ * number of structural patterns.  Before this refactoring, each handler was
+ * written out in full (~17 lines each), leading to ~900 lines of near-
+ * identical boilerplate for ~50 handlers.  The macros below capture those
+ * patterns so that each handler is declared in a single line.
+ *
+ * The macros expand to EXACTLY the same code the hand-written handlers
+ * produced, so there is zero risk of behavioral change.  The C preprocessor
+ * inlines them at compile time; there are no function-pointer indirections
+ * or runtime overhead.
+ *
+ * Three pattern families exist:
+ *
+ *   1. BINARY  -- two NEON source registers, one destination register.
+ *                 Used by arithmetic (PADD*, PSUB*, PFADD, PFMUL, ...),
+ *                 comparison (PCMPEQ*, PCMPGT*, PFCMP*), and interleave
+ *                 (PUNPCK*) operations.
+ *
+ *   2. UNARY   -- one NEON source register, one destination register.
+ *                 Used by conversions (PF2ID, PI2FD).
+ *
+ *   3. SHIFT   -- one NEON source register, one destination register,
+ *                 plus an immediate shift amount from uop->imm_data.
+ *                 Used by PSLL*_IMM, PSRA*_IMM, PSRL*_IMM.
+ *                 Each shift family has three element widths (W/D/Q) with
+ *                 different max-shift thresholds and overflow behavior.
+ * ============================================================================
+ */
+
+/*
+ * DEFINE_MMX_BINARY_OP -- Define a handler for a binary (3-register) NEON op.
+ *
+ * Parameters:
+ *   OP_NAME     - the UOP handler suffix (e.g. PADDB -> codegen_PADDB)
+ *   ARM64_INSN  - the host_arm64_* emitter to call (e.g. host_arm64_ADD_V8B)
+ *   FATAL_NAME  - the name string for the fatal() diagnostic
+ *
+ * Generated handler:
+ *   - Unpacks dest, src_a, src_b registers and their sizes from the uop
+ *   - Asserts all three are IREG_SIZE_Q (64-bit NEON / MMX register)
+ *   - Emits a single ARM64 NEON instruction: ARM64_INSN(block, dest, src_a, src_b)
+ *   - Calls fatal() with a diagnostic if sizes don't match (should never happen)
+ */
+#    define DEFINE_MMX_BINARY_OP(OP_NAME, ARM64_INSN, FATAL_NAME)                                                                    \
+        static int                                                                                                                    \
+        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
+        {                                                                                                                             \
+            int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);                                                                      \
+            int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);                                                                       \
+            int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);                                                                       \
+            int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                     \
+            int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);                                                                      \
+            int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);                                                                      \
+                                                                                                                                      \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {                                               \
+                ARM64_INSN(block, dest_reg, src_reg_a, src_reg_b);                                                                    \
+            } else                                                                                                                    \
+                fatal(FATAL_NAME " %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);               \
+                                                                                                                                      \
+            return 0;                                                                                                                 \
+        }
+
+/*
+ * DEFINE_MMX_UNARY_OP -- Define a handler for a unary (2-register) NEON op.
+ *
+ * Parameters:
+ *   OP_NAME     - the UOP handler suffix (e.g. PF2ID -> codegen_PF2ID)
+ *   ARM64_INSN  - the host_arm64_* emitter to call (e.g. host_arm64_FCVTZS_V2S)
+ *   FATAL_NAME  - the name string for the fatal() diagnostic
+ *
+ * Generated handler:
+ *   - Unpacks dest, src_a registers and their sizes from the uop
+ *   - Asserts both are IREG_SIZE_Q (64-bit NEON / MMX register)
+ *   - Emits a single ARM64 NEON instruction: ARM64_INSN(block, dest, src_a)
+ *   - Calls fatal() with a diagnostic if sizes don't match
+ */
+#    define DEFINE_MMX_UNARY_OP(OP_NAME, ARM64_INSN, FATAL_NAME)                                                                     \
+        static int                                                                                                                    \
+        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
+        {                                                                                                                             \
+            int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);                                                                      \
+            int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);                                                                       \
+            int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                     \
+            int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);                                                                      \
+                                                                                                                                      \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {                                                                        \
+                ARM64_INSN(block, dest_reg, src_reg_a);                                                                               \
+            } else                                                                                                                    \
+                fatal(FATAL_NAME " %02x\n", uop->dest_reg_a_real);                                                                    \
+                                                                                                                                      \
+            return 0;                                                                                                                 \
+        }
+
+/*
+ * DEFINE_MMX_SHIFT_LEFT_IMM -- Define a handler for a NEON left-shift-by-immediate.
+ *
+ * Parameters:
+ *   OP_NAME     - UOP handler suffix (e.g. PSLLW_IMM)
+ *   ARM64_SHL   - the host_arm64_SHL_V* emitter for this element width
+ *   MAX_SHIFT   - the element width in bits (16 for W, 32 for D, 64 for Q);
+ *                 shifts >= MAX_SHIFT produce zero (same as x86 behavior)
+ *   FATAL_NAME  - diagnostic string for fatal()
+ *
+ * Overflow behavior: shifts >= MAX_SHIFT zero the register (EOR with itself).
+ * Zero-shift: FMOV_D_D (64-bit move, preserving upper bits for dest!=src).
+ */
+#    define DEFINE_MMX_SHIFT_LEFT_IMM(OP_NAME, ARM64_SHL, MAX_SHIFT, FATAL_NAME)                                                     \
+        static int                                                                                                                    \
+        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
+        {                                                                                                                             \
+            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                                                                       \
+            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                                                                        \
+            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                      \
+            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                                                                       \
+                                                                                                                                      \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                                                          \
+                if (uop->imm_data == 0)                                                                                               \
+                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                                                                    \
+                else if (uop->imm_data > (MAX_SHIFT - 1))                                                                            \
+                    host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);                                                        \
+                else                                                                                                                  \
+                    ARM64_SHL(block, dest_reg, src_reg, uop->imm_data);                                                               \
+            } else                                                                                                                    \
+                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);                                          \
+                                                                                                                                      \
+            return 0;                                                                                                                 \
+        }
+
+/*
+ * DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM -- Define a handler for NEON arithmetic
+ * right-shift-by-immediate.
+ *
+ * Parameters:
+ *   OP_NAME      - UOP handler suffix (e.g. PSRAW_IMM)
+ *   ARM64_SSHR   - the host_arm64_SSHR_V* emitter for this element width
+ *   MAX_SHIFT    - the element width in bits (16/32/64);
+ *                  shifts >= MAX_SHIFT clamp to (MAX_SHIFT - 1) to replicate
+ *                  the sign bit across all positions (x86 PSRA* behavior)
+ *   FATAL_NAME   - diagnostic string for fatal()
+ *
+ * Overflow behavior: shifts >= MAX_SHIFT clamp to MAX_SHIFT-1 (sign-fill).
+ * This matches x86 PSRAW/PSRAD semantics where excessive shifts produce
+ * all-zeros or all-ones depending on the sign bit.
+ */
+#    define DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM(OP_NAME, ARM64_SSHR, MAX_SHIFT, FATAL_NAME)                                             \
+        static int                                                                                                                    \
+        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
+        {                                                                                                                             \
+            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                                                                       \
+            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                                                                        \
+            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                      \
+            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                                                                       \
+                                                                                                                                      \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                                                          \
+                if (uop->imm_data == 0)                                                                                               \
+                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                                                                    \
+                else if (uop->imm_data > (MAX_SHIFT - 1))                                                                            \
+                    ARM64_SSHR(block, dest_reg, src_reg, (MAX_SHIFT - 1));                                                            \
+                else                                                                                                                  \
+                    ARM64_SSHR(block, dest_reg, src_reg, uop->imm_data);                                                              \
+            } else                                                                                                                    \
+                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);                                          \
+                                                                                                                                      \
+            return 0;                                                                                                                 \
+        }
+
+/*
+ * DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM -- Define a handler for NEON logical
+ * right-shift-by-immediate.
+ *
+ * Parameters:
+ *   OP_NAME      - UOP handler suffix (e.g. PSRLW_IMM)
+ *   ARM64_USHR   - the host_arm64_USHR_V* emitter for this element width
+ *   MAX_SHIFT    - element width in bits (16/32/64);
+ *                  shifts >= MAX_SHIFT zero the register (x86 PSRL* behavior)
+ *   FATAL_NAME   - diagnostic string for fatal()
+ *
+ * Overflow behavior: shifts >= MAX_SHIFT zero the register (EOR with itself).
+ * This is identical to left-shift overflow behavior.
+ */
+#    define DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(OP_NAME, ARM64_USHR, MAX_SHIFT, FATAL_NAME)                                             \
+        static int                                                                                                                    \
+        codegen_##OP_NAME(codeblock_t *block, uop_t *uop)                                                                            \
+        {                                                                                                                             \
+            int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);                                                                       \
+            int src_reg   = HOST_REG_GET(uop->src_reg_a_real);                                                                        \
+            int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);                                                                      \
+            int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);                                                                       \
+                                                                                                                                      \
+            if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {                                                                          \
+                if (uop->imm_data == 0)                                                                                               \
+                    host_arm64_FMOV_D_D(block, dest_reg, src_reg);                                                                    \
+                else if (uop->imm_data > (MAX_SHIFT - 1))                                                                            \
+                    host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);                                                        \
+                else                                                                                                                  \
+                    ARM64_USHR(block, dest_reg, src_reg, uop->imm_data);                                                              \
+            } else                                                                                                                    \
+                fatal(FATAL_NAME " %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);                                          \
+                                                                                                                                      \
+            return 0;                                                                                                                 \
+        }
+
 static int
 codegen_ADD(codeblock_t *block, uop_t *uop)
 {
@@ -1490,363 +1697,44 @@ codegen_PACKUSWB(codeblock_t *block, uop_t *uop)
     return 0;
 }
 
-static int
-codegen_PADDB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+/*
+ * ============================================================================
+ * Macro-generated MMX/3DNow! handlers (R1+R2 refactoring)
+ *
+ * Each line below expands to a complete static handler function via the
+ * DEFINE_MMX_BINARY_OP / DEFINE_MMX_UNARY_OP macros defined above.
+ * The generated code is identical to the original hand-written handlers.
+ * ============================================================================
+ */
 
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ADD_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PADDB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+/* MMX packed-integer add: wrapping, signed-saturating, unsigned-saturating */
+DEFINE_MMX_BINARY_OP(PADDB,   host_arm64_ADD_V8B,   "PADDB")   /* x86 PADDB   -> NEON ADD 8B  */
+DEFINE_MMX_BINARY_OP(PADDW,   host_arm64_ADD_V4H,   "PADDW")   /* x86 PADDW   -> NEON ADD 4H  */
+DEFINE_MMX_BINARY_OP(PADDD,   host_arm64_ADD_V2S,   "PADDD")   /* x86 PADDD   -> NEON ADD 2S  */
+DEFINE_MMX_BINARY_OP(PADDSB,  host_arm64_SQADD_V8B, "PADDSB")  /* x86 PADDSB  -> NEON SQADD 8B (signed saturating) */
+DEFINE_MMX_BINARY_OP(PADDSW,  host_arm64_SQADD_V4H, "PADDSW")  /* x86 PADDSW  -> NEON SQADD 4H (signed saturating) */
+DEFINE_MMX_BINARY_OP(PADDUSB, host_arm64_UQADD_V8B, "PADDUSB") /* x86 PADDUSB -> NEON UQADD 8B (unsigned saturating) */
+DEFINE_MMX_BINARY_OP(PADDUSW, host_arm64_UQADD_V4H, "PADDUSW") /* x86 PADDUSW -> NEON UQADD 4H (unsigned saturating) */
 
-    return 0;
-}
-static int
-codegen_PADDW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+/* MMX packed-integer compare: equality and signed greater-than */
+DEFINE_MMX_BINARY_OP(PCMPEQB, host_arm64_CMEQ_V8B,  "PCMPEQB") /* x86 PCMPEQB -> NEON CMEQ 8B */
+DEFINE_MMX_BINARY_OP(PCMPEQW, host_arm64_CMEQ_V4H,  "PCMPEQW") /* x86 PCMPEQW -> NEON CMEQ 4H */
+DEFINE_MMX_BINARY_OP(PCMPEQD, host_arm64_CMEQ_V2S,  "PCMPEQD") /* x86 PCMPEQD -> NEON CMEQ 2S */
+DEFINE_MMX_BINARY_OP(PCMPGTB, host_arm64_CMGT_V8B,  "PCMPGTB") /* x86 PCMPGTB -> NEON CMGT 8B (signed GT) */
+DEFINE_MMX_BINARY_OP(PCMPGTW, host_arm64_CMGT_V4H,  "PCMPGTW") /* x86 PCMPGTW -> NEON CMGT 4H (signed GT) */
+DEFINE_MMX_BINARY_OP(PCMPGTD, host_arm64_CMGT_V2S,  "PCMPGTD") /* x86 PCMPGTD -> NEON CMGT 2S (signed GT) */
 
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ADD_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PADDW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+/* 3DNow! float-to-int conversion (unary) */
+DEFINE_MMX_UNARY_OP(PF2ID, host_arm64_FCVTZS_V2S, "PF2ID") /* 3DNow! PF2ID -> NEON FCVTZS 2S (float-to-int truncate) */
 
-    return 0;
-}
-static int
-codegen_PADDD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ADD_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PADDD %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PADDSB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_SQADD_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PADDSB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PADDSW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_SQADD_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PADDSW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PADDUSB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_UQADD_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PADDUSB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PADDUSW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_UQADD_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PADDUSW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-
-static int
-codegen_PCMPEQB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_CMEQ_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PCMPEQB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PCMPEQW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_CMEQ_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PCMPEQW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PCMPEQD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_CMEQ_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PCMPEQD %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PCMPGTB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_CMGT_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PCMPGTB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PCMPGTW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_CMGT_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PCMPGTW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PCMPGTD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_CMGT_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PCMPGTD %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-
-static int
-codegen_PF2ID(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
-        host_arm64_FCVTZS_V2S(block, dest_reg, src_reg_a);
-    } else
-        fatal("PF2ID %02x\n", uop->dest_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PFADD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FADD_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFADD %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PFCMPEQ(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FCMEQ_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFCMPEQ %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PFCMPGE(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FCMGE_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFCMPGE %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PFCMPGT(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FCMGT_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFCMPGT %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PFMAX(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FMAX_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFMAX %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PFMIN(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FMIN_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFMIN %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PFMUL(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FMUL_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFMUL %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
+/* 3DNow! binary floating-point arithmetic and comparisons */
+DEFINE_MMX_BINARY_OP(PFADD,   host_arm64_FADD_V2S,  "PFADD")   /* 3DNow! PFADD   -> NEON FADD 2S  */
+DEFINE_MMX_BINARY_OP(PFCMPEQ, host_arm64_FCMEQ_V2S, "PFCMPEQ") /* 3DNow! PFCMPEQ -> NEON FCMEQ 2S */
+DEFINE_MMX_BINARY_OP(PFCMPGE, host_arm64_FCMGE_V2S, "PFCMPGE") /* 3DNow! PFCMPGE -> NEON FCMGE 2S */
+DEFINE_MMX_BINARY_OP(PFCMPGT, host_arm64_FCMGT_V2S, "PFCMPGT") /* 3DNow! PFCMPGT -> NEON FCMGT 2S */
+DEFINE_MMX_BINARY_OP(PFMAX,   host_arm64_FMAX_V2S,  "PFMAX")   /* 3DNow! PFMAX   -> NEON FMAX 2S  */
+DEFINE_MMX_BINARY_OP(PFMIN,   host_arm64_FMIN_V2S,  "PFMIN")   /* 3DNow! PFMIN   -> NEON FMIN 2S  */
+DEFINE_MMX_BINARY_OP(PFMUL,   host_arm64_FMUL_V2S,  "PFMUL")   /* 3DNow! PFMUL   -> NEON FMUL 2S  */
 static int
 codegen_PFRCP(codeblock_t *block, uop_t *uop)
 {
@@ -1899,38 +1787,10 @@ codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
 
     return 0;
 }
-static int
-codegen_PFSUB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+DEFINE_MMX_BINARY_OP(PFSUB, host_arm64_FSUB_V2S, "PFSUB") /* 3DNow! PFSUB -> NEON FSUB 2S */
 
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_FSUB_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PFSUB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PI2FD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
-        host_arm64_SCVTF_V2S(block, dest_reg, src_reg_a);
-    } else
-        fatal("PI2FD %02x\n", uop->dest_reg_a_real);
-
-    return 0;
-}
+/* 3DNow! int-to-float conversion (unary) */
+DEFINE_MMX_UNARY_OP(PI2FD, host_arm64_SCVTF_V2S, "PI2FD") /* 3DNow! PI2FD -> NEON SCVTF 2S (signed int-to-float) */
 
 static int
 codegen_PMADDWD(codeblock_t *block, uop_t *uop)
@@ -1968,427 +1828,63 @@ codegen_PMULHW(codeblock_t *block, uop_t *uop)
 
     return 0;
 }
-static int
-codegen_PMULLW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+DEFINE_MMX_BINARY_OP(PMULLW, host_arm64_MUL_V4H, "PMULLW") /* x86 PMULLW -> NEON MUL 4H (low half of product) */
 
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_MUL_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PMULLW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+/*
+ * ---- MMX shift-by-immediate handlers (R3 refactoring) ----
+ *
+ * Each macro below expands to a handler that:
+ *   - Zero shift: FMOV_D_D (copy src to dest)
+ *   - Shift >= element width: zero (SHL/USHR) or sign-fill (SSHR)
+ *   - Normal: emit the corresponding NEON shift instruction
+ *
+ * The third parameter is the element width in bits -- shifts at or beyond
+ * this value trigger the overflow behavior.
+ */
 
-    return 0;
-}
+/* MMX logical left shift by immediate */
+DEFINE_MMX_SHIFT_LEFT_IMM(PSLLW_IMM, host_arm64_SHL_V4H, 16, "PSLLW_IMM") /* x86 PSLLW -> NEON SHL 4H */
+DEFINE_MMX_SHIFT_LEFT_IMM(PSLLD_IMM, host_arm64_SHL_V2S, 32, "PSLLD_IMM") /* x86 PSLLD -> NEON SHL 2S */
+DEFINE_MMX_SHIFT_LEFT_IMM(PSLLQ_IMM, host_arm64_SHL_V2D, 64, "PSLLQ_IMM") /* x86 PSLLQ -> NEON SHL 2D */
 
-static int
-codegen_PSLLW_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
+/* ---- MMX arithmetic right shift by immediate (R3: shift template) ---- */
+DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM(PSRAW_IMM, host_arm64_SSHR_V4H, 16, "PSRAW_IMM") /* x86 PSRAW -> NEON SSHR 4H (clamp at 15) */
+DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM(PSRAD_IMM, host_arm64_SSHR_V2S, 32, "PSRAD_IMM") /* x86 PSRAD -> NEON SSHR 2S (clamp at 31) */
+DEFINE_MMX_SHIFT_RIGHT_ARITH_IMM(PSRAQ_IMM, host_arm64_SSHR_V2D, 64, "PSRAQ_IMM") /* x86 PSRAQ -> NEON SSHR 2D (clamp at 63) */
 
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 15)
-            host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);
-        else
-            host_arm64_SHL_V4H(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSLLW_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
+/* MMX logical right shift by immediate */
+DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(PSRLW_IMM, host_arm64_USHR_V4H, 16, "PSRLW_IMM") /* x86 PSRLW -> NEON USHR 4H */
+DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(PSRLD_IMM, host_arm64_USHR_V2S, 32, "PSRLD_IMM") /* x86 PSRLD -> NEON USHR 2S */
+DEFINE_MMX_SHIFT_RIGHT_LOGIC_IMM(PSRLQ_IMM, host_arm64_USHR_V2D, 64, "PSRLQ_IMM") /* x86 PSRLQ -> NEON USHR 2D */
 
-    return 0;
-}
-static int
-codegen_PSLLD_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
+/* MMX packed-integer subtract: wrapping, signed-saturating, unsigned-saturating */
+DEFINE_MMX_BINARY_OP(PSUBB,   host_arm64_SUB_V8B,   "PSUBB")   /* x86 PSUBB   -> NEON SUB 8B  */
+DEFINE_MMX_BINARY_OP(PSUBW,   host_arm64_SUB_V4H,   "PSUBW")   /* x86 PSUBW   -> NEON SUB 4H  */
+DEFINE_MMX_BINARY_OP(PSUBD,   host_arm64_SUB_V2S,   "PSUBD")   /* x86 PSUBD   -> NEON SUB 2S  */
+DEFINE_MMX_BINARY_OP(PSUBSB,  host_arm64_SQSUB_V8B, "PSUBSB")  /* x86 PSUBSB  -> NEON SQSUB 8B (signed saturating) */
+DEFINE_MMX_BINARY_OP(PSUBSW,  host_arm64_SQSUB_V4H, "PSUBSW")  /* x86 PSUBSW  -> NEON SQSUB 4H (signed saturating) */
+DEFINE_MMX_BINARY_OP(PSUBUSB, host_arm64_UQSUB_V8B, "PSUBUSB") /* x86 PSUBUSB -> NEON UQSUB 8B (unsigned saturating) */
+DEFINE_MMX_BINARY_OP(PSUBUSW, host_arm64_UQSUB_V4H, "PSUBUSW") /* x86 PSUBUSW -> NEON UQSUB 4H (unsigned saturating) */
 
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 31)
-            host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);
-        else
-            host_arm64_SHL_V2S(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSLLD_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PSLLQ_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 63)
-            host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);
-        else
-            host_arm64_SHL_V2D(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSLLQ_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PSRAW_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 15)
-            host_arm64_SSHR_V4H(block, dest_reg, src_reg, 15);
-        else
-            host_arm64_SSHR_V4H(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSRAW_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PSRAD_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 31)
-            host_arm64_SSHR_V2S(block, dest_reg, src_reg, 31);
-        else
-            host_arm64_SSHR_V2S(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSRAD_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PSRAQ_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 63)
-            host_arm64_SSHR_V2D(block, dest_reg, src_reg, 63);
-        else
-            host_arm64_SSHR_V2D(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSRAQ_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PSRLW_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 15)
-            host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);
-        else
-            host_arm64_USHR_V4H(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSRLW_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PSRLD_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 31)
-            host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);
-        else
-            host_arm64_USHR_V2S(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSRLD_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-static int
-codegen_PSRLQ_IMM(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg  = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg   = HOST_REG_GET(uop->src_reg_a_real);
-    int dest_size = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size  = IREG_GET_SIZE(uop->src_reg_a_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
-        if (uop->imm_data == 0)
-            host_arm64_FMOV_D_D(block, dest_reg, src_reg);
-        else if (uop->imm_data > 63)
-            host_arm64_EOR_REG_V(block, dest_reg, dest_reg, dest_reg);
-        else
-            host_arm64_USHR_V2D(block, dest_reg, src_reg, uop->imm_data);
-    } else
-        fatal("PSRLQ_IMM %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
-
-    return 0;
-}
-
-static int
-codegen_PSUBB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_SUB_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PSUBB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PSUBW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_SUB_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PSUBW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PSUBD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_SUB_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PSUBD %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PSUBSB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_SQSUB_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PSUBSB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PSUBSW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_SQSUB_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PSUBSW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PSUBUSB(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_UQSUB_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PSUBUSB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PSUBUSW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_UQSUB_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PSUBUSW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-
-static int
-codegen_PUNPCKHBW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ZIP2_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PUNPCKHBW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PUNPCKHWD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ZIP2_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PUNPCKHWD %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PUNPCKHDQ(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ZIP2_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PUNPCKHDQ %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PUNPCKLBW(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ZIP1_V8B(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PUNPCKLBW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PUNPCKLWD(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ZIP1_V4H(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PUNPCKLWD %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
-static int
-codegen_PUNPCKLDQ(codeblock_t *block, uop_t *uop)
-{
-    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
-    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
-    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
-    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
-    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
-    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
-
-    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        host_arm64_ZIP1_V2S(block, dest_reg, src_reg_a, src_reg_b);
-    } else
-        fatal("PUNPCKLDQ %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
-
-    return 0;
-}
+/*
+ * MMX unpack/interleave operations.
+ *
+ * R7 verification: ARM64 NEON ZIP1/ZIP2 are semantically equivalent to x86
+ * PUNPCKLxx / PUNPCKHxx on little-endian systems (which ARM64 always is in
+ * user mode).  Both instruction families interleave elements from two source
+ * vectors.  ZIP1 takes the low elements, ZIP2 takes the high elements.
+ * On little-endian ARM64:
+ *   ZIP1 Vd.2S, Vn.2S, Vm.2S  =>  Vd = [Vn[0], Vm[0]]
+ *   x86  PUNPCKLDQ mm1, mm2   =>  mm1 = [mm1[0], mm2[0]]
+ * These are identical because both architectures number elements from the
+ * least-significant end of the register on little-endian.
+ */
+DEFINE_MMX_BINARY_OP(PUNPCKHBW, host_arm64_ZIP2_V8B, "PUNPCKHBW") /* x86 PUNPCKHBW -> NEON ZIP2 8B */
+DEFINE_MMX_BINARY_OP(PUNPCKHWD, host_arm64_ZIP2_V4H, "PUNPCKHWD") /* x86 PUNPCKHWD -> NEON ZIP2 4H */
+DEFINE_MMX_BINARY_OP(PUNPCKHDQ, host_arm64_ZIP2_V2S, "PUNPCKHDQ") /* x86 PUNPCKHDQ -> NEON ZIP2 2S */
+DEFINE_MMX_BINARY_OP(PUNPCKLBW, host_arm64_ZIP1_V8B, "PUNPCKLBW") /* x86 PUNPCKLBW -> NEON ZIP1 8B */
+DEFINE_MMX_BINARY_OP(PUNPCKLWD, host_arm64_ZIP1_V4H, "PUNPCKLWD") /* x86 PUNPCKLWD -> NEON ZIP1 4H */
+DEFINE_MMX_BINARY_OP(PUNPCKLDQ, host_arm64_ZIP1_V2S, "PUNPCKLDQ") /* x86 PUNPCKLDQ -> NEON ZIP1 2S */
 
 static int
 codegen_ROL(codeblock_t *block, uop_t *uop)
