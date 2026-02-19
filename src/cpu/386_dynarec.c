@@ -757,6 +757,57 @@ exec386_dynarec_dyn(void)
 #    endif
 }
 
+#if defined(__aarch64__) || defined(_M_ARM64)
+/*
+ * handle_pending_exceptions -- Process SMI, NMI, and IRQ exceptions.
+ *
+ * R6 refactoring: This function is marked __attribute__((noinline)) to keep
+ * the exception-handling code OUT of the hot path in exec386_dynarec().
+ * Exception dispatch is rare (typically fires only a few hundred times per
+ * second) but the code is ~30 instructions, which would pollute the L1
+ * I-cache on every iteration of the main dispatch loop if inlined.
+ *
+ * On ARM64 Cortex-A cores, L1 I-cache lines are 64 bytes (16 instructions).
+ * Keeping the cold exception path out-of-line saves 2-3 I-cache lines in
+ * the hot loop, reducing I-cache pressure and improving fetch bandwidth
+ * for the block dispatch path.
+ *
+ * All variables accessed here (smi_line, nmi, nmi_enable, nmi_mask,
+ * cpu_state, pic) are globals, so no parameters are needed.
+ */
+static __attribute__((noinline)) void
+handle_pending_exceptions(void)
+{
+    if (smi_line)
+        enter_smm_check(0);
+    else if (nmi && nmi_enable && nmi_mask) {
+#    ifndef USE_NEW_DYNAREC
+        oldcs = CS;
+#    endif
+        cpu_state.oldpc = cpu_state.pc;
+        x86_int(2);
+        nmi_enable = 0;
+#    ifdef OLD_NMI_BEHAVIOR
+        if (nmi_auto_clear) {
+            nmi_auto_clear = 0;
+            nmi            = 0;
+        }
+#    else
+        nmi = 0;
+#    endif
+    } else if ((cpu_state.flags & I_FLAG) && pic.int_pending) {
+        int vector = picinterrupt();
+        if (vector != -1) {
+#    ifndef USE_NEW_DYNAREC
+            oldcs = CS;
+#    endif
+            cpu_state.oldpc = cpu_state.pc;
+            x86_int(vector);
+        }
+    }
+}
+#endif /* __aarch64__ || _M_ARM64 */
+
 void
 exec386_dynarec(int32_t cycs)
 {
@@ -846,33 +897,44 @@ exec386_dynarec(int32_t cycs)
                 x86_int(16);
             }
 
+            /*
+             * R6: On ARM64, exception dispatch is moved to a separate noinline
+             * function to keep the hot path compact in L1 I-cache.  On other
+             * architectures, the code remains inline (no behavioral change).
+             */
+#    if defined(__aarch64__) || defined(_M_ARM64)
+            if (UNLIKELY(smi_line || (nmi && nmi_enable && nmi_mask) ||
+                         ((cpu_state.flags & I_FLAG) && pic.int_pending)))
+                handle_pending_exceptions();
+#    else
             if (UNLIKELY(smi_line))
                 enter_smm_check(0);
             else if (UNLIKELY(nmi && nmi_enable && nmi_mask)) {
-#    ifndef USE_NEW_DYNAREC
+#        ifndef USE_NEW_DYNAREC
                 oldcs = CS;
-#    endif
+#        endif
                 cpu_state.oldpc = cpu_state.pc;
                 x86_int(2);
                 nmi_enable = 0;
-#    ifdef OLD_NMI_BEHAVIOR
+#        ifdef OLD_NMI_BEHAVIOR
                 if (nmi_auto_clear) {
                     nmi_auto_clear = 0;
                     nmi            = 0;
                 }
-#    else
+#        else
                 nmi = 0;
-#    endif
+#        endif
             } else if (UNLIKELY((cpu_state.flags & I_FLAG) && pic.int_pending)) {
                 vector = picinterrupt();
                 if (vector != -1) {
-#    ifndef USE_NEW_DYNAREC
+#        ifndef USE_NEW_DYNAREC
                     oldcs = CS;
-#    endif
+#        endif
                     cpu_state.oldpc = cpu_state.pc;
                     x86_int(vector);
                 }
             }
+#    endif /* __aarch64__ || _M_ARM64 */
 
             cycdiff = oldcyc - cycles;
             delta   = tsc - oldtsc;
