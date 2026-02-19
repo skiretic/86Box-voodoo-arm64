@@ -41,6 +41,19 @@ A comprehensive guide for building, testing, and verifying the Voodoo ARM64 JIT 
 - At least 8GB RAM recommended
 - 2GB free disk space for VM and ROM files
 
+### Quick Start (Recommended)
+
+Instead of the manual steps below, you can use the all-in-one build script:
+
+```bash
+git clone https://github.com/yourusername/86Box-voodoo-arm64.git
+cd 86Box-voodoo-arm64
+./scripts/setup-and-build.sh deps      # Install Homebrew dependencies
+./scripts/setup-and-build.sh build     # Configure, build, and codesign
+```
+
+The signed `86Box.app` will be at `build/src/86Box.app`. If you prefer manual control, continue reading below.
+
 ---
 
 ## Building 86Box
