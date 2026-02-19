@@ -1174,6 +1174,12 @@ voodoo_card_init(void)
         char path[1280];
         snprintf(path, sizeof(path), "%svoodoo_jit.log", usr_path);
         voodoo->jit_debug_log = fopen(path, "w");
+#if defined(__aarch64__) || defined(_M_ARM64)
+        if (voodoo->jit_debug_log)
+            fprintf(voodoo->jit_debug_log,
+                    "VOODOO JIT: INIT render_threads=%d use_recompiler=%d jit_debug=%d\n",
+                    voodoo->render_threads, voodoo->use_recompiler, voodoo->jit_debug);
+#endif
     }
 #endif
     voodoo->type = device_get_config_int("type");
@@ -1340,6 +1346,12 @@ voodoo_2d3d_card_init(int type)
         char path[1280];
         snprintf(path, sizeof(path), "%svoodoo_jit.log", usr_path);
         voodoo->jit_debug_log = fopen(path, "w");
+#if defined(__aarch64__) || defined(_M_ARM64)
+        if (voodoo->jit_debug_log)
+            fprintf(voodoo->jit_debug_log,
+                    "VOODOO JIT: INIT render_threads=%d use_recompiler=%d jit_debug=%d\n",
+                    voodoo->render_threads, voodoo->use_recompiler, voodoo->jit_debug);
+#endif
     }
 #endif
     voodoo->type      = type;

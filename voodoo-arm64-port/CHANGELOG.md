@@ -4,6 +4,56 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## JIT Log Analyzer Script + INIT Logging (2026-02-19)
+
+### Added `scripts/analyze-jit-log.py` — automated JIT health analysis tool
+
+**Motivation:** Manually analyzing 1+ GB JIT debug logs (16M+ lines) is tedious and error-prone.
+The Pi 5 user's log required a custom agent run that took ~19 minutes. This script does the same
+analysis in a single streaming pass (~2-3 minutes for 16M lines).
+
+#### Script features:
+- Single-pass streaming analysis (handles multi-GB logs efficiently)
+- **Configuration**: Parses new `VOODOO JIT: INIT` line for render threads, recompiler state, debug level
+- **Compilation**: Block count, cache hits, even/odd balance, xdir coverage, recomp range
+- **Interpreter fallback detection**: Scans for `INTERPRETER FALLBACK` (use_recompiler=0 or NULL block) and `REJECT` (emit overflow) — patterns the previous manual analysis missed
+- **Error scanning**: Checks for crash indicators (SIGILL, SIGSEGV, SIGBUS, fault, trap, etc.)
+- **Execution stats**: Scanline counts, total pixels, pixel count distribution
+- **Pipeline coverage**: Texture fetch, color combine, alpha test/blend, fog, depth test, dither, FB write — decoded from mode register values
+- **Pixel output quality**: Unique RGB565 values, diversity check
+- **Iterator health**: Negative value counts (normal for signed Gouraud interpolation)
+- **Thread interleave detection**: Counts lines with multiple `VOODOO JIT` prefixes (cosmetic race)
+- **Summary table + verdict**: HEALTHY / FUNCTIONAL WITH INTERPRETER FALLBACKS / FUNCTIONAL WITH WARNINGS / COMPILING BUT NOT EXECUTING / JIT NOT ACTIVE
+
+#### Usage:
+```bash
+./scripts/analyze-jit-log.py <logfile>
+```
+
+### Added `VOODOO JIT: INIT` log line (ARM64 only)
+
+Added a single log line at the very start of JIT debug output:
+```
+VOODOO JIT: INIT render_threads=2 use_recompiler=1 jit_debug=1
+```
+
+- Guarded with `#if defined(__aarch64__) || defined(_M_ARM64)` — compiled out on x86-64
+- Added to both Voodoo 1/2 and Banshee/3 init paths in `vid_voodoo.c`
+- Script falls back to inferring thread count from `odd_even=` values for older logs
+
+#### Files created:
+- `scripts/analyze-jit-log.py` — JIT log health analyzer
+
+#### Files modified:
+- `src/video/vid_voodoo.c` — Added INIT log line in both init paths (lines ~1177, ~1349)
+
+#### Testing:
+- Verified against Pi 5 user log (1.1 GB, 16M lines): matches manual analysis results
+- Verified against local macOS log (172 MB, 2.6M lines): INIT line parsed correctly, all stages healthy
+- Backwards-compatible with logs missing INIT line (infers thread count from odd_even values)
+
+---
+
 ## Readability Review + Comment Pass (2026-02-18)
 
 ### Comprehensive comment additions for readability and graphics concept documentation
@@ -499,3 +549,4 @@ Audited all ~1450 comment lines in the ARM64 codegen header for accuracy.
 | Infra | JIT debug logging runtime toggle | Committed | -- |
 | Fix | Voodoo 2 non-perspective texture alignment bug | Uncommitted | -- |
 | Hardening | Emission bounds checks + branch patch validation (state-locality experiment rolled back) | Uncommitted | -- |
+| Tool | JIT log analyzer script + INIT log line | Uncommitted | -- |
