@@ -24,10 +24,11 @@ From the repo root, run:
 ./appimage/build.sh
 ```
 
-**First run** takes ~10-15 minutes:
-1. Builds the Docker image (downloads Debian Bullseye ARM64, installs all deps)
-2. Compiles 86Box inside the container
-3. Bundles everything into an AppImage with appimage-builder
+**First run** takes ~15-20 minutes:
+1. Builds the Docker image (downloads Debian Bullseye ARM64, installs build deps)
+2. Compiles OpenAL, rtmidi, FluidSynth, and SDL2 from source (minimal features)
+3. Compiles 86Box linked against those custom libraries
+4. Bundles everything into an AppImage with appimage-builder
 
 **Subsequent runs** are much faster:
 - Docker image is cached (skips step 1)
@@ -90,17 +91,28 @@ docker volume ls | grep 86box
 
 ## What's bundled
 
-The AppImage includes everything needed to run on any Linux ARM64 distro:
+The AppImage includes everything needed to run on any Linux ARM64 distro.
+Matches the official 86Box AppImage approach — four key libraries are compiled
+from source with minimal features to avoid transitive dependencies (libnsl,
+libjack, libpulse) that break on distros like Fedora.
 
+**Compiled from source** (matching official):
+- **OpenAL Soft 1.23.1** — sndio backend disabled
+- **rtmidi 4.0.0** — JACK API disabled
+- **FluidSynth 2.3.0** — all sound backends disabled
+- **SDL2 2.0.20** — audio/video off, joystick only (Qt handles display)
+
+**Bundled from Debian packages**:
 - **glibc 2.31** (Debian Bullseye) — wide distro compatibility
-- **Qt 5.15** with full Wayland + X11 support
-- **All Qt plugins** — wayland, xcb, eglfs, linuxfb, input devices
-- **Audio** — OpenAL, FluidSynth, ALSA, sndio
-- **MIDI** — rtmidi + mdsx.so synthesizer plugin
+- **Qt 5.15** — core, gui, widgets, Wayland plugin
+- **Audio** — libsndfile, libinstpatch (soundfont loading)
+- **MIDI** — mdsx.so synthesizer plugin (if built)
 - **Networking** — libslirp, libvdeplug (VDE)
 - **Serial** — libserialport
 - **Printing** — Ghostscript for PostScript printer emulation
-- **Crypto** — OpenSSL, GnuTLS, Kerberos
+
+**Not bundled** (provided by host OS):
+- Crypto/TLS, systemd, udev, ALSA — these must come from the host
 
 Compression: gzip (same as official 86Box releases).
 

@@ -20,19 +20,16 @@ RUN apt-get update && apt-get install -y \
     zsync \
     && rm -rf /var/lib/apt/lists/*
 
-# 86Box build dependencies (matching official)
+# 86Box build dependencies (libs we DON'T compile from source)
 RUN apt-get update && apt-get install -y \
     libfreetype-dev \
-    libsdl2-dev \
     libpng-dev \
     libc6-dev \
-    librtmidi-dev \
-    libopenal-dev \
     libslirp-dev \
-    libfluidsynth-dev \
     libvdeplug-dev \
     libserialport-dev \
     libevdev-dev \
+    libxi-dev \
     libxkbcommon-x11-dev \
     libsndfile1-dev \
     qtbase5-dev \
@@ -42,8 +39,21 @@ RUN apt-get update && apt-get install -y \
     qtwayland5 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install appimage-builder
-RUN pip3 install appimage-builder
+# Dev packages needed to compile OpenAL, SDL2, rtmidi, FluidSynth from source
+RUN apt-get update && apt-get install -y \
+    libasound2-dev \
+    libpipewire-0.3-dev \
+    libjack-jackd2-dev \
+    libsamplerate-dev \
+    libdrm-dev \
+    libudev-dev \
+    libdbus-1-dev \
+    libwayland-dev \
+    libinstpatch-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install appimage-builder (pinned to same commit as official 86Box)
+RUN pip3 install git+https://github.com/AppImageCrafters/appimage-builder.git@22fefa298f9cee922a651a6f65a46fe0ccbfa34e
 
 # Download appimagetool for aarch64
 RUN wget -q "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage" \
