@@ -296,6 +296,7 @@ Experiment with different thread counts for performance testing:
 ### Log Contents
 
 ```
+VOODOO JIT: INIT render_threads=2 use_recompiler=1 jit_debug=1
 VOODOO JIT: GENERATE #1 odd_even=0 block=0 code=0x123456 recomp=1
   fbzMode=0x00000000 fbzColorPath=0x00000000 alphaMode=0x00000000
   textureMode[0]=0x00000000 fogMode=0x00000000 xdir=1
@@ -303,9 +304,29 @@ VOODOO JIT: cache HIT #0 odd_even=0 block=0 code=0x123456
   fbzMode=0x00000000 fbzColorPath=0x00000000 alphaMode=0x00000000
 ```
 
+- **INIT**: Configuration at startup (render threads, recompiler state, debug level)
 - **GENERATE**: JIT compiled new code block
 - **cache HIT**: Reused existing compiled block
 - **recomp count**: Total JIT compilations (increases over time)
+
+### Analyzing JIT Logs
+
+Instead of reading the log manually, use the automated analyzer:
+
+```bash
+./scripts/analyze-jit-log.py <vm_directory>/voodoo_jit.log
+```
+
+The script performs a single streaming pass and reports:
+- Configuration (render threads, recompiler state)
+- Block compilation stats (count, cache hits, even/odd balance)
+- Interpreter fallback detection (emit overflow, recompiler disabled)
+- Error scanning (crash indicators, signal faults)
+- Pipeline stage coverage (texture, color, alpha, fog, depth, dither)
+- Pixel output quality (RGB565 diversity)
+- Summary table with a **HEALTHY** / **WARNINGS** / **NOT ACTIVE** verdict
+
+Works with logs of any size (tested up to 1.1 GB / 16M lines).
 
 ### Verify Mode (Level 2)
 
@@ -372,7 +393,8 @@ When enabled:
 4. **Logs**
    - Set **JIT Debug Logging = 1**
    - Reproduce the issue
-   - Attach `voodoo_jit.log`
+   - Run `./scripts/analyze-jit-log.py <vm_dir>/voodoo_jit.log` and include the output
+   - Attach `voodoo_jit.log` if requested
 
 ### Where to Report
 

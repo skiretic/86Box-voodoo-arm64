@@ -4,6 +4,14 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Testing Guide Update (2026-02-19)
+
+- Added analyzer script usage to Debug Logging section (`./scripts/analyze-jit-log.py`)
+- Added INIT line to log format example
+- Updated issue reporting workflow: run analyzer first, attach raw log only if requested
+
+---
+
 ## JIT Log Analyzer Script + INIT Logging (2026-02-19)
 
 ### Added `scripts/analyze-jit-log.py` — automated JIT health analysis tool
