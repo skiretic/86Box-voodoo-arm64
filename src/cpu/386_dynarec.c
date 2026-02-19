@@ -414,8 +414,17 @@ exec386_dynarec_dyn(void)
 
         /* Block must match current CS, PC, code segment size,
            and physical address. The physical address check will
-           also catch any page faults at this stage */
-        valid_block = (block->pc == cs + cpu_state.pc) && (block->_cs == cs) && (block->phys == phys_addr) && !((block->status ^ cpu_cur_status) & CPU_STATUS_FLAGS) && ((block->status & cpu_cur_status & CPU_STATUS_MASK) == (cpu_cur_status & CPU_STATUS_MASK));
+           also catch any page faults at this stage.
+           Branchless: OR all mismatch bits, then negate.
+           Eliminates 4-5 short-circuit branches. */
+        {
+            uint32_t pc_match     = block->pc ^ (cs + cpu_state.pc);
+            uint32_t cs_match     = block->_cs ^ cs;
+            uint32_t phys_match   = block->phys ^ phys_addr;
+            uint32_t status_match = (block->status ^ cpu_cur_status) & CPU_STATUS_FLAGS;
+            uint32_t mask_match   = (block->status & cpu_cur_status & CPU_STATUS_MASK) ^ (cpu_cur_status & CPU_STATUS_MASK);
+            valid_block = !(pc_match | cs_match | phys_match | status_match | mask_match);
+        }
         if (!valid_block) {
             uint64_t mask = (uint64_t) 1 << ((phys_addr >> PAGE_MASK_SHIFT) & PAGE_MASK_MASK);
 #    ifdef USE_NEW_DYNAREC
@@ -431,7 +440,12 @@ exec386_dynarec_dyn(void)
                 /* Walk page tree to see if we find the correct block */
                 codeblock_t *new_block = codeblock_tree_find(phys_addr, cs);
                 if (new_block) {
-                    valid_block = (new_block->pc == cs + cpu_state.pc) && (new_block->_cs == cs) && (new_block->phys == phys_addr) && !((new_block->status ^ cpu_cur_status) & CPU_STATUS_FLAGS) && ((new_block->status & cpu_cur_status & CPU_STATUS_MASK) == (cpu_cur_status & CPU_STATUS_MASK));
+                    uint32_t nb_pc     = new_block->pc ^ (cs + cpu_state.pc);
+                    uint32_t nb_cs     = new_block->_cs ^ cs;
+                    uint32_t nb_phys   = new_block->phys ^ phys_addr;
+                    uint32_t nb_status = (new_block->status ^ cpu_cur_status) & CPU_STATUS_FLAGS;
+                    uint32_t nb_mask   = (new_block->status & cpu_cur_status & CPU_STATUS_MASK) ^ (cpu_cur_status & CPU_STATUS_MASK);
+                    valid_block = !(nb_pc | nb_cs | nb_phys | nb_status | nb_mask);
                     if (valid_block) {
                         block = new_block;
 #    ifdef USE_NEW_DYNAREC
@@ -513,9 +527,9 @@ exec386_dynarec_dyn(void)
     }
 
 #    ifdef USE_NEW_DYNAREC
-    if (valid_block && (block->flags & CODEBLOCK_WAS_RECOMPILED))
+    if (LIKELY(valid_block && (block->flags & CODEBLOCK_WAS_RECOMPILED)))
 #    else
-    if (valid_block && block->was_recompiled)
+    if (LIKELY(valid_block && block->was_recompiled))
 #    endif
     {
         void (*code)(void) = (void *) &block->data[BLOCK_START];
@@ -760,13 +774,13 @@ exec386_dynarec(int32_t cycs)
     acycs = 0;
 #    endif
     cycles_main += cycs;
-    while (cycles_main > 0) {
+    while (LIKELY(cycles_main > 0)) {
         int32_t cycles_start;
 
         cycles += cyc_period;
         cycles_start = cycles;
 
-        while (cycles > 0) {
+        while (LIKELY(cycles > 0)) {
 #    ifndef USE_NEW_DYNAREC
             oldcs           = CS;
             cpu_state.oldpc = cpu_state.pc;
@@ -779,19 +793,28 @@ exec386_dynarec(int32_t cycs)
             cycles_old       = cycles;
             oldtsc           = tsc;
             tsc_old          = tsc;
-            if (cpu_force_interpreter || cpu_override_dynarec ||  (!CACHE_ON())) /*Interpret block*/
+#    if defined(USE_NEW_DYNAREC) && (defined(__GNUC__) || defined(__clang__))
+            /* Speculatively prefetch the hash table entry using the
+               virtual address.  This is a hint only -- a wrong guess
+               (e.g. due to virtual!=physical) wastes one cache line
+               at worst.  On cores with weak HW prefetchers (Cortex-
+               A53) this hides the latency of the subsequent
+               get_phys() + codeblock_hash[] lookup. */
+            __builtin_prefetch(&codeblock_hash[(cs + cpu_state.pc) & HASH_MASK], 0, 3);
+#    endif
+            if (UNLIKELY(cpu_force_interpreter || cpu_override_dynarec || !CACHE_ON())) /*Interpret block*/
             {
                 exec386_dynarec_int();
             } else {
                 exec386_dynarec_dyn();
             }
 
-            if (cpu_init) {
+            if (UNLIKELY(cpu_init)) {
                 cpu_init = 0;
                 resetx86();
             }
 
-            if (cpu_state.abrt) {
+            if (UNLIKELY(cpu_state.abrt)) {
                 flags_rebuild();
                 tempi          = cpu_state.abrt & ABRT_MASK;
                 cpu_state.abrt = 0;
@@ -814,7 +837,7 @@ exec386_dynarec(int32_t cycs)
                 }
             }
 
-            if (new_ne) {
+            if (UNLIKELY(new_ne)) {
 #    ifndef USE_NEW_DYNAREC
                 oldcs = CS;
 #    endif
@@ -823,9 +846,9 @@ exec386_dynarec(int32_t cycs)
                 x86_int(16);
             }
 
-            if (smi_line)
+            if (UNLIKELY(smi_line))
                 enter_smm_check(0);
-            else if (nmi && nmi_enable && nmi_mask) {
+            else if (UNLIKELY(nmi && nmi_enable && nmi_mask)) {
 #    ifndef USE_NEW_DYNAREC
                 oldcs = CS;
 #    endif
@@ -840,7 +863,7 @@ exec386_dynarec(int32_t cycs)
 #    else
                 nmi = 0;
 #    endif
-            } else if ((cpu_state.flags & I_FLAG) && pic.int_pending) {
+            } else if (UNLIKELY((cpu_state.flags & I_FLAG) && pic.int_pending)) {
                 vector = picinterrupt();
                 if (vector != -1) {
 #    ifndef USE_NEW_DYNAREC

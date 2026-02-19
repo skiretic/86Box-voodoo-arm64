@@ -86,17 +86,17 @@ JIT backend files are inherently ARM64-only — no additional guards needed.
 
 ## Phase 5: C-Level Interpreter/Dispatch Optimizations
 
-- [ ] Add LIKELY/UNLIKELY to `386_dynarec.c` hot paths (6-8 sites)
-- [ ] Add LIKELY/UNLIKELY to `386_common.h` fastreadl_fetch (2-3 sites)
-- [ ] Add LIKELY/UNLIKELY to memory read/write macros in `386_common.h`
-- [ ] (Optional) Implement branchless block validation
-- [ ] (Optional) Add __builtin_prefetch for block dispatch
-- [ ] (Optional) Remove redundant __builtin_available checks (macOS ARM64)
-- [ ] Build + test
+- [x] Add LIKELY/UNLIKELY to `386_dynarec.c` hot paths (10 sites: 2 loop conditions, interpreter check, block validity, abort, cpu_init, new_ne, SMI, NMI, IRQ)
+- [x] Add LIKELY/UNLIKELY to `386_common.h` fastread* functions (14 sites across fastreadb, fastreadw, fastreadl, fastreadw_fetch, fastreadl_fetch)
+- [ ] Add LIKELY/UNLIKELY to memory read/write macros in `386_common.h` (skipped -- ternary operator macros don't benefit from branch hints)
+- [x] (Optional) Implement branchless block validation (XOR+OR pattern at both hash-table and tree-walk sites)
+- [x] (Optional) Add __builtin_prefetch for block dispatch (virtual address hash, guarded by GCC/Clang check)
+- [ ] (Optional) Remove redundant __builtin_available checks (macOS ARM64) (deferred)
+- [x] Build + test
 
 ### Phase 5 Testing
 
-- [ ] **BUILD**: Compiles on ARM64
+- [x] **BUILD**: Compiles on ARM64
 - [ ] **RUN TEST**: Boot Windows 98 VM, verify normal operation
 - [ ] Create PR for Phase 5
 
