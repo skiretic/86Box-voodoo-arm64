@@ -549,12 +549,6 @@ path_get_dirname(char *dest, const char *path)
     *dest = '\0';
 }
 
-void
-ui_sb_set_text_w(UNUSED(wchar_t *wstr))
-{
-    /* No-op. */
-}
-
 int
 stricmp(const char *s1, const char *s2)
 {
