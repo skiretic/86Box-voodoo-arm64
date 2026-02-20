@@ -29,7 +29,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <wchar.h>
 #include <stdatomic.h>
 #include <unistd.h>
 #include <math.h>
@@ -1225,8 +1224,8 @@ usage:
     else
         strcpy(temp, "unknown");
 
-    pclog("#\n# %ls v%ls logfile, created %s\n#\n",
-          EMU_NAME_W, EMU_VERSION_FULL_W, temp);
+    pclog("#\n# %s v%s logfile, created %s\n#\n",
+          EMU_NAME, EMU_VERSION_FULL, temp);
 
     if (portable_mode) {
         pclog("# Portable mode enabled.\n");
