@@ -670,23 +670,19 @@ do_stop(void)
 }
 
 int
-ui_msgbox(int flags, void *message)
+ui_msgbox(int flags, const char *message)
 {
     return ui_msgbox_header(flags, NULL, message);
 }
 
 int
-ui_msgbox_header(int flags, void *header, void *message)
+ui_msgbox_header(int flags, const char *header, const char *message)
 {
     SDL_MessageBoxData       msgdata;
     SDL_MessageBoxButtonData msgbtn;
 
-    if (!header) {
-        if (flags & MBX_ANSI)
-            header = (void *) EMU_NAME;
-        else
-            header = (void *) EMU_NAME_W;
-    }
+    if (!header)
+        header = EMU_NAME;
 
     msgbtn.buttonid = 1;
     msgbtn.text     = "OK";
@@ -695,32 +691,19 @@ ui_msgbox_header(int flags, void *header, void *message)
     msgdata.numbuttons = 1;
     msgdata.buttons    = &msgbtn;
     int msgflags       = 0;
-    if (msgflags & MBX_FATAL)
+    if (flags & MBX_FATAL)
         msgflags |= SDL_MESSAGEBOX_ERROR;
-    else if (msgflags & MBX_ERROR || msgflags & MBX_WARNING)
+    else if (flags & MBX_ERROR || flags & MBX_WARNING)
         msgflags |= SDL_MESSAGEBOX_WARNING;
     else
         msgflags |= SDL_MESSAGEBOX_INFORMATION;
-    msgdata.flags = msgflags;
-    if (flags & MBX_ANSI) {
-        int button      = 0;
-        msgdata.title   = header;
-        msgdata.message = message;
-        SDL_ShowMessageBox(&msgdata, &button);
-        return button;
-    } else {
-        int   button    = 0;
-        char *res       = SDL_iconv_string("UTF-8", sizeof(wchar_t) == 2 ? "UTF-16LE" : "UTF-32LE", (char *) message, wcslen(message) * sizeof(wchar_t) + sizeof(wchar_t));
-        char *res2      = SDL_iconv_string("UTF-8", sizeof(wchar_t) == 2 ? "UTF-16LE" : "UTF-32LE", (char *) header, wcslen(header) * sizeof(wchar_t) + sizeof(wchar_t));
-        msgdata.message = res;
-        msgdata.title   = res2;
-        SDL_ShowMessageBox(&msgdata, &button);
-        free(res);
-        free(res2);
-        return button;
-    }
+    msgdata.flags   = msgflags;
 
-    return 0;
+    int button      = 0;
+    msgdata.title   = header;
+    msgdata.message = message;
+    SDL_ShowMessageBox(&msgdata, &button);
+    return button;
 }
 
 void
@@ -1341,7 +1324,7 @@ main(int argc, char **argv)
     if (ret == 0)
         return 0;
     if (!pc_init_roms()) {
-        ui_msgbox_header(MBX_FATAL, L"No ROMs found.", EMU_NAME_W L" could not find any usable ROM images.\n\nPlease download a ROM set and extract it into the \"roms\" directory.");
+        ui_msgbox_header(MBX_FATAL, "No ROMs found.", EMU_NAME " could not find any usable ROM images.\n\nPlease download a ROM set and extract it into the \"roms\" directory.");
         SDL_Quit();
         return 6;
     }

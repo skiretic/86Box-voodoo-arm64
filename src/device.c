@@ -168,8 +168,8 @@ device_add_common(const device_t *dev, void *p, void *params, int inst)
         snprintf(temp, sizeof(temp),
                  plat_get_string(STRING_HW_NOT_AVAILABLE_DEVICE),
                  dev->name);
-        ui_msgbox_header(MBX_INFO | MBX_ANSI,
-                         (void *) plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE),
+        ui_msgbox_header(MBX_INFO,
+                         plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE),
                          temp);
         return ((void *) dev->name);
     }

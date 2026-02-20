@@ -151,10 +151,10 @@ plat_mouse_capture(int on)
 }
 
 int
-ui_msgbox_header(int flags, void *header, void *message)
+ui_msgbox_header(int flags, const char *header, const char *message)
 {
-    const auto hdr = (flags & MBX_ANSI) ? QString(static_cast<char *>(header)) : QString::fromWCharArray(static_cast<const wchar_t *>(header));
-    const auto msg = (flags & MBX_ANSI) ? QString(static_cast<char *>(message)) : QString::fromWCharArray(static_cast<const wchar_t *>(message));
+    const auto hdr = QString::fromUtf8(header);
+    const auto msg = QString::fromUtf8(message);
 
     // any error in early init
     if (main_window == nullptr) {
@@ -193,7 +193,7 @@ ui_deinit_monitor(int monitor_index)
 }
 
 int
-ui_msgbox(int flags, void *message)
+ui_msgbox(int flags, const char *message)
 {
     return ui_msgbox_header(flags, nullptr, message);
 }

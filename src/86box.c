@@ -513,7 +513,7 @@ fatal(const char *fmt, ...)
 
     do_pause(2);
 
-    ui_msgbox(MBX_ERROR | MBX_FATAL | MBX_ANSI, temp);
+    ui_msgbox(MBX_ERROR | MBX_FATAL, temp);
 
     /* Cleanly terminate all of the emulator's components so as
        to avoid things like threads getting stuck. */
@@ -557,7 +557,7 @@ fatal_ex(const char *fmt, va_list ap)
 
     do_pause(2);
 
-    ui_msgbox(MBX_ERROR | MBX_FATAL | MBX_ANSI, temp);
+    ui_msgbox(MBX_ERROR | MBX_FATAL, temp);
 
     /* Cleanly terminate all of the emulator's components so as
        to avoid things like threads getting stuck. */
@@ -596,7 +596,7 @@ warning(const char *fmt, ...)
 
     do_pause(2);
 
-    ui_msgbox(MBX_ERROR | MBX_ANSI, temp);
+    ui_msgbox(MBX_ERROR, temp);
 
     fflush(stdlog);
 
@@ -628,7 +628,7 @@ warning_ex(const char *fmt, va_list ap)
 
     do_pause(2);
 
-    ui_msgbox(MBX_ERROR | MBX_ANSI, temp);
+    ui_msgbox(MBX_ERROR, temp);
 
     fflush(stdlog);
 
@@ -738,7 +738,7 @@ pc_show_usage(void)
             "\nA config file can be specified. If none is, the default file will be used.\n");
 
 #ifdef _WIN32
-    ui_msgbox(MBX_ANSI | MBX_INFO, p);
+    ui_msgbox(MBX_INFO, p);
 #else
     always_log("%s", p);
 #endif
@@ -1246,7 +1246,7 @@ usage:
         start_vmm = 0;
 #ifdef __APPLE__
         if (!strncmp(exe_path, "/private/var/folders/", 21)) {
-            ui_msgbox_header(MBX_FATAL, L"App Translocation", EMU_NAME_W L" cannot determine the emulated machine's location due to a macOS security feature. Please move the " EMU_NAME_W L" app to another folder (not /Applications), or make a copy of it and open that copy instead.");
+            ui_msgbox_header(MBX_FATAL, "App Translocation", EMU_NAME " cannot determine the emulated machine's location due to a macOS security feature. Please move the " EMU_NAME " app to another folder (not /Applications), or make a copy of it and open that copy instead.");
             return 0;
         }
 #endif
@@ -1415,7 +1415,7 @@ pc_init_modules(void)
         machine = -1;
         while (machine_get_internal_name_ex(c) != NULL) {
             if (machine_available(c)) {
-                ui_msgbox_header(MBX_INFO | MBX_ANSI, (void *) plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
+                ui_msgbox_header(MBX_INFO, plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
                 machine = c;
                 config_save();
                 break;
@@ -1437,7 +1437,7 @@ pc_init_modules(void)
         while (video_get_internal_name(c) != NULL) {
             gfxcard[0] = -1;
             if (video_card_available(c)) {
-                ui_msgbox_header(MBX_INFO | MBX_ANSI, (void *) plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
+                ui_msgbox_header(MBX_INFO, plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
                 gfxcard[0] = c;
                 config_save();
                 break;
@@ -1456,7 +1456,7 @@ pc_init_modules(void)
             char tempc[512] = { 0 };
             device_get_name(video_card_getdevice(gfxcard[i]), 0, tempc);
             snprintf(temp, sizeof(temp), plat_get_string(STRING_HW_NOT_AVAILABLE_VIDEO2), tempc);
-            ui_msgbox_header(MBX_INFO | MBX_ANSI, (void *) plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
+            ui_msgbox_header(MBX_INFO, plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
             gfxcard[i] = 0;
         }
     }

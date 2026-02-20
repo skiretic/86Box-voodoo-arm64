@@ -240,7 +240,7 @@ ddc_init_with_custom_edid(char *edid_path, void *i2c)
         char errmsg[2048] = { 0 };
 
         snprintf(errmsg, sizeof(errmsg), plat_get_string(STRING_EDID_TOO_LARGE), monitor_edid_path);
-        ui_msgbox_header(MBX_ERROR | MBX_ANSI, (void *) "EDID", errmsg);
+        ui_msgbox_header(MBX_ERROR, "EDID", errmsg);
 
         return NULL;
     } else if (size == 0) {
