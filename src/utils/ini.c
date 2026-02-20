@@ -29,8 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <wchar.h>
-#include <wctype.h>
+
 #define HAVE_STDARG_H
 #include <86box/86box.h>
 #include <86box/ini.h>
@@ -53,9 +52,8 @@ typedef struct section_t {
 typedef struct entry_t {
     list_t list;
 
-    char    name[128];
-    char    data[512];
-    wchar_t wdata[512];
+    char name[128];
+    char data[512];
 } entry_t;
 
 #define list_add(new, head)        \
@@ -337,30 +335,6 @@ ini_detect_bom(const char *fn)
     return 0;
 }
 
-#ifdef __HAIKU__
-/* Local version of fgetws to avoid a crash */
-static wchar_t *
-ini_fgetws(wchar_t *str, int count, FILE *stream)
-{
-    int i = 0;
-    if (feof(stream))
-        return NULL;
-    for (i = 0; i < count; i++) {
-        wint_t curChar = fgetwc(stream);
-        if (curChar == WEOF) {
-            if (i + 1 < count)
-                str[i + 1] = 0;
-            return feof(stream) ? str : NULL;
-        }
-        str[i] = curChar;
-        if (curChar == '\n')
-            break;
-    }
-    if (i + 1 < count)
-        str[i + 1] = 0;
-    return str;
-}
-#endif
 
 /* Read and parse the configuration file into memory, with open type selection. */
 ini_t
@@ -368,7 +342,7 @@ ini_read_ex(const char *fn, int is_rom)
 {
     char       sname[128];
     char       ename[128];
-    wchar_t    buff[1024];
+    char       buff[1024];
     section_t *sec;
     section_t *ns;
     entry_t   *ne;
@@ -405,44 +379,40 @@ ini_read_ex(const char *fn, int is_rom)
 
     while (1) {
         memset(buff, 0x00, sizeof(buff));
-#ifdef __HAIKU__
-        ini_fgetws(buff, sizeof_w(buff), fp);
-#else
-        (void) !fgetws(buff, sizeof_w(buff), fp);
-#endif
+        (void) !fgets(buff, sizeof(buff), fp);
         if (feof(fp))
             break;
 
         /* Make sure there are no stray newlines or hard-returns in there. */
-        if (wcslen(buff) > 0)
-            if (buff[wcslen(buff) - 1] == L'\n')
-                buff[wcslen(buff) - 1] = L'\0';
-        if (wcslen(buff) > 0)
-            if (buff[wcslen(buff) - 1] == L'\r')
-                buff[wcslen(buff) - 1] = L'\0';
+        if (strlen(buff) > 0)
+            if (buff[strlen(buff) - 1] == '\n')
+                buff[strlen(buff) - 1] = '\0';
+        if (strlen(buff) > 0)
+            if (buff[strlen(buff) - 1] == '\r')
+                buff[strlen(buff) - 1] = '\0';
 
         /* Skip any leading whitespace. */
         c = 0;
-        while ((buff[c] == L' ') || (buff[c] == L'\t'))
+        while ((buff[c] == ' ') || (buff[c] == '\t'))
             c++;
 
         /* Skip empty lines. */
-        if (buff[c] == L'\0')
+        if (buff[c] == '\0')
             continue;
 
         /* Skip lines that (only) have a comment. */
-        if ((buff[c] == L'#') || (buff[c] == L';'))
+        if ((buff[c] == '#') || (buff[c] == ';'))
             continue;
 
-        if (buff[c] == L'[') { /*Section*/
+        if (buff[c] == '[') { /*Section*/
             c++;
             d = 0;
-            while (buff[c] != L']' && buff[c])
-                (void) !wctomb(&(sname[d++]), buff[c++]);
-            sname[d] = L'\0';
+            while (buff[c] != ']' && buff[c])
+                sname[d++] = buff[c++];
+            sname[d] = '\0';
 
             /* Is the section name properly terminated? */
-            if (buff[c] != L']')
+            if (buff[c] != ']')
                 continue;
 
             /* Create a new section and insert it. */
@@ -458,20 +428,20 @@ ini_read_ex(const char *fn, int is_rom)
 
         /* Get the variable name. */
         d = 0;
-        while ((buff[c] != L'=') && (buff[c] != L' ') && buff[c])
-            (void) !wctomb(&(ename[d++]), buff[c++]);
-        ename[d] = L'\0';
+        while ((buff[c] != '=') && (buff[c] != ' ') && buff[c])
+            ename[d++] = buff[c++];
+        ename[d] = '\0';
 
         /* Skip incomplete lines. */
-        if (buff[c] == L'\0')
+        if (buff[c] == '\0')
             continue;
 
         /* Look for =, skip whitespace. */
-        while ((buff[c] == L'=' || buff[c] == L' ') && buff[c])
+        while ((buff[c] == '=' || buff[c] == ' ') && buff[c])
             c++;
 
         /* Skip incomplete lines. */
-        if (buff[c] == L'\0')
+        if (buff[c] == '\0')
             continue;
 
         /* This is where the value part starts. */
@@ -481,13 +451,7 @@ ini_read_ex(const char *fn, int is_rom)
         ne = calloc(1, sizeof(entry_t));
         memset(ne, 0x00, sizeof(entry_t));
         memcpy(ne->name, ename, 128);
-        wcsncpy(ne->wdata, &buff[d], sizeof_w(ne->wdata) - 1);
-        ne->wdata[sizeof_w(ne->wdata) - 1] = L'\0';
-#ifdef _WIN32 /* Make sure the string is converted to UTF-8 rather than a legacy codepage */
-        c16stombs(ne->data, ne->wdata, sizeof(ne->data));
-#else
-        wcstombs(ne->data, ne->wdata, sizeof(ne->data));
-#endif
+        strncpy(ne->data, &buff[d], sizeof(ne->data) - 1);
         ne->data[sizeof(ne->data) - 1] = '\0';
 
         /* .. and insert it. */
@@ -510,7 +474,6 @@ ini_read(const char *fn)
 void
 ini_write_ex(ini_t ini, const char *fn, int is_rom)
 {
-    wchar_t    wtemp[512];
     list_t    *list = (list_t *) ini;
     section_t *sec;
     FILE      *fp;
@@ -541,22 +504,20 @@ ini_write_ex(ini_t ini, const char *fn, int is_rom)
         entry_t *ent;
 
         if (sec->name[0]) {
-            mbstowcs(wtemp, sec->name, strlen(sec->name) + 1);
             if (fl)
-                fwprintf(fp, L"\n[%ls]\n", wtemp);
+                fprintf(fp, "\n[%s]\n", sec->name);
             else
-                fwprintf(fp, L"[%ls]\n", wtemp);
+                fprintf(fp, "[%s]\n", sec->name);
             fl++;
         }
 
         ent = (entry_t *) sec->entry_head.next;
         while (ent != NULL) {
             if (ent->name[0] != '\0') {
-                mbstowcs(wtemp, ent->name, 128);
-                if (ent->wdata[0] == L'\0')
-                    fwprintf(fp, L"%ls = \n", wtemp);
+                if (ent->data[0] == '\0')
+                    fprintf(fp, "%s = \n", ent->name);
                 else
-                    fwprintf(fp, L"%ls = %ls\n", wtemp, ent->wdata);
+                    fprintf(fp, "%s = %s\n", ent->name, ent->data);
                 fl++;
             }
 
@@ -574,54 +535,6 @@ void
 ini_write(ini_t ini, const char *fn)
 {
     ini_write_ex(ini, fn, 0);
-}
-
-/* Wide-character version of "trim" */
-wchar_t *
-trim_w(wchar_t *str)
-{
-    size_t  len     = 0;
-    wchar_t *frontp = str;
-    wchar_t *endp   = NULL;
-
-    if (str == NULL) {
-        return NULL;
-    }
-    if (str[0] == L'\0') {
-        return str;
-    }
-
-    len  = wcslen(str);
-    endp = str + len;
-
-    /* Move the front and back pointers to address the first non-whitespace
-     * characters from each end.
-     */
-    while (iswspace((wint_t) *frontp)) {
-        ++frontp;
-    }
-    if (endp != frontp) {
-        while (iswspace((wint_t) *(--endp)) && endp != frontp) { }
-    }
-
-    if (frontp != str && endp == frontp)
-        *str = L'\0';
-    else if ((str + len - 1) != endp)
-        *(endp + 1) = L'\0';
-
-    /* Shift the string so that it starts at str so that if it's dynamically
-     * allocated, we can still free it on the returned pointer.  Note the reuse
-     * of endp to mean the front of the string buffer now.
-     */
-    endp = str;
-    if (frontp != str) {
-        while (*frontp) {
-            *endp++ = *frontp++;
-        }
-        *endp = L'\0';
-    }
-
-    return str;
 }
 
 extern char* trim(char* str);
@@ -642,14 +555,7 @@ ini_strip_quotes(ini_t ini)
             if (ent->name[0] != '\0') {
                 int trailing_hash = strcspn(ent->data, "#");
                 int trailing_quote;
-                ent->wdata[trailing_hash] = 0;
                 ent->data[trailing_hash] = 0;
-                if (ent->wdata[0] == L'\"') {
-                    memmove(ent->wdata, &ent->wdata[1], sizeof(ent->wdata) - sizeof(wchar_t));
-                }
-                if (ent->wdata[wcslen(ent->wdata) - 1] == L'\"') {
-                    ent->wdata[wcslen(ent->wdata) - 1] = 0;
-                }
 
                 if (ent->data[0] == '\"') {
                     memmove(ent->data, &ent->data[1], sizeof(ent->data) - sizeof(char));
@@ -659,10 +565,8 @@ ini_strip_quotes(ini_t ini)
                 }
 
                 trailing_quote = strcspn(ent->data, "\"");
-                ent->wdata[trailing_quote] = 0;
                 ent->data[trailing_quote] = 0;
-                
-                trim_w(ent->wdata);
+
                 trim(ent->data);
             }
 
@@ -803,7 +707,6 @@ ini_section_get_double(ini_section_t self, const char *name, double def)
         for (i = 0; i < strlen(entry->data); i++) {
             if (entry->data[i] == ',') {
                 entry->data[i] = '.';
-                entry->wdata[i] = L'.';
             }
         }
         (void)sscanf(entry->data, "%lg", &value);
@@ -906,22 +809,6 @@ ini_section_get_string(ini_section_t self, const char *name, char *def)
     return (entry->data);
 }
 
-wchar_t *
-ini_section_get_wstring(ini_section_t self, const char *name, wchar_t *def)
-{
-    section_t *section = (section_t *) self;
-    entry_t   *entry;
-
-    if (section == NULL)
-        return def;
-
-    entry = find_entry(section, name);
-    if (entry == NULL)
-        return def;
-
-    return (entry->wdata);
-}
-
 void
 ini_section_set_int(ini_section_t self, const char *name, int val)
 {
@@ -936,7 +823,6 @@ ini_section_set_int(ini_section_t self, const char *name, int val)
         ent = create_entry(section, name);
 
     sprintf(ent->data, "%i", val);
-    mbstowcs(ent->wdata, ent->data, 512);
 }
 
 void
@@ -953,7 +839,6 @@ ini_section_set_uint(ini_section_t self, const char *name, uint32_t val)
         ent = create_entry(section, name);
 
     sprintf(ent->data, "%i", val);
-    mbstowcs(ent->wdata, ent->data, 512);
 }
 
 #if 0
@@ -971,7 +856,6 @@ ini_section_set_float(ini_section_t self, const char *name, float val)
         ent = create_entry(section, name);
 
     sprintf(ent->data, "%g", val);
-    mbstowcs(ent->wdata, ent->data, 512);
 }
 #endif
 
@@ -989,7 +873,6 @@ ini_section_set_double(ini_section_t self, const char *name, double val)
         ent = create_entry(section, name);
 
     sprintf(ent->data, "%lg", val);
-    mbstowcs(ent->wdata, ent->data, 512);
 }
 
 void
@@ -1006,7 +889,6 @@ ini_section_set_hex12(ini_section_t self, const char *name, int val)
         ent = create_entry(section, name);
 
     sprintf(ent->data, "%03X", val);
-    mbstowcs(ent->wdata, ent->data, sizeof_w(ent->wdata));
 }
 
 void
@@ -1023,7 +905,6 @@ ini_section_set_hex16(ini_section_t self, const char *name, int val)
         ent = create_entry(section, name);
 
     sprintf(ent->data, "%04X", val);
-    mbstowcs(ent->wdata, ent->data, sizeof_w(ent->wdata));
 }
 
 void
@@ -1040,7 +921,6 @@ ini_section_set_hex20(ini_section_t self, const char *name, int val)
         ent = create_entry(section, name);
 
     sprintf(ent->data, "%05X", val);
-    mbstowcs(ent->wdata, ent->data, sizeof_w(ent->wdata));
 }
 
 void
@@ -1058,7 +938,6 @@ ini_section_set_mac(ini_section_t self, const char *name, int val)
 
     sprintf(ent->data, "%02x:%02x:%02x",
             (val >> 16) & 0xff, (val >> 8) & 0xff, val & 0xff);
-    mbstowcs(ent->wdata, ent->data, 512);
 }
 
 void
@@ -1078,30 +957,4 @@ ini_section_set_string(ini_section_t self, const char *name, const char *val)
         memcpy(ent->data, val, strlen(val) + 1);
     else
         memcpy(ent->data, val, sizeof(ent->data));
-#ifdef _WIN32 /* Make sure the string is converted from UTF-8 rather than a legacy codepage */
-    mbstoc16s(ent->wdata, ent->data, sizeof_w(ent->wdata));
-#else
-    mbstowcs(ent->wdata, ent->data, sizeof_w(ent->wdata));
-#endif
-}
-
-void
-ini_section_set_wstring(ini_section_t self, const char *name, wchar_t *val)
-{
-    section_t *section = (section_t *) self;
-    entry_t   *ent;
-
-    if (section == NULL)
-        return;
-
-    ent = find_entry(section, name);
-    if (ent == NULL)
-        ent = create_entry(section, name);
-
-    memcpy(ent->wdata, val, sizeof_w(ent->wdata));
-#ifdef _WIN32 /* Make sure the string is converted to UTF-8 rather than a legacy codepage */
-    c16stombs(ent->data, ent->wdata, sizeof(ent->data));
-#else
-    wcstombs(ent->data, ent->wdata, sizeof(ent->data));
-#endif
 }

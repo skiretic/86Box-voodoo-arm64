@@ -156,7 +156,6 @@ extern void *config_get_ini(void);
 #define config_get_hex20(head, name, def)   ini_get_hex20(config_get_ini(), head, name, def)
 #define config_get_mac(head, name, def)     ini_get_mac(config_get_ini(), head, name, def)
 #define config_get_string(head, name, def)  ini_get_string(config_get_ini(), head, name, def)
-#define config_get_wstring(head, name, def) ini_get_wstring(config_get_ini(), head, name, def)
 
 #define config_set_int(head, name, val)     ini_set_int(config_get_ini(), head, name, val)
 #define config_set_double(head, name, val)  ini_set_double(config_get_ini(), head, name, val)
@@ -164,7 +163,6 @@ extern void *config_get_ini(void);
 #define config_set_hex20(head, name, val)   ini_set_hex20(config_get_ini(), head, name, val)
 #define config_set_mac(head, name, val)     ini_set_mac(config_get_ini(), head, name, val)
 #define config_set_string(head, name, val)  ini_set_string(config_get_ini(), head, name, val)
-#define config_set_wstring(head, name, val) ini_set_wstring(config_get_ini(), head, name, val)
 
 #define config_find_section(name)           ini_find_section(config_get_ini(), name)
 #define config_rename_section               ini_rename_section

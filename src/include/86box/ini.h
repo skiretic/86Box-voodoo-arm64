@@ -48,7 +48,6 @@ extern int      ini_section_get_hex16(ini_section_t section, const char *name, i
 extern int      ini_section_get_hex20(ini_section_t section, const char *name, int def);
 extern int      ini_section_get_mac(ini_section_t section, const char *name, int def);
 extern char    *ini_section_get_string(ini_section_t section, const char *name, char *def);
-extern wchar_t *ini_section_get_wstring(ini_section_t section, const char *name, wchar_t *def);
 extern void     ini_section_set_int(ini_section_t section, const char *name, int val);
 extern void     ini_section_set_uint(ini_section_t section, const char *name, uint32_t val);
 #if 0
@@ -60,7 +59,6 @@ extern void     ini_section_set_hex16(ini_section_t section, const char *name, i
 extern void     ini_section_set_hex20(ini_section_t section, const char *name, int val);
 extern void     ini_section_set_mac(ini_section_t section, const char *name, int val);
 extern void     ini_section_set_string(ini_section_t section, const char *name, const char *val);
-extern void     ini_section_set_wstring(ini_section_t section, const char *name, wchar_t *val);
 extern int      ini_has_entry(ini_section_t self, const char *name);
 
 #define ini_delete_var(ini, head, name)       ini_section_delete_var(ini_find_section(ini, head), name)
@@ -76,7 +74,6 @@ extern int      ini_has_entry(ini_section_t self, const char *name);
 #define ini_get_hex20(ini, head, name, def)   ini_section_get_hex20(ini_find_section(ini, head), name, def)
 #define ini_get_mac(ini, head, name, def)     ini_section_get_mac(ini_find_section(ini, head), name, def)
 #define ini_get_string(ini, head, name, def)  ini_section_get_string(ini_find_section(ini, head), name, def)
-#define ini_get_wstring(ini, head, name, def) ini_section_get_wstring(ini_find_section(ini, head), name, def)
 
 #define ini_set_int(ini, head, name, val)     ini_section_set_int(ini_find_or_create_section(ini, head), name, val)
 #define ini_set_uint(ini, head, name, val)    ini_section_set_uint(ini_find_or_create_section(ini, head), name, val)
@@ -89,7 +86,6 @@ extern int      ini_has_entry(ini_section_t self, const char *name);
 #define ini_set_hex20(ini, head, name, val)   ini_section_set_hex20(ini_find_or_create_section(ini, head), name, val)
 #define ini_set_mac(ini, head, name, val)     ini_section_set_mac(ini_find_or_create_section(ini, head), name, val)
 #define ini_set_string(ini, head, name, val)  ini_section_set_string(ini_find_or_create_section(ini, head), name, val)
-#define ini_set_wstring(ini, head, name, val) ini_section_set_wstring(ini_find_or_create_section(ini, head), name, val)
 
 extern ini_section_t ini_find_section(ini_t ini, const char *name);
 extern ini_section_t ini_find_or_create_section(ini_t ini, const char *name);
