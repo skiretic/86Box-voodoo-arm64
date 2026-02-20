@@ -44,8 +44,7 @@ extern SDL_mutex          *sdl_mutex;
 extern void unix_executeLine(char *line);
 
 // interface to the currently set window title, this can't be seen normally in a fullscreen setup
-extern wchar_t sdl_win_title[512];
-char sdl_win_title_mb[512] = "";
+extern char sdl_win_title[512];
 
 static SDL_Texture *font_texture = NULL;
 
@@ -178,8 +177,7 @@ void draw_menu(SDL_Renderer *renderer, int selected)
 
     draw_text(renderer, "MAIN MENU", x0 + 20, y0 + 5, (SDL_Color){255,255,255,255});
 
-    wcstombs(sdl_win_title_mb, sdl_win_title, 256);
-    draw_text(renderer, sdl_win_title_mb, x0 + 120, y0 + 5, (SDL_Color){255,255,255,255});
+    draw_text(renderer, sdl_win_title, x0 + 120, y0 + 5, (SDL_Color){255,255,255,255});
 
     for (int i = 0; i < MENU_ITEMS; i++)
     {

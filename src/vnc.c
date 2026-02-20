@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <wchar.h>
 #include <rfb/rfb.h>
 #define HAVE_STDARG_H
 #include <86box/86box.h>
@@ -304,7 +303,7 @@ vnc_pause(void)
 }
 
 void
-vnc_take_screenshot(UNUSED(wchar_t *fn))
+vnc_take_screenshot(UNUSED(const char *fn))
 {
     vnc_log("VNC: take_screenshot\n");
 }

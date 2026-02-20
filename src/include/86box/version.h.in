@@ -15,15 +15,10 @@
 #ifndef EMU_VERSION_H
 #define EMU_VERSION_H
 
-#define _LSTR(s) L ## s
-#define LSTR(s) _LSTR(s)
-
 /* Version info. */
 #define EMU_NAME    "@CMAKE_PROJECT_NAME@"
-#define EMU_NAME_W  LSTR(EMU_NAME)
 
 #define EMU_VERSION       "@CMAKE_PROJECT_VERSION@"
-#define EMU_VERSION_W     LSTR(EMU_VERSION)
 #define EMU_VERSION_EX    "3.50" /* frozen due to IDE re-detection behavior on Windows */
 #define EMU_VERSION_MAJ   @CMAKE_PROJECT_VERSION_MAJOR@
 #define EMU_VERSION_MIN   @CMAKE_PROJECT_VERSION_MINOR@
@@ -34,12 +29,9 @@
 #cmakedefine EMU_GIT_HASH  "@EMU_GIT_HASH@"
 
 #ifdef EMU_BUILD
-# define EMU_BUILD_W        LSTR(EMU_BUILD)
 # define EMU_VERSION_FULL   EMU_VERSION " [" EMU_BUILD "]"
-# define EMU_VERSION_FULL_W EMU_VERSION_W L" [" EMU_BUILD_W L"]"
 #else
 # define EMU_VERSION_FULL   EMU_VERSION
-# define EMU_VERSION_FULL_W EMU_VERSION_W
 #endif
 
 #define COPYRIGHT_YEAR "@EMU_COPYRIGHT_YEAR@"

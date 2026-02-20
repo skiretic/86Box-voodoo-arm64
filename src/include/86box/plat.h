@@ -74,8 +74,6 @@ extern int strnicmp(const char *s1, const char *s2, size_t n);
 /* A hack (GCC-specific?) to allow us to ignore unused parameters. */
 #    define UNUSED(arg) __attribute__((unused)) arg
 
-/* Return the size (in wchar's) of a wchar_t array. */
-#define sizeof_w(x) (sizeof((x)) / sizeof(wchar_t))
 
 #ifdef __cplusplus
 #    include <atomic>
