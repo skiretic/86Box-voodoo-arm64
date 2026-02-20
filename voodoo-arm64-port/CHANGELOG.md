@@ -4,6 +4,49 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Optimization Batch 1: Alpha Blend Rounding Cleanup (2026-02-20)
+
+### H7: Replace alookup[1] memory loads with pinned v8 register
+
+Removed 14 `LDR d16, [x20, #16]` instructions that loaded `alookup[1]` = {1,1,1,1} from
+memory every time a rounding sequence executed. The identical value is already pinned in
+v8 (neon_01_w) since the prologue. Replaced corresponding `ADD v4/v0, v4/v0, v16` with
+`ADD v4/v0, v4/v0, v8`.
+
+### H8: Eliminate redundant MOV before USHR in rounding sequences
+
+Removed 14 `MOV v17, v4` (or v0) instructions that copied the source register before
+`USHR v17, v17, #8`. USHR supports different Rd/Rn on ARMv8.0, so the copy is unnecessary.
+Replaced with `USHR v17, v4, #8` (or `USHR v17, v0, #8`).
+
+Net effect: 28 fewer instructions per alpha-blended pixel (14 LDR + 14 MOV removed).
+All 14 sites across dest_afunc (7) and src_afunc (7) switch cases. No functional change.
+
+#### File modified:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
+## Dead Code Removal (2026-02-20)
+
+### Removed two unused NEON instructions from ARM64 codegen
+
+**MINOR-1**: Removed dead `ARM64_MOV_V(5, 1)` in dual-TMU combine (was line ~2747).
+The x86-64 needed to save XMM5 before its multi-instruction multiply sequence
+(PMULLW/PMULHW/PUNPCKLWD), but the ARM64 uses `SMULL_4S_4H` which doesn't clobber
+its input registers. The saved copy was never read back.
+
+**MINOR-3**: Removed dead `ARM64_MOVI_V2D_ZERO(2)` before depth computation (was line ~2140).
+The x86-64 uses XMM2 as a zero register for `PUNPCKLBW` (byte-to-halfword unpack),
+but the ARM64 uses `UXTL` instead, which doesn't need a zero operand.
+
+Net effect: 8 fewer bytes of JIT output per generated block. No functional change.
+
+#### File modified:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Testing Guide Update (2026-02-19)
 
 - Added analyzer script usage to Debug Logging section (`./scripts/analyze-jit-log.py`)

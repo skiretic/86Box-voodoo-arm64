@@ -3701,21 +3701,17 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));  /* x7 = alookup + src_alpha*2*8 */
                 addlong(ARM64_LDR_D(5, 7, 0));               /* v5 = alookup[src_alpha] */
                 addlong(ARM64_MUL_V4H(4, 4, 5));
-                /* Round: add alookup[1], add (result>>8), shift >>8 */
-                addlong(ARM64_LDR_D(16, 20, 16));   /* v16 = alookup[1] (offset 1*16=16 bytes) */
-                addlong(ARM64_MOV_V(17, 4));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 16));
+                /* Round: add v8 (alookup[1] pinned), add (result>>8), shift >>8 */
+                addlong(ARM64_USHR_V4H(17, 4, 8));
+                addlong(ARM64_ADD_V4H(4, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 17));
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
             case AFUNC_A_COLOR:
                 /* v4 = dst * src_color >> 8 */
                 addlong(ARM64_MUL_V4H(4, 4, 0));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 4));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 16));
+                addlong(ARM64_USHR_V4H(17, 4, 8));
+                addlong(ARM64_ADD_V4H(4, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 17));
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
@@ -3724,10 +3720,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 4));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 16));
+                addlong(ARM64_USHR_V4H(17, 4, 8));
+                addlong(ARM64_ADD_V4H(4, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 17));
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
@@ -3739,10 +3733,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));  /* x7 = aminuslookup + src_alpha*2*8 */
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 4));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 16));
+                addlong(ARM64_USHR_V4H(17, 4, 8));
+                addlong(ARM64_ADD_V4H(4, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 17));
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
@@ -3751,10 +3743,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_MOV_V(16, 9));         /* v16 = 0xFF */
                 addlong(ARM64_SUB_V4H(16, 16, 0));   /* v16 = 0xFF - src */
                 addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 4));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 16));
+                addlong(ARM64_USHR_V4H(17, 4, 8));
+                addlong(ARM64_ADD_V4H(4, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 17));
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
@@ -3763,10 +3753,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 4));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 16));
+                addlong(ARM64_USHR_V4H(17, 4, 8));
+                addlong(ARM64_ADD_V4H(4, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 17));
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
@@ -3775,10 +3763,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* Unpack v13 to 4x16 in v16 */
                 addlong(ARM64_UXTL_8H_8B(16, 13));
                 addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 4));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 16));
+                addlong(ARM64_USHR_V4H(17, 4, 8));
+                addlong(ARM64_ADD_V4H(4, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 17));
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
@@ -3794,20 +3780,16 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 0));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 16));
+                addlong(ARM64_USHR_V4H(17, 0, 8));
+                addlong(ARM64_ADD_V4H(0, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 17));
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
             case AFUNC_A_COLOR:
                 /* v0 = src * dst_color (v6) >> 8 */
                 addlong(ARM64_MUL_V4H(0, 0, 6));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 0));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 16));
+                addlong(ARM64_USHR_V4H(17, 0, 8));
+                addlong(ARM64_ADD_V4H(0, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 17));
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
@@ -3816,10 +3798,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 0));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 16));
+                addlong(ARM64_USHR_V4H(17, 0, 8));
+                addlong(ARM64_ADD_V4H(0, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 17));
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
@@ -3831,10 +3811,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 0));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 16));
+                addlong(ARM64_USHR_V4H(17, 0, 8));
+                addlong(ARM64_ADD_V4H(0, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 17));
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
@@ -3843,10 +3821,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_MOV_V(16, 9));          /* v16 = 0xFF */
                 addlong(ARM64_SUB_V4H(16, 16, 6));    /* v16 = 0xFF - dst */
                 addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 0));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 16));
+                addlong(ARM64_USHR_V4H(17, 0, 8));
+                addlong(ARM64_ADD_V4H(0, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 17));
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
@@ -3855,10 +3831,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 0));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 16));
+                addlong(ARM64_USHR_V4H(17, 0, 8));
+                addlong(ARM64_ADD_V4H(0, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 17));
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
@@ -3874,10 +3848,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 6, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
                 addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_LDR_D(16, 20, 16));
-                addlong(ARM64_MOV_V(17, 0));
-                addlong(ARM64_USHR_V4H(17, 17, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 16));
+                addlong(ARM64_USHR_V4H(17, 0, 8));
+                addlong(ARM64_ADD_V4H(0, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 17));
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
