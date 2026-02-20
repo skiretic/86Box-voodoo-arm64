@@ -2136,9 +2136,6 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_STR_W(5, 0, STATE_x_tiled));
     }
 
-    /* Zero v2 for later unpacking (PXOR XMM2, XMM2 equivalent) */
-    addlong(ARM64_MOVI_V2D_ZERO(2));
-
     /* ====================================================================
      * DEPTH COMPUTATION (W-buffer or Z-buffer)
      * ====================================================================
@@ -2743,9 +2740,6 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_ADD_V4H(4, 4, 8));
 
             /* Multiply: signed 16x16 -> 32 -> >>8 -> narrow */
-            /* Save v1 (other-clocal) in v5 before multiply */
-            addlong(ARM64_MOV_V(5, 1));
-
             if (tca_sub_clocal) {
                 /* Save raw TMU0 packed for alpha extraction */
                 addlong(ARM64_FMOV_W_S(5, 7));  /* w5 = raw TMU0 packed BGRA */
