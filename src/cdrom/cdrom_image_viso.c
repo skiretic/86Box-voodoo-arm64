@@ -30,7 +30,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <wchar.h>
+
 #include <86box/86box.h>
 #include <86box/cdrom.h>
 #include <86box/cdrom_image.h>
@@ -181,11 +181,32 @@ viso_pwrite(const void *ptr, const uint64_t offset, const size_t size,
     return ret;
 }
 
-static size_t
-viso_convert_utf8(wchar_t *dest, const char *src, ssize_t buf_size)
+static inline size_t
+ucs2_strlen(const uint16_t *s)
 {
-    uint32_t c;
-    wchar_t *p = dest;
+    size_t len = 0;
+    while (s[len])
+        len++;
+    return len;
+}
+
+static inline const uint16_t *
+ucs2_rchr(const uint16_t *s, uint16_t c)
+{
+    const uint16_t *last = NULL;
+    while (*s) {
+        if (*s == c)
+            last = s;
+        s++;
+    }
+    return last;
+}
+
+static size_t
+viso_convert_utf8(uint16_t *dest, const char *src, ssize_t buf_size)
+{
+    uint32_t  c;
+    uint16_t *p = dest;
     size_t   next;
 
     while (buf_size-- > 0) {
@@ -207,8 +228,8 @@ viso_convert_utf8(wchar_t *dest, const char *src, ssize_t buf_size)
                 c = (c << 6) | (*src++ & 0x3f);
 
             /* Convert codepoints >= U+10000 to UTF-16 surrogate pairs.
-               This has to be done here because wchar_t on some platforms
-               (Windows) is not wide enough to store such high codepoints. */
+               This has to be done here because uint16_t is not wide
+               enough to store such high codepoints directly. */
             if (c >= 0x10000) {
                 if ((c <= 0x10ffff) && (buf_size-- > 0)) {
                     /* Encode surrogate pair. */
@@ -319,7 +340,7 @@ viso_convert_utf8(wchar_t *dest, const char *src, ssize_t buf_size)
         }                                                                           \
     }
 VISO_WRITE_STR_FUNC(viso_write_string, uint8_t, char, , 0)
-VISO_WRITE_STR_FUNC(viso_write_wstring, uint16_t, wchar_t, cpu_to_be16, c > 0xffff)
+VISO_WRITE_STR_FUNC(viso_write_wstring, uint16_t, uint16_t, cpu_to_be16, 0)
 
 static int
 viso_fill_fn_short(char *data, const viso_entry_t *entry, viso_entry_t **entries)
@@ -413,8 +434,8 @@ static size_t
 viso_fill_fn_joliet(uint8_t *data, const viso_entry_t *entry, size_t max_len) /* note: receives and returns byte sizes */
 {
     /* Decode filename as UTF-8. */
-    size_t  len = strlen(entry->basename);
-    wchar_t utf8dec[len + 1];
+    size_t   len = strlen(entry->basename);
+    uint16_t utf8dec[len + 1];
     len = viso_convert_utf8(utf8dec, entry->basename, len + 1);
 
     /* Trim decoded filename to max_len if needed. */
@@ -424,9 +445,9 @@ viso_fill_fn_joliet(uint8_t *data, const viso_entry_t *entry, size_t max_len) /*
 
         /* Relocate extension if the original name exceeds the maximum length. */
         if (!S_ISDIR(entry->stats.st_mode)) { /* do this on files only */
-            const wchar_t *ext = wcsrchr(utf8dec, L'.');
+            const uint16_t *ext = ucs2_rchr(utf8dec, '.');
             if (ext > utf8dec) {
-                len = wcslen(ext);
+                len = ucs2_strlen(ext);
                 if (len > max_len)
                     len = max_len;
                 else if ((len < max_len) && ((((uint16_t *) data)[max_len - len] & be16_to_cpu(0xfc00)) == be16_to_cpu(0xdc00)))
@@ -1078,9 +1099,11 @@ next_dir:
         *p++ = 0; /* unused */
 
         if (i) {
-            viso_write_wstring((uint16_t *) p, EMU_NAME_W, 16, VISO_CHARSET_A); /* system ID */
+            uint16_t emu_name_w[32];
+            viso_convert_utf8(emu_name_w, EMU_NAME, 32);
+            viso_write_wstring((uint16_t *) p, emu_name_w, 16, VISO_CHARSET_A); /* system ID */
             p += 32;
-            wchar_t wtemp[16];
+            uint16_t wtemp[16];
             viso_convert_utf8(wtemp, basename, 16);
             viso_write_wstring((uint16_t *) p, wtemp, 16, VISO_CHARSET_D); /* volume ID */
             p += 32;
@@ -1118,20 +1141,23 @@ next_dir:
 
         int copyright_abstract_len = (viso->format & VISO_FORMAT_ISO) ? 37 : 32;
         if (i) {
-            viso_write_wstring((uint16_t *) p, L"", 64, VISO_CHARSET_D); /* volume set ID */
+            static const uint16_t empty_ucs2[] = { 0 };
+            uint16_t app_id_w[64];
+            viso_convert_utf8(app_id_w, EMU_NAME " " EMU_VERSION " VIRTUAL ISO", 64);
+            viso_write_wstring((uint16_t *) p, empty_ucs2, 64, VISO_CHARSET_D); /* volume set ID */
             p += 128;
-            viso_write_wstring((uint16_t *) p, L"", 64, VISO_CHARSET_A); /* publisher ID */
+            viso_write_wstring((uint16_t *) p, empty_ucs2, 64, VISO_CHARSET_A); /* publisher ID */
             p += 128;
-            viso_write_wstring((uint16_t *) p, L"", 64, VISO_CHARSET_A); /* data preparer ID */
+            viso_write_wstring((uint16_t *) p, empty_ucs2, 64, VISO_CHARSET_A); /* data preparer ID */
             p += 128;
-            viso_write_wstring((uint16_t *) p, EMU_NAME_W L" " EMU_VERSION_W L" VIRTUAL ISO", 64, VISO_CHARSET_A); /* application ID */
+            viso_write_wstring((uint16_t *) p, app_id_w, 64, VISO_CHARSET_A); /* application ID */
             p += 128;
-            viso_write_wstring((uint16_t *) p, L"", copyright_abstract_len >> 1, VISO_CHARSET_D); /* copyright file ID */
+            viso_write_wstring((uint16_t *) p, empty_ucs2, copyright_abstract_len >> 1, VISO_CHARSET_D); /* copyright file ID */
             p += copyright_abstract_len;
-            viso_write_wstring((uint16_t *) p, L"", copyright_abstract_len >> 1, VISO_CHARSET_D); /* abstract file ID */
+            viso_write_wstring((uint16_t *) p, empty_ucs2, copyright_abstract_len >> 1, VISO_CHARSET_D); /* abstract file ID */
             p += copyright_abstract_len;
             if (viso->format & VISO_FORMAT_ISO) {
-                viso_write_wstring((uint16_t *) p, L"", 18, VISO_CHARSET_D); /* bibliography file ID (ISO only) */
+                viso_write_wstring((uint16_t *) p, empty_ucs2, 18, VISO_CHARSET_D); /* bibliography file ID (ISO only) */
                 p += 37;
             }
         } else {
