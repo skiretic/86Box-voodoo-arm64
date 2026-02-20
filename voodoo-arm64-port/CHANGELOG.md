@@ -4,6 +4,50 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Optimization Batch 3: Hoist Params Delta Loads (2026-02-20)
+
+### H1: Hoist loop-invariant RGBA and TMU S/T deltas to prologue
+
+Loaded per-triangle delta vectors into callee-saved NEON registers in the prologue:
+- v12 = `{dBdX, dGdX, dRdX, dAdX}` (RGBA color deltas, 4x32-bit)
+- v15 = `{dSdX_0, dTdX_0}` (TMU0 texture coordinate deltas, 2x64-bit)
+- v14 = `{dSdX_1, dTdX_1}` (TMU1 texture coordinate deltas, conditional on dual TMU)
+
+Replaced per-pixel delta loads in the increment section with direct register usage.
+Extended prologue/epilogue STP/LDP to save/restore d14-d15. Stack frame increased
+from 160 to 176 bytes.
+
+Net effect: 3 fewer instructions per pixel (4 with dual TMU). No functional change.
+
+#### File modified:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
+## Optimization Batch 2: Cache STATE_x / STATE_x2 in GPRs (2026-02-20)
+
+### H2: Cache STATE_x in callee-saved w28
+
+Loaded STATE_x once at the top of the pixel loop into w28. Replaced 9 subsequent
+per-pixel `LDR w<N>, [x0, #STATE_x]` memory loads with `MOV w<N>, w28`. The cached
+value is updated after the end-of-loop x increment store (`MOV w28, w5`).
+
+Sites replaced: stipple test, tiled x calc, depth test address, alpha blend dest
+alpha/RGB reads, depth write (both paths), dither/FB write address.
+
+### H3: Cache STATE_x2 in callee-saved w27
+
+Loaded loop bound STATE_x2 once in the prologue into w27. Replaced the per-iteration
+`LDR w6, [x0, #STATE_x2]` + `CMP` with `CMP w4, w27`.
+
+Net effect: ~11 fewer memory loads per pixel (10 LDR eliminated, 1 kept for store-back).
+No functional change.
+
+#### File modified:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Optimization Batch 1: Alpha Blend Rounding Cleanup (2026-02-20)
 
 ### H7: Replace alookup[1] memory loads with pinned v8 register

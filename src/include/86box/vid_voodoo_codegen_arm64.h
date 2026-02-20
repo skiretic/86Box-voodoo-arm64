@@ -106,8 +106,10 @@
  *   v9      = xmm_ff_w constant {0xFF,...}     (callee-saved)
  *   v10     = xmm_ff_b constant {0xFFFFFF,0,0,0} (callee-saved)
  *   v11     = minus_254 constant {0xFF02,...}   (callee-saved)
- *   v12-v13 = scratch (callee-saved, save/restore in prologue/epilogue)
- *   v14-v15 = not used by current generated path
+ *   v12     = hoisted RGBA deltas {dBdX,dGdX,dRdX,dAdX} (callee-saved)
+ *   v13     = scratch (callee-saved, save/restore in prologue/epilogue)
+ *   v14     = hoisted TMU1 ST deltas {dSdX_1,dTdX_1}    (callee-saved)
+ *   v15     = hoisted TMU0 ST deltas {dSdX_0,dTdX_0}    (callee-saved)
  *   v16-v31 = scratch (caller-saved)
  * ======================================================================== */
 
@@ -1917,12 +1919,13 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   [SP, #96]:  d8, d9    (NEON callee-saved, lower 64 bits)
      *   [SP, #112]: d10, d11
      *   [SP, #128]: d12, d13
-     *   [SP, #144]: (padding to 160 bytes for 16-byte alignment)
-     * Total: 160 bytes (16-byte aligned)
+     *   [SP, #144]: d14, d15
+     *   [SP, #160]: (padding to 176 bytes for 16-byte alignment)
+     * Total: 176 bytes (16-byte aligned)
      */
 
-    /* STP x29, x30, [SP, #-160]! */
-    addlong(ARM64_STP_PRE_X(29, 30, 31, -160));
+    /* STP x29, x30, [SP, #-176]! */
+    addlong(ARM64_STP_PRE_X(29, 30, 31, -176));
     /* STP x19, x20, [SP, #16] */
     addlong(ARM64_STP_OFF_X(19, 20, 31, 16));
     /* STP x21, x22, [SP, #32] */
@@ -1937,8 +1940,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     addlong(ARM64_STP_D(8, 9, 31, 96));
     /* STP d10, d11, [SP, #112] */
     addlong(ARM64_STP_D(10, 11, 31, 112));
-    /* STP d12, d13, [SP, #128] -- save d12-d13 for scratch callee-saved usage */
+    /* STP d12, d13, [SP, #128] */
     addlong(ARM64_STP_D(12, 13, 31, 128));
+    /* STP d14, d15, [SP, #144] -- hoisted TMU delta registers */
+    addlong(ARM64_STP_D(14, 15, 31, 144));
 
     /* Set up frame pointer (optional but helps with debugging) */
     /* MOV x29, SP */
@@ -2020,6 +2025,30 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 #undef EMIT_LOAD_NEON_CONST
 
         (void) addr;
+    }
+
+    /* ================================================================
+     * Hoist loop-invariant NEON deltas into callee-saved V registers
+     * ================================================================
+     *
+     * These delta vectors are loaded from params once here and reused
+     * every pixel iteration, avoiding redundant memory loads.
+     *
+     *   v12 = {dBdX, dGdX, dRdX, dAdX}  (RGBA color deltas, 4x32)
+     *   v15 = {dSdX_0, dTdX_0}           (TMU0 ST deltas, 2x64)
+     *   v14 = {dSdX_1, dTdX_1}           (TMU1 ST deltas, 2x64, if dual TMU)
+     */
+
+    /* v12 = RGBA deltas (PARAMS_dBdX=48, not 16-byte aligned) */
+    addlong(ARM64_ADD_IMM_X(16, 1, PARAMS_dBdX));
+    addlong(ARM64_LD1_V4S(12, 16));
+
+    /* v15 = TMU0 ST deltas (PARAMS_tmu0_dSdX=144, Q-aligned) */
+    addlong(ARM64_LDR_Q(15, 1, PARAMS_tmu0_dSdX));
+
+    /* v14 = TMU1 ST deltas (PARAMS_tmu1_dSdX=240, Q-aligned) */
+    if (voodoo->dual_tmus) {
+        addlong(ARM64_LDR_Q(14, 1, PARAMS_tmu1_dSdX));
     }
 
     /* ================================================================
@@ -4160,15 +4189,14 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ================================================================== */
 
     /* ib/ig/ir/ia increment (4 x int32, contiguous at STATE_ib=472).
-     * 472 is not 16-byte aligned, so use ADD+LD1 instead of LDR Q. */
+     * 472 is not 16-byte aligned, so use ADD+LD1 instead of LDR Q.
+     * RGBA deltas are hoisted in v12 from the prologue. */
     addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));    /* x16 = &state->ib */
     addlong(ARM64_LD1_V4S(0, 16));                 /* v0 = {ib, ig, ir, ia} */
-    addlong(ARM64_ADD_IMM_X(17, 1, PARAMS_dBdX));  /* x17 = &params->dBdX */
-    addlong(ARM64_LD1_V4S(1, 17));                  /* v1 = {dBdX, dGdX, dRdX, dAdX} */
     if (state->xdir > 0) {
-        addlong(ARM64_ADD_V4S(0, 0, 1));
+        addlong(ARM64_ADD_V4S(0, 0, 12));
     } else {
-        addlong(ARM64_SUB_V4S(0, 0, 1));
+        addlong(ARM64_SUB_V4S(0, 0, 12));
     }
     addlong(ARM64_ST1_V4S(0, 16));  /* store v0 back to [x16] (= &state->ib) */
 
@@ -4184,23 +4212,13 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     }
     addlong(ARM64_STR_W(4, 0, STATE_z));
 
-    /* TMU0 s/t increment (64-bit add/sub) */
-    /* tmu0_s and tmu0_t are contiguous 64-bit values at STATE_tmu0_s.
-     * dSdX and dTdX are contiguous 64-bit values at PARAMS_tmu0_dSdX.
-     * Use NEON 2xD (128-bit) add/sub. */
-
-    /* LDR Q0, [x0, #STATE_tmu0_s] -- loads tmu0_s (64-bit) + tmu0_t (64-bit) = 128 bits */
-    /* STATE_tmu0_s = 496, 496/16 = 31 -> aligned! */
+    /* TMU0 s/t increment (64-bit add/sub).
+     * TMU0 ST deltas are hoisted in v15 from the prologue. */
     addlong(ARM64_LDR_Q(0, 0, STATE_tmu0_s));
-
-    /* LDR Q1, [x1, #PARAMS_tmu0_dSdX] -- loads dSdX + dTdX */
-    /* PARAMS_tmu0_dSdX = 144, 144/16 = 9 -> aligned */
-    addlong(ARM64_LDR_Q(1, 1, PARAMS_tmu0_dSdX));
-
     if (state->xdir > 0) {
-        addlong(ARM64_ADD_V2D(0, 0, 1));
+        addlong(ARM64_ADD_V2D(0, 0, 15));
     } else {
-        addlong(ARM64_SUB_V2D(0, 0, 1));
+        addlong(ARM64_SUB_V2D(0, 0, 15));
     }
     addlong(ARM64_STR_Q(0, 0, STATE_tmu0_s));
 
@@ -4227,17 +4245,14 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* TMU1 s/t/w if dual TMUs */
     if (voodoo->dual_tmus) {
         /* TMU1 s/t (128-bit NEON).
-         * STATE_tmu1_s = 520, not 16-byte aligned -- use ADD+LD1/ST1. */
+         * STATE_tmu1_s = 520, not 16-byte aligned -- use ADD+LD1/ST1.
+         * TMU1 ST deltas are hoisted in v14 from the prologue. */
         addlong(ARM64_ADD_IMM_X(16, 0, STATE_tmu1_s)); /* x16 = &state->tmu1_s */
         addlong(ARM64_LD1_V4S(0, 16));                  /* v0 = {tmu1_s_lo, tmu1_s_hi, tmu1_t_lo, tmu1_t_hi} */
-
-        /* PARAMS_tmu1_dSdX = 240, 240/16 = 15 -> Q-aligned */
-        addlong(ARM64_LDR_Q(1, 1, PARAMS_tmu1_dSdX));
-
         if (state->xdir > 0) {
-            addlong(ARM64_ADD_V2D(0, 0, 1));
+            addlong(ARM64_ADD_V2D(0, 0, 14));
         } else {
-            addlong(ARM64_SUB_V2D(0, 0, 1));
+            addlong(ARM64_SUB_V2D(0, 0, 14));
         }
         addlong(ARM64_ST1_V4S(0, 16)); /* store back via x16 = &state->tmu1_s */
 
@@ -4304,6 +4319,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * Epilogue: restore callee-saved registers and return
      * ================================================================ */
 
+    /* LDP d14, d15, [SP, #144] */
+    addlong(ARM64_LDP_D(14, 15, 31, 144));
     /* LDP d12, d13, [SP, #128] */
     addlong(ARM64_LDP_D(12, 13, 31, 128));
     /* LDP d10, d11, [SP, #112] */
@@ -4320,8 +4337,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     addlong(ARM64_LDP_OFF_X(21, 22, 31, 32));
     /* LDP x19, x20, [SP, #16] */
     addlong(ARM64_LDP_OFF_X(19, 20, 31, 16));
-    /* LDP x29, x30, [SP], #160 */
-    addlong(ARM64_LDP_POST_X(29, 30, 31, 160));
+    /* LDP x29, x30, [SP], #176 */
+    addlong(ARM64_LDP_POST_X(29, 30, 31, 176));
 
     /* RET */
     addlong(ARM64_RET);
