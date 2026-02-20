@@ -66,3 +66,89 @@ Converted all `swprintf` + `plat_get_string()` callers to `snprintf` + `MBX_ANSI
 - `86box.c` — Removed `#include <wchar.h>`, converted pclog banner from `EMU_NAME_W`/`EMU_VERSION_FULL_W` to narrow equivalents
 
 **Kept** (still has active callers): `LSTR`, `EMU_NAME_W`, `EMU_VERSION_W`, `EMU_BUILD_W`, `EMU_VERSION_FULL_W` (used by `cdrom_image_viso.c`, `unix.c`, macOS App Translocation), `sizeof_w()` (used by `utils/ini.c`)
+
+---
+
+## Commit E: INI System — Eliminate wdata Field (3 files, net -153 lines)
+
+Converted the INI system to be purely `char`/UTF-8 internally:
+- `ini.c` — Removed `entry_t.wdata[512]` field, converted `fgetws()`→`fgets()`, `fwprintf()`→`fprintf()`, removed `trim_w()`, `ini_fgetws()` (Haiku workaround), `ini_section_get_wstring()`, `ini_section_set_wstring()`, all `mbstowcs`/`wcstombs` sync in setters, `#include <wchar.h>` and `<wctype.h>`
+- `ini.h` — Removed `ini_section_get_wstring()`/`ini_section_set_wstring()` declarations and `ini_get_wstring`/`ini_set_wstring` convenience macros
+- `config.h` — Removed `config_get_wstring`/`config_set_wstring` macros (zero callers)
+
+**Preserved**: `ini_detect_bom()`, `ccs=UTF-8` mode on Windows, `ANSI_CFG` guards
+
+---
+
+## Commit F: Message Box API — const char*, Remove MBX_ANSI (12 files)
+
+Changed `ui_msgbox`/`ui_msgbox_header` signatures from `void*` to `const char*` and removed the `MBX_ANSI` flag entirely:
+- `ui.h` — Removed `#define MBX_ANSI 0x80`, changed signatures to `const char*`
+- `qt_ui.cpp` — Replaced dual-path `MBX_ANSI` ternary with direct `QString::fromUtf8()`
+- `unix.c` — Removed wide conversion branch (`SDL_iconv_string`), converted "No ROMs found" to narrow, fixed `msgflags` vs `flags` bug in icon selection
+- `86box.c` — Converted App Translocation warning to narrow strings, stripped `| MBX_ANSI` from 8 calls
+- `device.c`, `config.c`, `network.c`, `cdrom.c`, `vid_ddc.c`, `prt_ps.c`, `prt_escp.c`, `hdd.c` — Stripped `| MBX_ANSI` and `(void *)` casts
+
+**Bonus fix**: `unix.c` had a pre-existing bug where `msgflags` (always 0) was tested instead of `flags` for message box icon type
+
+---
+
+## Commit G: VISO — UCS-2 Isolation (1 file)
+
+Replaced `wchar_t` with `uint16_t` in `cdrom_image_viso.c` for platform-independent UCS-2:
+- `viso_convert_utf8()` — `wchar_t*` → `uint16_t*` parameter and locals
+- `viso_write_wstring` macro — source type `wchar_t` → `uint16_t`, removed unnecessary `c > 0xffff` check
+- `viso_fill_fn_joliet()` — `wchar_t` → `uint16_t` array, `wcsrchr`/`wcslen` → `ucs2_rchr`/`ucs2_strlen` helpers
+- Volume descriptor — `EMU_NAME_W`/`EMU_VERSION_W` → runtime `viso_convert_utf8()` calls, `L""` → `static const uint16_t empty_ucs2[]`
+- Added `ucs2_strlen()` and `ucs2_rchr()` helper functions
+- Removed `#include <wchar.h>`
+
+---
+
+## Commit H: Windows Serial Passthrough Error Messages (1 file)
+
+Converted `win_serial_passthrough.c` error messages from wide to narrow:
+- `open_pseudo_terminal()` — `wchar_t errorMsg` → `wchar_t errorMsg_w` (for `FormatMessageW`) + `char errorMsg` (narrow via `wcstombs`), `swprintf` → `snprintf`
+- `connect_named_pipe_client()` — same pattern
+- `FormatMessageW` stays (Win32 API requires `wchar_t`), conversion happens immediately after
+
+---
+
+## Commit I: Dead Code and Final Cleanup (7 files, +5/-21 lines)
+
+Removed all remaining dead `wchar_t` infrastructure:
+- `86box.h` — Removed `#if 0` block with `pc_reload(wchar_t *fn)` dead code
+- `vnc.h` + `vnc.c` — Changed `vnc_take_screenshot` signature to `const char *fn`, removed `#include <wchar.h>`
+- `plat.h` — Removed `sizeof_w()` macro (zero callers after Phase E)
+- `unix_osd.c` — Fixed extern to `char sdl_win_title[512]`, eliminated `sdl_win_title_mb` intermediate buffer
+- `fdd_86f.c` — Fixed `L"wb"` → `"wb"` bug in `#ifdef D86F_COMPRESS` block
+- `version.h.in` — Removed `LSTR`, `_LSTR`, `EMU_NAME_W`, `EMU_VERSION_W`, `EMU_BUILD_W`, `EMU_VERSION_FULL_W` (all zero callers)
+
+---
+
+## Summary
+
+**10 commits, ~30 files modified** across the full pipeline:
+
+| Commit | Scope | Risk | Net Lines |
+|--------|-------|------|-----------|
+| A | Core title pipeline | HIGH | ~-33 |
+| B | Status bar cleanup | LOW | small |
+| C | Message box callers | MEDIUM | small |
+| D | Dead `_W` macros | LOW | small |
+| E | INI system wdata | HIGH | -153 |
+| F | Message box API const char* | MEDIUM | ~12 files |
+| G | VISO UCS-2 isolation | MEDIUM | 1 file |
+| H | Windows serial error msgs | LOW | 1 file |
+| I | Dead code + final cleanup | LOW | -21 |
+
+**Remaining `wchar_t`** (intentional — Windows API surface only):
+- `qt_platform.cpp` — `GetModuleFileNameW`, `GetSystemWindowsDirectoryW`, `SetThreadDescription`
+- `win_cdrom_ioctl.c` — `CreateFileW`, `ioctl_t.path` (WCHAR)
+- `win_serial_passthrough.c` — `FormatMessageW` (output immediately converted to narrow)
+- `qt_main.cpp` — `SetCurrentProcessExplicitAppUserModelID`, `FindWindowW`
+- `qt_util.cpp` — `RegGetValueW`
+- `qt_winrawinputfilter.cpp`, `qt_vmmanager_windarkmodefilter.cpp` — `wcscmp` on Windows messages
+- `cdrom_image.c` — `sf_wchar_open` (libsndfile Windows API)
+- `plat_dir.h` — POSIX dirent under `#ifdef UNICODE`
+- `config.h` — `storage_cfg_t.path` (dual-use, deferred)
