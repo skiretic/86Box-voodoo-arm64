@@ -1,69 +1,72 @@
-# CMake
-CMakeUserPresets.json
+# Build directories
+build
+out
+
+# IDE-specific files
+*.swp
+*.swo
+*~
+.vscode
+.vs
+CMakeSettings.json
+CMakePresets.json
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Compiled objects
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Dependency directories
+vcpkg_installed
+
+# CMake generated files
 CMakeCache.txt
 CMakeFiles
-/build
-Makefile
-*.a
-/src/*.exe
-/src/86Box
-/src/include/86box/version.h
-/src/.vs
-/src/out
+cmake_install.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
 
-# Legacy Makefile
-/src/*.o
-/src/*.d
-/src/*.res
-/src/*.dll
-/src/NUL
+# C++ compilation database
+.clangd
 
-# State
-/src/*.cfg
-/src/*.log
-/src/*.dmp
-/src/nvr/
-/src/roms/
-/src/screenshots/
-
-# Build scripts
-/archive_tmp
-/archive_tmp_universal
-/static2dll.*
-/VERSION
-*.zip
-*.tar
-*.tar.*
-*.AppImage
-/appimage-builder-cache
-/appimage-build
-/AppImageBuilder-generated.yml
-
-# Visual Studio Code
-/.vs
-/.vscode
-/out
-
-# Windows resource compiler
-RC*
+# Precompiled headers
+*.gch
+*.pch
 
 # Qt Creator
 CMakeLists.txt.user
 
-# Debian builder
-/debian/*.log
-/debian/*.substvars
-/debian/.debhelper
-/debian/86box
-/debian/debhelper-build-stamp
-/debian/files
-/obj-*-linux-gnu
-
-# MacOS Finder stuff
-.DS_Store
+# Doxygen
+docs/doxygen
 
 # clangd
 .cache
 
 # Jetbrains CLion
 .idea
+
+# Claude Code
+CLAUDE.md
+.claude/
+
+/somefix/
+/voodoo-arm64-port/
+
+# Serena
+.serena/
+
+# Misc local artifacts
+/appimage/
+*.log
