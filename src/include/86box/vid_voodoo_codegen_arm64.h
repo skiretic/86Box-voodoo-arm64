@@ -94,7 +94,9 @@
  *   x23     = i_00_ff_w pointer    (callee-saved, pinned)
  *   x24     = real_y               (callee-saved copy)
  *   x25     = bilinear_lookup ptr  (callee-saved, pinned)
- *   x26-x28 = scratch (callee-saved, available)
+ *   x26     = scratch (callee-saved, available)
+ *   x27     = STATE_x2 (loop bound, callee-saved)
+ *   x28     = STATE_x  (pixel x coord, callee-saved)
  *   x29     = frame pointer        (saved/restored)
  *   x30     = link register        (saved/restored)
  *
@@ -1983,6 +1985,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 #undef EMIT_MOV_IMM64
     }
 
+    /* load loop bound STATE_x2 into callee-saved w27 */
+    addlong(ARM64_LDR_W(27, 0, STATE_x2));
+
     /* ================================================================
      * Load NEON constants into callee-saved V registers
      * ================================================================
@@ -2030,6 +2035,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ================================================================ */
     loop_jump_pos = block_pos;  /* Top of the pixel loop -- loopback branch targets here */
 
+    /* cache STATE_x in w28 for this iteration */
+    addlong(ARM64_LDR_W(28, 0, STATE_x));
+
     /* ====================================================================
      * STIPPLE TEST
      * ====================================================================
@@ -2070,8 +2078,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_AND_MASK(4, 24, 2));
             /* LSL w4, w4, #3 */
             addlong(ARM64_LSL_IMM(4, 4, 3));
-            /* LDR w5, [x0, #STATE_x] */
-            addlong(ARM64_LDR_W(5, 0, STATE_x));
+            /* MOV w5, w28 -- cached STATE_x */
+            addlong(ARM64_MOV_REG(5, 28));
             /* MVN w5, w5 */
             addlong(ARM64_MVN(5, 5));
             /* AND w5, w5, #7 */
@@ -2124,8 +2132,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * So tile_row * 2048 = (x >> 6) << 11
      * ================================================================== */
     if (params->col_tiled || params->aux_tiled) {
-        /* LDR w4, [x0, #STATE_x] */
-        addlong(ARM64_LDR_W(4, 0, STATE_x));
+        /* MOV w4, w28 -- cached STATE_x */
+        addlong(ARM64_MOV_REG(4, 28));
         /* AND w5, w4, #63 */
         addlong(ARM64_AND_MASK(5, 4, 6));
         /* LSR w6, w4, #6 */
@@ -2332,8 +2340,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             /* LDR w4, [x0, #STATE_x_tiled] */
             addlong(ARM64_LDR_W(4, 0, STATE_x_tiled));
         } else {
-            /* LDR w4, [x0, #STATE_x] */
-            addlong(ARM64_LDR_W(4, 0, STATE_x));
+            /* MOV w4, w28 -- cached STATE_x */
+            addlong(ARM64_MOV_REG(4, 28));
         }
 
         /* Load old depth: LDRH w5, [x9, x4, LSL #1]
@@ -3641,7 +3649,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             if (params->aux_tiled)
                 addlong(ARM64_LDR_W(5, 0, STATE_x_tiled));
             else
-                addlong(ARM64_LDR_W(5, 0, STATE_x));
+                addlong(ARM64_MOV_REG(5, 28));  /* cached STATE_x */
             /* LDRH w5, [x9, x5, LSL #1] -- load 16-bit aux value */
             addlong(ARM64_LDRH_REG_LSL1(5, 9, 5));
         } else {
@@ -3654,7 +3662,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         if (params->col_tiled)
             addlong(ARM64_LDR_W(4, 0, STATE_x_tiled));
         else
-            addlong(ARM64_LDR_W(4, 0, STATE_x));
+            addlong(ARM64_MOV_REG(4, 28));  /* cached STATE_x */
 
         /* w12 *= 2, w5 *= 2 -- for table indexing (each entry is 16 bytes) */
         addlong(ARM64_ADD_REG(12, 12, 12));  /* w12 = src_alpha * 2 */
@@ -3913,7 +3921,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         if (params->aux_tiled)
             addlong(ARM64_LDR_W(4, 0, STATE_x_tiled));
         else
-            addlong(ARM64_LDR_W(4, 0, STATE_x));
+            addlong(ARM64_MOV_REG(4, 28));  /* cached STATE_x */
         /* STRH w12, [x9, x4, LSL #1] -- store alpha/depth to aux buffer */
         addlong(ARM64_STRH_REG_LSL1(12, 9, 4));
     }
@@ -3949,7 +3957,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->col_tiled)
         addlong(ARM64_LDR_W(14, 0, STATE_x_tiled));
     else
-        addlong(ARM64_LDR_W(14, 0, STATE_x));
+        addlong(ARM64_MOV_REG(14, 28));  /* cached STATE_x */
 
     /* Extract packed BGRA from v0 to w4 */
     addlong(ARM64_FMOV_W_S(4, 0));
@@ -4093,7 +4101,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         if (params->aux_tiled)
             addlong(ARM64_LDR_W(4, 0, STATE_x_tiled));
         else
-            addlong(ARM64_LDR_W(4, 0, STATE_x));
+            addlong(ARM64_MOV_REG(4, 28));  /* cached STATE_x */
         /* Load new_depth */
         addlong(ARM64_LDRH_IMM(5, 0, STATE_new_depth));
         /* STRH w5, [x9, x4, LSL #1] */
@@ -4269,8 +4277,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * x86-64 ref: lines 3448-3469
      * ================================================================ */
 
-    /* LDR w4, [x0, #STATE_x] */
-    addlong(ARM64_LDR_W(4, 0, STATE_x));
+    /* use cached STATE_x from w28 */
+    addlong(ARM64_MOV_REG(4, 28));
 
     if (state->xdir > 0) {
         addlong(ARM64_ADD_IMM(5, 4, 1));
@@ -4280,10 +4288,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
     /* STR w5, [x0, #STATE_x] */
     addlong(ARM64_STR_W(5, 0, STATE_x));
+    /* update cached STATE_x for next iteration */
+    addlong(ARM64_MOV_REG(28, 5));
 
-    /* CMP w4, state->x2 */
-    addlong(ARM64_LDR_W(6, 0, STATE_x2));
-    addlong(ARM64_CMP_REG(4, 6));
+    /* CMP w4, w27 -- compare old x against cached STATE_x2 */
+    addlong(ARM64_CMP_REG(4, 27));
 
     /* B.NE loop_jump_pos */
     {
