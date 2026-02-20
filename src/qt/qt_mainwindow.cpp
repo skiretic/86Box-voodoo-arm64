@@ -19,6 +19,7 @@
  *          Copyright 2022 dob205
  */
 #include <QDebug>
+#include <cstring>
 
 #include "qt_mainwindow.hpp"
 #include "ui_qt_mainwindow.h"
@@ -1516,13 +1517,15 @@ MainWindow::on_actionFullscreen_triggered()
 }
 
 void
-MainWindow::getTitle_(wchar_t *title)
+MainWindow::getTitle_(char *title)
 {
-    this->windowTitle().toWCharArray(title);
+    QByteArray ba = this->windowTitle().toUtf8();
+    strncpy(title, ba.constData(), 511);
+    title[511] = '\0';
 }
 
 void
-MainWindow::getTitle(wchar_t *title)
+MainWindow::getTitle(char *title)
 {
     if (QThread::currentThread() == this->thread()) {
         getTitle_(title);

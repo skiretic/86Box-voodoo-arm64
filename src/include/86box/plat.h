@@ -159,7 +159,7 @@ extern void     plat_break(void);
 extern void     plat_send_to_clipboard(unsigned char *rgb, int width, int height);
 
 /* Resource management. */
-extern wchar_t *plat_get_string(int id);
+extern const char *plat_get_string(int id);
 
 /* Emulator start/stop support functions. */
 extern void do_start(void);

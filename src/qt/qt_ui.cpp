@@ -69,16 +69,16 @@ plat_delay_ms(uint32_t count)
 #endif
 }
 
-wchar_t *
-ui_window_title(wchar_t *str)
+char *
+ui_window_title(char *str)
 {
     if (str == nullptr) {
-        static wchar_t title[512] = { 0 };
+        static char title[512] = { 0 };
 
         main_window->getTitle(title);
         str = title;
     } else
-        emit main_window->setTitle(QString::fromWCharArray(str));
+        emit main_window->setTitle(QString::fromUtf8(str));
 
     return str;
 }

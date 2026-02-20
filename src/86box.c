@@ -362,7 +362,7 @@ int efscrnsz_y = SCREEN_RES_Y;
 
 __thread int is_cpu_thread = 0;
 
-static wchar_t mouse_msg[3][200];
+static char mouse_msg[3][200];
 
 static ATOMIC_INT do_pause_ack = 0;
 static ATOMIC_INT pause_ack = 0;
@@ -1846,36 +1846,32 @@ void
 update_mouse_msg(void)
 {
 #ifdef USE_SDL_UI
-    wchar_t  wcpufamily[2048];
-    wchar_t  wcpu[2048];
-    wchar_t  wmachine[2048];
-    wchar_t *wcp;
-
-    mbstowcs(wmachine, machine_getname(machine), strlen(machine_getname(machine)) + 1);
+    char  cpufamily[2048];
+    char *cp;
 
     if (!cpu_override)
-        mbstowcs(wcpufamily, cpu_f->name, strlen(cpu_f->name) + 1);
+        strncpy(cpufamily, cpu_f->name, sizeof(cpufamily) - 1);
     else
-        swprintf(wcpufamily, sizeof_w(wcpufamily), L"[U] %hs", cpu_f->name);
+        snprintf(cpufamily, sizeof(cpufamily), "[U] %s", cpu_f->name);
+    cpufamily[sizeof(cpufamily) - 1] = '\0';
 
-    wcp = wcschr(wcpufamily, L'(');
-    if (wcp) /* remove parentheses */
-        *(wcp - 1) = L'\0';
-    mbstowcs(wcpu, cpu_s->name, strlen(cpu_s->name) + 1);
-    swprintf(mouse_msg[0], sizeof_w(mouse_msg[0]), L"%ls v%ls - %%i%%%% - %ls - %ls/%ls - %ls",
-             EMU_NAME_W, EMU_VERSION_FULL_W, wmachine, wcpufamily, wcpu,
+    cp = strchr(cpufamily, '(');
+    if (cp) /* remove parentheses */
+        *(cp - 1) = '\0';
+    snprintf(mouse_msg[0], sizeof(mouse_msg[0]), "%s v%s - %%i%%%% - %s - %s/%s - %s",
+             EMU_NAME, EMU_VERSION_FULL, machine_getname(machine), cpufamily, cpu_s->name,
              plat_get_string(STRING_MOUSE_CAPTURE));
-    swprintf(mouse_msg[1], sizeof_w(mouse_msg[1]), L"%ls v%ls - %%i%%%% - %ls - %ls/%ls - %ls",
-             EMU_NAME_W, EMU_VERSION_FULL_W, wmachine, wcpufamily, wcpu,
+    snprintf(mouse_msg[1], sizeof(mouse_msg[1]), "%s v%s - %%i%%%% - %s - %s/%s - %s",
+             EMU_NAME, EMU_VERSION_FULL, machine_getname(machine), cpufamily, cpu_s->name,
              (mouse_get_buttons() > 2) ? plat_get_string(STRING_MOUSE_RELEASE) : plat_get_string(STRING_MOUSE_RELEASE_MMB));
-    swprintf(mouse_msg[2], sizeof_w(mouse_msg[2]), L"%ls v%ls - %%i%%%% - %ls - %ls/%ls",
-             EMU_NAME_W, EMU_VERSION_FULL_W, wmachine, wcpufamily, wcpu);
+    snprintf(mouse_msg[2], sizeof(mouse_msg[2]), "%s v%s - %%i%%%% - %s - %s/%s",
+             EMU_NAME, EMU_VERSION_FULL, machine_getname(machine), cpufamily, cpu_s->name);
 #else
-    swprintf(mouse_msg[0], sizeof_w(mouse_msg[0]), L"%%i%%%% - %ls",
+    snprintf(mouse_msg[0], sizeof(mouse_msg[0]), "%%i%%%% - %s",
              plat_get_string(STRING_MOUSE_CAPTURE));
-    swprintf(mouse_msg[1], sizeof_w(mouse_msg[1]), L"%%i%%%% - %ls",
+    snprintf(mouse_msg[1], sizeof(mouse_msg[1]), "%%i%%%% - %s",
              (mouse_get_buttons() > 2) ? plat_get_string(STRING_MOUSE_RELEASE) : plat_get_string(STRING_MOUSE_RELEASE_MMB));
-    wcsncpy(mouse_msg[2], L"%i%%", sizeof_w(mouse_msg[2]));
+    strncpy(mouse_msg[2], "%i%%", sizeof(mouse_msg[2]));
 #endif
 }
 
@@ -1949,7 +1945,7 @@ pc_close(UNUSED(thread_t *ptr))
 static void
 _ui_window_title(void *s)
 {
-    ui_window_title((wchar_t *) s);
+    ui_window_title((char *) s);
     free(s);
 }
 #endif
@@ -1966,8 +1962,8 @@ ack_pause(void)
 void
 pc_run(void)
 {
-    int     mouse_msg_idx;
-    wchar_t temp[200];
+    int  mouse_msg_idx;
+    char temp[200];
 
     /* Trigger a hard reset if one is pending. */
     if (hard_reset_pending) {
@@ -2009,10 +2005,10 @@ pc_run(void)
         else
             fps = ((fps + 20) / 50) * 50;
 #endif
-        swprintf(temp, sizeof_w(temp), mouse_msg[mouse_msg_idx], fps / (force_10ms ? 1 : 10));
+        snprintf(temp, sizeof(temp), mouse_msg[mouse_msg_idx], fps / (force_10ms ? 1 : 10));
 #ifdef __APPLE__
         /* Needed due to modifying the UI on the non-main thread is a big no-no. */
-        dispatch_async_f(dispatch_get_main_queue(), wcsdup((const wchar_t *) temp), _ui_window_title);
+        dispatch_async_f(dispatch_get_main_queue(), strdup(temp), _ui_window_title);
 #else
         ui_window_title(temp);
 #endif

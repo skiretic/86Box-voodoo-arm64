@@ -213,7 +213,8 @@ vnc_init(UNUSED(void *arg))
     cgapal_rebuild_monitor(0);
 
     if (rfb == NULL) {
-        wcstombs(title, ui_window_title(NULL), sizeof(title));
+        strncpy(title, ui_window_title(NULL), sizeof(title) - 1);
+        title[sizeof(title) - 1] = '\0';
         updatingSize = 0;
         allowedX     = scrnsz_x;
         allowedY     = scrnsz_y;
