@@ -736,7 +736,7 @@ ProgSettings::reloadStrings()
     translatedstrings[STRING_NET_ERROR_DESC]            = QCoreApplication::translate("", "The network configuration will be switched to the null driver").toUtf8().toStdString();
     translatedstrings[STRING_ESCP_ERROR_TITLE]          = QCoreApplication::translate("", "Unable to find Dot-Matrix fonts").toUtf8().toStdString();
     translatedstrings[STRING_ESCP_ERROR_DESC]           = QCoreApplication::translate("", "TrueType fonts in the \"roms/printer/fonts\" directory are required for the emulation of the Generic ESC/P 2 Dot-Matrix Printer.").toUtf8().toStdString();
-    translatedstrings[STRING_EDID_TOO_LARGE]            = QCoreApplication::translate("", "EDID file \"%ls\" is too large.").toUtf8().toStdString();
+    translatedstrings[STRING_EDID_TOO_LARGE]            = QCoreApplication::translate("", "EDID file \"%s\" is too large.").toUtf8().toStdString();
 }
 
 const char *

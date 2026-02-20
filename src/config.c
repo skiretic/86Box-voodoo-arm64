@@ -828,9 +828,9 @@ load_network(void)
             if (nc->net_type == NET_TYPE_PCAP) {
                 if ((network_dev_to_id(p) == -1) || (network_ndev == 1)) {
                     if (network_ndev == 1)
-                        ui_msgbox_header(MBX_ERROR, plat_get_string(STRING_PCAP_ERROR_NO_DEVICES), plat_get_string(STRING_PCAP_ERROR_DESC));
+                        ui_msgbox_header(MBX_ERROR | MBX_ANSI, (void *) plat_get_string(STRING_PCAP_ERROR_NO_DEVICES), (void *) plat_get_string(STRING_PCAP_ERROR_DESC));
                     else if (network_dev_to_id(p) == -1)
-                        ui_msgbox_header(MBX_ERROR, plat_get_string(STRING_PCAP_ERROR_INVALID_DEVICE), plat_get_string(STRING_PCAP_ERROR_DESC));
+                        ui_msgbox_header(MBX_ERROR | MBX_ANSI, (void *) plat_get_string(STRING_PCAP_ERROR_INVALID_DEVICE), (void *) plat_get_string(STRING_PCAP_ERROR_DESC));
                     strcpy(nc->host_dev_name, "none");
                 } else
                     strncpy(nc->host_dev_name, p, sizeof(nc->host_dev_name) - 1);
@@ -880,9 +880,9 @@ load_network(void)
             if (nc->net_type == NET_TYPE_PCAP) {
                 if ((network_dev_to_id(p) == -1) || (network_ndev == 1)) {
                     if (network_ndev == 1)
-                        ui_msgbox_header(MBX_ERROR, plat_get_string(STRING_PCAP_ERROR_NO_DEVICES), plat_get_string(STRING_PCAP_ERROR_DESC));
+                        ui_msgbox_header(MBX_ERROR | MBX_ANSI, (void *) plat_get_string(STRING_PCAP_ERROR_NO_DEVICES), (void *) plat_get_string(STRING_PCAP_ERROR_DESC));
                     else if (network_dev_to_id(p) == -1)
-                        ui_msgbox_header(MBX_ERROR, plat_get_string(STRING_PCAP_ERROR_INVALID_DEVICE), plat_get_string(STRING_PCAP_ERROR_DESC));
+                        ui_msgbox_header(MBX_ERROR | MBX_ANSI, (void *) plat_get_string(STRING_PCAP_ERROR_INVALID_DEVICE), (void *) plat_get_string(STRING_PCAP_ERROR_DESC));
                     strcpy(nc->host_dev_name, "none");
                 } else
                     strncpy(nc->host_dev_name, p, sizeof(nc->host_dev_name) - 1);

@@ -51,7 +51,7 @@ hdd_string_to_bus(char *str, int cdrom)
     if (!strcmp(str, "mfm")) {
         if (cdrom) {
 no_cdrom:
-            ui_msgbox_header(MBX_ERROR, plat_get_string(STRING_INVALID_CONFIG), plat_get_string(STRING_NO_ST506_ESDI_CDROM));
+            ui_msgbox_header(MBX_ERROR | MBX_ANSI, (void *) plat_get_string(STRING_INVALID_CONFIG), (void *) plat_get_string(STRING_NO_ST506_ESDI_CDROM));
             return 0;
         }
 

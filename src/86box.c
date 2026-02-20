@@ -1405,18 +1405,18 @@ pc_init_roms(void)
 int
 pc_init_modules(void)
 {
-    int     c;
-    wchar_t temp[512];
-    char    tempc[512];
+    int  c;
+    char temp[512];
+    char tempc[512];
 
     /* Load the ROMs for the selected machine. */
     if (!machine_available(machine)) {
-        swprintf(temp, sizeof_w(temp), plat_get_string(STRING_HW_NOT_AVAILABLE_MACHINE), machine_getname(machine));
+        snprintf(temp, sizeof(temp), plat_get_string(STRING_HW_NOT_AVAILABLE_MACHINE), machine_getname(machine));
         c       = 0;
         machine = -1;
         while (machine_get_internal_name_ex(c) != NULL) {
             if (machine_available(c)) {
-                ui_msgbox_header(MBX_INFO, plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
+                ui_msgbox_header(MBX_INFO | MBX_ANSI, (void *) plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
                 machine = c;
                 config_save();
                 break;
@@ -1433,12 +1433,12 @@ pc_init_modules(void)
     if (!video_card_available(gfxcard[0])) {
         memset(tempc, 0, sizeof(tempc));
         device_get_name(video_card_getdevice(gfxcard[0]), 0, tempc);
-        swprintf(temp, sizeof_w(temp), plat_get_string(STRING_HW_NOT_AVAILABLE_VIDEO), tempc);
+        snprintf(temp, sizeof(temp), plat_get_string(STRING_HW_NOT_AVAILABLE_VIDEO), tempc);
         c = 0;
         while (video_get_internal_name(c) != NULL) {
             gfxcard[0] = -1;
             if (video_card_available(c)) {
-                ui_msgbox_header(MBX_INFO, plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
+                ui_msgbox_header(MBX_INFO | MBX_ANSI, (void *) plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
                 gfxcard[0] = c;
                 config_save();
                 break;
@@ -1456,8 +1456,8 @@ pc_init_modules(void)
         if (!video_card_available(gfxcard[i])) {
             char tempc[512] = { 0 };
             device_get_name(video_card_getdevice(gfxcard[i]), 0, tempc);
-            swprintf(temp, sizeof_w(temp), plat_get_string(STRING_HW_NOT_AVAILABLE_VIDEO2), tempc);
-            ui_msgbox_header(MBX_INFO, plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
+            snprintf(temp, sizeof(temp), plat_get_string(STRING_HW_NOT_AVAILABLE_VIDEO2), tempc);
+            ui_msgbox_header(MBX_INFO | MBX_ANSI, (void *) plat_get_string(STRING_HW_NOT_AVAILABLE_TITLE), temp);
             gfxcard[i] = 0;
         }
     }
