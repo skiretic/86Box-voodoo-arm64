@@ -217,11 +217,13 @@ open_pseudo_terminal(serial_passthrough_t *dev)
     ascii_pipe_name[1023] = '\0';
     dev->master_fd        = (intptr_t) CreateNamedPipeA(ascii_pipe_name, PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT, PIPE_UNLIMITED_INSTANCES, 65536, 65536, NMPWAIT_USE_DEFAULT_WAIT, NULL);
     if (dev->master_fd == (intptr_t) INVALID_HANDLE_VALUE) {
-        wchar_t errorMsg[1024] = { 0 };
-        wchar_t finalMsg[1024] = { 0 };
-        DWORD   error          = GetLastError();
-        FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), errorMsg, 1024, NULL);
-        swprintf(finalMsg, 1024, L"Named Pipe (server, named_pipe=\"%hs\", port=COM%d): %ls\n", ascii_pipe_name, dev->port + 1, errorMsg);
+        wchar_t errorMsg_w[1024] = { 0 };
+        char    errorMsg[1024]   = { 0 };
+        char    finalMsg[2048]   = { 0 };
+        DWORD   error            = GetLastError();
+        FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), errorMsg_w, 1024, NULL);
+        wcstombs(errorMsg, errorMsg_w, sizeof(errorMsg) - 1);
+        snprintf(finalMsg, sizeof(finalMsg), "Named Pipe (server, named_pipe=\"%s\", port=COM%d): %s\n", ascii_pipe_name, dev->port + 1, errorMsg);
         ui_msgbox(MBX_ERROR | MBX_FATAL, finalMsg);
         return 0;
     }
@@ -250,10 +252,12 @@ connect_named_pipe_client(serial_passthrough_t *dev)
 
     if (hPipe == INVALID_HANDLE_VALUE) {
         DWORD error = GetLastError();
-        wchar_t errorMsg[1024] = { 0 };
-        wchar_t finalMsg[1024] = { 0 };
-        FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), errorMsg, 1024, NULL);
-        swprintf(finalMsg, 1024, L"Named Pipe (client, named_pipe=\"%hs\", port=COM%d): %ls\n", ascii_pipe_name, dev->port + 1, errorMsg);
+        wchar_t errorMsg_w[1024] = { 0 };
+        char    errorMsg[1024]   = { 0 };
+        char    finalMsg[2048]   = { 0 };
+        FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), errorMsg_w, 1024, NULL);
+        wcstombs(errorMsg, errorMsg_w, sizeof(errorMsg) - 1);
+        snprintf(finalMsg, sizeof(finalMsg), "Named Pipe (client, named_pipe=\"%s\", port=COM%d): %s\n", ascii_pipe_name, dev->port + 1, errorMsg);
         ui_msgbox(MBX_ERROR | MBX_FATAL, finalMsg);
         return 0;
     }
