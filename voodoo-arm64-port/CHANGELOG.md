@@ -4,6 +4,38 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Batch 9: Texture + color broadcast optimizations (2026-02-21)
+
+Three optimizations from the Round 2 audit: R2-07, R2-12, R2-08.
+Saves ~3-5 instructions/pixel (path-dependent).
+
+### R2-07: Eliminate ebp_store memory round-trip (2 insns/pixel, bilinear path)
+The bilinear texture section stored the bilinear lookup index to `STATE_ebp_store` (memory),
+then reloaded it ~40 instructions later. The value was kept in w10 which got clobbered
+in the intervening texture coordinate setup. Fix: hold the value in w17 (IP1 scratch register)
+instead of round-tripping through memory. Since there are no BL/BLR calls in the generated
+pixel loop, w17 is safe to use as a long-lived scratch. Eliminates 1 STR + 1 LDR, adds 1 MOV
+= net 1 instruction saved per bilinear-textured pixel.
+
+### R2-12: DUP_V4H_GPR replaces FMOV+DUP (1 insn per site, 8 sites)
+The scalar-to-vector broadcast pattern `FMOV Sd, Wn` + `DUP Vd.4H, Vd.H[0]` (2 instructions)
+is replaced by `DUP Vd.4H, Wn` (1 instruction). The `DUP (general)` variant takes the low
+16 bits of a GPR and broadcasts to all halfword lanes. All 8 affected sites broadcast values
+that are provably 0-255 (alpha values, LOD fractions, detail blend factors), so the 16-bit
+truncation is safe. Sites: TC_MSELECT_DETAIL (TMU0+TMU1), TC_MSELECT_LOD_FRAC (TMU0+TMU1),
+CC_MSELECT_AOTHER, CC_MSELECT_ALOCAL (both paths), CC_MSELECT_TEX.
+
+### R2-08: Cache original LOD for point-sample clamp/wrap (1 insn/pixel, point-sample path)
+In the point-sample texture path, `ADD w6, w6, #4` modifies the cached LOD (w6) to create
+the point-sample shift amount. The subsequent S/T clamp/wrap sections need the *original*
+LOD for indexing into tex_w_mask/tex_h_mask arrays, so they reloaded it from `STATE_lod`
+memory. Fix: insert `MOV w11, w6` before the ADD to save the original LOD in w11, which
+is free at that point. Eliminates 2 LDR instructions (one for S, one for T... wait, only
+the S section loaded it; the T section reused w11 from S). Net: 1 instruction saved per
+point-sampled pixel.
+
+---
+
 ## JIT cache expansion: 8 -> 32 slots per thread (2026-02-21)
 
 Increased `BLOCK_NUM` from 8 to 32, giving each of the 4 render threads 32 cache slots

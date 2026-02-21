@@ -1506,9 +1506,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* x86-64: LEA RSI, [RSI+RCX*4]  -- advance params by lod*4 for mask arrays
              * ARM64: We compute mask array base explicitly, no -0x10 hack.
              *
-             * Save bilinear_shift in state->ebp_store for later.
+             * Keep bilinear_shift in w17 (IP1 scratch) to avoid memory
+             * round-trip through STATE_ebp_store (Batch 9/R2-07).
              */
-            addlong(ARM64_STR_W(10, 0, STATE_ebp_store));
+            addlong(ARM64_MOV_REG(17, 10));
 
             /* Load texture base pointer: tex[tmu][lod]
              * x86-64: MOV RBP, state->tex[RDI+RCX*8]
@@ -1583,8 +1584,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                 addlong(ARM64_ADD_IMM_X(15, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 15, 6));
 
-                /* Load bilinear_shift from ebp_store */
-                addlong(ARM64_LDR_W(10, 0, STATE_ebp_store));
+                /* bilinear_shift is in w17 (Batch 9/R2-07) */
 
                 /* Test if S is negative */
                 addlong(ARM64_CMP_IMM(4, 0));
@@ -1636,8 +1636,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                 addlong(ARM64_ADD_IMM_X(15, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 15, 6));
 
-                /* Load bilinear_shift from ebp_store */
-                addlong(ARM64_LDR_W(10, 0, STATE_ebp_store));
+                /* bilinear_shift is in w17 (Batch 9/R2-07) */
 
                 addlong(ARM64_CMP_REG(4, 15));
                 {
@@ -1688,15 +1687,15 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* Load bilinear weights from lookup table.
              * x25 = bilinear_lookup pointer (pinned)
-             * w10 = bilinear_index * 32 (stored in ebp_store, loaded above)
+             * w17 = bilinear_index * 32 (kept in IP1 since Batch 9/R2-07)
              *
              * bilinear_lookup[idx*2+0] = {d0, d0, d0, d0, d1, d1, d1, d1}
              * bilinear_lookup[idx*2+1] = {d2, d2, d2, d2, d3, d3, d3, d3}
              *
              * Each entry is 16 bytes (128 bits). Total = 32 bytes per index pair.
              */
-            /* ADD x11, x25, x10 -- base of weight pair */
-            addlong(ARM64_ADD_REG_X(11, 25, 10));
+            /* ADD x11, x25, x17 -- base of weight pair (Batch 9/R2-07) */
+            addlong(ARM64_ADD_REG_X(11, 25, 17));
 
             /* LDR q16, [x11, #0]  -- weights for row0: d0|d1 */
             addlong(ARM64_LDR_Q(16, 11, 0));
@@ -1753,6 +1752,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* SUB w7, w7, w6  (tex_shift = 8 - lod) */
             addlong(ARM64_SUB_REG(7, 7, 6));
+            /* Save original LOD in w11 before we destroy w6 with +4.
+             * The clamp/wrap sections need the original LOD for array indexing
+             * into tex_w_mask/tex_h_mask. Avoids LDR from STATE_lod (Batch 9/R2-08). */
+            addlong(ARM64_MOV_REG(11, 6));
             /* ADD w6, w6, #4  -- point-sample uses a larger shift than bilinear:
              * bilinear shifts by 'lod' (integer texel step), but point-sample
              * needs to strip the 4-bit sub-texel fraction too, hence lod+4. */
@@ -1785,10 +1788,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             if (state->clamp_s[tmu]) {
                 /* Clamp S to [0, tex_w_mask[tmu][lod]]
                  * x86-64 uses -0x10 hack with ECX*4. We compute cleanly.
-                 * Note: lod was already incremented by 4 in w6, but we need
-                 * the original LOD for array indexing. Reload it.
+                 * w11 = original LOD (saved before ADD w6, w6, #4, Batch 9/R2-08)
                  */
-                addlong(ARM64_LDR_W(11, 0, STATE_lod));
                 addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
 
@@ -1799,8 +1800,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                 addlong(ARM64_CMP_REG(4, 15));
                 addlong(ARM64_CSEL(4, 15, 4, COND_CS));
             } else {
-                /* AND S with tex_w_mask */
-                addlong(ARM64_LDR_W(11, 0, STATE_lod));
+                /* AND S with tex_w_mask
+                 * w11 = original LOD (Batch 9/R2-08)
+                 */
                 addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
                 addlong(ARM64_AND_REG(4, 4, 15));
@@ -2556,13 +2558,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                             addlong(ARM64_LSL_IMM(4, 4, params->detail_scale[1]));
                         addlong(ARM64_CMP_REG(4, 11));
                         addlong(ARM64_CSEL(4, 11, 4, COND_GE));
-                        addlong(ARM64_FMOV_S_W(0, 4));
-                        addlong(ARM64_DUP_V4H_LANE(0, 0, 0));
+                        addlong(ARM64_DUP_V4H_GPR(0, 4));  /* Batch 9/R2-12 */
                         break;
                     case TC_MSELECT_LOD_FRAC:
                         addlong(ARM64_LDR_W(4, 0, STATE_lod_frac_n(1)));
-                        addlong(ARM64_FMOV_S_W(0, 4));
-                        addlong(ARM64_DUP_V4H_LANE(0, 0, 0));
+                        addlong(ARM64_DUP_V4H_GPR(0, 4));  /* Batch 9/R2-12 */
                         break;
                 }
 
@@ -2778,13 +2778,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                         addlong(ARM64_LSL_IMM(4, 4, params->detail_scale[0]));
                     addlong(ARM64_CMP_REG(4, 11));
                     addlong(ARM64_CSEL(4, 11, 4, COND_GE));
-                    addlong(ARM64_FMOV_S_W(4, 4));
-                    addlong(ARM64_DUP_V4H_LANE(4, 4, 0));
+                    addlong(ARM64_DUP_V4H_GPR(4, 4));  /* Batch 9/R2-12 */
                     break;
                 case TC_MSELECT_LOD_FRAC:
                     addlong(ARM64_LDR_W(4, 0, STATE_lod_frac_n(0)));
-                    addlong(ARM64_FMOV_S_W(4, 4));
-                    addlong(ARM64_DUP_V4H_LANE(4, 4, 0));
+                    addlong(ARM64_DUP_V4H_GPR(4, 4));  /* Batch 9/R2-12 */
                     break;
             }
 
@@ -3283,8 +3281,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* Copy a_other to v3 for CC_MSELECT_AOTHER before it gets modified */
     if (!(cc_mselect == 0 && cc_reverse_blend == 0) && cc_mselect == CC_MSELECT_AOTHER) {
         if (params->alphaMode & ((1 << 0) | (1 << 4))) {
-            addlong(ARM64_FMOV_S_W(3, 12));
-            addlong(ARM64_DUP_V4H_LANE(3, 3, 0));
+            addlong(ARM64_DUP_V4H_GPR(3, 12));  /* Batch 9/R2-12 */
         } else {
             addlong(ARM64_MOVI_V2D_ZERO(3));
         }
@@ -3327,8 +3324,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             case CC_MSELECT_ALOCAL:
                 /* Broadcast a_local (w15) to all 4 lanes of v3 */
                 if (params->alphaMode & ((1 << 0) | (1 << 4))) {
-                    addlong(ARM64_FMOV_S_W(3, 15));
-                    addlong(ARM64_DUP_V4H_LANE(3, 3, 0));
+                    addlong(ARM64_DUP_V4H_GPR(3, 15));  /* Batch 9/R2-12 */
                 } else {
                     /* Need to compute a_local if not done above */
                     switch (cca_localselect) {
@@ -3355,8 +3351,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                             addlong(ARM64_MOVZ_W(4, 0xFF));
                             break;
                     }
-                    addlong(ARM64_FMOV_S_W(3, 4));
-                    addlong(ARM64_DUP_V4H_LANE(3, 3, 0));
+                    addlong(ARM64_DUP_V4H_GPR(3, 4));  /* Batch 9/R2-12 */
                 }
                 break;
             case CC_MSELECT_AOTHER:
@@ -3365,8 +3360,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             case CC_MSELECT_TEX:
                 /* Broadcast tex_a to all lanes */
                 addlong(ARM64_LDR_W(4, 0, STATE_tex_a));
-                addlong(ARM64_FMOV_S_W(3, 4));
-                addlong(ARM64_DUP_V4H_LANE(3, 3, 0));
+                addlong(ARM64_DUP_V4H_GPR(3, 4));  /* Batch 9/R2-12 */
                 break;
             case CC_MSELECT_TEXRGB:
                 /* v4 has saved texture packed BGRA. Unpack to 4x16. */
