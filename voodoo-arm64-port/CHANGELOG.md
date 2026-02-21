@@ -4,6 +4,47 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Bugfix: Batch 7/M5 TMU0 Alpha Extraction Ordering (2026-02-21)
+
+### Root cause
+
+Batch 7/M5 refactored the dual-TMU TCA (texture combine alpha) section to extract the
+TMU0 alpha byte from v7 (packed BGRA) into w13 once, then reuse w13 at multiple consumer
+sites via `MOV w5, w13`. However, the extraction (`FMOV w13, s7` + `LSR w13, w13, #24`)
+was placed at the START of the TCA section -- AFTER code that already reads w13.
+
+Specifically, when `tca_sub_clocal` is true, the code emitted `MOV w5, w13` (to save the
+TMU0 alpha for the subtract step) immediately after the TC multiply, but w13 had not been
+extracted yet. This caused w13 to contain a stale value from earlier in the pipeline,
+producing incorrect alpha values in the TCA subtract path.
+
+### The fix
+
+Moved the w13 extraction to BEFORE the SMULL (TC multiply), which is the earliest point
+after v7 is established and before any code reads w13. The old extraction site at the TCA
+section start was replaced with a comment noting w13 is already populated.
+
+### Verification
+
+- The FMOV_W_S(13, 7) reads s7 (scalar lane 0 of v7) and writes w13 -- no conflict with
+  v4 which is the SMULL blend factor
+- The SMULL/SSHR/SQXTN sequence operates on v16/v1/v4 -- none touch w13 (GPR)
+- All downstream uses of w13 (tca_sub_clocal, TCA_MSELECT_CLOCAL, TCA_MSELECT_ALOCAL,
+  tca_add_clocal) now see the correct extracted alpha value
+
+### LDP pairing audit (Batch 7/M1) -- all verified correct
+
+Checked all 4 LDP pairing sites against struct layout:
+- `LDP w4, w5, [x0, #STATE_tex_s]`: tex_s=188, tex_t=192, diff=4 (adjacent int32)
+- `LDP x5, x6, [x0, #STATE_tmu_s(tmu)]`: tmu0_s=496, tmu0_t=504, diff=8 (adjacent int64)
+- `LDP x8, x9, [x0, #STATE_fb_mem]`: fb_mem=456, aux_mem=464, diff=8 (adjacent pointers)
+- All confirmed adjacent in `voodoo_state_t` with compile-time VOODOO_ASSERT_OFFSET checks
+
+#### File changed:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Optimization Batch 8: Loop Structure + Redundant Instruction Removal (2026-02-20)
 
 ### R2-24: Move STATE_x LDR before loop (1 insn/pixel saved)
@@ -77,8 +118,10 @@ Saves 2-3 instructions per fog-enabled pixel.
 
 In the dual-TMU texture combine alpha (TCA) section, the pattern `FMOV w, s7` +
 `LSR w, w, #24` (extract TMU0 alpha byte from packed BGRA) appeared at up to 4 sites.
-Now extracted once into w13 at the top of the TCA section and reused via `MOV w5, w13`
-at each consumer.
+Now extracted once into w13 and reused via `MOV w5, w13` at each consumer.
+
+**BUG**: Original placement was at TCA section start, AFTER code that reads w13 via
+`tca_sub_clocal`. Fixed 2026-02-21: extraction moved to before the SMULL.
 
 Saves 2-6 instructions depending on TCA configuration.
 
