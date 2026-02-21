@@ -101,7 +101,8 @@
  *   x30     = link register        (saved/restored)
  *
  * NEON (in generated code):
- *   v0-v7   = scratch (caller-saved)
+ *   v0-v5,v7 = scratch (caller-saved)
+ *   v6      = iterated BGRA cache during color combine   (scratch, computed per-pixel)
  *   v8      = xmm_01_w constant {1,1,1,1}     (callee-saved)
  *   v9      = xmm_ff_w constant {0xFF,...}     (callee-saved)
  *   v10     = xmm_ff_b constant {0xFFFFFF,0,0,0} (callee-saved)
@@ -1363,6 +1364,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
         /* Store LOD: STR w4, [x0, #STATE_lod] */
         addlong(ARM64_STR_W(4, 0, STATE_lod));
+        addlong(ARM64_MOV_REG(6, 4));  /* H4: keep LOD in w6 for bilinear/point-sample */
     } else {
         /* ============================================================
          * No perspective division (textureMode bit 0 clear)
@@ -1399,6 +1401,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
         /* STR w5, [x0, #STATE_lod] */
         addlong(ARM64_STR_W(5, 0, STATE_lod));
+        addlong(ARM64_MOV_REG(6, 5));  /* H4: keep LOD in w6 for bilinear/point-sample */
     }
 
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
@@ -1420,8 +1423,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* MOV w7, #8  (initial tex_shift) */
             addlong(ARM64_MOVZ_W(7, 8));
-            /* LDR w6, [x0, #STATE_lod] */
-            addlong(ARM64_LDR_W(6, 0, STATE_lod));
+            /* w6 = LOD, cached by H4 optimization (no reload needed) */
             /* MOV w10, #1 */
             addlong(ARM64_MOVZ_W(10, 1));
             /* SUB w7, w7, w6  (tex_shift = 8 - lod) */
@@ -1483,8 +1485,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* ORR w10, w10, w11  (bilinear_index = frac_s | (frac_t << 4)) */
             addlong(ARM64_ORR_REG(10, 10, 11));
 
-            /* LDR w6, [x0, #STATE_lod] -- reload LOD for array indexing */
-            addlong(ARM64_LDR_W(6, 0, STATE_lod));
+            /* w6 = LOD, still cached from H4 optimization (no reload needed) */
 
             /* LSL w10, w10, #5  (bilinear_index * 32 = offset into bilinear_lookup) */
             addlong(ARM64_LSL_IMM(10, 10, 5));
@@ -1732,8 +1733,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* MOV w7, #8 */
             addlong(ARM64_MOVZ_W(7, 8));
-            /* LDR w6, [x0, #STATE_lod] */
-            addlong(ARM64_LDR_W(6, 0, STATE_lod));
+            /* w6 = LOD, cached by H4 optimization (no reload needed) */
 
             /* Load texture base pointer: tex[tmu][lod] */
             addlong(ARM64_ADD_IMM_X(11, 0, STATE_tex_n(tmu)));
@@ -2967,10 +2967,27 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   v2 = zero (cleared when needed; not guaranteed from prior phases)
      *   v3 = cc_mselect factor (4x16)
      *   v4 = saved texture RGB for CC_MSELECT_TEXRGB
+     *   v6 = cached iterated BGRA (H6 optimization, packed 8B)
      *   w14 = a_other (scalar alpha)
      *   w15 = a_local (scalar alpha)
      *   w4-w7, w10-w13 = scratch
      * ================================================================== */
+
+    /* H6: Determine if any color combine path uses iterated BGRA.
+     * Chroma key (site 1), clocal (sites 2+3), and cother (site 4)
+     * all pack the same ib/ig/ir/ia values.  Cache once in v6. */
+    int needs_iter_bgra = (_rgb_sel == CC_LOCALSELECT_ITER_RGB) ||
+        ((cc_sub_clocal || cc_mselect == CC_MSELECT_CLOCAL || cc_add == 1) &&
+         (!cc_localselect || cc_localselect_override));
+
+    /* H6: Cache iterated BGRA pack in v6 (NEON scratch, free during color combine) */
+    if (needs_iter_bgra) {
+        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
+        addlong(ARM64_LD1_V4S(6, 16));
+        addlong(ARM64_SSHR_V4S(6, 6, 12));
+        addlong(ARM64_SQXTN_4H_4S(6, 6));
+        addlong(ARM64_SQXTUN_8B_8H(6, 6));
+    }
 
     /* Save texture color for CC_MSELECT_TEXRGB before it gets overwritten */
     if (cc_mselect == CC_MSELECT_TEXRGB) {
@@ -2989,13 +3006,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->fbzMode & FBZ_CHROMAKEY) {
         switch (_rgb_sel) {
             case CC_LOCALSELECT_ITER_RGB:
-                /* Load ib/ig/ir/ia, shift right by 12, pack to bytes */
-                addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-                addlong(ARM64_LD1_V4S(16, 16));            /* v16 = {ib, ig, ir, ia} as 4xS32 */
-                addlong(ARM64_SSHR_V4S(16, 16, 12));       /* v16 >>= 12 (arithmetic) */
-                addlong(ARM64_SQXTN_4H_4S(16, 16));        /* v16.4H = saturate_narrow(v16.4S) */
-                addlong(ARM64_SQXTUN_8B_8H(16, 16));       /* v16.8B = unsigned saturate_narrow(v16.8H) */
-                addlong(ARM64_FMOV_W_S(4, 16));            /* w4 = packed BGRA */
+                /* H6: use cached iterated BGRA from v6 */
+                addlong(ARM64_FMOV_W_S(4, 6));             /* w4 = cached packed BGRA from v6 */
                 break;
             case CC_LOCALSELECT_COLOR1:
                 addlong(ARM64_LDR_W(4, 1, PARAMS_color1));
@@ -3153,13 +3165,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_LDR_W(4, 1, PARAMS_color0));
                 addlong(ARM64_FMOV_S_W(1, 4));
             } else {
-                /* clocal = CLAMP(ib>>12, ig>>12, ir>>12, ia>>12)
-                 * Load ib/ig/ir/ia as 4xS32, shift right 12, pack to bytes */
-                addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-                addlong(ARM64_LD1_V4S(1, 16));
-                addlong(ARM64_SSHR_V4S(1, 1, 12));
-                addlong(ARM64_SQXTN_4H_4S(1, 1));
-                addlong(ARM64_SQXTUN_8B_8H(1, 1));
+                /* H6: clocal = cached iterated BGRA from v6 */
+                addlong(ARM64_MOV_V(1, 6));                /* clocal = cached iterated BGRA from v6 */
             }
         } else {
             /* cc_localselect_override: select based on tex_a bit 7 */
@@ -3176,11 +3183,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
             /* tex_a bit 7 clear: use iter_rgb */
             PATCH_FORWARD_TBxZ(override_skip);
-            addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-            addlong(ARM64_LD1_V4S(1, 16));
-            addlong(ARM64_SSHR_V4S(1, 1, 12));
-            addlong(ARM64_SQXTN_4H_4S(1, 1));
-            addlong(ARM64_SQXTUN_8B_8H(1, 1));
+            /* H6: clocal = cached iterated BGRA from v6 */
+            addlong(ARM64_MOV_V(1, 6));                    /* clocal = cached iterated BGRA from v6 */
 
             PATCH_FORWARD_B(override_done);
         }
@@ -3196,12 +3200,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ---------------------------------------------------------------- */
     if (!cc_zero_other) {
         if (_rgb_sel == CC_LOCALSELECT_ITER_RGB) {
-            /* cother = CLAMP(ib>>12, ig>>12, ir>>12, ia>>12) */
-            addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-            addlong(ARM64_LD1_V4S(0, 16));
-            addlong(ARM64_SSHR_V4S(0, 0, 12));
-            addlong(ARM64_SQXTN_4H_4S(0, 0));
-            addlong(ARM64_SQXTUN_8B_8H(0, 0));
+            /* H6: cother = cached iterated BGRA from v6 */
+            addlong(ARM64_MOV_V(0, 6));                    /* cother = cached iterated BGRA from v6 */
         } else if (_rgb_sel == CC_LOCALSELECT_TEX) {
             /* cother = texture color, already in v0 from Phase 3 */
             /* (v0 already has packed BGRA) */
