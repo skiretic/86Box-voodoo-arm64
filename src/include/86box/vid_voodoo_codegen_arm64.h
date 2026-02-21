@@ -301,6 +301,9 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 /* MOVZ Xd, #imm16 -- 64-bit, hw=0 */
 #define ARM64_MOVZ_X(d, imm16) (0xD2800000 | IMM16(imm16) | Rd(d))
 
+/* MOVZ Xd, #imm16, LSL #(hw*16) -- 64-bit, arbitrary halfword */
+#define ARM64_MOVZ_X_HW(d, imm16, hw) (0xD2800000 | MOV_WIDE_HW(hw) | IMM16(imm16) | Rd(d))
+
 /* MOVK Wd, #imm16, LSL #16 -- keep, insert at hw=1 */
 #define ARM64_MOVK_W_16(d, imm16) (0x72A00000 | IMM16(imm16) | Rd(d))
 
@@ -1278,11 +1281,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         /* LDR x7, [x0, #STATE_tmu_w(tmu)] -- load W (64-bit) */
         addlong(ARM64_LDR_X(7, 0, STATE_tmu_w(tmu)));
 
-        /* MOV x4, #(1 << 48) -- dividend for W division */
-        addlong(ARM64_MOVZ_X(4, 0));            /* low 16 bits = 0 */
-        addlong(ARM64_MOVK_X(4, 0, 1));         /* bits 16-31 = 0 */
-        addlong(ARM64_MOVK_X(4, 0, 2));         /* bits 32-47 = 0 */
-        addlong(ARM64_MOVK_X(4, 1, 3));         /* bits 48-63 = 1 */
+        /* MOV x4, #(1 << 48) -- dividend for W division
+         * MOVZ with hw=3 zeros all other bits (R2-09). */
+        addlong(ARM64_MOVZ_X_HW(4, 1, 3));
 
         /* If tmu_w == 0, skip division (avoid divide-by-zero)
          * CBZ x7 replaces CMP #0 + B.EQ (Batch 7/L1) */
@@ -1987,13 +1988,29 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     {
         /* Helper macro is #undef'd after use to avoid polluting the namespace.
          * See the #undef immediately after the pointer loads below. */
+/* R2-23: Skip zero halfwords -- MOVZ targets the first non-zero halfword
+ * (which zeros everything else), then MOVK only for remaining non-zero
+ * halfwords. On macOS ARM64, hw=3 is always 0 for user pointers, saving
+ * 1+ MOVK per load. Typical macOS pointer saves 1-2 instructions. */
 #define EMIT_MOV_IMM64(d, ptr)                                                   \
     do {                                                                          \
         uint64_t _v = (uint64_t) (uintptr_t) (ptr);                              \
-        addlong(ARM64_MOVZ_X((d), (_v) & 0xFFFF));                               \
-        addlong(ARM64_MOVK_X((d), ((_v) >> 16) & 0xFFFF, 1));                    \
-        addlong(ARM64_MOVK_X((d), ((_v) >> 32) & 0xFFFF, 2));                    \
-        addlong(ARM64_MOVK_X((d), ((_v) >> 48) & 0xFFFF, 3));                    \
+        uint16_t _hw0 = (_v) & 0xFFFF;                                           \
+        uint16_t _hw1 = ((_v) >> 16) & 0xFFFF;                                   \
+        uint16_t _hw2 = ((_v) >> 32) & 0xFFFF;                                   \
+        uint16_t _hw3 = ((_v) >> 48) & 0xFFFF;                                   \
+        int _first = (_hw0) ? 0 : (_hw1) ? 1 : (_hw2) ? 2 : 3;                  \
+        uint16_t _first_val = (_first == 0) ? _hw0                               \
+                            : (_first == 1) ? _hw1                               \
+                            : (_first == 2) ? _hw2                               \
+                            : _hw3;                                               \
+        addlong(ARM64_MOVZ_X_HW((d), _first_val, _first));                       \
+        if (_first < 1 && _hw1)                                                  \
+            addlong(ARM64_MOVK_X((d), _hw1, 1));                                 \
+        if (_first < 2 && _hw2)                                                  \
+            addlong(ARM64_MOVK_X((d), _hw2, 2));                                 \
+        if (_first < 3 && _hw3)                                                  \
+            addlong(ARM64_MOVK_X((d), _hw3, 3));                                 \
     } while (0)
 
         EMIT_MOV_IMM64(19, &logtable);
@@ -2024,13 +2041,24 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     {
         uint64_t addr;
 
+/* R2-23: Same zero-halfword skip as EMIT_MOV_IMM64 for pointer into x16. */
 #define EMIT_LOAD_NEON_CONST(vreg, constaddr)                                        \
     do {                                                                             \
         addr = (uint64_t) (uintptr_t) (constaddr);                                  \
-        addlong(ARM64_MOVZ_X(16, addr & 0xFFFF));                                   \
-        addlong(ARM64_MOVK_X(16, (addr >> 16) & 0xFFFF, 1));                        \
-        addlong(ARM64_MOVK_X(16, (addr >> 32) & 0xFFFF, 2));                        \
-        addlong(ARM64_MOVK_X(16, (addr >> 48) & 0xFFFF, 3));                        \
+        uint16_t _h0 = addr & 0xFFFF;                                               \
+        uint16_t _h1 = (addr >> 16) & 0xFFFF;                                       \
+        uint16_t _h2 = (addr >> 32) & 0xFFFF;                                       \
+        uint16_t _h3 = (addr >> 48) & 0xFFFF;                                       \
+        int _f = (_h0) ? 0 : (_h1) ? 1 : (_h2) ? 2 : 3;                            \
+        uint16_t _fv = (_f == 0) ? _h0 : (_f == 1) ? _h1                            \
+                      : (_f == 2) ? _h2 : _h3;                                      \
+        addlong(ARM64_MOVZ_X_HW(16, _fv, _f));                                      \
+        if (_f < 1 && _h1)                                                           \
+            addlong(ARM64_MOVK_X(16, _h1, 1));                                      \
+        if (_f < 2 && _h2)                                                           \
+            addlong(ARM64_MOVK_X(16, _h2, 2));                                      \
+        if (_f < 3 && _h3)                                                           \
+            addlong(ARM64_MOVK_X(16, _h3, 3));                                      \
         addlong(ARM64_LDR_Q((vreg), 16, 0));                                        \
     } while (0)
 
@@ -3991,13 +4019,23 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->fbzMode & FBZ_RGB_WMASK) {
         if (dither) {
             /* ---- Dither path ---- */
-            /* Load dither table base pointer into x7 */
+            /* Load dither table base pointer into x7 (R2-23: skip zero halfwords) */
             {
                 uintptr_t dither_rb_addr = dither2x2 ? (uintptr_t) dither_rb2x2 : (uintptr_t) dither_rb;
-                addlong(ARM64_MOVZ_X(7, dither_rb_addr & 0xFFFF));
-                addlong(ARM64_MOVK_X(7, (dither_rb_addr >> 16) & 0xFFFF, 1));
-                addlong(ARM64_MOVK_X(7, (dither_rb_addr >> 32) & 0xFFFF, 2));
-                addlong(ARM64_MOVK_X(7, (dither_rb_addr >> 48) & 0xFFFF, 3));
+                uint16_t _dh0 = dither_rb_addr & 0xFFFF;
+                uint16_t _dh1 = (dither_rb_addr >> 16) & 0xFFFF;
+                uint16_t _dh2 = (dither_rb_addr >> 32) & 0xFFFF;
+                uint16_t _dh3 = (dither_rb_addr >> 48) & 0xFFFF;
+                int _df = (_dh0) ? 0 : (_dh1) ? 1 : (_dh2) ? 2 : 3;
+                uint16_t _dfv = (_df == 0) ? _dh0 : (_df == 1) ? _dh1
+                              : (_df == 2) ? _dh2 : _dh3;
+                addlong(ARM64_MOVZ_X_HW(7, _dfv, _df));
+                if (_df < 1 && _dh1)
+                    addlong(ARM64_MOVK_X(7, _dh1, 1));
+                if (_df < 2 && _dh2)
+                    addlong(ARM64_MOVK_X(7, _dh2, 2));
+                if (_df < 3 && _dh3)
+                    addlong(ARM64_MOVK_X(7, _dh3, 3));
             }
 
             /* w5 = real_y (saved in x24 by prologue) */

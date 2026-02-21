@@ -4,6 +4,29 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Batch 10: Prologue pointer load optimizations (2026-02-21)
+
+Two optimizations from the Round 2 audit: R2-23, R2-09.
+Saves ~13 instructions per JIT block (prologue-only, amortized over span).
+
+### R2-23: Skip zero halfwords in EMIT_MOV_IMM64 (~10 insns/block)
+The `EMIT_MOV_IMM64` macro loaded 64-bit pointers using a fixed 4-instruction sequence
+(MOVZ + 3 MOVK) regardless of the pointer value. On macOS ARM64, user-space pointers are
+in the range `0x0000_0001_xxxx_xxxx`, so the top halfword (hw=3) is always zero. Additionally,
+the bottom halfword is often zero for page-aligned data. The optimized version finds the first
+non-zero halfword and uses `MOVZ Xd, #imm16, LSL #(hw*16)` (which zeros all other bits), then
+only emits MOVK for remaining non-zero halfwords. Applied to 4 sites: EMIT_MOV_IMM64 (7 prologue
+pointer loads), EMIT_LOAD_NEON_CONST (3 NEON constant loads), and dither_rb_addr (1 dither
+table pointer). New `ARM64_MOVZ_X_HW(d, imm16, hw)` encoding macro added.
+
+### R2-09: MOVZ with hw=3 for (1<<48) constant (3 insns/block)
+The perspective texture division dividend `0x0001_0000_0000_0000` (1<<48) was loaded with 4
+instructions: `MOVZ X4, #0` + 3 MOVK (inserting zeros for hw=1,2 and finally #1 for hw=3).
+Since only bit 48 is set, a single `MOVZ X4, #1, LSL #48` (hw=3) suffices -- it places 1 in
+bits [63:48] and zeros all other bits. Saves 3 instructions per perspective-textured block.
+
+---
+
 ## Batch 9: Texture + color broadcast optimizations (2026-02-21)
 
 Three optimizations from the Round 2 audit: R2-07, R2-12, R2-08.

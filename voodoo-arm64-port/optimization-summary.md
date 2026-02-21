@@ -20,12 +20,13 @@
 | 7-fix | Batch 7/M5 alpha extraction bug | — | — | PASS | [x] | [x] | [x] | [x] | DONE |
 | 8 | Loop + CC + stipple peepholes (R2) | R2-24,R2-25,R2-13,R2-27 | ~4 insn/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 9 | Texture + color broadcast opts (R2) | R2-07,R2-12,R2-08 | ~3-5 insn/px | PASS | [x] | [x] | [ ] | — | DONE |
+| 10 | Prologue pointer load opts (R2) | R2-23,R2-09 | ~13 insn/block | PASS | [x] | [x] | [ ] | — | DONE |
 | D | SDIV → reciprocal (deferred) | H5 | ~5-15 cyc/px | N/A | — | — | — | — | DEFERRED |
 
 **Legend**: PASS = audit verified, PARTIAL = partially audited, PENDING = not yet audited
 
-**Completed**: 7 / 7 Round 1 batches + 2 Round 2 batches
-**Estimated total savings**: 15-25% fewer instructions per pixel (~80-100 insns removed, Round 1) + ~7-9 insns/pixel (Round 2 Batches 8+9)
+**Completed**: 7 / 7 Round 1 batches + 3 Round 2 batches
+**Estimated total savings**: 15-25% fewer instructions per pixel (~80-100 insns removed, Round 1) + ~7-9 insns/pixel (Round 2 Batches 8+9) + ~13 insns/block (Batch 10)
 
 ---
 
@@ -38,13 +39,12 @@ A second optimization audit was performed on 2026-02-21, generating 33 findings 
 
 | Item | Type | Description | Est. Savings | Risk |
 |------|------|-------------|-------------|------|
-| **Batch 10** | Prologue opt | R2-23 (skip zero halfwords in EMIT_MOV_IMM64), R2-09 (MOVZ with hw for 1<<48) | ~5-10 insns/block (negligible wall-clock) | Zero |
 | **Batch D** | Per-pixel opt | SDIV → reciprocal approximation for perspective W division | ~5-15 cyc/pixel | High (accuracy) |
 | **JIT cache expansion** | Infrastructure | Increase cache from 8 to 16-32 slots per thread to reduce recompilation thrashing (258K recompiles for 351 configs). Smoothness/latency improvement, not throughput. | Reduced micro-stutters | Low |
 | **Performance benchmarking** | Validation | A/B comparison of pre-optimization vs post-optimization builds with fixed workload. Actually measure the estimated 10-20% wall-clock improvement. | N/A | N/A |
 | **Debug logging levels** | Infrastructure | Add verbosity tiers (level 1 = GENERATE only, level 2 = +EXECUTE/POST, level 3 = +PIXELS). Current uncapped logging produces 38GB+ logs. | N/A | Zero |
 
-**Recommended order**: Batch 10 → JIT cache expansion → Debug logging levels → Performance benchmarking → Batch D
+**Recommended order**: JIT cache expansion → Debug logging levels → Performance benchmarking → Batch D
 
 ---
 
@@ -63,6 +63,7 @@ A second optimization audit was performed on 2026-02-21, generating 33 findings 
 | 7-fix | `b48b0d763` | 2026-02-21 | Batch 7/M5 bugfix: moved TMU0 alpha extraction before SMULL (was after tca_sub_clocal read of w13) |
 | 8 | `9dddfba23` | 2026-02-21 | Round 2 peepholes: STATE_x LDR before loop (R2-24), eliminate MOV w4,w28 (R2-25), remove MOV v16,v0 in cc multiply (R2-13), MVN directly from w28 in stipple (R2-27) |
 | 9 | `5d77b8ce3` | 2026-02-21 | Round 2 texture+color: ebp_store→w17 (R2-07), DUP_V4H_GPR (R2-12, 8 sites), point-sample LOD cache w11 (R2-08) |
+| 10 | `a57fc9af1` | 2026-02-21 | Round 2 prologue: skip zero halfwords in EMIT_MOV_IMM64 (R2-23, 4 sites), MOVZ hw=3 for 1<<48 (R2-09) |
 
 ---
 
@@ -82,6 +83,7 @@ A second optimization audit was performed on 2026-02-21, generating 33 findings 
 | 7 (M1+M3+M5+M6+L1+L2) | LDP, fogColor hoist, TCA extract-once, BFI, CBZ, MOV elim | 16-22 |
 | 8 (R2-24+R2-25+R2-13+R2-27) | Loop LDR hoist, loop MOV elim, cc multiply MOV, stipple MVN | ~4 |
 | 9 (R2-07+R2-12+R2-08) | ebp_store→w17 (bilinear), DUP_V4H_GPR (8 sites), LOD cache w11 (point-sample) | ~3-5 |
+| 10 (R2-23+R2-09) | Skip zero halfwords in pointer loads (4 sites), MOVZ hw=3 for 1<<48 | ~13/block |
 
 ### By Category
 
