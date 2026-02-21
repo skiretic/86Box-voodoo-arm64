@@ -14,7 +14,7 @@
 | 2 | Cache STATE_x / STATE_x2 | H2, H3 | ~20-36 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 3 | Hoist params delta loads | H1 | ~20-36 cyc/px | PARTIAL | [x] | [x] | [x] | [x] | DONE |
 | 4 | BIC+ASR clamp idiom | M2 | ~16 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
-| 5 | Pin rgb565 ptr + batch counters | M4, M7 | ~8 cyc/px | PENDING | [ ] | [ ] | [ ] | [ ] | PENDING |
+| 5 | Pin rgb565 ptr + batch counters | M4, M7 | ~8 cyc/px | PASS | [x] | [x] | [ ] | [ ] | TESTING |
 | 6 | Cache LOD + iterated BGRA | H4, H6 | ~9-16 cyc/px | PARTIAL | [ ] | [ ] | [ ] | [ ] | PENDING |
 | 7 | Misc small wins + dead code | M1,M3,M5,M6,L1,L2 | ~16-22 cyc/px | PENDING | [ ] | [ ] | [ ] | [ ] | PENDING |
 | D | SDIV → reciprocal (deferred) | H5 | ~5-15 cyc/px | N/A | — | — | — | — | DEFERRED |

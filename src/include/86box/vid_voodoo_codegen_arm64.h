@@ -94,7 +94,7 @@
  *   x23     = i_00_ff_w pointer    (callee-saved, pinned)
  *   x24     = real_y               (callee-saved copy)
  *   x25     = bilinear_lookup ptr  (callee-saved, pinned)
- *   x26     = scratch (callee-saved, available)
+ *   x26     = rgb565 table pointer  (callee-saved, pinned)
  *   x27     = STATE_x2 (loop bound, callee-saved)
  *   x28     = STATE_x  (pixel x coord, callee-saved)
  *   x29     = frame pointer        (saved/restored)
@@ -643,6 +643,12 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 
 /* LDP Xt1, Xt2, [Xn, #imm] -- signed offset load pair (64-bit) */
 #define ARM64_LDP_OFF_X(t1, t2, n, imm) (0xA9400000 | IMM7_X(imm) | Rt2(t2) | Rn(n) | Rt(t1))
+
+/* STP Wt1, Wt2, [Xn, #imm] -- signed offset store pair (32-bit, imm multiple of 4) */
+#define ARM64_STP_OFF_W(t1, t2, n, imm) (0x29000000 | ((((imm) >> 2) & 0x7F) << 15) | Rt2(t2) | Rn(n) | Rt(t1))
+
+/* LDP Wt1, Wt2, [Xn, #imm] -- signed offset load pair (32-bit, imm multiple of 4) */
+#define ARM64_LDP_OFF_W(t1, t2, n, imm) (0x29400000 | ((((imm) >> 2) & 0x7F) << 15) | Rt2(t2) | Rn(n) | Rt(t1))
 
 /* STP Dt1, Dt2, [Xn, #imm] -- SIMD store pair (64-bit NEON) */
 #define ARM64_STP_D(t1, t2, n, imm) (0x6D000000 | (((imm >> 3) & 0x7F) << 15) | Rt2(t2) | Rn(n) | Rt(t1))
@@ -1989,6 +1995,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         EMIT_MOV_IMM64(22, &neon_00_ff_w);
         EMIT_MOV_IMM64(23, &i_00_ff_w);
         EMIT_MOV_IMM64(25, &bilinear_lookup);
+        EMIT_MOV_IMM64(26, &rgb565);
 
 #undef EMIT_MOV_IMM64
     }
@@ -3697,14 +3704,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         /* Decode dest RGB565 via rgb565[] lookup table.
          * rgb565 is an array of rgba8_t (4 bytes each).
          * Load rgb565[pixel] (32-bit), put in v4, unpack to 4x16. */
-        /* Load 64-bit pointer to rgb565 decode table.
-         * (EMIT_MOV_IMM64 was #undef'd after prologue; repeating the 4-insn sequence.) */
-        addlong(ARM64_MOVZ_X(7, (uintptr_t) rgb565 & 0xFFFF));
-        addlong(ARM64_MOVK_X(7, ((uintptr_t) rgb565 >> 16) & 0xFFFF, 1));
-        addlong(ARM64_MOVK_X(7, ((uintptr_t) rgb565 >> 32) & 0xFFFF, 2));
-        addlong(ARM64_MOVK_X(7, ((uintptr_t) rgb565 >> 48) & 0xFFFF, 3));
-        /* LDR w6, [x7, w6, UXTW #2] -- rgb565[pixel] */
-        addlong(ARM64_LDR_W_UXTW2(6, 7, 6));
+        /* Use pinned rgb565 pointer from x26 */
+        /* LDR w6, [x26, w6, UXTW #2] -- rgb565[pixel] */
+        addlong(ARM64_LDR_W_UXTW2(6, 26, 6));
         addlong(ARM64_FMOV_S_W(4, 6));
         addlong(ARM64_UXTL_8H_8B(4, 4));
 
@@ -4257,22 +4259,26 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_STR_X(10, 0, STATE_tmu1_w));
     }
 
-    /* Pixel count increment */
-    /* LDR w4, [x0, #STATE_pixel_count] */
-    addlong(ARM64_LDR_W(4, 0, STATE_pixel_count));
-    addlong(ARM64_ADD_IMM(4, 4, 1));
-    addlong(ARM64_STR_W(4, 0, STATE_pixel_count));
-
-    /* Texel count increment */
+    /* Pixel and texel count increments */
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
-        addlong(ARM64_LDR_W(4, 0, STATE_texel_count));
+        /* ADD x7, x0, #STATE_pixel_count -- base for LDP/STP (offset exceeds imm7 range) */
+        addlong(ARM64_ADD_IMM_X(7, 0, STATE_pixel_count));
+        /* LDP w4, w5, [x7] -- load pixel_count and texel_count */
+        addlong(ARM64_LDP_OFF_W(4, 5, 7, 0));
+        addlong(ARM64_ADD_IMM(4, 4, 1));
         if ((params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH
             || (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL) {
-            addlong(ARM64_ADD_IMM(4, 4, 1));
+            addlong(ARM64_ADD_IMM(5, 5, 1));
         } else {
-            addlong(ARM64_ADD_IMM(4, 4, 2));
+            addlong(ARM64_ADD_IMM(5, 5, 2));
         }
-        addlong(ARM64_STR_W(4, 0, STATE_texel_count));
+        /* STP w4, w5, [x7] -- store pixel_count and texel_count */
+        addlong(ARM64_STP_OFF_W(4, 5, 7, 0));
+    } else {
+        /* Pixel count only (no textures) */
+        addlong(ARM64_LDR_W(4, 0, STATE_pixel_count));
+        addlong(ARM64_ADD_IMM(4, 4, 1));
+        addlong(ARM64_STR_W(4, 0, STATE_pixel_count));
     }
 
     /* ================================================================

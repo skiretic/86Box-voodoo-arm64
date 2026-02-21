@@ -4,6 +4,35 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Optimization Batch 5: Pin rgb565 Pointer + Pair Counters (2026-02-20)
+
+### M4: Pin rgb565 lookup table pointer in x26
+
+Loaded the `rgb565` decode table pointer into callee-saved x26 in the prologue
+via `EMIT_MOV_IMM64(26, &rgb565)`. x26 was already saved/restored as part of
+the x25/x26 STP/LDP pair.
+
+In the alpha blend path, replaced the per-pixel 4-instruction MOVZ+MOVK sequence
+with a direct indexed load from x26: `LDR w6, [x26, w6, UXTW #2]`. Saves 3
+instructions per alpha-blended pixel.
+
+### M7: Pair pixel_count + texel_count with LDP/STP
+
+Added `ARM64_LDP_OFF_W` and `ARM64_STP_OFF_W` encoding macros for 32-bit
+load/store pair with signed offset.
+
+When textures are enabled (common case), pixel_count and texel_count are now
+loaded and stored as a pair. Since STATE_pixel_count (552) exceeds the LDP
+W-form imm7 range (max 252), an `ADD x7, x0, #STATE_pixel_count` computes
+the base address first, then LDP/STP at offset 0.
+
+Saves 1 instruction per pixel when textures are enabled.
+
+#### File changed:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Optimization Batch 4: BIC+ASR Clamp Idiom (2026-02-20)
 
 ### M2: Replace 5-instruction clamp with 3-instruction ARM idiom
