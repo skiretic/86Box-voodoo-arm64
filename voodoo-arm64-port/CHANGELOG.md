@@ -4,6 +4,51 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Optimization Batch 8: Loop Structure + Redundant Instruction Removal (2026-02-20)
+
+### R2-24: Move STATE_x LDR before loop (1 insn/pixel saved)
+
+The `LDR w28, [x0, #STATE_x]` at the top of the pixel loop was executed every iteration,
+but is only needed for the first iteration. On subsequent iterations, the `MOV w28, w5`
+at the bottom of the loop already keeps w28 in sync with STATE_x.
+
+Moved the LDR to before `loop_jump_pos` so it executes once. Subsequent iterations
+use the cached w28 value updated by the loop tail.
+
+### R2-25: Eliminate MOV w4,w28 in loop control (1 insn/pixel saved)
+
+The loop tail copied w28 to w4 (`MOV w4, w28`) then used w4 for ADD/SUB and CMP.
+Since w28 holds the old x value, the ADD/SUB and CMP can use w28 directly. The CMP
+is reordered before the `MOV w28, w5` update so it sees the old x value.
+
+Old: MOV w4,w28 / ADD w5,w4,#1 / STR / MOV w28,w5 / CMP w4,w27 / B.NE (6 insns)
+New: ADD w5,w28,#1 / STR / CMP w28,w27 / MOV w28,w5 / B.NE (5 insns)
+
+### R2-13: Eliminate redundant MOV v16,v0 in color combine multiply (1 insn/pixel saved, conditional)
+
+In the color combine multiply path, `MOV v16.16B, v0.16B` saved v0 before the blend
+factor computation (EOR/ADD on v3). But v0 is not modified by those operations -- only
+v3 is. The SMULL now reads v0 directly instead of the saved v16 copy.
+
+Applies when cc_mselect != 0 or cc_reverse_blend != 0.
+
+### R2-27: MVN directly from w28 in stipple (1 insn/pixel saved, stipple path)
+
+The pattern stipple computed `(~x) & 7` via `MOV w5, w28` / `MVN w5, w5` / `AND w5, w5, #7`.
+Since `ARM64_MVN(d, s)` supports different source and destination registers
+(`ORN Wd, WZR, Wn`), the MOV is eliminated: `MVN w5, w28` / `AND w5, w5, #7`.
+
+### Summary
+
+4 optimizations, saving 2 instructions per pixel unconditionally (R2-24, R2-25),
+plus 1 instruction in color combine multiply paths (R2-13) and 1 instruction in
+pattern stipple paths (R2-27).
+
+#### File changed:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Optimization Batch 7: Misc Small Wins + Dead Code Removal (2026-02-20)
 
 ### M1: LDP for adjacent 32-bit/64-bit loads

@@ -2081,13 +2081,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* LDP x8, x9, [x0, #STATE_fb_mem] -- load fb_mem and aux_mem (Batch 7/M1) */
     addlong(ARM64_LDP_OFF_X(8, 9, 0, STATE_fb_mem));
 
+    /* Load STATE_x into w28 once before the loop (Batch 8/R2-24).
+     * Subsequent iterations keep w28 updated via the MOV w28, w5 at the
+     * bottom of the loop, so this LDR only needs to execute once. */
+    addlong(ARM64_LDR_W(28, 0, STATE_x));
+
     /* ================================================================
      * Pixel loop entry point
      * ================================================================ */
     loop_jump_pos = block_pos;  /* Top of the pixel loop -- loopback branch targets here */
-
-    /* cache STATE_x in w28 for this iteration */
-    addlong(ARM64_LDR_W(28, 0, STATE_x));
 
     /* ====================================================================
      * STIPPLE TEST
@@ -2129,10 +2131,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_AND_MASK(4, 24, 2));
             /* LSL w4, w4, #3 */
             addlong(ARM64_LSL_IMM(4, 4, 3));
-            /* MOV w5, w28 -- cached STATE_x */
-            addlong(ARM64_MOV_REG(5, 28));
-            /* MVN w5, w5 */
-            addlong(ARM64_MVN(5, 5));
+            /* MVN w5, w28 -- NOT x directly from cached STATE_x (Batch 8/R2-27) */
+            addlong(ARM64_MVN(5, 28));
             /* AND w5, w5, #7 */
             addlong(ARM64_AND_MASK(5, 5, 3));
             /* ORR w4, w4, w5 */
@@ -3374,21 +3374,19 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 break;
         }
 
-        /* Save v0 for the multiply */
-        addlong(ARM64_MOV_V(16, 0));
-
-        /* Apply reverse blend to factor */
+        /* Apply reverse blend to factor (only v3 is modified, not v0) */
         if (!cc_reverse_blend) {
             addlong(ARM64_EOR_V(3, 3, 9));     /* XOR with 0xFF (v9 = xmm_ff_w) */
         }
         addlong(ARM64_ADD_V4H(3, 3, 8));       /* factor += 1 (v8 = xmm_01_w) */
 
         /* Signed multiply: v0 * v3 -> 32-bit -> >>8 -> saturating narrow
+         * v0 is used directly -- the EOR/ADD above only modify v3 (Batch 8/R2-13).
          * SMULL v17.4S, v0.4H, v3.4H
          * SSHR v17.4S, v17.4S, #8
          * SQXTN v0.4H, v17.4S
          */
-        addlong(ARM64_SMULL_4S_4H(17, 16, 3));
+        addlong(ARM64_SMULL_4S_4H(17, 0, 3));
         addlong(ARM64_SSHR_V4S(17, 17, 8));
         addlong(ARM64_SQXTN_4H_4S(0, 17));
     }
@@ -4296,22 +4294,21 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * x86-64 ref: lines 3448-3469
      * ================================================================ */
 
-    /* use cached STATE_x from w28 */
-    addlong(ARM64_MOV_REG(4, 28));
-
+    /* Compute new x directly from w28, eliminating MOV w4,w28 (Batch 8/R2-25).
+     * CMP uses w28 (old x) BEFORE w28 is updated, so the comparison is correct. */
     if (state->xdir > 0) {
-        addlong(ARM64_ADD_IMM(5, 4, 1));
+        addlong(ARM64_ADD_IMM(5, 28, 1));
     } else {
-        addlong(ARM64_SUB_IMM(5, 4, 1));
+        addlong(ARM64_SUB_IMM(5, 28, 1));
     }
 
     /* STR w5, [x0, #STATE_x] */
     addlong(ARM64_STR_W(5, 0, STATE_x));
-    /* update cached STATE_x for next iteration */
-    addlong(ARM64_MOV_REG(28, 5));
 
-    /* CMP w4, w27 -- compare old x against cached STATE_x2 */
-    addlong(ARM64_CMP_REG(4, 27));
+    /* CMP w28, w27 -- compare old x against cached STATE_x2 (before update) */
+    addlong(ARM64_CMP_REG(28, 27));
+    /* update cached STATE_x for next iteration (after CMP reads old value) */
+    addlong(ARM64_MOV_REG(28, 5));
 
     /* B.NE loop_jump_pos */
     {
