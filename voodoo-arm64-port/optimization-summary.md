@@ -18,7 +18,7 @@
 | 6 | Cache LOD + iterated BGRA | H4, H6 | ~9-16 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 7 | Misc small wins + dead code | M1,M3,M5,M6,L1,L2 | ~16-22 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 7-fix | Batch 7/M5 alpha extraction bug | — | — | PASS | [x] | [x] | [x] | [x] | DONE |
-| 8 | Loop + CC + stipple peepholes (R2) | R2-24,R2-25,R2-13,R2-27 | ~4 insn/px | PASS | [x] | [x] | [x] | [ ] | TESTING |
+| 8 | Loop + CC + stipple peepholes (R2) | R2-24,R2-25,R2-13,R2-27 | ~4 insn/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | D | SDIV → reciprocal (deferred) | H5 | ~5-15 cyc/px | N/A | — | — | — | — | DEFERRED |
 
 **Legend**: PASS = audit verified, PARTIAL = partially audited, PENDING = not yet audited
@@ -52,7 +52,42 @@ Remaining Round 2 candidates (not yet implemented):
 | 6 | `4ba01f4b4` | 2026-02-20 | Cache LOD in w6 (H4: 3 reloads eliminated), iterated BGRA in v6 (H6: 4 pack sequences replaced) |
 | 7 | `877bf0e6a` | 2026-02-20 | Misc small wins: LDP pairing (M1), fogColor hoist to v11 (M3), TCA alpha extract-once (M5), BFI RGB565 (M6), CBZ guard (L1), eliminate MOV w11 (L2), dead neon_minus_254 removal |
 | 7-fix | `b48b0d763` | 2026-02-21 | Batch 7/M5 bugfix: moved TMU0 alpha extraction before SMULL (was after tca_sub_clocal read of w13) |
-| 8 | pending | 2026-02-21 | Round 2 peepholes: STATE_x LDR before loop (R2-24), eliminate MOV w4,w28 (R2-25), remove MOV v16,v0 in cc multiply (R2-13), MVN directly from w28 in stipple (R2-27) |
+| 8 | `9dddfba23` | 2026-02-21 | Round 2 peepholes: STATE_x LDR before loop (R2-24), eliminate MOV w4,w28 (R2-25), remove MOV v16,v0 in cc multiply (R2-13), MVN directly from w28 in stipple (R2-27) |
+
+---
+
+## Total Savings Breakdown
+
+### Per-Pixel Instruction Savings by Batch
+
+| Batch | What | Insns Removed |
+|-------|------|---------------|
+| Dead code | Unused MOV v5,v1 + MOVI v2,#0 | 2/block |
+| 1 (H7+H8) | alookup[1] LDR → v8, MOV before USHR eliminated | ~28 (alpha blend path) |
+| 2 (H2+H3) | Cache STATE_x in w28, STATE_x2 in w27 | ~11 memory loads |
+| 3 (H1) | Hoist RGBA/TMU deltas to v12/v15/v14 | 3-4 |
+| 4 (M2) | BIC+ASR clamp at 9 sites (5→3 insns each) | ~18 (across clamp sites) |
+| 5 (M4+M7) | Pin rgb565 in x26 + LDP/STP counters | ~4 |
+| 6 (H4+H6) | Cache LOD in w6 + iterated BGRA in v6 | 12-16 |
+| 7 (M1+M3+M5+M6+L1+L2) | LDP, fogColor hoist, TCA extract-once, BFI, CBZ, MOV elim | 16-22 |
+| 8 (R2-24+R2-25+R2-13+R2-27) | Loop LDR hoist, loop MOV elim, cc multiply MOV, stipple MVN | ~4 |
+
+### By Category
+
+| Category | Insns Removed |
+|----------|---------------|
+| Redundant memory loads (STATE_x, LOD, deltas, constants) | 30-45 |
+| Unnecessary register copies (MOV before USHR/SMULL/etc.) | ~18 |
+| Oversized clamp sequences (5-insn → 3-insn × 9 sites) | ~18 |
+| Constant rematerialization (rgb565 ptr, alookup[1]) | 8-10 |
+| Misc peepholes (LDP, BFI, CBZ, fog hoist, loop opts) | 14-18 |
+
+### Total
+
+**~84-105 instructions removed per pixel** (path-dependent — alpha blend and dual-TMU paths save more).
+Estimated **15-25% fewer instructions per pixel**, roughly **10-20% wall-clock improvement** on the pixel pipeline.
+
+Only remaining candidate: Batch D (SDIV → reciprocal, est. 5-15 cyc/px) — deferred due to accuracy risk.
 
 ---
 
