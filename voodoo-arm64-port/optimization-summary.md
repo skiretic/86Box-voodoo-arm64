@@ -14,7 +14,7 @@
 | 2 | Cache STATE_x / STATE_x2 | H2, H3 | ~20-36 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 3 | Hoist params delta loads | H1 | ~20-36 cyc/px | PARTIAL | [x] | [x] | [x] | [x] | DONE |
 | 4 | BIC+ASR clamp idiom | M2 | ~16 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
-| 5 | Pin rgb565 ptr + batch counters | M4, M7 | ~8 cyc/px | PASS | [x] | [x] | [ ] | [ ] | TESTING |
+| 5 | Pin rgb565 ptr + batch counters | M4, M7 | ~8 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 6 | Cache LOD + iterated BGRA | H4, H6 | ~9-16 cyc/px | PARTIAL | [ ] | [ ] | [ ] | [ ] | PENDING |
 | 7 | Misc small wins + dead code | M1,M3,M5,M6,L1,L2 | ~16-22 cyc/px | PENDING | [ ] | [ ] | [ ] | [ ] | PENDING |
 | D | SDIV → reciprocal (deferred) | H5 | ~5-15 cyc/px | N/A | — | — | — | — | DEFERRED |
@@ -34,8 +34,8 @@
 | 1 | `ea8443b0f` | 2026-02-20 | Alpha blend rounding cleanup (H7: v8 replaces LDR alookup[1], H8: USHR Rd!=Rn eliminates MOV) |
 | 2 | `89dbbe6de` | 2026-02-20 | Cache STATE_x in w28 (H2: 9 loads eliminated), STATE_x2 in w27 (H3: 1 load eliminated) |
 | 3 | `e37e3cc0c` | 2026-02-20 | Hoist RGBA deltas→v12, TMU0 ST→v15, TMU1 ST→v14; frame 160→176 bytes |
-| 4 | (pending) | 2026-02-20 | BIC+ASR clamp idiom: 9 sites updated, new ARM64_BIC_REG_ASR macro added |
-| 5 | | | |
+| 4 | `269af2375` | 2026-02-20 | BIC+ASR clamp idiom: 9 sites updated, new ARM64_BIC_REG_ASR macro added |
+| 5 | `63d60c3db` | 2026-02-20 | Pin rgb565 ptr in x26 (M4), LDP/STP counter pairing (M7) |
 | 6 | | | |
 | 7 | | | |
 
