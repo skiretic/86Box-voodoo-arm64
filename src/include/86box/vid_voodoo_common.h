@@ -721,6 +721,7 @@ typedef struct voodoo_t {
     ATOMIC_INT jit_hit_count;
     ATOMIC_INT jit_gen_count;
     ATOMIC_INT jit_exec_count;
+    ATOMIC_INT jit_interp_count;
     ATOMIC_INT jit_verify_mismatches;
 
     struct voodoo_set_t *set;

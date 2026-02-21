@@ -4,6 +4,31 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Batch 8: Loop + CC + Stipple peepholes (2026-02-21)
+
+Re-applied 4 safe, mechanical optimizations from the Round 2 audit (R2-24, R2-25, R2-13, R2-27).
+Saves ~4 instructions/pixel total.
+
+### R2-24: Move STATE_x LDR before loop (1 insn/pixel)
+The `LDR w28, [x0, #STATE_x]` was inside the loop body, reloading every iteration. Since
+`MOV w28, w5` at the loop tail already keeps w28 current, the load only needs to run once
+before the first iteration. Moved it above `loop_jump_pos`.
+
+### R2-25: Eliminate MOV w4,w28 in loop control (1 insn/pixel)
+The loop tail had `MOV w4, w28` then `ADD/SUB w5, w4, #1`. Changed to `ADD/SUB w5, w28, #1`
+directly. Reordered CMP before `MOV w28, w5` so CMP reads the old x value.
+
+### R2-13: Eliminate redundant MOV v16,v0 in cc multiply (1 insn/pixel)
+`MOV v16, v0` saved v0 before the blend factor EOR/ADD, then SMULL read v16. Since only v3
+(blend factor) is modified between the MOV and SMULL, v0 is untouched. Removed the MOV and
+changed SMULL to read v0 directly: `SMULL v17.4S, v0.4H, v3.4H`.
+
+### R2-27: MVN directly from w28 in stipple (1 insn/pixel, stipple path)
+Pattern stipple had `MOV w5, w28` + `MVN w5, w5`. Since ARM64 MVN supports different src/dst
+registers, replaced with single `MVN w5, w28`.
+
+---
+
 ## Bugfix: Batch 7/M5 TMU0 Alpha Extraction Ordering (2026-02-21)
 
 ### Root cause
@@ -39,51 +64,6 @@ Checked all 4 LDP pairing sites against struct layout:
 - `LDP x5, x6, [x0, #STATE_tmu_s(tmu)]`: tmu0_s=496, tmu0_t=504, diff=8 (adjacent int64)
 - `LDP x8, x9, [x0, #STATE_fb_mem]`: fb_mem=456, aux_mem=464, diff=8 (adjacent pointers)
 - All confirmed adjacent in `voodoo_state_t` with compile-time VOODOO_ASSERT_OFFSET checks
-
-#### File changed:
-- `src/include/86box/vid_voodoo_codegen_arm64.h`
-
----
-
-## Optimization Batch 8: Loop Structure + Redundant Instruction Removal (2026-02-20)
-
-### R2-24: Move STATE_x LDR before loop (1 insn/pixel saved)
-
-The `LDR w28, [x0, #STATE_x]` at the top of the pixel loop was executed every iteration,
-but is only needed for the first iteration. On subsequent iterations, the `MOV w28, w5`
-at the bottom of the loop already keeps w28 in sync with STATE_x.
-
-Moved the LDR to before `loop_jump_pos` so it executes once. Subsequent iterations
-use the cached w28 value updated by the loop tail.
-
-### R2-25: Eliminate MOV w4,w28 in loop control (1 insn/pixel saved)
-
-The loop tail copied w28 to w4 (`MOV w4, w28`) then used w4 for ADD/SUB and CMP.
-Since w28 holds the old x value, the ADD/SUB and CMP can use w28 directly. The CMP
-is reordered before the `MOV w28, w5` update so it sees the old x value.
-
-Old: MOV w4,w28 / ADD w5,w4,#1 / STR / MOV w28,w5 / CMP w4,w27 / B.NE (6 insns)
-New: ADD w5,w28,#1 / STR / CMP w28,w27 / MOV w28,w5 / B.NE (5 insns)
-
-### R2-13: Eliminate redundant MOV v16,v0 in color combine multiply (1 insn/pixel saved, conditional)
-
-In the color combine multiply path, `MOV v16.16B, v0.16B` saved v0 before the blend
-factor computation (EOR/ADD on v3). But v0 is not modified by those operations -- only
-v3 is. The SMULL now reads v0 directly instead of the saved v16 copy.
-
-Applies when cc_mselect != 0 or cc_reverse_blend != 0.
-
-### R2-27: MVN directly from w28 in stipple (1 insn/pixel saved, stipple path)
-
-The pattern stipple computed `(~x) & 7` via `MOV w5, w28` / `MVN w5, w5` / `AND w5, w5, #7`.
-Since `ARM64_MVN(d, s)` supports different source and destination registers
-(`ORN Wd, WZR, Wn`), the MOV is eliminated: `MVN w5, w28` / `AND w5, w5, #7`.
-
-### Summary
-
-4 optimizations, saving 2 instructions per pixel unconditionally (R2-24, R2-25),
-plus 1 instruction in color combine multiply paths (R2-13) and 1 instruction in
-pattern stipple paths (R2-27).
 
 #### File changed:
 - `src/include/86box/vid_voodoo_codegen_arm64.h`
@@ -912,6 +892,9 @@ Audited all ~1450 comment lines in the ARM64 codegen header for accuracy.
 | 6 | Dither + FB Write + Depth Write + Increments | Committed | -- |
 | Debug | LD1/ST1 encoding fix + 5 other fixes | Committed | -- |
 | Infra | JIT debug logging runtime toggle | Committed | -- |
-| Fix | Voodoo 2 non-perspective texture alignment bug | Uncommitted | -- |
-| Hardening | Emission bounds checks + branch patch validation (state-locality experiment rolled back) | Uncommitted | -- |
-| Tool | JIT log analyzer script + INIT log line | Uncommitted | -- |
+| Fix | Voodoo 2 non-perspective texture alignment bug | Committed | -- |
+| Hardening | Emission bounds checks + branch patch validation | Committed | -- |
+| Tool | JIT log analyzer script + INIT log line | Committed | -- |
+| Opt 1-7 | Round 1 optimization batches (80-100 insns/pixel removed) | Committed | -- |
+| Opt 7-fix | Batch 7/M5 TMU0 alpha extraction ordering bugfix | Committed | -- |
+| Opt 8 | Round 2 Batch 8: loop + cc + stipple peepholes (~4 insn/px) | Testing | -- |

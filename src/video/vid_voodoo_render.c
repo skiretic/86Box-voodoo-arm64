@@ -989,14 +989,14 @@ voodoo_half_triangle(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *
             }
 
             if (voodoo->use_recompiler && voodoo_draw && !jit_verify_active) {
-                if (voodoo->jit_debug && voodoo->jit_debug_log && voodoo->jit_exec_count < 50) {
+                if (voodoo->jit_debug && voodoo->jit_debug_log) {
                     fprintf(voodoo->jit_debug_log,
                             "VOODOO JIT: EXECUTE #%d code=%p x=%d x2=%d real_y=%d odd_even=%d\n",
                             voodoo->jit_exec_count, (void *) voodoo_draw, x, x2, real_y, odd_even);
                     voodoo->jit_exec_count++;
                 }
                 voodoo_draw(state, params, x, real_y);
-                if (voodoo->jit_debug && voodoo->jit_debug_log && voodoo->jit_exec_count <= 50) {
+                if (voodoo->jit_debug && voodoo->jit_debug_log) {
                     fprintf(voodoo->jit_debug_log,
                             "VOODOO JIT POST: ib=%d ig=%d ir=%d ia=%d z=%08x pixel_count=%d\n",
                             state->ib, state->ig, state->ir, state->ia, state->z, state->pixel_count);
@@ -1019,12 +1019,11 @@ voodoo_half_triangle(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *
             do {
 #ifndef NO_CODEGEN
                 if (voodoo->jit_debug && voodoo->jit_debug_log) {
-                    static int interp_warn = 0;
-                    if (!interp_warn) {
+                    voodoo->jit_interp_count++;
+                    if (voodoo->jit_interp_count <= 50) {
                         fprintf(voodoo->jit_debug_log,
-                                "VOODOO WARNING: INTERPRETER FALLBACK! use_recomp=%d x=%d x2=%d real_y=%d\n",
-                                voodoo->use_recompiler, x, x2, real_y);
-                        interp_warn = 1;
+                                "VOODOO WARNING: INTERPRETER FALLBACK #%d! use_recomp=%d x=%d x2=%d real_y=%d\n",
+                                voodoo->jit_interp_count, voodoo->use_recompiler, x, x2, real_y);
                     }
                 }
 #endif

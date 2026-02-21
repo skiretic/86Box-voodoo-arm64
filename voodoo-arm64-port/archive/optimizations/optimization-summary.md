@@ -17,25 +17,12 @@
 | 5 | Pin rgb565 ptr + batch counters | M4, M7 | ~8 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 6 | Cache LOD + iterated BGRA | H4, H6 | ~9-16 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 7 | Misc small wins + dead code | M1,M3,M5,M6,L1,L2 | ~16-22 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
-| 7-fix | Batch 7/M5 alpha extraction bug | — | — | PASS | [x] | [x] | [x] | [x] | DONE |
-| 8 | Loop + CC + stipple peepholes (R2) | R2-24,R2-25,R2-13,R2-27 | ~4 insn/px | PASS | [x] | [x] | [x] | [ ] | TESTING |
 | D | SDIV → reciprocal (deferred) | H5 | ~5-15 cyc/px | N/A | — | — | — | — | DEFERRED |
 
 **Legend**: PASS = audit verified, PARTIAL = partially audited, PENDING = not yet audited
 
-**Completed**: 7 / 7 Round 1 batches + 1 Round 2 batch (Batch 8 pending commit)
-**Estimated total savings**: 15-25% fewer instructions per pixel (~80-100 insns removed, Round 1) + ~4 insns/pixel (Round 2 Batch 8)
-
----
-
-## Round 2 Optimization Audit
-
-A second optimization audit was performed on 2026-02-21, generating 33 findings across 10 categories
-(report: `optimization-audit-round2.md`). 15 findings were actionable. Batch 8 implements the 4 safest.
-
-Remaining Round 2 candidates (not yet implemented):
-- **Batch 9**: R2-07 (ebp_store elimination), R2-12 (DUP_V4H_GPR), R2-08 (LOD cache for point-sample)
-- **Batch 10**: R2-23 (skip zero halfwords in EMIT_MOV_IMM64), R2-09 (MOVZ with hw for 1<<48)
+**Completed**: 7 / 7 batches (all non-deferred work done)
+**Estimated total savings**: 15-25% fewer instructions per pixel (~10-20% wall-clock)
 
 ---
 
@@ -51,8 +38,6 @@ Remaining Round 2 candidates (not yet implemented):
 | 5 | `63d60c3db` | 2026-02-20 | Pin rgb565 ptr in x26 (M4), LDP/STP counter pairing (M7) |
 | 6 | `4ba01f4b4` | 2026-02-20 | Cache LOD in w6 (H4: 3 reloads eliminated), iterated BGRA in v6 (H6: 4 pack sequences replaced) |
 | 7 | `877bf0e6a` | 2026-02-20 | Misc small wins: LDP pairing (M1), fogColor hoist to v11 (M3), TCA alpha extract-once (M5), BFI RGB565 (M6), CBZ guard (L1), eliminate MOV w11 (L2), dead neon_minus_254 removal |
-| 7-fix | `b48b0d763` | 2026-02-21 | Batch 7/M5 bugfix: moved TMU0 alpha extraction before SMULL (was after tca_sub_clocal read of w13) |
-| 8 | pending | 2026-02-21 | Round 2 peepholes: STATE_x LDR before loop (R2-24), eliminate MOV w4,w28 (R2-25), remove MOV v16,v0 in cc multiply (R2-13), MVN directly from w28 in stipple (R2-27) |
 
 ---
 
@@ -100,7 +85,7 @@ One bonus finding: **v11** (neon_minus_254) is loaded in the prologue but never 
 
 All optimization logic, encoding claims, and safety analysis verified correct.
 
-### Round 1 Final Verification (2026-02-20)
+### Final Verification (2026-02-20)
 
 After all 7 batches, a comprehensive feature parity audit confirmed the ARM64 codegen matches the x86-64 reference across all 17 pipeline stages. No features were removed or degraded by any optimization.
 
@@ -109,16 +94,6 @@ Final regression test (Q3, Turok, 3DMark99, 3DMark2000, UT99):
 - 4.4 billion pixels rendered
 - 274 unique pipeline configurations exercised
 - 25 texture modes, 30 color configs, 25 alpha modes, 4 fog modes
-- Verdict: **HEALTHY**
-
-### Round 2 Batch 8 Verification (2026-02-21)
-
-Extensive regression test (Q3, 3DMark, multiple games on Voodoo 3 dual-TMU):
-- 138K blocks compiled, 0 rejects, 0 errors
-- 5.5 billion pixels rendered (174M JIT executions, 0 interpreter fallbacks)
-- 351 unique pipeline configurations exercised
-- 30 texture modes, 30 color configs, 28 alpha modes, 4 fog modes
-- 37M unique Z values, 32,550 unique RGB565 colors
 - Verdict: **HEALTHY**
 
 ## Documents

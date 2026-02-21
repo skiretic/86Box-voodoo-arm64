@@ -1609,6 +1609,9 @@ voodoo_card_close(voodoo_t *voodoo)
 #ifndef NO_CODEGEN
     voodoo_codegen_close(voodoo);
     if (voodoo->jit_debug_log) {
+        fprintf(voodoo->jit_debug_log,
+                "VOODOO JIT SUMMARY: jit_exec=%d interp_exec=%d gen=%d\n",
+                voodoo->jit_exec_count, voodoo->jit_interp_count, voodoo->jit_gen_count);
         fclose(voodoo->jit_debug_log);
         voodoo->jit_debug_log = NULL;
     }
