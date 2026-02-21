@@ -4,6 +4,38 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Optimization Batch 4: BIC+ASR Clamp Idiom (2026-02-20)
+
+### M2: Replace 5-instruction clamp with 3-instruction ARM idiom
+
+Replaced all 9 clamp-to-[0,255] sites from the old 5-instruction pattern
+(`CMP #0` / `CSEL LT` / `MOVZ #0xFF` / `CMP #0xFF` / `CSEL GT`) with the
+3-instruction ARM idiom:
+```
+MOVZ w10, #0xFF
+BIC  wN, wN, wN, ASR #31   // zero if negative
+CMP  wN, #0xFF
+CSEL wN, w10, wN, HI       // cap at 0xFF
+```
+
+Added new `ARM64_BIC_REG_ASR(d, n, m, shift)` encoding macro.
+
+**9 sites updated:**
+- Line 2886: TCA alpha clamp (w4)
+- Line 3060: Alpha select ITER_A (w14)
+- Line 3094: CCA local select ITER_A (w15)
+- Line 3111: CCA local select ITER_Z (w15)
+- Line 3280: CCA alpha combine result (w12)
+- Line 3318: CCA mux ITER_A local alpha (w4)
+- Line 3329: CCA mux ITER_Z local alpha (w4)
+- Line 3514: Fog source FOG_ALPHA (w4)
+- Line 3524: Fog source FOG_W (w4)
+
+#### File changed:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Optimization Batch 3: Hoist Params Delta Loads (2026-02-20)
 
 ### H1: Hoist loop-invariant RGBA and TMU S/T deltas to prologue

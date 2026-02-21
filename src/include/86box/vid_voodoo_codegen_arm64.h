@@ -408,6 +408,9 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 /* BIC Wd, Wn, Wm -- bit clear (AND NOT) */
 #define ARM64_BIC_REG(d, n, m) (0x0A200000 | Rm(m) | Rn(n) | Rd(d))
 
+/* BIC Wd, Wn, Wm, ASR #shift -- bit clear with arithmetic shift */
+#define ARM64_BIC_REG_ASR(d, n, m, shift) (0x0A200000 | (2 << 22) | (((shift) & 0x3F) << 10) | Rm(m) | Rn(n) | Rd(d))
+
 /* ========================================================================
  * Section 12a: GPR Bitwise -- Bitmask Immediate
  * ========================================================================
@@ -2869,8 +2872,6 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_ADD_IMM(5, 5, 1));
             /* MUL w4, w4, w5 */
             addlong(ARM64_MUL(4, 4, 5));
-            /* MOV w10, #0 -- zero for negative clamp via CSEL */
-            addlong(ARM64_MOV_ZERO(10));
             /* ASR w4, w4, #8 */
             addlong(ARM64_ASR_IMM(4, 4, 8));
 
@@ -2881,11 +2882,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             }
 
             /* Clamp: if negative, 0; if > 0xFF, 0xFF */
-            addlong(ARM64_CMP_IMM(4, 0));
-            addlong(ARM64_CSEL(4, 10, 4, COND_LT));
             addlong(ARM64_MOVZ_W(10, 0xFF));
+            addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
             addlong(ARM64_CMP_IMM(4, 0xFF));
-            addlong(ARM64_CSEL(4, 10, 4, COND_GT));
+            addlong(ARM64_CSEL(4, 10, 4, COND_HI));    /* cap at 0xFF */
 
             if (tca_invert_output) {
                 addlong(ARM64_EOR_MASK(4, 4, 8));  /* XOR with 0xFF */
@@ -3056,11 +3056,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_LDR_W(14, 0, STATE_ia));
                 addlong(ARM64_ASR_IMM(14, 14, 12));
                 /* Clamp to [0, 0xFF] */
-                addlong(ARM64_CMP_IMM(14, 0));
-                addlong(ARM64_CSEL(14, 31, 14, COND_LT));
                 addlong(ARM64_MOVZ_W(10, 0xFF));
-                addlong(ARM64_CMP_REG(14, 10));
-                addlong(ARM64_CSEL(14, 10, 14, COND_HI));
+                addlong(ARM64_BIC_REG_ASR(14, 14, 14, 31));  /* zero if negative */
+                addlong(ARM64_CMP_IMM(14, 0xFF));
+                addlong(ARM64_CSEL(14, 10, 14, COND_HI));    /* cap at 0xFF */
                 break;
             case A_SEL_TEX:
                 addlong(ARM64_LDR_W(14, 0, STATE_tex_a));
@@ -3091,11 +3090,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     /* Compute CLAMP(state->ia >> 12) */
                     addlong(ARM64_LDR_W(15, 0, STATE_ia));
                     addlong(ARM64_ASR_IMM(15, 15, 12));
-                    addlong(ARM64_CMP_IMM(15, 0));
-                    addlong(ARM64_CSEL(15, 31, 15, COND_LT));
                     addlong(ARM64_MOVZ_W(10, 0xFF));
-                    addlong(ARM64_CMP_REG(15, 10));
-                    addlong(ARM64_CSEL(15, 10, 15, COND_HI));
+                    addlong(ARM64_BIC_REG_ASR(15, 15, 15, 31));  /* zero if negative */
+                    addlong(ARM64_CMP_IMM(15, 0xFF));
+                    addlong(ARM64_CSEL(15, 10, 15, COND_HI));    /* cap at 0xFF */
                 }
                 break;
             case CCA_LOCALSELECT_COLOR0:
@@ -3104,18 +3102,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 break;
             case CCA_LOCALSELECT_ITER_Z:
                 addlong(ARM64_LDR_W(15, 0, STATE_z));
-                /* Need w10 = 0 and w11 = 0xFF for clamping if a_sel != ITER_A */
+                /* Ensure w10 = 0xFF for clamping if a_sel != ITER_A */
                 if (a_sel != A_SEL_ITER_A) {
                     addlong(ARM64_MOVZ_W(10, 0xFF));
                 }
                 addlong(ARM64_ASR_IMM(15, 15, 20));
-                addlong(ARM64_CMP_IMM(15, 0));
-                addlong(ARM64_CSEL(15, 31, 15, COND_LT));
-                if (a_sel == A_SEL_ITER_A) {
-                    addlong(ARM64_MOVZ_W(10, 0xFF));
-                }
-                addlong(ARM64_CMP_REG(15, 10));
-                addlong(ARM64_CSEL(15, 10, 15, COND_HI));
+                /* Clamp to [0, 0xFF] */
+                addlong(ARM64_BIC_REG_ASR(15, 15, 15, 31));  /* zero if negative */
+                addlong(ARM64_CMP_IMM(15, 0xFF));
+                addlong(ARM64_CSEL(15, 10, 15, COND_HI));    /* cap at 0xFF */
                 break;
             default:
                 addlong(ARM64_MOVZ_W(15, 0xFF));
@@ -3281,11 +3276,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
     /* Clamp alpha result to [0, 0xFF] */
     if (params->alphaMode & ((1 << 0) | (1 << 4))) {
-        addlong(ARM64_CMP_IMM(12, 0));
-        addlong(ARM64_CSEL(12, 31, 12, COND_LT));  /* if negative, 0 */
         addlong(ARM64_MOVZ_W(10, 0xFF));
+        addlong(ARM64_BIC_REG_ASR(12, 12, 12, 31));  /* zero if negative */
         addlong(ARM64_CMP_IMM(12, 0xFF));
-        addlong(ARM64_CSEL(12, 10, 12, COND_GT));   /* if > 0xFF, 0xFF */
+        addlong(ARM64_CSEL(12, 10, 12, COND_HI));    /* cap at 0xFF */
         if (cca_invert_output) {
             addlong(ARM64_EOR_MASK(12, 12, 8));      /* XOR with 0xFF */
         }
@@ -3320,11 +3314,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                         case CCA_LOCALSELECT_ITER_A:
                             addlong(ARM64_LDR_W(4, 0, STATE_ia));
                             addlong(ARM64_ASR_IMM(4, 4, 12));
-                            addlong(ARM64_CMP_IMM(4, 0));
-                            addlong(ARM64_CSEL(4, 31, 4, COND_LT));
                             addlong(ARM64_MOVZ_W(10, 0xFF));
-                            addlong(ARM64_CMP_REG(4, 10));
-                            addlong(ARM64_CSEL(4, 10, 4, COND_HI));
+                            addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
+                            addlong(ARM64_CMP_IMM(4, 0xFF));
+                            addlong(ARM64_CSEL(4, 10, 4, COND_HI));    /* cap at 0xFF */
                             break;
                         case CCA_LOCALSELECT_COLOR0:
                             addlong(ARM64_LDRB_IMM(4, 1, PARAMS_color0 + 3));
@@ -3332,11 +3325,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                         case CCA_LOCALSELECT_ITER_Z:
                             addlong(ARM64_LDR_W(4, 0, STATE_z));
                             addlong(ARM64_ASR_IMM(4, 4, 20));
-                            addlong(ARM64_CMP_IMM(4, 0));
-                            addlong(ARM64_CSEL(4, 31, 4, COND_LT));
                             addlong(ARM64_MOVZ_W(10, 0xFF));
-                            addlong(ARM64_CMP_REG(4, 10));
-                            addlong(ARM64_CSEL(4, 10, 4, COND_HI));
+                            addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
+                            addlong(ARM64_CMP_IMM(4, 0xFF));
+                            addlong(ARM64_CSEL(4, 10, 4, COND_HI));    /* cap at 0xFF */
                             break;
                         default:
                             addlong(ARM64_MOVZ_W(4, 0xFF));
@@ -3518,22 +3510,20 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_LDR_W(4, 0, STATE_ia));
                     addlong(ARM64_ASR_IMM(4, 4, 12));
                     /* Clamp to [0, 0xFF] */
-                    addlong(ARM64_CMP_IMM(4, 0));
-                    addlong(ARM64_CSEL(4, 31, 4, COND_LT));
-                    addlong(ARM64_MOVZ_W(5, 0xFF));
-                    addlong(ARM64_CMP_REG(4, 5));
-                    addlong(ARM64_CSEL(4, 5, 4, COND_HI));
+                    addlong(ARM64_MOVZ_W(10, 0xFF));
+                    addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
+                    addlong(ARM64_CMP_IMM(4, 0xFF));
+                    addlong(ARM64_CSEL(4, 10, 4, COND_HI));    /* cap at 0xFF */
                     break;
 
                 case FOG_W:
                     /* fog_a = CLAMP(w >> 32) -- high 32 bits of 64-bit W */
                     addlong(ARM64_LDR_W(4, 0, STATE_w + 4));  /* high word of w */
                     /* Clamp to [0, 0xFF] */
-                    addlong(ARM64_CMP_IMM(4, 0));
-                    addlong(ARM64_CSEL(4, 31, 4, COND_LT));
-                    addlong(ARM64_MOVZ_W(5, 0xFF));
-                    addlong(ARM64_CMP_REG(4, 5));
-                    addlong(ARM64_CSEL(4, 5, 4, COND_HI));
+                    addlong(ARM64_MOVZ_W(10, 0xFF));
+                    addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
+                    addlong(ARM64_CMP_IMM(4, 0xFF));
+                    addlong(ARM64_CSEL(4, 10, 4, COND_HI));    /* cap at 0xFF */
                     break;
             }
 
