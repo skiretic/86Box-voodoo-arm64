@@ -67,7 +67,7 @@
  *   voodoo->jit_last_block[4], jit_next_block_to_write[4], jit_recomp
  */
 
-#define BLOCK_NUM  8
+#define BLOCK_NUM  32
 #define BLOCK_MASK (BLOCK_NUM - 1)
 #define BLOCK_SIZE 16384
 
@@ -4425,7 +4425,7 @@ arm64_codegen_store_cache_key(voodoo_arm64_data_t *data, voodoo_t *voodoo, voodo
  * for the active pipeline stages. This is dramatically faster than the
  * C interpreter, which must check every option on every pixel.
  *
- * Blocks are cached in an 8-entry ring buffer per render target. When the
+ * Blocks are cached in a 32-entry ring buffer per render target. When the
  * game changes rendering state (e.g., switches from opaque to transparent
  * objects), a new block is compiled for the new state. Most games use only
  * a handful of distinct pipeline configurations per frame.
@@ -4440,7 +4440,7 @@ arm64_codegen_store_cache_key(voodoo_arm64_data_t *data, voodoo_t *voodoo, voodo
  * voodoo_get_block() -- find or JIT-compile a pixel pipeline block.
  *
  * Algorithm:
- *   1. Search the 8-entry ring buffer (jit_last_block[odd_even] to +7) for a
+ *   1. Search the 32-entry ring buffer (jit_last_block[odd_even] to +31) for a
  *      cached block whose key matches the current hardware state. Return it on hit.
  *   2. On miss, evict jit_next_block_to_write[odd_even] and JIT-compile a new block:
  *      a. Make code page writable (W^X toggle).
@@ -4459,8 +4459,8 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     voodoo_arm64_data_t *voodoo_arm64_data = voodoo->codegen_data;
     voodoo_arm64_data_t *data;
 
-    for (uint8_t c = 0; c < 8; c++) {
-        int probe = (b + c) & 7;
+    for (uint8_t c = 0; c < BLOCK_NUM; c++) {
+        int probe = (b + c) & BLOCK_MASK;
         data      = &voodoo_arm64_data[odd_even + probe * 4];
 
         if ((data->valid || data->rejected)
@@ -4510,7 +4510,7 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
                     "code=%p\n",
                     odd_even, voodoo->jit_next_block_to_write[odd_even], (void *) data->code_block);
         }
-        voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & 7;
+        voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & BLOCK_MASK;
         return NULL;
     }
 
@@ -4530,7 +4530,7 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
                     "(limit=%d) -> interpreter fallback\n",
                     odd_even, voodoo->jit_next_block_to_write[odd_even], BLOCK_SIZE);
         }
-        voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & 7;
+        voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & BLOCK_MASK;
         return NULL;
     }
 
@@ -4558,7 +4558,7 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
                     "code=%p\n",
                     odd_even, voodoo->jit_next_block_to_write[odd_even], (void *) data->code_block);
         }
-        voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & 7;
+        voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & BLOCK_MASK;
         return NULL;
     }
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -4569,7 +4569,7 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
 #    endif
 #endif
 
-    voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & 7;
+    voodoo->jit_next_block_to_write[odd_even] = (voodoo->jit_next_block_to_write[odd_even] + 1) & BLOCK_MASK;
 
     return data->code_block;
 }

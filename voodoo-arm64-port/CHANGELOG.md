@@ -4,6 +4,32 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## JIT cache expansion: 8 -> 32 slots per thread (2026-02-21)
+
+Increased `BLOCK_NUM` from 8 to 32, giving each of the 4 render threads 32 cache slots
+(128 total, up from 32). Real workloads hit 180-351 unique pipeline configurations;
+the old 8-slot cache caused massive recompilation churn (258K recompilations for 351
+configs in a single Q3 session). With 32 slots, the working set fits comfortably and
+most recompilations are eliminated after warmup.
+
+### Memory budget
+- Old: 32 slots x 16KB = 512KB code memory
+- New: 128 slots x 16KB = 2MB code memory (well under 4MB budget)
+- Metadata: 128 x sizeof(voodoo_arm64_data_t) ~ 10KB (negligible)
+
+### Changes
+- `BLOCK_NUM`: 8 -> 32, `BLOCK_MASK`: 7 -> 31
+- Cache search loop: `c < 8` -> `c < BLOCK_NUM`
+- All round-robin eviction masks: hardcoded `& 7` -> `& BLOCK_MASK`
+- Comments updated to reflect 32-entry ring buffer
+
+### Platform compatibility
+- macOS: `pthread_jit_write_protect_np` toggles per-thread (not per-page), unaffected
+- Linux/Pi 5: `mprotect` per-block unchanged (each slot has its own mmap region)
+- Windows ARM64: `VirtualProtect` per-block unchanged
+
+---
+
 ## Batch 8: Loop + CC + Stipple peepholes (2026-02-21)
 
 Re-applied 4 safe, mechanical optimizations from the Round 2 audit (R2-24, R2-25, R2-13, R2-27).
