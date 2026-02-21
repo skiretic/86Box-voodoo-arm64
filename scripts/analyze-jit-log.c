@@ -1,4 +1,6 @@
 // Build: cc -O2 -o scripts/analyze-jit-log scripts/analyze-jit-log.c -lpthread
+#undef _DARWIN_C_SOURCE
+#define _DARWIN_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
 #include <ctype.h>
@@ -105,6 +107,12 @@ typedef struct {
 
     uint64_t interp_fallbacks;
     uint64_t reject_fallbacks;
+    uint64_t reject_wx_write;
+    uint64_t reject_wx_exec;
+    uint64_t reject_emit_overflow;
+    uint64_t warn_count;
+    uint64_t verify_mismatch_count;
+    uint64_t verify_pixels_differ;
 
     bool has_init;
     uint64_t init_line_no;
@@ -151,6 +159,7 @@ typedef struct {
     U32HashSet z_values;
 
     uint8_t unique_pixels[PIXEL_BITSET_BYTES];
+    U32HashSet unique_scanlines;  /* real_y values from EXECUTE lines */
 
     uint64_t error_count;
     ErrorLine error_lines[MAX_STORED_ERROR_LINES];
@@ -203,6 +212,7 @@ typedef struct {
 static const char *ERROR_PATTERNS[] = {
     "error", "fail", "crash", "overflow", "invalid", "abort", "sigill", "sigsegv",
     "sigbus", "rejected", "skip", "fault", "trap", "mprotect", "exceeded", "truncated",
+    "mismatch",
 };
 
 static void die(const char *fmt, ...) {
@@ -442,6 +452,7 @@ static bool raw_config_vec_add(RawConfigVecSet *set, const RawPipelineConfig *cf
 static void stats_init(Stats *s, size_t z_hint) {
     memset(s, 0, sizeof(*s));
     u32_hash_init(&s->z_values, z_hint);
+    u32_hash_init(&s->unique_scanlines, 1024);
 }
 
 static void stats_free(Stats *s) {
@@ -461,6 +472,7 @@ static void stats_free(Stats *s) {
     str_vec_free(&s->fog_modes_raw);
     free(s->configs_raw.data);
     u32_hash_free(&s->z_values);
+    u32_hash_free(&s->unique_scanlines);
     memset(s, 0, sizeof(*s));
 }
 
@@ -514,25 +526,6 @@ static bool contains_substr(const char *s, size_t len, const char *needle) {
     return find_substr(s, len, needle) != NULL;
 }
 
-static int count_substr_nonoverlap(const char *s, size_t len, const char *needle) {
-    size_t nlen = strlen(needle);
-    if (nlen == 0 || len < nlen) {
-        return 0;
-    }
-
-    int count = 0;
-    size_t off = 0;
-    while (off + nlen <= len) {
-        const char *m = find_substr(s + off, len - off, needle);
-        if (m == NULL) {
-            break;
-        }
-        size_t pos = (size_t)(m - s);
-        count++;
-        off = pos + nlen;
-    }
-    return count;
-}
 
 static int mem_equal_ci(const char *a, const char *b, size_t n) {
     size_t i;
@@ -656,14 +649,7 @@ static void copy_span(char *dst, size_t dst_cap, const char *start, const char *
     dst[n] = '\0';
 }
 
-static int parse_init_line(const char *line, size_t len, InitFields *out) {
-    const char *start = find_substr(line, len, "VOODOO JIT: INIT");
-    if (start == NULL) {
-        return 0;
-    }
-    const char *p = start + strlen("VOODOO JIT: INIT");
-    const char *end = line + len;
-
+static int parse_init_line(const char *p, const char *end, InitFields *out) {
     skip_spaces(&p, end);
     if (!consume_literal(&p, end, "render_threads=")) {
         return 0;
@@ -697,14 +683,10 @@ static int parse_init_line(const char *line, size_t len, InitFields *out) {
     return 1;
 }
 
-static int parse_generate_line(const char *line, size_t len, GenerateFields *out) {
-    const char *start = find_substr(line, len, "VOODOO JIT: GENERATE #");
-    if (start == NULL) {
-        return 0;
-    }
-    const char *p = start + strlen("VOODOO JIT: GENERATE #");
-    const char *end = line + len;
-
+static int parse_generate_line(const char *p, const char *end, GenerateFields *out) {
+    /* p points after "GENERATE " — expect "#N ..." */
+    if (p >= end || *p != '#') return 0;
+    p++;  /* skip '#' */
     uint64_t ignored_generate_id = 0;
     if (!parse_u64(&p, end, &ignored_generate_id)) {
         (void)ignored_generate_id;
@@ -784,14 +766,11 @@ static int parse_generate_line(const char *line, size_t len, GenerateFields *out
     return 1;
 }
 
-static int parse_execute_line(const char *line, size_t len) {
-    const char *start = find_substr(line, len, "VOODOO JIT: EXECUTE #");
-    if (start == NULL) {
-        return 0;
-    }
-    const char *p = start + strlen("VOODOO JIT: EXECUTE #");
-    const char *end = line + len;
-
+static int parse_execute_line(const char *p, const char *end, int32_t *out_real_y) {
+    /* p points after "EXECUTE " — expect "#N ..." */
+    *out_real_y = -1;
+    if (p >= end || *p != '#') return 0;
+    p++;  /* skip '#' */
     uint64_t execute_id = 0;
     if (!parse_u64(&p, end, &execute_id)) return 0;
 
@@ -810,6 +789,14 @@ static int parse_execute_line(const char *line, size_t len) {
     uint64_t x2 = 0;
     if (!parse_u64(&p, end, &x2)) return 0;
 
+    skip_spaces(&p, end);
+    if (consume_literal(&p, end, "real_y=")) {
+        int64_t ry = 0;
+        if (parse_i64(&p, end, &ry)) {
+            *out_real_y = (int32_t)ry;
+        }
+    }
+
     (void)execute_id;
     (void)code;
     (void)x;
@@ -817,14 +804,7 @@ static int parse_execute_line(const char *line, size_t len) {
     return 1;
 }
 
-static int parse_post_line(const char *line, size_t len, PostFields *out) {
-    const char *start = find_substr(line, len, "VOODOO JIT POST:");
-    if (start == NULL) {
-        return 0;
-    }
-    const char *p = start + strlen("VOODOO JIT POST:");
-    const char *end = line + len;
-
+static int parse_post_line(const char *p, const char *end, PostFields *out) {
     skip_spaces(&p, end);
     if (!consume_literal(&p, end, "ib=")) return 0;
     int64_t ib = 0;
@@ -874,14 +854,9 @@ static int parse_post_line(const char *line, size_t len, PostFields *out) {
     return 1;
 }
 
-static int parse_pixel_line(const char *line, size_t len, uint8_t unique_pixels[PIXEL_BITSET_BYTES]) {
-    const char *start = find_substr(line, len, "VOODOO JIT PIXELS y=");
-    if (start == NULL) {
-        return 0;
-    }
-    const char *p = start + strlen("VOODOO JIT PIXELS y=");
-    const char *end = line + len;
-
+static int parse_pixel_line(const char *p, const char *end, uint8_t unique_pixels[PIXEL_BITSET_BYTES]) {
+    skip_spaces(&p, end);
+    if (!consume_literal(&p, end, "y=")) return 0;
     uint64_t y = 0;
     if (!parse_u64(&p, end, &y)) return 0;
 
@@ -931,14 +906,6 @@ static int parse_pixel_line(const char *line, size_t len, uint8_t unique_pixels[
     return 1;
 }
 
-static int matches_reject_fallback(const char *line, size_t len) {
-    const char *reject = find_substr(line, len, "VOODOO JIT: REJECT");
-    if (reject == NULL) {
-        return 0;
-    }
-    size_t off = (size_t)(reject - line);
-    return find_substr(line + off, len - off, "interpreter fallback") != NULL;
-}
 
 static int line_has_error_pattern(const char *line, size_t len) {
     size_t i;
@@ -970,136 +937,249 @@ static void store_error_line(Stats *s, uint64_t line_no, const char *line, size_
 }
 
 static void process_line(Stats *s, const char *line, size_t len, uint64_t line_no) {
-    if (count_substr_nonoverlap(line, len, "VOODOO JIT") >= 2) {
+    /*
+     * Fast dispatch: find "VOODOO JIT" once, then branch on the keyword
+     * that follows. Avoids 5+ cascading substring searches per line.
+     *
+     * Line formats:
+     *   "VOODOO JIT: INIT ..."
+     *   "VOODOO JIT: GENERATE #N ..."
+     *   "VOODOO JIT: cache HIT ..."
+     *   "VOODOO JIT: EXECUTE #N ..."
+     *   "VOODOO JIT: REJECT ..."
+     *   "VOODOO JIT POST: ..."
+     *   "VOODOO JIT PIXELS y=..."
+     *   "INTERPRETER FALLBACK ..." (no "VOODOO JIT" prefix)
+     */
+    #define VJ_PREFIX "VOODOO JIT"
+    #define VJ_PREFIX_LEN 10
+
+    const char *vj = NULL;
+    /* Hot path: most lines start with "VOODOO JIT" */
+    if (len >= VJ_PREFIX_LEN && memcmp(line, VJ_PREFIX, VJ_PREFIX_LEN) == 0) {
+        vj = line;
+    } else {
+        /* Slow path: check if "VOODOO JIT" appears anywhere (rare) */
+        vj = find_substr(line, len, VJ_PREFIX);
+        if (vj == NULL) {
+            /* Not a JIT line — check for INTERPRETER FALLBACK, VERIFY MISMATCH, and errors */
+            if (len >= 22 && find_substr(line, len, "INTERPRETER FALLBACK")) {
+                s->interp_fallbacks++;
+                return;
+            }
+            if (len >= 15 && memcmp(line, "VERIFY MISMATCH", 15) == 0) {
+                s->verify_mismatch_count++;
+                /* Try to extract pixel differ count: "(%d/%d pixels differ)" */
+                const char *pd = find_substr(line, len, "pixels differ)");
+                if (pd) {
+                    /* Walk backwards to find the '/' then the '(' */
+                    const char *slash = pd;
+                    while (slash > line && *slash != '/') slash--;
+                    if (slash > line) {
+                        const char *paren = slash;
+                        while (paren > line && *paren != '(') paren--;
+                        if (*paren == '(') {
+                            int64_t diff = 0;
+                            const char *dp = paren + 1;
+                            if (parse_i64(&dp, slash, &diff) && diff > 0) {
+                                s->verify_pixels_differ += (uint64_t)diff;
+                            }
+                        }
+                    }
+                }
+                store_error_line(s, line_no, line, len);
+                return;
+            }
+            if (line_has_error_pattern(line, len)) {
+                store_error_line(s, line_no, line, len);
+            }
+            return;
+        }
+        /* "VOODOO JIT" found but not at start — interleaved for sure if line also starts with JIT */
         s->interleaved_lines++;
     }
 
-    if (!s->has_init && contains_substr(line, len, "INIT")) {
-        InitFields init;
-        if (parse_init_line(line, len, &init)) {
-            s->has_init = true;
-            s->init_line_no = line_no;
-            s->init_render_threads = init.render_threads;
-            s->init_use_recompiler = init.use_recompiler;
-            s->init_jit_debug = init.jit_debug;
+    /* Check for second "VOODOO JIT" occurrence (interleaved thread output) */
+    if (vj == line) {
+        size_t off = VJ_PREFIX_LEN;
+        if (off < len) {
+            const char *second = find_substr(line + off, len - off, VJ_PREFIX);
+            if (second != NULL) {
+                s->interleaved_lines++;
+            }
+        }
+    }
+
+    /* Dispatch based on what follows "VOODOO JIT" */
+    const char *after_vj = vj + VJ_PREFIX_LEN;
+    size_t remaining = len - (size_t)(after_vj - line);
+
+    /* "VOODOO JIT: " (colon-space) — most common prefix */
+    if (remaining >= 2 && after_vj[0] == ':' && after_vj[1] == ' ') {
+        const char *keyword = after_vj + 2;
+        size_t krem = remaining - 2;
+
+        if (krem >= 9 && memcmp(keyword, "GENERATE", 8) == 0) {
+            const char *gen_p = keyword + 9;  /* skip "GENERATE " */
+            const char *gen_end = line + len;
+            GenerateFields gen;
+            if (parse_generate_line(gen_p, gen_end, &gen)) {
+                s->generate_count++;
+                int_vec_add(&s->odd_even_values, gen.odd_even);
+                if (gen.odd_even == 0) s->odd_even_zero_count++;
+                if (gen.odd_even == 1) s->odd_even_one_count++;
+                int_vec_add(&s->block_ids, gen.block);
+                u64_vec_add(&s->code_addrs, gen.code);
+
+                if (!s->has_recomp_range) {
+                    s->has_recomp_range = true;
+                    s->recomp_min = gen.recomp;
+                    s->recomp_max = gen.recomp;
+                } else {
+                    if (gen.recomp < s->recomp_min) s->recomp_min = gen.recomp;
+                    if (gen.recomp > s->recomp_max) s->recomp_max = gen.recomp;
+                }
+
+                u32_vec_add(&s->fbz_modes, gen.fbz_mode);
+                u32_vec_add(&s->fbz_color_paths, gen.fbz_color_path);
+                u32_vec_add(&s->alpha_modes, gen.alpha_mode);
+                u32_vec_add(&s->texture_modes, gen.texture_mode);
+                u32_vec_add(&s->fog_modes, gen.fog_mode);
+                str_vec_add(&s->fbz_modes_raw, gen.fbz_mode_raw);
+                str_vec_add(&s->fbz_color_paths_raw, gen.fbz_color_path_raw);
+                str_vec_add(&s->alpha_modes_raw, gen.alpha_mode_raw);
+                str_vec_add(&s->texture_modes_raw, gen.texture_mode_raw);
+                str_vec_add(&s->fog_modes_raw, gen.fog_mode_raw);
+                if (gen.xdir == 1) s->xdir_pos_count++;
+                if (gen.xdir == -1) s->xdir_neg_count++;
+
+                PipelineConfig cfg;
+                cfg.fbz_mode = gen.fbz_mode;
+                cfg.fbz_color_path = gen.fbz_color_path;
+                cfg.alpha_mode = gen.alpha_mode;
+                cfg.texture_mode = gen.texture_mode;
+                cfg.fog_mode = gen.fog_mode;
+                cfg.xdir = gen.xdir;
+                config_vec_add(&s->configs, cfg);
+
+                RawPipelineConfig raw_cfg;
+                copy_span(raw_cfg.fbz_mode, sizeof(raw_cfg.fbz_mode), gen.fbz_mode_raw, gen.fbz_mode_raw + strlen(gen.fbz_mode_raw));
+                copy_span(raw_cfg.fbz_color_path, sizeof(raw_cfg.fbz_color_path), gen.fbz_color_path_raw, gen.fbz_color_path_raw + strlen(gen.fbz_color_path_raw));
+                copy_span(raw_cfg.alpha_mode, sizeof(raw_cfg.alpha_mode), gen.alpha_mode_raw, gen.alpha_mode_raw + strlen(gen.alpha_mode_raw));
+                copy_span(raw_cfg.texture_mode, sizeof(raw_cfg.texture_mode), gen.texture_mode_raw, gen.texture_mode_raw + strlen(gen.texture_mode_raw));
+                copy_span(raw_cfg.fog_mode, sizeof(raw_cfg.fog_mode), gen.fog_mode_raw, gen.fog_mode_raw + strlen(gen.fog_mode_raw));
+                raw_cfg.xdir = gen.xdir;
+                raw_config_vec_add(&s->configs_raw, &raw_cfg);
+            }
             return;
         }
-    }
 
-    GenerateFields gen;
-    if (parse_generate_line(line, len, &gen)) {
-        s->generate_count++;
-        int_vec_add(&s->odd_even_values, gen.odd_even);
-        if (gen.odd_even == 0) s->odd_even_zero_count++;
-        if (gen.odd_even == 1) s->odd_even_one_count++;
-        int_vec_add(&s->block_ids, gen.block);
-        u64_vec_add(&s->code_addrs, gen.code);
-
-        if (!s->has_recomp_range) {
-            s->has_recomp_range = true;
-            s->recomp_min = gen.recomp;
-            s->recomp_max = gen.recomp;
-        } else {
-            if (gen.recomp < s->recomp_min) s->recomp_min = gen.recomp;
-            if (gen.recomp > s->recomp_max) s->recomp_max = gen.recomp;
+        if (krem >= 9 && memcmp(keyword, "cache HIT", 9) == 0) {
+            s->cache_hits++;
+            return;
         }
 
-        u32_vec_add(&s->fbz_modes, gen.fbz_mode);
-        u32_vec_add(&s->fbz_color_paths, gen.fbz_color_path);
-        u32_vec_add(&s->alpha_modes, gen.alpha_mode);
-        u32_vec_add(&s->texture_modes, gen.texture_mode);
-        u32_vec_add(&s->fog_modes, gen.fog_mode);
-        str_vec_add(&s->fbz_modes_raw, gen.fbz_mode_raw);
-        str_vec_add(&s->fbz_color_paths_raw, gen.fbz_color_path_raw);
-        str_vec_add(&s->alpha_modes_raw, gen.alpha_mode_raw);
-        str_vec_add(&s->texture_modes_raw, gen.texture_mode_raw);
-        str_vec_add(&s->fog_modes_raw, gen.fog_mode_raw);
-        if (gen.xdir == 1) s->xdir_pos_count++;
-        if (gen.xdir == -1) s->xdir_neg_count++;
-
-        PipelineConfig cfg;
-        cfg.fbz_mode = gen.fbz_mode;
-        cfg.fbz_color_path = gen.fbz_color_path;
-        cfg.alpha_mode = gen.alpha_mode;
-        cfg.texture_mode = gen.texture_mode;
-        cfg.fog_mode = gen.fog_mode;
-        cfg.xdir = gen.xdir;
-        config_vec_add(&s->configs, cfg);
-
-        RawPipelineConfig raw_cfg;
-        copy_span(raw_cfg.fbz_mode, sizeof(raw_cfg.fbz_mode), gen.fbz_mode_raw, gen.fbz_mode_raw + strlen(gen.fbz_mode_raw));
-        copy_span(raw_cfg.fbz_color_path, sizeof(raw_cfg.fbz_color_path), gen.fbz_color_path_raw, gen.fbz_color_path_raw + strlen(gen.fbz_color_path_raw));
-        copy_span(raw_cfg.alpha_mode, sizeof(raw_cfg.alpha_mode), gen.alpha_mode_raw, gen.alpha_mode_raw + strlen(gen.alpha_mode_raw));
-        copy_span(raw_cfg.texture_mode, sizeof(raw_cfg.texture_mode), gen.texture_mode_raw, gen.texture_mode_raw + strlen(gen.texture_mode_raw));
-        copy_span(raw_cfg.fog_mode, sizeof(raw_cfg.fog_mode), gen.fog_mode_raw, gen.fog_mode_raw + strlen(gen.fog_mode_raw));
-        raw_cfg.xdir = gen.xdir;
-        raw_config_vec_add(&s->configs_raw, &raw_cfg);
-        return;
-    }
-
-    if (contains_substr(line, len, "VOODOO JIT: cache HIT")) {
-        s->cache_hits++;
-        return;
-    }
-
-    if (contains_substr(line, len, "INTERPRETER FALLBACK")) {
-        s->interp_fallbacks++;
-        return;
-    }
-
-    if (contains_substr(line, len, "REJECT") && matches_reject_fallback(line, len)) {
-        s->reject_fallbacks++;
-        return;
-    }
-
-    if (contains_substr(line, len, "EXECUTE")) {
-        if (parse_execute_line(line, len)) {
-            s->execute_count++;
-        }
-        return;
-    }
-
-    PostFields post;
-    if (parse_post_line(line, len, &post)) {
-        s->post_count++;
-        s->pixel_count_total += post.pixel_count;
-        if (post.pixel_count > s->pixel_count_max) {
-            s->pixel_count_max = post.pixel_count;
+        if (krem >= 7 && memcmp(keyword, "EXECUTE", 7) == 0) {
+            const char *exec_p = keyword + 8;  /* skip "EXECUTE " */
+            const char *exec_end = line + len;
+            int32_t real_y = -1;
+            if (parse_execute_line(exec_p, exec_end, &real_y)) {
+                s->execute_count++;
+                if (real_y >= 0) {
+                    u32_hash_insert(&s->unique_scanlines, (uint32_t)real_y);
+                }
+            }
+            return;
         }
 
-        if (post.pixel_count <= 1) {
-            s->pixel_hist_1++;
-        } else if (post.pixel_count <= 10) {
-            s->pixel_hist_2_10++;
-        } else if (post.pixel_count <= 100) {
-            s->pixel_hist_11_100++;
-        } else if (post.pixel_count <= 320) {
-            s->pixel_hist_101_320++;
-        } else {
-            s->pixel_hist_321_plus++;
+        if (krem >= 4 && memcmp(keyword, "INIT", 4) == 0) {
+            if (!s->has_init) {
+                const char *init_p = keyword + 4;  /* skip "INIT" */
+                const char *init_end = line + len;
+                InitFields init;
+                if (parse_init_line(init_p, init_end, &init)) {
+                    s->has_init = true;
+                    s->init_line_no = line_no;
+                    s->init_render_threads = init.render_threads;
+                    s->init_use_recompiler = init.use_recompiler;
+                    s->init_jit_debug = init.jit_debug;
+                }
+            }
+            return;
         }
 
-        if (post.ir < 0) s->negative_ir++;
-        if (post.ig < 0) s->negative_ig++;
-        if (post.ib < 0) s->negative_ib++;
-        if (post.ia < 0) s->negative_ia++;
+        if (krem >= 6 && memcmp(keyword, "REJECT", 6) == 0) {
+            const char *rej_p = keyword + 6;  /* skip "REJECT" */
+            const char *rej_end = line + len;
+            size_t rej_rem = (size_t)(rej_end - rej_p);
+            s->reject_fallbacks++;  /* count ALL rejects */
+            if (find_substr(rej_p, rej_rem, "wx_write_enable_failed")) {
+                s->reject_wx_write++;
+            } else if (find_substr(rej_p, rej_rem, "emit_overflow")) {
+                s->reject_emit_overflow++;
+            } else if (find_substr(rej_p, rej_rem, "wx_exec_enable_failed")) {
+                s->reject_wx_exec++;
+            }
+            return;
+        }
 
-        if (!post.z_is_zero_literal) {
-            u32_hash_insert(&s->z_values, post.z_value);
+        if (krem >= 4 && memcmp(keyword, "WARN", 4) == 0) {
+            s->warn_count++;
+            return;
+        }
+
+        /* Unknown "VOODOO JIT: ..." line — skip */
+        return;
+    }
+
+    /* "VOODOO JIT POST:" */
+    if (remaining >= 6 && memcmp(after_vj, " POST:", 6) == 0) {
+        const char *post_payload = after_vj + 6;
+        const char *line_end = line + len;
+        PostFields post;
+        if (parse_post_line(post_payload, line_end, &post)) {
+            s->post_count++;
+            s->pixel_count_total += post.pixel_count;
+            if (post.pixel_count > s->pixel_count_max) {
+                s->pixel_count_max = post.pixel_count;
+            }
+
+            if (post.pixel_count <= 1) {
+                s->pixel_hist_1++;
+            } else if (post.pixel_count <= 10) {
+                s->pixel_hist_2_10++;
+            } else if (post.pixel_count <= 100) {
+                s->pixel_hist_11_100++;
+            } else if (post.pixel_count <= 320) {
+                s->pixel_hist_101_320++;
+            } else {
+                s->pixel_hist_321_plus++;
+            }
+
+            if (post.ir < 0) s->negative_ir++;
+            if (post.ig < 0) s->negative_ig++;
+            if (post.ib < 0) s->negative_ib++;
+            if (post.ia < 0) s->negative_ia++;
+
+            if (!post.z_is_zero_literal) {
+                u32_hash_insert(&s->z_values, post.z_value);
+            }
         }
         return;
     }
 
-    if (contains_substr(line, len, "PIXELS")) {
-        if (parse_pixel_line(line, len, s->unique_pixels)) {
+    /* "VOODOO JIT PIXELS y=..." */
+    if (remaining >= 7 && memcmp(after_vj, " PIXELS", 7) == 0) {
+        const char *pix_payload = after_vj + 7;
+        const char *line_end_pix = line + len;
+        if (parse_pixel_line(pix_payload, line_end_pix, s->unique_pixels)) {
             s->pixel_lines++;
         }
         return;
     }
 
-    if (!contains_substr(line, len, "VOODOO JIT") && line_has_error_pattern(line, len)) {
-        store_error_line(s, line_no, line, len);
-    }
+    #undef VJ_PREFIX
+    #undef VJ_PREFIX_LEN
 }
 
 static void *worker_main(void *argp) {
@@ -1107,6 +1187,7 @@ static void *worker_main(void *argp) {
     const char *p = ctx->data + ctx->start;
     const char *end = ctx->data + ctx->end;
     uint64_t local_line = 0;
+    uint64_t batch = 0;
 
     while (p < end) {
         const char *nl = memchr(p, '\n', (size_t)(end - p));
@@ -1114,12 +1195,19 @@ static void *worker_main(void *argp) {
         size_t len = (size_t)(line_end - p);
 
         local_line++;
-        atomic_fetch_add_explicit(ctx->progress_lines, 1, memory_order_relaxed);
+        batch++;
+        if (batch >= 4096) {
+            atomic_fetch_add_explicit(ctx->progress_lines, batch, memory_order_relaxed);
+            batch = 0;
+        }
         process_line(&ctx->stats, p, len, local_line);
 
         p = (nl != NULL) ? (nl + 1) : end;
     }
 
+    if (batch > 0) {
+        atomic_fetch_add_explicit(ctx->progress_lines, batch, memory_order_relaxed);
+    }
     ctx->stats.total_lines = local_line;
     atomic_fetch_add_explicit(ctx->done_threads, 1, memory_order_relaxed);
     return NULL;
@@ -1258,6 +1346,12 @@ static void merge_stats(Stats *agg, Stats *src, uint64_t line_offset) {
 
     agg->interp_fallbacks += src->interp_fallbacks;
     agg->reject_fallbacks += src->reject_fallbacks;
+    agg->reject_wx_write += src->reject_wx_write;
+    agg->reject_wx_exec += src->reject_wx_exec;
+    agg->reject_emit_overflow += src->reject_emit_overflow;
+    agg->warn_count += src->warn_count;
+    agg->verify_mismatch_count += src->verify_mismatch_count;
+    agg->verify_pixels_differ += src->verify_pixels_differ;
 
     if (src->has_init) {
         uint64_t global_line = src->init_line_no + line_offset;
@@ -1321,6 +1415,12 @@ static void merge_stats(Stats *agg, Stats *src, uint64_t line_offset) {
     for (i = 0; i < src->z_values.cap; ++i) {
         if (src->z_values.used[i]) {
             u32_hash_insert(&agg->z_values, src->z_values.keys[i]);
+        }
+    }
+
+    for (i = 0; i < src->unique_scanlines.cap; ++i) {
+        if (src->unique_scanlines.used[i]) {
+            u32_hash_insert(&agg->unique_scanlines, src->unique_scanlines.keys[i]);
         }
     }
 
@@ -1477,20 +1577,34 @@ static void print_report(const char *path, double file_mb, const Stats *s, const
 
     uint64_t total_fallbacks = s->interp_fallbacks + s->reject_fallbacks;
     if (total_fallbacks == 0) {
-        ok_msg("No interpreter fallbacks");
+        ok_msg("No interpreter fallbacks or rejects");
     } else {
         format_u64_commas(total_fallbacks, nbuf1, sizeof(nbuf1));
         char msg[256];
-        snprintf(msg, sizeof(msg), "Interpreter fallbacks: %s", nbuf1);
+        snprintf(msg, sizeof(msg), "Interpreter fallbacks + rejects: %s", nbuf1);
         fail_msg(msg);
         if (s->interp_fallbacks > 0) {
             format_u64_commas(s->interp_fallbacks, nbuf2, sizeof(nbuf2));
-            printf("             use_recompiler=0 or NULL block: %s\n", nbuf2);
+            printf("             INTERPRETER FALLBACK: %s\n", nbuf2);
         }
-        if (s->reject_fallbacks > 0) {
-            format_u64_commas(s->reject_fallbacks, nbuf2, sizeof(nbuf2));
-            printf("             emit overflow (REJECT): %s\n", nbuf2);
+        if (s->reject_emit_overflow > 0) {
+            format_u64_commas(s->reject_emit_overflow, nbuf2, sizeof(nbuf2));
+            printf("             REJECT emit_overflow: %s\n", nbuf2);
         }
+        if (s->reject_wx_write > 0) {
+            format_u64_commas(s->reject_wx_write, nbuf2, sizeof(nbuf2));
+            printf("             REJECT wx_write_enable_failed: %s\n", nbuf2);
+        }
+        if (s->reject_wx_exec > 0) {
+            format_u64_commas(s->reject_wx_exec, nbuf2, sizeof(nbuf2));
+            printf("             REJECT wx_exec_enable_failed: %s\n", nbuf2);
+        }
+    }
+
+    if (s->warn_count > 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "JIT warnings: %" PRIu64, s->warn_count);
+        warn_msg(msg);
     }
 
     printf("\n");
@@ -1534,6 +1648,19 @@ static void print_report(const char *path, double file_mb, const Stats *s, const
         warn_msg(msg);
     }
 
+    if (s->verify_mismatch_count > 0) {
+        printf("\n");
+        printf("%s═══ JIT VERIFY ═══%s\n", BOLD, NC);
+        char msg[256];
+        snprintf(msg, sizeof(msg), "VERIFY MISMATCH events: %" PRIu64, s->verify_mismatch_count);
+        fail_msg(msg);
+        if (s->verify_pixels_differ > 0) {
+            format_u64_commas(s->verify_pixels_differ, nbuf1, sizeof(nbuf1));
+            snprintf(msg, sizeof(msg), "Total differing pixels: %s", nbuf1);
+            fail_msg(msg);
+        }
+    }
+
     printf("\n");
     printf("%s═══ EXECUTION ═══%s\n", BOLD, NC);
 
@@ -1541,6 +1668,12 @@ static void print_report(const char *path, double file_mb, const Stats *s, const
     {
         char msg[256];
         snprintf(msg, sizeof(msg), "EXECUTE calls: %s", nbuf1);
+        info_msg(msg);
+    }
+
+    if (s->unique_scanlines.len > 0) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Unique scanlines (real_y): %zu", s->unique_scanlines.len);
         info_msg(msg);
     }
 
@@ -1855,15 +1988,40 @@ static void print_report(const char *path, double file_mb, const Stats *s, const
     const char *row_interleave = s->interleaved_lines > 0 ? "Cosmetic only" : "None";
     const char *row_termination = contains_substr(last_clean, strlen(last_clean), "VOODOO JIT") ? "Clean" : "Unexpected";
 
+    char row_scanlines[64];
+    if (s->unique_scanlines.len > 0) {
+        snprintf(row_scanlines, sizeof(row_scanlines), "%zu unique y values", s->unique_scanlines.len);
+    } else {
+        snprintf(row_scanlines, sizeof(row_scanlines), "No data");
+    }
+
+    char row_verify[64];
+    if (s->verify_mismatch_count > 0) {
+        snprintf(row_verify, sizeof(row_verify), "%" PRIu64 " MISMATCHES", s->verify_mismatch_count);
+    } else {
+        snprintf(row_verify, sizeof(row_verify), "Clean (no mismatches)");
+    }
+
+    char row_warns[64];
+    if (s->warn_count > 0) {
+        snprintf(row_warns, sizeof(row_warns), "%" PRIu64, s->warn_count);
+    } else {
+        snprintf(row_warns, sizeof(row_warns), "0");
+    }
+
     const char *labels[] = {
-        "Block compilation", "Interp. fallbacks", "Error count", "Crash indicators", "Mode diversity",
+        "Block compilation", "Rejects/fallbacks", "JIT warnings", "Error count", "Crash indicators",
+        "Verify mismatches", "Mode diversity",
         "Texture fetch", "Color combine", "Alpha test/blend", "Fog", "Dither", "Framebuffer write",
-        "Depth test", "Pixel output", "Cache hits", "xdir coverage", "Thread interleave", "Log termination"
+        "Depth test", "Scanline coverage", "Pixel output", "Cache hits", "xdir coverage",
+        "Thread interleave", "Log termination"
     };
     const char *values[] = {
-        row_block_comp, row_fallbacks, row_error_count, row_crash, row_mode_div,
+        row_block_comp, row_fallbacks, row_warns, row_error_count, row_crash,
+        row_verify, row_mode_div,
         row_texture, row_color, row_alpha, row_fog, row_dither, row_fb_write,
-        row_depth, row_pixel, row_cache, row_xdir, row_interleave, row_termination
+        row_depth, row_scanlines, row_pixel, row_cache, row_xdir,
+        row_interleave, row_termination
     };
     size_t row_count = sizeof(labels) / sizeof(labels[0]);
 
@@ -1885,8 +2043,11 @@ static void print_report(const char *path, double file_mb, const Stats *s, const
     bool has_blocks = s->generate_count > 0;
     bool has_output = s->post_count > 0;
     bool has_fallbacks = total_fallbacks > 0;
+    bool has_mismatches = s->verify_mismatch_count > 0;
 
-    if (has_blocks && has_output && !has_errors && !has_fallbacks) {
+    if (has_mismatches) {
+        printf("  %s%sVERDICT: JIT VERIFY MISMATCH — CORRECTNESS ISSUE%s\n", BOLD, RED, NC);
+    } else if (has_blocks && has_output && !has_errors && !has_fallbacks) {
         printf("  %s%sVERDICT: HEALTHY%s\n", BOLD, GREEN, NC);
     } else if (has_blocks && has_output && has_fallbacks && !has_errors) {
         printf("  %s%sVERDICT: FUNCTIONAL WITH INTERPRETER FALLBACKS%s\n", BOLD, YELLOW, NC);
@@ -1926,6 +2087,7 @@ static void analyze(const char *path) {
             close(fd);
             die("mmap failed: %s", strerror(errno));
         }
+        madvise(map, file_size, MADV_SEQUENTIAL);
         data = (const char *)map;
     }
     close(fd);
@@ -1964,8 +2126,12 @@ static void analyze(const char *path) {
     }
     printf("\n");
     printf("File: %s (%.1f MB)\n", path, file_mb);
+    printf("Threads: %zu\n", thread_count);
     printf("Scanning...");
     fflush(stdout);
+
+    struct timespec t_scan_start;
+    clock_gettime(CLOCK_MONOTONIC, &t_scan_start);
 
     atomic_uint_fast64_t progress_lines;
     atomic_init(&progress_lines, 0);
@@ -2005,12 +2171,20 @@ static void analyze(const char *path) {
         pthread_join(threads[i], NULL);
     }
 
+    struct timespec t_scan_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_scan_end);
+    double scan_secs = (double)(t_scan_end.tv_sec - t_scan_start.tv_sec)
+                     + (double)(t_scan_end.tv_nsec - t_scan_start.tv_nsec) / 1e9;
+
     uint64_t scanned_final = atomic_load_explicit(&progress_lines, memory_order_relaxed);
     while (scanned_final >= next_progress) {
         printf("\r  Scanned %" PRIu64 "M lines...", next_progress / 1000000);
         fflush(stdout);
         next_progress += 1000000;
     }
+
+    printf("\r  Merging thread results...");
+    fflush(stdout);
 
     Stats merged;
     stats_init(&merged, 1u << 16u);
@@ -2021,9 +2195,14 @@ static void analyze(const char *path) {
         stats_free(&workers[i].stats);
     }
 
+    struct timespec t_merge_end;
+    clock_gettime(CLOCK_MONOTONIC, &t_merge_end);
+    double merge_secs = (double)(t_merge_end.tv_sec - t_scan_end.tv_sec)
+                      + (double)(t_merge_end.tv_nsec - t_scan_end.tv_nsec) / 1e9;
+
     char total_lines_buf[64];
     format_u64_commas(merged.total_lines, total_lines_buf, sizeof(total_lines_buf));
-    printf("\r  Scanned %s lines.                    \n", total_lines_buf);
+    printf("\r  Scanned %s lines in %.1fs (merge %.1fs)       \n", total_lines_buf, scan_secs, merge_secs);
     printf("\n");
 
     char last_clean[1024];
