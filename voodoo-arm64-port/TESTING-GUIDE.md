@@ -311,13 +311,33 @@ VOODOO JIT: cache HIT #0 odd_even=0 block=0 code=0x123456
 
 ### Analyzing JIT Logs
 
-Instead of reading the log manually, use the automated analyzer:
+Instead of reading the log manually, use the automated analyzer. Two versions are available:
+
+#### C analyzer (recommended for large logs)
+
+Compiled binary — handles 15GB+ logs in seconds via mmap + pthreads. Build once:
+
+```bash
+cc -O2 -o scripts/analyze-jit-log scripts/analyze-jit-log.c -lpthread
+```
+
+Then run:
+
+```bash
+./scripts/analyze-jit-log <vm_directory>/voodoo_jit.log
+```
+
+#### Python analyzer (original)
 
 ```bash
 ./scripts/analyze-jit-log.py <vm_directory>/voodoo_jit.log
 ```
 
-The script performs a single streaming pass and reports:
+Works well for smaller logs. May run out of memory on logs larger than ~2GB due to Python string overhead in the Z-value set.
+
+---
+
+Both versions perform a full pass and report:
 - Configuration (render threads, recompiler state)
 - Block compilation stats (count, cache hits, even/odd balance)
 - Interpreter fallback detection (emit overflow, recompiler disabled)
@@ -325,8 +345,6 @@ The script performs a single streaming pass and reports:
 - Pipeline stage coverage (texture, color, alpha, fog, depth, dither)
 - Pixel output quality (RGB565 diversity)
 - Summary table with a **HEALTHY** / **WARNINGS** / **NOT ACTIVE** verdict
-
-Works with logs of any size (tested up to 1.1 GB / 16M lines).
 
 ### Verify Mode (Level 2)
 
@@ -393,7 +411,7 @@ When enabled:
 4. **Logs**
    - Set **JIT Debug Logging = 1**
    - Reproduce the issue
-   - Run `./scripts/analyze-jit-log.py <vm_dir>/voodoo_jit.log` and include the output
+   - Run `./scripts/analyze-jit-log <vm_dir>/voodoo_jit.log` (C) or `./scripts/analyze-jit-log.py <vm_dir>/voodoo_jit.log` (Python) and include the output
    - Attach `voodoo_jit.log` if requested
 
 ### Where to Report
