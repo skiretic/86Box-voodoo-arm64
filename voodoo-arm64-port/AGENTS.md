@@ -2,14 +2,27 @@
 
 ## Available Agents
 
+### Voodoo GPU JIT agents
+
 | Agent | Color | Purpose | Tools |
 |-------|-------|---------|-------|
 | `voodoo-lead` | 🔴 red | Scaffolding, coordination, build/test, Phase 1+2 | Write, Edit, Bash, Serena (all) |
 | `voodoo-texture` | 🔵 cyan | Texture fetch, LOD, bilinear, TMU combine (Phase 3) | Write, Edit, Bash, Serena (all) |
 | `voodoo-color` | 🟢 green | Color/alpha combine pipeline (Phase 4) | Write, Edit, Bash, Serena (all) |
-| `voodoo-effects` | 🟣 magenta | Fog, alpha test/blend, dither, framebuffer write (Phase 5+6) | Write, Edit, Bash, Serena (all) |
-| `voodoo-debug` | 🟡 yellow | Validation, debugging, build diagnostics | Bash, Serena (read-only) |
-| `voodoo-arch` | 🔵 blue | Architecture research, spec validation | WebSearch, WebFetch, Serena (read-only) |
+| `voodoo-effects` | 🟣 magenta | Fog, alpha test/blend, dither, framebuffer write, per-pixel increments (Phase 5+6) | Write, Edit, Bash, Serena (all) |
+| `voodoo-optimizer` | ⚪ white | Peephole opts, redundant load/store elimination, NEON tuning, instruction selection | Write, Edit, Bash, Serena (all) |
+| `voodoo-debug` | 🟡 yellow | Validation, encoding verification, build diagnostics — **read-only** | Bash, Serena (read-only) |
+| `voodoo-arch` | 🔵 blue | Architecture research, spec validation against 3dfx docs — **read-only** | WebSearch, WebFetch, Serena (read-only) |
+
+### CPU dynarec JIT agents
+
+These agents work on the ARM64 CPU dynamic recompiler (`src/codegen_new/`), **not** the Voodoo GPU JIT.
+
+| Agent | Color | Purpose | Tools |
+|-------|-------|---------|-------|
+| `cpu-jit-impl` | 🔴 red | ARM64 CPU dynarec implementation (PFRSQRT, BL calls, emitters, C interp opts) | Write, Edit, Bash, Serena (all) |
+| `cpu-jit-debug` | 🟡 yellow | CPU dynarec debugging, encoding validation — **read-only** | Bash, Serena (read-only) |
+| `cpu-jit-arch` | 🔵 blue | CPU dynarec architecture research (ARM64 ISA, 3DNow!, SSE2, NEON) — **read-only** | WebSearch, WebFetch, Serena (read-only), Context7 |
 
 ## When to Use Each Agent
 
@@ -68,7 +81,19 @@
 
 **Example:** "Check the ARM64 encoding for SMULL instruction at line 2950"
 
-### voodoo-arch (architecture expert) **NEW**
+### voodoo-optimizer (optimization specialist)
+**Use for:**
+- Peephole improvements to generated ARM64 code
+- Redundant load/store elimination
+- Better instruction selection (e.g. BIC+ASR clamp, TBZ for single-bit tests)
+- NEON/ASIMD vectorization opportunities
+- Prologue/epilogue register pinning
+- Strictly ARMv8.0-A baseline — no v8.1+ extensions
+
+**Example:** "Find and eliminate redundant loads in the alpha blend path"
+**Example:** "Pin the rgb565 table pointer in a callee-saved register"
+
+### voodoo-arch (architecture expert)
 **Use for:**
 - Validating implementation against official 3dfx specs
 - Researching Voodoo hardware behavior
@@ -80,6 +105,37 @@
 **Example:** "Does our color combine implementation match the Voodoo spec?"
 **Example:** "What's the exact fog blend formula for FOG_MULT mode?"
 **Example:** "Find the official 3dfx docs on alpha blend factors"
+
+### cpu-jit-impl (CPU dynarec implementer)
+**Use for:**
+- ARM64 CPU JIT backend fixes and new emitters (`src/codegen_new/`)
+- PFRSQRT instruction fix
+- BL intra-pool call optimization
+- LOAD_FUNC_ARG width fix
+- C-level interpreter optimizations
+- Builds and commits on success
+
+**Example:** "Fix the PFRSQRT reciprocal square root approximation in the ARM64 backend"
+
+### cpu-jit-debug (CPU dynarec debugger)
+**Use for:**
+- Validating ARM64 instruction encodings in the CPU dynarec
+- Diagnosing build errors in `src/codegen_new/`
+- Comparing ARM64 codegen to x86-64 reference behavior
+- Analyzing NEON/SIMD correctness
+
+**Example:** "Verify the ARM64 encoding of our SMULL emitter"
+
+### cpu-jit-arch (CPU dynarec architecture expert)
+**Use for:**
+- ARM64/AArch64 ISA research for CPU dynarec work
+- AMD 3DNow!, SSE2, MMX behavior lookup
+- NEON/ASIMD instruction mapping
+- JIT compilation technique research
+
+**Example:** "What's the correct ARM64 equivalent of PFRSQRT?"
+
+---
 
 ## Usage Pattern
 
@@ -167,21 +223,32 @@ When an implementation agent needs validation:
 
 **I want to...** | **Spawn this agent**
 ---|---
-Implement a new phase | lead, texture, color, or effects (depending on phase)
-Fix a build error | voodoo-debug
-Understand what the hardware does | voodoo-arch
-Validate my implementation | voodoo-arch
-Debug wrong rendering | voodoo-debug first, then voodoo-arch if needed
-Check ARM64 instruction encoding | voodoo-debug
+Implement a new Voodoo JIT phase | lead, texture, color, or effects (depending on phase)
+Optimize Voodoo JIT codegen performance | voodoo-optimizer
+Fix a Voodoo JIT build error | voodoo-debug
+Understand what the Voodoo hardware does | voodoo-arch
+Validate Voodoo JIT implementation | voodoo-arch
+Debug wrong rendering output | voodoo-debug first, then voodoo-arch if needed
+Check ARM64 instruction encoding (Voodoo) | voodoo-debug
 Find official 3dfx documentation | voodoo-arch
-Compare our code to x86-64 reference | voodoo-debug
+Compare our Voodoo code to x86-64 reference | voodoo-debug
 Research Voodoo register layouts | voodoo-arch
+Implement a CPU dynarec fix or emitter | cpu-jit-impl
+Debug CPU dynarec build or encoding error | cpu-jit-debug
+Research ARM64 ISA for CPU dynarec | cpu-jit-arch
 
 ## Color Coding (for easy identification in logs)
 
-- 🔴 **Red** = Lead/coordinator
-- 🔵 **Cyan** = Texture specialist
-- 🟢 **Green** = Color/alpha specialist
-- 🟣 **Magenta** = Effects specialist (fog/blend/dither/write)
-- 🟡 **Yellow** = Debugger/validator
-- 🔵 **Blue** = Architecture expert
+### Voodoo GPU JIT
+- 🔴 **Red** = `voodoo-lead` (coordinator)
+- 🔵 **Cyan** = `voodoo-texture` (texture specialist)
+- 🟢 **Green** = `voodoo-color` (color/alpha specialist)
+- 🟣 **Magenta** = `voodoo-effects` (fog/blend/dither/write)
+- ⚪ **White** = `voodoo-optimizer` (peephole/NEON optimizer)
+- 🟡 **Yellow** = `voodoo-debug` (validator, read-only)
+- 🔵 **Blue** = `voodoo-arch` (3dfx spec research, read-only)
+
+### CPU Dynarec JIT
+- 🔴 **Red** = `cpu-jit-impl` (implementer)
+- 🟡 **Yellow** = `cpu-jit-debug` (validator, read-only)
+- 🔵 **Blue** = `cpu-jit-arch` (ISA research, read-only)
