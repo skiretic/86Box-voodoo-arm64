@@ -3539,9 +3539,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 }
 
                 case FOG_Z:
-                    /* fog_a = (z >> 12) & 0xff */
+                    /* fog_a = (z >> 20) & 0xff -- match interpreter */
                     addlong(ARM64_LDR_W(4, 0, STATE_z));
-                    addlong(ARM64_LSR_IMM(4, 4, 12));
+                    addlong(ARM64_LSR_IMM(4, 4, 20));
                     addlong(ARM64_AND_MASK(4, 4, 8));
                     break;
 
@@ -3557,13 +3557,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     break;
 
                 case FOG_W:
-                    /* fog_a = CLAMP(w >> 32) -- high 32 bits of 64-bit W */
+                    /* fog_a = (w >> 32) & 0xff -- match interpreter
+                     * The interpreter masks BEFORE clamping, so values > 0xFF
+                     * wrap to their low byte rather than saturating to 0xFF.
+                     * The AND alone is sufficient (result always in [0,255]). */
                     addlong(ARM64_LDR_W(4, 0, STATE_w + 4));  /* high word of w */
-                    /* Clamp to [0, 0xFF] */
-                    addlong(ARM64_MOVZ_W(10, 0xFF));
-                    addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
-                    addlong(ARM64_CMP_IMM(4, 0xFF));
-                    addlong(ARM64_CSEL(4, 10, 4, COND_HI));    /* cap at 0xFF */
+                    addlong(ARM64_AND_MASK(4, 4, 8));          /* & 0xFF */
                     break;
             }
 
