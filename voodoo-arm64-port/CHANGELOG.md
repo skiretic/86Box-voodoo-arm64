@@ -4,6 +4,47 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Optimization Batch 6: Cache LOD + Iterated BGRA (2026-02-20)
+
+### H4: Cache LOD in w6 after store to STATE_lod
+
+After computing LOD and storing it to `STATE_lod`, the value is now kept in w6
+via a `MOV` instruction. This eliminates 3 redundant `LDR w6, [x0, #STATE_lod]`
+memory reloads:
+- Bilinear texture path: 2 reloads eliminated (first load + "reload for array indexing")
+- Point-sample texture path: 1 reload eliminated
+
+Both the perspective and non-perspective LOD computation paths now `MOV` their
+result into w6 before falling through to the texture lookup code.
+
+Saves 1 instruction per pixel (-3 LDR + 2 MOV), but more importantly removes
+3 memory loads from the critical texture fetch path.
+
+### H6: Cache iterated BGRA in v6 (NEON scratch)
+
+The packed iterated BGRA computation (5 instructions: ADD\_IMM\_X + LD1 + SSHR +
+SQXTN + SQXTUN) appeared at 4 sites in the color combine section, all computing
+the identical value from `ib/ig/ir/ia`. These values don't change during color
+combine (only updated at end of pixel loop).
+
+Added a one-time computation into NEON register v6 before color combine starts,
+guarded by a C-level `needs_iter_bgra` condition. Each of the 4 original sites
+is replaced with a single instruction:
+
+- Chroma key ITER\_RGB: 6 instructions → `FMOV w4, s6` (1 instruction)
+- Color local select (iter path): 5 instructions → `MOV v1, v6` (1 instruction)
+- Color local select override (iter branch): 5 instructions → `MOV v1, v6` (1 instruction)
+- Color other select ITER\_RGB: 5 instructions → `MOV v0, v6` (1 instruction)
+
+**Note**: v14 was originally planned for this cache but is already used for TMU1
+ST deltas (Batch 3). v6 (NEON) is free during the entire color combine section
+and is a different physical register from w6 (GPR, used for LOD in H4).
+
+#### File changed:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Optimization Batch 5: Pin rgb565 Pointer + Pair Counters (2026-02-20)
 
 ### M4: Pin rgb565 lookup table pointer in x26

@@ -15,13 +15,13 @@
 | 3 | Hoist params delta loads | H1 | ~20-36 cyc/px | PARTIAL | [x] | [x] | [x] | [x] | DONE |
 | 4 | BIC+ASR clamp idiom | M2 | ~16 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 5 | Pin rgb565 ptr + batch counters | M4, M7 | ~8 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
-| 6 | Cache LOD + iterated BGRA | H4, H6 | ~9-16 cyc/px | PARTIAL | [ ] | [ ] | [ ] | [ ] | PENDING |
+| 6 | Cache LOD + iterated BGRA | H4, H6 | ~9-16 cyc/px | PASS | [x] | [x] | [x] | [x] | DONE |
 | 7 | Misc small wins + dead code | M1,M3,M5,M6,L1,L2 | ~16-22 cyc/px | PENDING | [ ] | [ ] | [ ] | [ ] | PENDING |
 | D | SDIV → reciprocal (deferred) | H5 | ~5-15 cyc/px | N/A | — | — | — | — | DEFERRED |
 
 **Legend**: PASS = audit verified, PARTIAL = partially audited, PENDING = not yet audited
 
-**Completed**: 4 / 7 batches
+**Completed**: 6 / 7 batches
 **Estimated total savings**: 15-25% fewer instructions per pixel (~10-20% wall-clock)
 
 ---
@@ -36,7 +36,7 @@
 | 3 | `e37e3cc0c` | 2026-02-20 | Hoist RGBA deltas→v12, TMU0 ST→v15, TMU1 ST→v14; frame 160→176 bytes |
 | 4 | `269af2375` | 2026-02-20 | BIC+ASR clamp idiom: 9 sites updated, new ARM64_BIC_REG_ASR macro added |
 | 5 | `63d60c3db` | 2026-02-20 | Pin rgb565 ptr in x26 (M4), LDP/STP counter pairing (M7) |
-| 6 | | | |
+| 6 | `4ba01f4b4` | 2026-02-20 | Cache LOD in w6 (H4: 3 reloads eliminated), iterated BGRA in v6 (H6: 4 pack sequences replaced) |
 | 7 | | | |
 
 ---
