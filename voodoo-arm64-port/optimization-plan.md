@@ -134,7 +134,7 @@ If any batch causes visual artifacts or crashes, revert immediately and investig
 
 **Miscellaneous — ~16-22 cycles/pixel saved**
 
-**Audit status**: Not yet audited. Run audit before implementation.
+**Audit status**: PASS — audited, all claims verified (M6 adjusted from 5→6 insns, L1 reduced to 1 site). See `batch7-audit.md`.
 
 - **M1**: Use LDP for adjacent 32-bit loads where both come from the same base register
 - **M3**: Hoist `params->fogColor` load+unpack (LDR+FMOV+UXTL) to prologue into v11 (replacing dead neon_minus_254). Constant per triangle.

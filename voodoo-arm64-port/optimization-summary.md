@@ -37,7 +37,7 @@
 | 4 | `269af2375` | 2026-02-20 | BIC+ASR clamp idiom: 9 sites updated, new ARM64_BIC_REG_ASR macro added |
 | 5 | `63d60c3db` | 2026-02-20 | Pin rgb565 ptr in x26 (M4), LDP/STP counter pairing (M7) |
 | 6 | `4ba01f4b4` | 2026-02-20 | Cache LOD in w6 (H4: 3 reloads eliminated), iterated BGRA in v6 (H6: 4 pack sequences replaced) |
-| 7 | | 2026-02-20 | Misc small wins: LDP pairing (M1), fogColor hoist to v11 (M3), TCA alpha extract-once (M5), BFI RGB565 (M6), CBZ guard (L1), eliminate MOV w11 (L2), dead neon_minus_254 removal |
+| 7 | `877bf0e6a` | 2026-02-20 | Misc small wins: LDP pairing (M1), fogColor hoist to v11 (M3), TCA alpha extract-once (M5), BFI RGB565 (M6), CBZ guard (L1), eliminate MOV w11 (L2), dead neon_minus_254 removal |
 
 ---
 
@@ -81,9 +81,20 @@ The optimization plan was independently audited by the voodoo-debug agent. Two r
 - **v10**: Claimed available but used for `neon_ff_b` (cc_invert path) — reassigned H6 to v14
 - **v13**: Claimed available but used for color-before-fog (ACOLORBEFOREFOG blend) — reassigned H1 deltas to v15
 
-One bonus finding: **v11** (neon_minus_254) is loaded in the prologue but never used — dead code that can be removed when repurposing v11 for fogColor (Batch 7/M3).
+One bonus finding: **v11** (neon_minus_254) is loaded in the prologue but never used — dead code that was removed in Batch 7 when repurposing v11 for fogColor (M3).
 
 All optimization logic, encoding claims, and safety analysis verified correct.
+
+### Final Verification (2026-02-20)
+
+After all 7 batches, a comprehensive feature parity audit confirmed the ARM64 codegen matches the x86-64 reference across all 17 pipeline stages. No features were removed or degraded by any optimization.
+
+Final regression test (Q3, Turok, 3DMark99, 3DMark2000, UT99):
+- 68,426 blocks compiled, 0 rejects, 0 errors
+- 4.4 billion pixels rendered
+- 274 unique pipeline configurations exercised
+- 25 texture modes, 30 color configs, 25 alpha modes, 4 fog modes
+- Verdict: **HEALTHY**
 
 ## Documents
 
@@ -93,3 +104,5 @@ All optimization logic, encoding claims, and safety analysis verified correct.
 | `perf-optimization-report.md` | Full analysis of all 20 optimization opportunities |
 | `optimization-plan-audit.md` | Independent audit of the plan's accuracy |
 | `codegen-audit-report.md` | Prior correctness audit (0 bugs found) |
+| `batch7-audit.md` | Batch 7 pre-implementation audit |
+| `feature-parity-audit.md` | Final feature parity audit (ARM64 vs x86-64) |
