@@ -4,6 +4,86 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Optimization Batch 7: Misc Small Wins + Dead Code Removal (2026-02-20)
+
+### M1: LDP for adjacent 32-bit/64-bit loads
+
+Combined adjacent individual loads into paired load instructions at 4 sites:
+- Bilinear tex_s + tex_t: `LDP w4, w5` replacing two `LDR w` (STATE_tex_s, STATE_tex_t)
+- Point-sample tex_s + tex_t: same LDP pairing
+- Prologue fb_mem + aux_mem: `LDP x8, x9` replacing two `LDR x` (STATE_fb_mem, STATE_aux_mem)
+- Perspective tmu_s + tmu_t: `LDP x5, x6` replacing two `LDR x` (TMU0 only; TMU1 offsets
+  exceed LDP signed-7 range, guarded by runtime check)
+
+Saves 4 instructions per compiled block.
+
+### M3: Hoist fogColor to v11 (replacing dead neon_minus_254)
+
+fogColor (`params->fogColor`) is triangle-invariant but was loaded and unpacked per-pixel
+in the fog section (LDR + FMOV + UXTL). Now loaded once in the prologue into callee-saved
+v11 when fog is enabled.
+
+- FOG_CONSTANT path: `UQADD v0, v0, v11` directly (was 3 insns: LDR + FMOV + UQADD)
+- Non-constant fog path: `UXTL v3, v11` widens to 16-bit (was 3 insns: LDR + FMOV + UXTL)
+
+Saves 2-3 instructions per fog-enabled pixel.
+
+### M5: Extract TMU0 alpha once in dual-TMU TCA
+
+In the dual-TMU texture combine alpha (TCA) section, the pattern `FMOV w, s7` +
+`LSR w, w, #24` (extract TMU0 alpha byte from packed BGRA) appeared at up to 4 sites.
+Now extracted once into w13 at the top of the TCA section and reused via `MOV w5, w13`
+at each consumer.
+
+Saves 2-6 instructions depending on TCA configuration.
+
+### M6: BFI for no-dither RGB565 packing
+
+Replaced the 7-instruction no-dither RGB565 packing sequence with a 6-instruction version
+using BFI (Bit Field Insert). New `ARM64_BFI` encoding macro added.
+
+Old: UBFX blue + UBFX green + LSL green + UBFX red + LSL red + ORR R|G + ORR |B (7 insns)
+New: UBFX blue + UBFX green + UBFX red + LSL red + BFI green + ORR blue (6 insns)
+
+Saves 1 instruction per non-dithered pixel.
+
+### L1: CBZ for tmu_w divide-by-zero guard
+
+Replaced `CMP x7, #0` + `B.EQ` with `CBZ x7` at the perspective W division guard.
+Added `ARM64_CBZ_X_PLACEHOLDER` and `ARM64_CBNZ_X_PLACEHOLDER` encoding macros.
+
+Saves 1 instruction per perspective-corrected texture fetch.
+
+### L2: Eliminate MOV w11,w7 before LSL in texture fetch
+
+In both bilinear and point-sample texture fetch paths, `MOV w11, w7` copied tex_shift
+before `LSL w5, w5, w11`. Since w7 is not modified between the copy and use, the LSL
+now operates on w7 directly: `LSL w5, w5, w7`.
+
+Saves 2 instructions (1 per texture fetch variant).
+
+### Bonus: Remove dead neon_minus_254
+
+Removed the dead `neon_minus_254` constant and its prologue load sequence:
+- Removed C-level static initialization (4 lines)
+- Removed `EMIT_LOAD_NEON_CONST(11, &neon_minus_254)` which expanded to 5 ARM64 instructions
+
+v11 is now repurposed for fogColor (M3 above). When fog is disabled, v11 is simply
+unused (still saved/restored as part of the callee-saved d10/d11 pair).
+
+Saves 5 prologue instructions.
+
+### Feature parity audit
+
+Full 17-stage feature parity audit confirmed ARM64 codegen matches x86-64 reference
+across all pipeline stages after all 7 optimization batches. No features removed or
+degraded. Report: `voodoo-arm64-port/feature-parity-audit.md`.
+
+#### File changed:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Optimization Batch 6: Cache LOD + Iterated BGRA (2026-02-20)
 
 ### H4: Cache LOD in w6 after store to STATE_lod

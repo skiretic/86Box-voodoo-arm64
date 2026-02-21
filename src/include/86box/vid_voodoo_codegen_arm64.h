@@ -106,7 +106,7 @@
  *   v8      = xmm_01_w constant {1,1,1,1}     (callee-saved)
  *   v9      = xmm_ff_w constant {0xFF,...}     (callee-saved)
  *   v10     = xmm_ff_b constant {0xFFFFFF,0,0,0} (callee-saved)
- *   v11     = minus_254 constant {0xFF02,...}   (callee-saved)
+ *   v11     = hoisted fogColor (packed bytes, callee-saved; only when fog enabled)
  *   v12     = hoisted RGBA deltas {dBdX,dGdX,dRdX,dAdX} (callee-saved)
  *   v13     = scratch (callee-saved, save/restore in prologue/epilogue)
  *   v14     = hoisted TMU1 ST deltas {dSdX_1,dTdX_1}    (callee-saved)
@@ -508,6 +508,10 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 /* SBFX Wd, Wn, #lsb, #width */
 #define ARM64_SBFX(d, n, lsb, width) (0x13000000 | IMMR(lsb) | IMMS((lsb) + (width) - 1) | Rn(n) | Rd(d))
 
+/* BFI Wd, Wn, #lsb, #width -- Bit Field Insert (Batch 7/M6)
+ * Alias for BFM Wd, Wn, #(-lsb mod 32), #(width-1) */
+#define ARM64_BFI(d, n, lsb, width) (0x33000000 | IMMR((-(lsb)) & 0x1F) | IMMS((width) - 1) | Rn(n) | Rd(d))
+
 /* UXTB Wd, Wn */
 #define ARM64_UXTB(d, n) (0x53001C00 | Rn(n) | Rd(d))
 
@@ -707,6 +711,8 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 #define ARM64_TBNZ_PLACEHOLDER(t, bit)  (0x37000000 | BIT_TBxZ(bit) | Rt(t))
 #define ARM64_CBZ_W_PLACEHOLDER(t)      (0x34000000 | Rt(t))
 #define ARM64_CBNZ_W_PLACEHOLDER(t)     (0x35000000 | Rt(t))
+#define ARM64_CBZ_X_PLACEHOLDER(t)      (0xB4000000 | Rt(t))
+#define ARM64_CBNZ_X_PLACEHOLDER(t)     (0xB5000000 | Rt(t))
 
 static inline void
 arm64_codegen_check_patch_pos(int pos)
@@ -1172,7 +1178,7 @@ typedef union {
 static voodoo_neon_reg_t neon_01_w;      /* {1,1,1,1, 0,0,0,0} */
 static voodoo_neon_reg_t neon_ff_w;      /* {0xFF,0xFF,0xFF,0xFF, 0,0,0,0} */
 static voodoo_neon_reg_t neon_ff_b;      /* {0,0,0,0, ...} -- 24-bit mask in u32[0] */
-static voodoo_neon_reg_t neon_minus_254; /* {0xFF02,0xFF02,0xFF02,0xFF02, 0,0,0,0} */
+/* neon_minus_254 removed -- v11 now used for hoisted fogColor (Batch 7/M3) */
 
 static voodoo_neon_reg_t alookup[257];
 static voodoo_neon_reg_t aminuslookup[256];
@@ -1258,11 +1264,16 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
          * Multiply S and T by the reciprocal, shift, and compute LOD.
          * ============================================================ */
 
-        /* LDR x5, [x0, #STATE_tmu_s(tmu)] -- load S (64-bit) */
-        addlong(ARM64_LDR_X(5, 0, STATE_tmu_s(tmu)));
-
-        /* LDR x6, [x0, #STATE_tmu_t(tmu)] -- load T (64-bit) */
-        addlong(ARM64_LDR_X(6, 0, STATE_tmu_t(tmu)));
+        /* Load S, T, W (64-bit each) for perspective division.
+         * TMU0 offsets (496,504,512) fit LDP X signed-7 range; TMU1 (520,528,536) do not.
+         * Use LDP for S+T when offset fits, else individual LDR. (Batch 7/M1) */
+        if (STATE_tmu_s(tmu) / 8 <= 63) {
+            /* LDP x5, x6, [x0, #STATE_tmu_s(tmu)] -- S and T paired */
+            addlong(ARM64_LDP_OFF_X(5, 6, 0, STATE_tmu_s(tmu)));
+        } else {
+            addlong(ARM64_LDR_X(5, 0, STATE_tmu_s(tmu)));
+            addlong(ARM64_LDR_X(6, 0, STATE_tmu_t(tmu)));
+        }
 
         /* LDR x7, [x0, #STATE_tmu_w(tmu)] -- load W (64-bit) */
         addlong(ARM64_LDR_X(7, 0, STATE_tmu_w(tmu)));
@@ -1273,17 +1284,17 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         addlong(ARM64_MOVK_X(4, 0, 2));         /* bits 32-47 = 0 */
         addlong(ARM64_MOVK_X(4, 1, 3));         /* bits 48-63 = 1 */
 
-        /* If tmu_w == 0, skip division (avoid divide-by-zero) */
+        /* If tmu_w == 0, skip division (avoid divide-by-zero)
+         * CBZ x7 replaces CMP #0 + B.EQ (Batch 7/L1) */
         {
             int div_skip_pos;
-            addlong(ARM64_CMP_IMM_X(7, 0));
             div_skip_pos = block_pos;
-            addlong(ARM64_BCOND_PLACEHOLDER(COND_EQ));
+            addlong(ARM64_CBZ_X_PLACEHOLDER(7));
 
             /* SDIV x4, x4, x7 -- quotient = (1<<48) / tmu_w */
             addlong(ARM64_SDIV_X(4, 4, 7));
 
-            PATCH_FORWARD_BCOND(div_skip_pos);
+            PATCH_FORWARD_CBxZ(div_skip_pos);
         }
 
         /* ASR x5, x5, #14 -- S >>= 14 */
@@ -1376,10 +1387,14 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
          * LOD = lod_min >> 8
          * ============================================================ */
 
-        /* LDR x4, [x0, #STATE_tmu_s(tmu)] */
-        addlong(ARM64_LDR_X(4, 0, STATE_tmu_s(tmu)));
-        /* LDR x6, [x0, #STATE_tmu_t(tmu)] */
-        addlong(ARM64_LDR_X(6, 0, STATE_tmu_t(tmu)));
+        /* Load tmu_s and tmu_t (64-bit).
+         * TMU0 offsets fit LDP X signed-7 range; TMU1 do not. (Batch 7/M1) */
+        if (STATE_tmu_s(tmu) / 8 <= 63) {
+            addlong(ARM64_LDP_OFF_X(4, 6, 0, STATE_tmu_s(tmu)));
+        } else {
+            addlong(ARM64_LDR_X(4, 0, STATE_tmu_s(tmu)));
+            addlong(ARM64_LDR_X(6, 0, STATE_tmu_t(tmu)));
+        }
 
         /* LSR x4, x4, #28 */
         addlong(ARM64_LSR_IMM_X(4, 4, 28));
@@ -1430,12 +1445,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             addlong(ARM64_SUB_REG(7, 7, 6));
             /* LSL w10, w10, w6  (1 << lod) */
             addlong(ARM64_LSL_REG(10, 10, 6));
-            /* LDR w4, [x0, #STATE_tex_s] */
-            addlong(ARM64_LDR_W(4, 0, STATE_tex_s));
+            /* LDP w4, w5, [x0, #STATE_tex_s] -- load tex_s and tex_t (Batch 7/M1) */
+            addlong(ARM64_LDP_OFF_W(4, 5, 0, STATE_tex_s));
             /* LSL w10, w10, #3  ((1 << lod) << 3 = 1 << (lod+3)) */
             addlong(ARM64_LSL_IMM(10, 10, 3));
-            /* LDR w5, [x0, #STATE_tex_t] */
-            addlong(ARM64_LDR_W(5, 0, STATE_tex_t));
 
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
@@ -1505,8 +1518,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             addlong(ARM64_ADD_IMM_X(11, 0, STATE_tex_n(tmu)));
             addlong(ARM64_LDR_X_REG_LSL3(12, 11, 6));
 
-            /* MOV w11, w7  (w11 = tex_shift for SHL later) */
-            addlong(ARM64_MOV_REG(11, 7));
+            /* w7 holds tex_shift, used directly in LSL below (Batch 7/L2) */
 
             /* w13 = T+1 (next row) */
             addlong(ARM64_MOV_REG(13, 5));
@@ -1555,12 +1567,12 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
              * x86-64: SHL EBX, CL; SHL EDX, CL
              *         LEA RBX, [RBP+RBX*4]; LEA RDX, [RBP+RDX*4]
              *
-             * ARM64: LSL w5, w5, w11; LSL w13, w13, w11
+             * ARM64: LSL w5, w5, w7; LSL w13, w13, w7  (Batch 7/L2: use w7 directly)
              *        ADD x13_row0, x12, x5, LSL #2
              *        ADD x14_row1, x12, x13, LSL #2
              */
-            addlong(ARM64_LSL_REG(5, 5, 11));
-            addlong(ARM64_LSL_REG(13, 13, 11));
+            addlong(ARM64_LSL_REG(5, 5, 7));
+            addlong(ARM64_LSL_REG(13, 13, 7));
             /* x13 = row1 address, x14 = row0 address (reuse registers) */
             addlong(ARM64_ADD_REG_X_LSL(14, 12, 5, 2));   /* x14 = tex_base + T0_offset*4 */
             addlong(ARM64_ADD_REG_X_LSL(13, 12, 13, 2));  /* x13 = tex_base + T1_offset*4 */
@@ -1746,10 +1758,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
              * needs to strip the 4-bit sub-texel fraction too, hence lod+4. */
             addlong(ARM64_ADD_IMM(6, 6, 4));
 
-            /* LDR w4, [x0, #STATE_tex_s] */
-            addlong(ARM64_LDR_W(4, 0, STATE_tex_s));
-            /* LDR w5, [x0, #STATE_tex_t] */
-            addlong(ARM64_LDR_W(5, 0, STATE_tex_t));
+            /* LDP w4, w5, [x0, #STATE_tex_s] -- load tex_s and tex_t (Batch 7/M1) */
+            addlong(ARM64_LDP_OFF_W(4, 5, 0, STATE_tex_s));
 
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
@@ -1814,10 +1824,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* Compute linear texel index: (T << tex_shift) + S
              * then load texel: tex[tmu][lod][(T << shift) + S]
              */
-            /* MOV w11, w7  (tex_shift) */
-            addlong(ARM64_MOV_REG(11, 7));
-            /* LSL w5, w5, w11 */
-            addlong(ARM64_LSL_REG(5, 5, 11));
+            /* LSL w5, w5, w7  (Batch 7/L2: use w7 directly, no MOV needed) */
+            addlong(ARM64_LSL_REG(5, 5, 7));
             /* ADD w5, w5, w4 */
             addlong(ARM64_ADD_REG(5, 5, 4));
 
@@ -1909,10 +1917,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     neon_ff_b.u32[1]      = 0;
     neon_ff_b.u32[2]      = 0;
     neon_ff_b.u32[3]      = 0;
-    neon_minus_254.u32[0] = 0xff02ff02;
-    neon_minus_254.u32[1] = 0xff02ff02;
-    neon_minus_254.u32[2] = 0;
-    neon_minus_254.u32[3] = 0;
+    /* neon_minus_254 removed -- v11 now used for fogColor (Batch 7/M3) */
 
     /* ================================================================
      * Prologue: save callee-saved registers
@@ -2010,7 +2015,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * v8 = xmm_01_w  {1,1,1,1}
      * v9 = xmm_ff_w  {0xFF,0xFF,0xFF,0xFF}
      * v10 = xmm_ff_b {0x00FFFFFF,0,0,0}
-     * v11 = minus_254 {0xFF02,0xFF02,0xFF02,0xFF02}
+     * v11 = fogColor (hoisted below, only when fog enabled)
      *
      * Load via a temporary register pointing to each constant.
      */
@@ -2030,7 +2035,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         EMIT_LOAD_NEON_CONST(8, &neon_01_w);
         EMIT_LOAD_NEON_CONST(9, &neon_ff_w);
         EMIT_LOAD_NEON_CONST(10, &neon_ff_b);
-        EMIT_LOAD_NEON_CONST(11, &neon_minus_254);
+        /* v11 no longer loaded here -- used for fogColor, hoisted below */
 
 #undef EMIT_LOAD_NEON_CONST
 
@@ -2061,13 +2066,20 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_LDR_Q(14, 1, PARAMS_tmu1_dSdX));
     }
 
+    /* v11 = fogColor (packed bytes, hoisted from per-pixel fog section)
+     * Only loaded when fog is enabled. Triangle-invariant. (Batch 7/M3)
+     * FOG_CONSTANT path uses v11 as packed 8B directly.
+     * Non-constant fog path uses UXTL to widen v11 to 8H per-pixel. */
+    if (params->fogMode & FOG_ENABLE) {
+        addlong(ARM64_LDR_W(16, 1, PARAMS_fogColor));
+        addlong(ARM64_FMOV_S_W(11, 16));
+    }
+
     /* ================================================================
      * Load fb_mem and aux_mem pointers
      * ================================================================ */
-    /* LDR x8, [x0, #STATE_fb_mem] */
-    addlong(ARM64_LDR_X(8, 0, STATE_fb_mem));
-    /* LDR x9, [x0, #STATE_aux_mem] */
-    addlong(ARM64_LDR_X(9, 0, STATE_aux_mem));
+    /* LDP x8, x9, [x0, #STATE_fb_mem] -- load fb_mem and aux_mem (Batch 7/M1) */
+    addlong(ARM64_LDP_OFF_X(8, 9, 0, STATE_fb_mem));
 
     /* ================================================================
      * Pixel loop entry point
@@ -2787,18 +2799,13 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_ADD_V4H(4, 4, 8));
 
             /* Multiply: signed 16x16 -> 32 -> >>8 -> narrow */
-            if (tca_sub_clocal) {
-                /* Save raw TMU0 packed for alpha extraction */
-                addlong(ARM64_FMOV_W_S(5, 7));  /* w5 = raw TMU0 packed BGRA */
-            }
-
             addlong(ARM64_SMULL_4S_4H(16, 1, 4));
             addlong(ARM64_SSHR_V4S(16, 16, 8));
             addlong(ARM64_SQXTN_4H_4S(1, 16));
 
             if (tca_sub_clocal) {
-                /* w5 already has raw TMU0 packed */
-                addlong(ARM64_LSR_IMM(5, 5, 24));  /* extract alpha byte */
+                /* w5 = TMU0 alpha (from w13, Batch 7/M5) */
+                addlong(ARM64_MOV_REG(5, 13));
             }
 
             /* tc_add_clocal: add local (TMU0) back */
@@ -2819,7 +2826,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_SQXTUN_8B_8H(3, 3));   /* v3 = packed TMU1 */
             addlong(ARM64_SQXTUN_8B_8H(1, 1));   /* v1 = packed combined RGB */
 
-            /* ---- TCA (alpha combine for TMU0) ---- */
+            /* ---- TCA (alpha combine for TMU0) ----
+             * Extract TMU0 alpha from v7 once into w13 for reuse. (Batch 7/M5)
+             * v7 holds raw TMU0 packed BGRA; alpha is byte 3 (bits [31:24]). */
+            addlong(ARM64_FMOV_W_S(13, 7));
+            addlong(ARM64_LSR_IMM(13, 13, 24));
+
             if (tca_zero_other) {
                 addlong(ARM64_MOV_ZERO(4));
             } else {
@@ -2837,16 +2849,16 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_MOV_ZERO(5));
                     break;
                 case TCA_MSELECT_CLOCAL:
-                    addlong(ARM64_FMOV_W_S(5, 7));
-                    addlong(ARM64_LSR_IMM(5, 5, 24));
+                    /* w5 = TMU0 alpha (from w13, Batch 7/M5) */
+                    addlong(ARM64_MOV_REG(5, 13));
                     break;
                 case TCA_MSELECT_AOTHER:
                     addlong(ARM64_FMOV_W_S(5, 3));
                     addlong(ARM64_LSR_IMM(5, 5, 24));
                     break;
                 case TCA_MSELECT_ALOCAL:
-                    addlong(ARM64_FMOV_W_S(5, 7));
-                    addlong(ARM64_LSR_IMM(5, 5, 24));
+                    /* w5 = TMU0 alpha (from w13, Batch 7/M5) */
+                    addlong(ARM64_MOV_REG(5, 13));
                     break;
                 case TCA_MSELECT_DETAIL:
                     addlong(ARM64_MOVZ_W(5, params->detail_bias[0] & 0xFFFF));
@@ -2883,9 +2895,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_ASR_IMM(4, 4, 8));
 
             if (tca_add_clocal || tca_add_alocal) {
-                addlong(ARM64_FMOV_W_S(5, 7));
-                addlong(ARM64_LSR_IMM(5, 5, 24));
-                addlong(ARM64_ADD_REG(4, 4, 5));
+                /* ADD w4, w4, w13 -- TMU0 alpha from w13 (Batch 7/M5) */
+                addlong(ARM64_ADD_REG(4, 4, 13));
             }
 
             /* Clamp: if negative, 0; if > 0xFF, 0xFF */
@@ -3441,22 +3452,18 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ================================================================== */
     if (params->fogMode & FOG_ENABLE) {
         if (params->fogMode & FOG_CONSTANT) {
-            /* FOG_CONSTANT: simply add fogColor to color (saturating) */
-            /* FMOV s3, [params->fogColor] => LDR w4, [x1, #PARAMS_fogColor] */
-            addlong(ARM64_LDR_W(4, 1, PARAMS_fogColor));
-            addlong(ARM64_FMOV_S_W(3, 4));
-            /* UQADD v0.8B, v0.8B, v3.8B -- unsigned saturating add bytes */
-            addlong(ARM64_UQADD_V8B(0, 0, 3));
+            /* FOG_CONSTANT: simply add fogColor to color (saturating)
+             * v11 = hoisted fogColor (packed bytes from prologue, Batch 7/M3) */
+            addlong(ARM64_UQADD_V8B(0, 0, 11));
         } else {
             /* Non-constant fog: unpack color to 16-bit lanes for math */
             /* UXTL v0.8H, v0.8B -- unpack bytes to halfwords */
             addlong(ARM64_UXTL_8H_8B(0, 0));
 
             if (!(params->fogMode & FOG_ADD)) {
-                /* Load fogColor, unpack to 16-bit: v3 = fogColor */
-                addlong(ARM64_LDR_W(4, 1, PARAMS_fogColor));
-                addlong(ARM64_FMOV_S_W(3, 4));
-                addlong(ARM64_UXTL_8H_8B(3, 3));
+                /* v11 = hoisted fogColor (packed bytes, Batch 7/M3)
+                 * Widen to 16-bit halfwords for fog math */
+                addlong(ARM64_UXTL_8H_8B(3, 11));
             } else {
                 /* FOG_ADD: fogColor = 0 */
                 addlong(ARM64_MOVI_V2D_ZERO(3));
@@ -4088,18 +4095,19 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
              *   Green = (byte1 << 3) & 0x07E0
              *   Red   = (byte2 << 8) & 0xF800 -- actually (byte_val << 8) then AND
              *
-             * Simpler on ARM64 with UBFX+LSL:
+             * Using UBFX+BFI for 6 insns instead of 7 (Batch 7/M6):
              */
-            /* w5 = B = bits[7:3] of byte 0 = bits [7:3] -> (value >> 3) & 0x1F */
+            /* w5 = B = bits[7:3] -> 5-bit blue */
             addlong(ARM64_UBFX(5, 4, 3, 5));
-            /* w6 = G = bits[7:2] of byte 1 = bits [15:10] -> UBFX(4, 10, 6) then << 5 */
+            /* w6 = G = bits[15:10] -> 6-bit green */
             addlong(ARM64_UBFX(6, 4, 10, 6));
-            addlong(ARM64_LSL_IMM(6, 6, 5));
-            /* w7 = R = bits[7:3] of byte 2 = bits [23:19] -> UBFX(4, 19, 5) then << 11 */
-            addlong(ARM64_UBFX(7, 4, 19, 5));
-            addlong(ARM64_LSL_IMM(7, 7, 11));
-            /* Combine: w4 = R | G | B */
-            addlong(ARM64_ORR_REG(4, 7, 6));
+            /* w4 = R = bits[23:19] -> 5-bit red (safe to overwrite w4) */
+            addlong(ARM64_UBFX(4, 4, 19, 5));
+            /* w4 = R << 11 */
+            addlong(ARM64_LSL_IMM(4, 4, 11));
+            /* BFI w4, w6, #5, #6 -- insert G into bits [10:5] */
+            addlong(ARM64_BFI(4, 6, 5, 6));
+            /* w4 |= B (bits [4:0]) */
             addlong(ARM64_ORR_REG(4, 4, 5));
         }
 
