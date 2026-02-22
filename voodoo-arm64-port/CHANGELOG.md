@@ -4,6 +4,79 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Accuracy fixes: TMU1 negate ordering + depth bias clamp (2026-02-22)
+
+Two accuracy fixes that make the ARM64 JIT MORE accurate than the x86-64 JIT, matching
+the interpreter behavior in both cases. Both differences were inherited from x86-64.
+
+### Finding 2 fix: TMU1 RGB tc_sub_clocal negate ordering
+
+**Problem:** When TMU1 color combine uses `tc_sub_clocal_1`, the interpreter computes
+`(-clocal * factor) >> 8` (negate first, then multiply+shift). Both JITs computed
+`-(clocal * factor >> 8)` (multiply+shift first, then negate). These differ by exactly
+±1 when `clocal * factor` is not a multiple of 256, because arithmetic right shift
+floors toward negative infinity: `(-a*b) >> 8` rounds differently than `-(a*b >> 8)`.
+
+**Fix:** Negate clocal BEFORE the widening multiply. Changed the 4-instruction sequence:
+```
+SMULL v16.4S, v3.4H, v0.4H    ; positive multiply
+SSHR  v16.4S, v16.4S, #8       ; shift
+SQXTN v0.4H, v16.4S            ; narrow
+SUB   v1.4H, v1.4H, v0.4H     ; negate last (WRONG)
+```
+to:
+```
+SUB   v16.4H, v1.4H, v3.4H    ; negate clocal first (v1=0)
+SMULL v16.4S, v16.4H, v0.4H   ; multiply negated value
+SSHR  v16.4S, v16.4S, #8       ; shift
+SQXTN v1.4H, v16.4S            ; narrow directly into v1
+```
+
+Same instruction count (4). Result goes directly into v1 (already negated), eliminating
+the separate SUB. The `tc_add_clocal_1` and `tc_add_alocal_1` paths that follow continue
+to work correctly since they ADD to v1.
+
+**Scope:** Only affects TMU1 RGB path with `tc_sub_clocal_1`. Not alpha, not TMU0.
+
+### Finding 4 fix: zaColor depth bias clamp vs truncate
+
+**Problem:** The interpreter computes `CLAMP16(new_depth + (int16_t) params->zaColor)`,
+clamping the result to [0, 0xFFFF]. Both JITs used `AND 0xFFFF` (x86-64) / `UXTH`
+(ARM64), which wraps/truncates instead of clamping. A negative sum (e.g. depth=100,
+zaColor=-200) wraps to a large positive value instead of clamping to 0.
+
+**Fix:** Replaced `UXTH` with proper CLAMP16 sequence:
+```
+SXTH w4, w4                 ; sign-extend zaColor to match (int16_t) cast
+ADD  w10, w10, w4           ; signed addition
+CMP  w10, #0                ; clamp lower bound
+CSEL w10, wzr, w10, LT
+MOVZ w11, #0xFFFF           ; clamp upper bound
+CMP  w10, w11
+CSEL w10, w11, w10, GT
+```
+
+Uses the same CMP+CSEL clamp pattern already used for the z-buffer depth source clamp
+immediately above this code. Adds 5 net instructions (3 → 8) for blocks with FBZ_DEPTH_BIAS.
+
+### Verify mode results
+
+Compared against previous baseline (before fixes):
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Mismatch events | 2,900,000 | 926,001 | -68% |
+| Differing pixels | 22,300,000 | 5,808,898 | -74% |
+| Match rate | 99.24% | 99.61% | +0.37% |
+
+80.6% of remaining diffs are ±0-1 (verify mode state save/restore artifacts).
+jit_debug=1 is HEALTHY (zero errors, zero mismatches).
+
+#### File modified:
+- `src/include/86box/vid_voodoo_codegen_arm64.h`
+
+---
+
 ## Verify mode debugging and hardening (2026-02-21)
 
 Comprehensive investigation of VERIFY MISMATCH events in jit_debug=2 (verify mode).
@@ -1042,3 +1115,4 @@ Audited all ~1450 comment lines in the ARM64 codegen header for accuracy.
 | Opt 1-7 | Round 1 optimization batches (80-100 insns/pixel removed) | Committed | -- |
 | Opt 7-fix | Batch 7/M5 TMU0 alpha extraction ordering bugfix | Committed | -- |
 | Opt 8 | Round 2 Batch 8: loop + cc + stipple peepholes (~4 insn/px) | Testing | -- |
+| Accuracy | TMU1 negate ordering + depth bias clamp (Findings 2 & 4) | Committed | -- |

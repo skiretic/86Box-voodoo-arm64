@@ -2372,15 +2372,26 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ================================================================
      *
      * x86-64 ref: lines 954-960
-     * new_depth = (depth + zaColor) & 0xFFFF
+     *
+     * Interpreter: new_depth = CLAMP16(new_depth + (int16_t) params->zaColor)
+     * The x86-64 JIT (and our original code) just masked to 16 bits,
+     * but the interpreter clamps to [0, 0xFFFF] after a SIGNED add.
+     * With sign-extension of zaColor, the sum can go negative or
+     * exceed 0xFFFF, so a proper clamp is needed.
      * ================================================================ */
     if (params->fbzMode & FBZ_DEPTH_BIAS) {
         /* LDR w4, [x1, #PARAMS_zaColor] */
         addlong(ARM64_LDR_W(4, 1, PARAMS_zaColor));
-        /* ADD w10, w10, w4 */
+        /* SXTH w4, w4 -- sign-extend low 16 bits to match (int16_t) cast */
+        addlong(ARM64_SXTH(4, 4));
+        /* ADD w10, w10, w4 -- signed addition (result may be <0 or >0xFFFF) */
         addlong(ARM64_ADD_REG(10, 10, 4));
-        /* UXTH w10, w10  -- mask to 16 bits */
-        addlong(ARM64_UXTH(10, 10));
+        /* CLAMP16: clamp to [0, 0xFFFF] */
+        addlong(ARM64_CMP_IMM(10, 0));
+        addlong(ARM64_CSEL(10, 31, 10, COND_LT));
+        addlong(ARM64_MOVZ_W(11, 0xFFFF));
+        addlong(ARM64_CMP_REG(10, 11));
+        addlong(ARM64_CSEL(10, 11, 10, COND_GT));
     }
 
     /* Store new_depth: STR w10, [x0, #STATE_new_depth] */
@@ -2618,28 +2629,23 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_MOVI_V2D_ZERO(1));
 
                 /* The signed multiply sequence:
-                 * result = (clocal * factor) >> 8, saturated to 16-bit
-                 * Then: output = zero - result (negate)
-                 * Actually x86 does: XMM1 = XMM2(zero), then PSUBW XMM1, (multiply result)
-                 * Which is: output = 0 - (clocal * factor >> 8)
+                 * Interpreter does: (-clocal * factor) >> 8
+                 * i.e. negate clocal BEFORE the multiply+shift.
                  *
-                 * Wait, re-reading the x86-64 more carefully:
-                 * XMM0 = factor, XMM3 = clocal (TMU1)
-                 * MOVQ XMM1, XMM2  -> XMM1 = 0
-                 * MOVQ XMM5, XMM0  -> XMM5 = factor
-                 * PMULLW XMM0, XMM3  -> XMM0 = low(factor * clocal)
-                 * PMULHW XMM5, XMM3  -> XMM5 = high(factor * clocal)
-                 * PUNPCKLWD XMM0, XMM5 -> XMM0 = 32-bit products
-                 * PSRAD XMM0, 8       -> XMM0 >>= 8
-                 * PACKSSDW XMM0, XMM0 -> XMM0 = 16-bit saturated
-                 * PSUBW XMM1, XMM0    -> XMM1 = 0 - products
+                 * This matters because (-a*b)>>8 != -(a*b>>8) when a*b
+                 * is not a multiple of 256 (arithmetic right shift floors
+                 * toward negative infinity). Negating after the shift
+                 * loses the remainder and produces a +1 error.
                  *
-                 * ARM64 equivalent (3 insns for multiply + 1 for negate):
+                 * x86-64 JIT does the negate last (inherited bug).
+                 * We fix it here: negate clocal first, then multiply.
+                 *
+                 * v1 = 0 (from MOVI above), v3 = clocal, v0 = factor
                  */
-                addlong(ARM64_SMULL_4S_4H(16, 3, 0));    /* v16.4S = v3.4H * v0.4H */
-                addlong(ARM64_SSHR_V4S(16, 16, 8));       /* v16.4S >>= 8 */
-                addlong(ARM64_SQXTN_4H_4S(0, 16));        /* v0.4H = saturate_narrow(v16.4S) */
-                addlong(ARM64_SUB_V4H(1, 1, 0));          /* v1.4H = 0 - products */
+                addlong(ARM64_SUB_V4H(16, 1, 3));        /* v16.4H = 0 - clocal (negate first) */
+                addlong(ARM64_SMULL_4S_4H(16, 16, 0));   /* v16.4S = (-clocal).4H * factor.4H */
+                addlong(ARM64_SSHR_V4S(16, 16, 8));       /* v16.4S >>= 8 (arithmetic) */
+                addlong(ARM64_SQXTN_4H_4S(1, 16));        /* v1.4H = saturate_narrow(v16.4S) */
 
                 /* tc_add_clocal_1: add clocal (TMU1) back */
                 if (tc_add_clocal_1) {

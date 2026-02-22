@@ -11,9 +11,9 @@
 | # | Finding | Verdict | Impact | Action |
 |---|---------|---------|--------|--------|
 | 1 | Alpha blend /255 vs >>8 | **FALSE ALARM** | None | None needed |
-| 2 | TMU1 RGB negate ordering | **REAL, inherited from x86-64** | ±1 per channel, sub-perceptual | Optional |
+| 2 | TMU1 RGB negate ordering | **FIXED in ARM64 JIT** | ±1 per channel, sub-perceptual | Done |
 | 3 | AFUNC_ASATURATE operand | **REAL BUG in interpreter** | Wrong color blended entirely | **Fix recommended** |
-| 4 | zaColor depth bias clamp vs truncate | **REAL, inherited from x86-64** | Edge case only | Optional |
+| 4 | zaColor depth bias clamp vs truncate | **FIXED in ARM64 JIT** | Edge case only | Done |
 
 **ARM64-specific bugs found: 0**
 
@@ -76,7 +76,15 @@ Exactly 1 LSB per channel when `texel * adjusted_factor % 256 != 0` (the common 
 - NOT color combine
 - Common in Voodoo 2 trilinear/multitexture, rare in Voodoo 1
 
-### Verdict: Real ±1 difference, inherited from x86-64, sub-perceptual. ARM64 matches x86-64 exactly.
+### Fix (2026-02-22)
+
+Negated clocal BEFORE the widening multiply to match the interpreter's `(-clocal * factor) >> 8` order.
+Changed `SMULL(v3,v0) → SSHR → SQXTN → SUB` to `SUB(negate) → SMULL → SSHR → SQXTN`.
+Same instruction count. ARM64 JIT now matches interpreter exactly on this path; x86-64 JIT still has the bug.
+
+Verify mode results: mismatch events dropped 68% (2.9M → 926K), differing pixels dropped 74% (22.3M → 5.8M).
+
+### Verdict: ~~Real ±1 difference, inherited from x86-64.~~ **FIXED** — ARM64 JIT now more accurate than x86-64.
 
 ---
 
@@ -176,14 +184,23 @@ The old **x86 32-bit JIT** (`vid_voodoo_codegen_x86.h:792-812`) used CMOVS/CMOVA
 ### Impact
 Near zero. Requires depth + bias to cross the 0 or 0xFFFF boundary, which needs extreme depth values AND large bias — essentially never happens in real games.
 
-### Verdict: Real difference, inherited from x86-64, negligible practical impact.
+### Fix (2026-02-22)
+
+Replaced `UXTH` (truncate/wrap) with proper CLAMP16 sequence: `SXTH` (sign-extend zaColor) +
+`CMP/CSEL` (clamp to 0) + `MOVZ/CMP/CSEL` (clamp to 0xFFFF). Same pattern as the z-buffer
+depth source clamp immediately above. Adds 5 net instructions for FBZ_DEPTH_BIAS blocks.
+
+### Verdict: ~~Real difference, inherited from x86-64.~~ **FIXED** — ARM64 JIT now matches interpreter exactly.
 
 ---
 
 ## Overall Conclusions
 
-1. **The ARM64 JIT has zero unique bugs** — every difference found is inherited from the x86-64 JIT
+1. **The ARM64 JIT has zero unique bugs** — every difference found was inherited from the x86-64 JIT
 2. **One real upstream bug found** (Finding 3: ASATURATE) — affects interpreter only, both JITs are correct
-3. **Two ±1 rounding differences** (Findings 2 & 4) — both inherited, both sub-perceptual
+3. **Two inherited rounding differences fixed** (Findings 2 & 4) — ARM64 JIT now matches interpreter on both paths
 4. **One false alarm** (Finding 1) — the math is actually identical across all implementations
-5. **The ARM64 JIT is already more accurate than the x86-64 JIT** for fog blending (fog_a++ fix, commit ad136e14)
+5. **The ARM64 JIT is now more accurate than the x86-64 JIT** on three paths:
+   - Fog blending: fog_a++ fix (commit ad136e14)
+   - TMU1 RGB negate ordering: negate-before-multiply fix (Finding 2)
+   - Depth bias clamping: CLAMP16 instead of truncate (Finding 4)
