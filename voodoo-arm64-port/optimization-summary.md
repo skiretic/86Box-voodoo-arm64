@@ -200,3 +200,4 @@ Full analysis: `verify-mismatch-analysis.md`
 | `batch7-audit.md` | Batch 7 pre-implementation audit |
 | `feature-parity-audit.md` | Final feature parity audit (ARM64 vs x86-64) |
 | `verify-mismatch-analysis.md` | Verify mode mismatch root cause analysis (false positives) |
+| `accuracy-audit-findings.md` | JIT vs interpreter accuracy audit — 4 findings verified (2026-02-22) |
