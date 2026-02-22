@@ -22,14 +22,14 @@ Unlike higher-level emulators that approximate hardware behavior, 86Box performs
 
 ## Features
 
-- **Accurate CPU emulation** — Intel 8088 through Pentium III (Coppermine/Tualatin), AMD K6-III+, Cyrix/VIA, IDT WinChip. Optional dynamic recompiler for x86-64 and ARM64 hosts.
-- **Extensive machine library** — from the original IBM PC 5150 (1981) to Socket 370 Pentium III systems, including IBM PS/2, Compaq, and dozens of third-party motherboards from ASUS, Gigabyte, MSI, and more.
-- **3D accelerated graphics** — 3dfx Voodoo 1, Voodoo 2, Voodoo Banshee, and Voodoo 3 with JIT-compiled pixel pipelines. Plus S3 ViRGE, S3 Trio64, ATI Mach64, Matrox Mystique, Trident TGUI, Cirrus Logic, and many more — from CGA and Hercules through SVGA.
-- **Sound** — Sound Blaster (1.0 through AWE64), Gravis Ultrasound, Roland MPU-401, AdLib, Windows Sound System, Ensoniq AudioPCI. MIDI output via FluidSynth or emulated Roland MT-32/CM-32L (via munt).
-- **Networking** — NE2000, 3Com 3C503, AMD PCnet, Intel EtherExpress. SLiRP (NAT) or bridged networking.
-- **Storage** — MFM/RLL/ESDI/IDE/SCSI hard disks, floppy drives (360K through 2.88M), CD-ROM, ZIP, MO drives. Hard disk images in raw, VHD, HDX formats.
-- **Peripheral cards** — ISA, VLB, PCI, and AGP buses. SCSI controllers (Adaptec, BusLogic, NCR), serial/parallel ports, game ports, MIDI interfaces.
-- **Cross-platform** — Windows, Linux, macOS (including Apple Silicon), and FreeBSD. Qt or SDL user interface.
+- **Accurate CPU emulation** — Intel 8088 through Pentium II / Celeron (Mendocino), AMD K5 through K6-III+, Cyrix 6x86/MII, VIA Cyrix III, IDT WinChip. Optional dynamic recompiler for x86-64 and ARM64 hosts.
+- **450+ machine configurations** — from the original IBM PC 5150 (1981) to Socket 370 Celeron systems, including IBM PS/2 (MCA), Compaq, and dozens of third-party motherboards from ASUS, Gigabyte, MSI, Acer, Dell, and more.
+- **3D accelerated graphics** — 3dfx Voodoo Graphics, Voodoo 2, Voodoo Banshee, and Voodoo 3 with JIT-compiled pixel pipelines. S3 ViRGE/Trio3D, ATI Mach64, Matrox Millennium/Mystique, Trident TGUI, Cirrus Logic GD5400-5480, Tseng ET4000/W32, and many more — from CGA and Hercules through SVGA.
+- **Sound** — Sound Blaster (1.0 through AWE64 Gold), Gravis Ultrasound, Pro Audio Spectrum, Roland MPU-401, AdLib, ESS AudioDrive, Windows Sound System, Ensoniq AudioPCI, C-Media CMI8738. MIDI output via FluidSynth or emulated Roland MT-32/CM-32L (via munt).
+- **Networking** — NE1000/NE2000, 3Com 3C501/3C503, AMD PCnet, DEC Tulip, Realtek RTL8139C+. SLiRP (NAT) or bridged networking.
+- **Storage** — MFM/RLL/ESDI/IDE/SCSI hard disks, floppy drives (360K through 2.88M), CD-ROM, MO drives. SCSI controllers from Adaptec, BusLogic, NCR, and AMD. Hard disk images in raw, VHD, HDX formats.
+- **Peripheral cards** — ISA, MCA, VLB, PCI, and AGP buses. Serial/parallel ports, game ports, joysticks, printers (ESC/P, PostScript), MIDI interfaces.
+- **Cross-platform** — Windows, Linux, macOS (including Apple Silicon), and FreeBSD. Qt5/Qt6 or SDL user interface.
 
 ## Screenshots
 
