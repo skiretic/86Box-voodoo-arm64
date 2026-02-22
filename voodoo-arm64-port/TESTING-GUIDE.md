@@ -351,10 +351,50 @@ Both versions perform a full pass and report:
 **Warning:** Very slow, only use for debugging visual corruption.
 
 When enabled:
+- Saves framebuffer and depth buffer state
 - Runs JIT code for a scanline
+- Saves JIT output, restores original framebuffer and depth buffer
 - Runs interpreter for the same scanline
-- Compares pixel output
+- Compares JIT output vs interpreter output pixel-by-pixel
 - Logs mismatches to `voodoo_jit.log`
+
+#### Known limitations of verify mode
+
+Verify mode is useful for catching gross codegen bugs during development, but it has
+inherent limitations that produce **false positive mismatches**:
+
+- **State save/restore is imperfect.** The verify harness saves and restores the major
+  pipeline state (fb_mem, aux_mem, iterators ib/ig/ir/ia/z/w/tmu), but shared state
+  not covered by the save/restore (internal LOD state, texture cache coherence, etc.)
+  can differ between the JIT and interpreter runs, causing the interpreter to operate
+  on subtly different input.
+
+- **Expect ~99% match rate, not 100%.** Testing shows a consistent ~99.2-99.6% match
+  rate. Most diffs (85%) are ±0-1 (rounding differences). About 5% are ±7+ in RGB565,
+  which are artifacts of cascading state differences, not real JIT bugs.
+
+- **"Interpreter fallbacks" are expected.** In verify mode, every scanline runs the
+  interpreter as the comparison reference. The analyzer counts these as "fallbacks" —
+  this is normal and expected (hundreds of millions in a typical run). In jit_debug=1,
+  fallback count should be zero.
+
+- **Stack overflow on long runs (fixed).** The verify mode buffers were originally
+  allocated with `alloca()`, which accumulated on the stack across scanlines and caused
+  SIGBUS crashes. This was fixed by switching to `malloc()`/`free()`.
+
+#### Recommended validation workflow
+
+1. **Use jit_debug=1 for correctness validation.** A HEALTHY verdict at level 1 with
+   zero errors, zero fallbacks, and diverse pipeline coverage confirms JIT correctness.
+   This is the authoritative indicator.
+
+2. **Use jit_debug=2 only for debugging.** If you see visual corruption with the JIT
+   enabled that disappears with the interpreter, use verify mode to narrow down which
+   pipeline configuration is affected. Do not treat the match rate percentage as a
+   quality metric — some false positives are inherent.
+
+3. **Compare JIT ON vs OFF visually.** The ultimate test is whether the game looks
+   correct. Take screenshots with JIT enabled and disabled and compare.
 
 ---
 

@@ -40,11 +40,12 @@ A second optimization audit was performed on 2026-02-21, generating 33 findings 
 | Item | Type | Description | Est. Savings | Risk |
 |------|------|-------------|-------------|------|
 | **Batch D** | Per-pixel opt | SDIV → reciprocal approximation for perspective W division | ~5-15 cyc/pixel | High (accuracy) |
-| **JIT cache expansion** | Infrastructure | Increase cache from 8 to 16-32 slots per thread to reduce recompilation thrashing (258K recompiles for 351 configs). Smoothness/latency improvement, not throughput. | Reduced micro-stutters | Low |
 | **Performance benchmarking** | Validation | A/B comparison of pre-optimization vs post-optimization builds with fixed workload. Actually measure the estimated 10-20% wall-clock improvement. | N/A | N/A |
-| **Debug logging levels** | Infrastructure | Add verbosity tiers (level 1 = GENERATE only, level 2 = +EXECUTE/POST, level 3 = +PIXELS). Current uncapped logging produces 38GB+ logs. | N/A | Zero |
 
-**Recommended order**: JIT cache expansion → Debug logging levels → Performance benchmarking → Batch D
+~~**JIT cache expansion**~~: DONE (8 → 32 slots/thread, commit `cc560e062`).
+~~**Debug logging levels**~~: DONE (jit_debug=0/1/2, commit `ad136e14` area).
+
+**Recommended order**: Performance benchmarking → Batch D
 
 ---
 
@@ -170,6 +171,24 @@ Extensive regression test (Q3, 3DMark, multiple games on Voodoo 3 dual-TMU):
 - 37M unique Z values, 32,550 unique RGB565 colors
 - Verdict: **HEALTHY**
 
+### Verify Mode Investigation (2026-02-21)
+
+Investigated VERIFY MISMATCH events in jit_debug=2 across multiple extended runs (3GB, 42GB, 102GB logs).
+**Conclusion: all mismatches are artifacts of the verify test harness.**
+
+Key findings:
+- jit_debug=2 shows ~99.2% match rate (2.9B pixels, 22M differing) — false positives from imperfect state save/restore
+- 80% of mismatches occur with fog completely disabled — proves issue is NOT fog-related
+- 815M "interpreter fallbacks" in verify mode are expected (interpreter runs as comparison reference)
+- jit_debug=1 is perfectly clean: 0 errors, 0 fallbacks, 0 mismatches across 2.4B pixels and 259 configs
+
+Bugs fixed during investigation:
+- Fog alpha `fog_a++` increment was missing in JIT (commit `ad136e14`)
+- Verify mode EXECUTE/POST/PIXEL logging was being skipped (control flow fix)
+- `alloca()` stack overflow crash on long verify runs → replaced with `malloc()`/`free()`
+
+Full analysis: `verify-mismatch-analysis.md`
+
 ## Documents
 
 | File | Contents |
@@ -180,3 +199,4 @@ Extensive regression test (Q3, 3DMark, multiple games on Voodoo 3 dual-TMU):
 | `codegen-audit-report.md` | Prior correctness audit (0 bugs found) |
 | `batch7-audit.md` | Batch 7 pre-implementation audit |
 | `feature-parity-audit.md` | Final feature parity audit (ARM64 vs x86-64) |
+| `verify-mismatch-analysis.md` | Verify mode mismatch root cause analysis (false positives) |

@@ -96,6 +96,25 @@ typedef struct {
     char text[121];
 } ErrorLine;
 
+#define MAX_FOGMODE_COUNTERS 64
+#define MAX_MISMATCH_CONFIGS 256
+
+typedef struct {
+    uint32_t fog_mode;
+    uint64_t count;
+    uint64_t pixels_differ;
+} FogModeCounter;
+
+typedef struct {
+    uint32_t fbz_mode;
+    uint32_t fbz_color_path;
+    uint32_t alpha_mode;
+    uint32_t texture_mode;
+    uint32_t fog_mode;
+    uint64_t count;
+    uint64_t pixels_differ;
+} MismatchConfigCounter;
+
 typedef struct {
     uint64_t total_lines;
     uint64_t generate_count;
@@ -113,6 +132,24 @@ typedef struct {
     uint64_t warn_count;
     uint64_t verify_mismatch_count;
     uint64_t verify_pixels_differ;
+
+    /* Per-fogMode mismatch breakdown */
+    FogModeCounter vm_fog[MAX_FOGMODE_COUNTERS];
+    size_t vm_fog_len;
+
+    /* Per-pipeline-config mismatch breakdown */
+    MismatchConfigCounter vm_configs[MAX_MISMATCH_CONFIGS];
+    size_t vm_configs_len;
+
+    /* Pixel diff magnitude stats (from "  pixel[" lines) */
+    uint64_t diff_mag_0_1;
+    uint64_t diff_mag_2_3;
+    uint64_t diff_mag_4_6;
+    uint64_t diff_mag_7_plus;
+    int max_abs_dr;
+    int max_abs_dg;
+    int max_abs_db;
+    uint64_t pixel_diffs_parsed;
 
     bool has_init;
     uint64_t init_line_no;
@@ -635,6 +672,75 @@ static int parse_0x_hex_u64(const char **p, const char *end, uint64_t *out) {
     return 1;
 }
 
+/* Parse "key=0xHEX" from a line, returning the hex value. Returns 0 on failure. */
+static uint32_t find_hex_field(const char *line, size_t len, const char *key) {
+    const char *p = find_substr(line, len, key);
+    if (!p) return 0;
+    p += strlen(key);
+    const char *end = line + len;
+    uint64_t v = 0;
+    if (!parse_0x_hex_u64(&p, end, &v)) return 0;
+    return (uint32_t)v;
+}
+
+/* Parse "dR=+/-N" style signed int from a line. Returns 0 on failure. */
+static int find_signed_field(const char *line, size_t len, const char *key, int *out) {
+    const char *p = find_substr(line, len, key);
+    if (!p) return 0;
+    p += strlen(key);
+    const char *end = line + len;
+    int64_t v = 0;
+    /* Handle explicit '+' sign */
+    if (p < end && *p == '+') p++;
+    if (!parse_i64(&p, end, &v)) return 0;
+    *out = (int)v;
+    return 1;
+}
+
+/* Increment per-fogMode mismatch counter */
+static void vm_fog_increment(Stats *s, uint32_t fog_mode, uint64_t pixels_differ) {
+    size_t i;
+    for (i = 0; i < s->vm_fog_len; i++) {
+        if (s->vm_fog[i].fog_mode == fog_mode) {
+            s->vm_fog[i].count++;
+            s->vm_fog[i].pixels_differ += pixels_differ;
+            return;
+        }
+    }
+    if (s->vm_fog_len < MAX_FOGMODE_COUNTERS) {
+        s->vm_fog[s->vm_fog_len].fog_mode = fog_mode;
+        s->vm_fog[s->vm_fog_len].count = 1;
+        s->vm_fog[s->vm_fog_len].pixels_differ = pixels_differ;
+        s->vm_fog_len++;
+    }
+}
+
+/* Increment per-config mismatch counter */
+static void vm_config_increment(Stats *s, uint32_t fbz, uint32_t fcp, uint32_t alpha,
+                                uint32_t tex, uint32_t fog, uint64_t pixels_differ) {
+    size_t i;
+    for (i = 0; i < s->vm_configs_len; i++) {
+        MismatchConfigCounter *c = &s->vm_configs[i];
+        if (c->fbz_mode == fbz && c->fbz_color_path == fcp && c->alpha_mode == alpha &&
+            c->texture_mode == tex && c->fog_mode == fog) {
+            c->count++;
+            c->pixels_differ += pixels_differ;
+            return;
+        }
+    }
+    if (s->vm_configs_len < MAX_MISMATCH_CONFIGS) {
+        MismatchConfigCounter *c = &s->vm_configs[s->vm_configs_len];
+        c->fbz_mode = fbz;
+        c->fbz_color_path = fcp;
+        c->alpha_mode = alpha;
+        c->texture_mode = tex;
+        c->fog_mode = fog;
+        c->count = 1;
+        c->pixels_differ = pixels_differ;
+        s->vm_configs_len++;
+    }
+}
+
 static void copy_span(char *dst, size_t dst_cap, const char *start, const char *end) {
     if (dst_cap == 0) {
         return;
@@ -970,6 +1076,7 @@ static void process_line(Stats *s, const char *line, size_t len, uint64_t line_n
             if (len >= 15 && memcmp(line, "VERIFY MISMATCH", 15) == 0) {
                 s->verify_mismatch_count++;
                 /* Try to extract pixel differ count: "(%d/%d pixels differ)" */
+                uint64_t this_diff = 0;
                 const char *pd = find_substr(line, len, "pixels differ)");
                 if (pd) {
                     /* Walk backwards to find the '/' then the '(' */
@@ -982,12 +1089,44 @@ static void process_line(Stats *s, const char *line, size_t len, uint64_t line_n
                             int64_t diff = 0;
                             const char *dp = paren + 1;
                             if (parse_i64(&dp, slash, &diff) && diff > 0) {
-                                s->verify_pixels_differ += (uint64_t)diff;
+                                this_diff = (uint64_t)diff;
+                                s->verify_pixels_differ += this_diff;
                             }
                         }
                     }
                 }
+                /* Extract register values for breakdown */
+                uint32_t fm = find_hex_field(line, len, "fogMode=");
+                uint32_t fbz = find_hex_field(line, len, "fbzMode=");
+                uint32_t fcp = find_hex_field(line, len, "fbzColorPath=");
+                uint32_t am = find_hex_field(line, len, "alphaMode=");
+                uint32_t tm = find_hex_field(line, len, "textureMode=");
+                vm_fog_increment(s, fm, this_diff);
+                vm_config_increment(s, fbz, fcp, am, tm, fm, this_diff);
                 store_error_line(s, line_no, line, len);
+                return;
+            }
+            /* Parse pixel diff lines: "  pixel[N]: ... dR=+/-N dG=+/-N dB=+/-N" */
+            if (len >= 10 && find_substr(line, len, "pixel[") && find_substr(line, len, "dR=")) {
+                int dr = 0, dg = 0, db = 0;
+                if (find_signed_field(line, len, "dR=", &dr) &&
+                    find_signed_field(line, len, "dG=", &dg) &&
+                    find_signed_field(line, len, "dB=", &db)) {
+                    s->pixel_diffs_parsed++;
+                    int adr = dr < 0 ? -dr : dr;
+                    int adg = dg < 0 ? -dg : dg;
+                    int adb = db < 0 ? -db : db;
+                    if (adr > s->max_abs_dr) s->max_abs_dr = adr;
+                    if (adg > s->max_abs_dg) s->max_abs_dg = adg;
+                    if (adb > s->max_abs_db) s->max_abs_db = adb;
+                    int maxc = adr;
+                    if (adg > maxc) maxc = adg;
+                    if (adb > maxc) maxc = adb;
+                    if (maxc <= 1) s->diff_mag_0_1++;
+                    else if (maxc <= 3) s->diff_mag_2_3++;
+                    else if (maxc <= 6) s->diff_mag_4_6++;
+                    else s->diff_mag_7_plus++;
+                }
                 return;
             }
             if (line_has_error_pattern(line, len)) {
@@ -1353,6 +1492,60 @@ static void merge_stats(Stats *agg, Stats *src, uint64_t line_offset) {
     agg->verify_mismatch_count += src->verify_mismatch_count;
     agg->verify_pixels_differ += src->verify_pixels_differ;
 
+    /* Merge per-fogMode counters */
+    {
+        size_t mi;
+        for (mi = 0; mi < src->vm_fog_len; mi++) {
+            size_t j;
+            int found = 0;
+            for (j = 0; j < agg->vm_fog_len; j++) {
+                if (agg->vm_fog[j].fog_mode == src->vm_fog[mi].fog_mode) {
+                    agg->vm_fog[j].count += src->vm_fog[mi].count;
+                    agg->vm_fog[j].pixels_differ += src->vm_fog[mi].pixels_differ;
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found && agg->vm_fog_len < MAX_FOGMODE_COUNTERS) {
+                agg->vm_fog[agg->vm_fog_len++] = src->vm_fog[mi];
+            }
+        }
+    }
+
+    /* Merge per-config counters */
+    {
+        size_t mi;
+        for (mi = 0; mi < src->vm_configs_len; mi++) {
+            size_t j;
+            int found = 0;
+            MismatchConfigCounter *sc = &src->vm_configs[mi];
+            for (j = 0; j < agg->vm_configs_len; j++) {
+                MismatchConfigCounter *ac = &agg->vm_configs[j];
+                if (ac->fbz_mode == sc->fbz_mode && ac->fbz_color_path == sc->fbz_color_path &&
+                    ac->alpha_mode == sc->alpha_mode && ac->texture_mode == sc->texture_mode &&
+                    ac->fog_mode == sc->fog_mode) {
+                    ac->count += sc->count;
+                    ac->pixels_differ += sc->pixels_differ;
+                    found = 1;
+                    break;
+                }
+            }
+            if (!found && agg->vm_configs_len < MAX_MISMATCH_CONFIGS) {
+                agg->vm_configs[agg->vm_configs_len++] = *sc;
+            }
+        }
+    }
+
+    /* Merge pixel diff magnitude stats */
+    agg->diff_mag_0_1 += src->diff_mag_0_1;
+    agg->diff_mag_2_3 += src->diff_mag_2_3;
+    agg->diff_mag_4_6 += src->diff_mag_4_6;
+    agg->diff_mag_7_plus += src->diff_mag_7_plus;
+    if (src->max_abs_dr > agg->max_abs_dr) agg->max_abs_dr = src->max_abs_dr;
+    if (src->max_abs_dg > agg->max_abs_dg) agg->max_abs_dg = src->max_abs_dg;
+    if (src->max_abs_db > agg->max_abs_db) agg->max_abs_db = src->max_abs_db;
+    agg->pixel_diffs_parsed += src->pixel_diffs_parsed;
+
     if (src->has_init) {
         uint64_t global_line = src->init_line_no + line_offset;
         if (!agg->has_init || global_line < agg->init_line_no) {
@@ -1651,13 +1844,97 @@ static void print_report(const char *path, double file_mb, const Stats *s, const
     if (s->verify_mismatch_count > 0) {
         printf("\n");
         printf("%s═══ JIT VERIFY ═══%s\n", BOLD, NC);
-        char msg[256];
-        snprintf(msg, sizeof(msg), "VERIFY MISMATCH events: %" PRIu64, s->verify_mismatch_count);
+        char msg[512];
+        format_u64_commas(s->verify_mismatch_count, nbuf1, sizeof(nbuf1));
+        snprintf(msg, sizeof(msg), "VERIFY MISMATCH events: %s", nbuf1);
         fail_msg(msg);
         if (s->verify_pixels_differ > 0) {
             format_u64_commas(s->verify_pixels_differ, nbuf1, sizeof(nbuf1));
             snprintf(msg, sizeof(msg), "Total differing pixels: %s", nbuf1);
             fail_msg(msg);
+        }
+        /* Match rate */
+        if (s->pixel_count_total > 0 && s->verify_pixels_differ > 0) {
+            double match_pct = 100.0 * (1.0 - (double)s->verify_pixels_differ / (double)s->pixel_count_total);
+            format_u64_commas(s->pixel_count_total, nbuf1, sizeof(nbuf1));
+            snprintf(msg, sizeof(msg), "Match rate: %.2f%% (%s total pixels)", match_pct, nbuf1);
+            if (match_pct >= 99.0)
+                ok_msg(msg);
+            else
+                fail_msg(msg);
+        }
+
+        /* Per-fogMode breakdown (copy to sort without modifying const) */
+        if (s->vm_fog_len > 0) {
+            printf("\n%s  Mismatches by fogMode:%s\n", BOLD, NC);
+            FogModeCounter fog_sorted[MAX_FOGMODE_COUNTERS];
+            size_t fog_n = s->vm_fog_len;
+            memcpy(fog_sorted, s->vm_fog, fog_n * sizeof(FogModeCounter));
+            /* Insertion sort descending by count */
+            size_t fi, fj;
+            for (fi = 1; fi < fog_n; fi++) {
+                FogModeCounter tmp = fog_sorted[fi];
+                fj = fi;
+                while (fj > 0 && fog_sorted[fj - 1].count < tmp.count) {
+                    fog_sorted[fj] = fog_sorted[fj - 1];
+                    fj--;
+                }
+                fog_sorted[fj] = tmp;
+            }
+            for (fi = 0; fi < fog_n && fi < 10; fi++) {
+                FogModeCounter *fc = &fog_sorted[fi];
+                int fog_enabled = (fc->fog_mode & 0x01) ? 1 : 0;
+                format_u64_commas(fc->count, nbuf1, sizeof(nbuf1));
+                format_u64_commas(fc->pixels_differ, nbuf2, sizeof(nbuf2));
+                printf("             0x%08x: %s events, %s pixels%s\n",
+                       fc->fog_mode, nbuf1, nbuf2,
+                       fog_enabled ? "" : " (fog disabled)");
+            }
+        }
+
+        /* Top mismatch pipeline configs (copy to sort) */
+        if (s->vm_configs_len > 0) {
+            printf("\n%s  Top mismatch pipeline configs:%s\n", BOLD, NC);
+            MismatchConfigCounter *cfg_sorted = xmalloc(s->vm_configs_len * sizeof(MismatchConfigCounter));
+            size_t cfg_n = s->vm_configs_len;
+            memcpy(cfg_sorted, s->vm_configs, cfg_n * sizeof(MismatchConfigCounter));
+            size_t ci, cj;
+            for (ci = 1; ci < cfg_n; ci++) {
+                MismatchConfigCounter tmp = cfg_sorted[ci];
+                cj = ci;
+                while (cj > 0 && cfg_sorted[cj - 1].count < tmp.count) {
+                    cfg_sorted[cj] = cfg_sorted[cj - 1];
+                    cj--;
+                }
+                cfg_sorted[cj] = tmp;
+            }
+            size_t show = cfg_n < 10 ? cfg_n : 10;
+            for (ci = 0; ci < show; ci++) {
+                MismatchConfigCounter *cc = &cfg_sorted[ci];
+                format_u64_commas(cc->count, nbuf1, sizeof(nbuf1));
+                format_u64_commas(cc->pixels_differ, nbuf2, sizeof(nbuf2));
+                printf("             #%zu: %s events (%s px) fbz=0x%08x fcp=0x%08x alpha=0x%08x tex=0x%08x fog=0x%08x\n",
+                       ci + 1, nbuf1, nbuf2,
+                       cc->fbz_mode, cc->fbz_color_path, cc->alpha_mode,
+                       cc->texture_mode, cc->fog_mode);
+            }
+            free(cfg_sorted);
+        }
+
+        /* Pixel diff magnitude distribution */
+        if (s->pixel_diffs_parsed > 0) {
+            printf("\n%s  Pixel diff magnitude (max channel per pixel):%s\n", BOLD, NC);
+            uint64_t total = s->pixel_diffs_parsed;
+            format_u64_commas(s->diff_mag_0_1, nbuf1, sizeof(nbuf1));
+            printf("             ±0-1: %s (%.1f%%)\n", nbuf1, 100.0 * (double)s->diff_mag_0_1 / (double)total);
+            format_u64_commas(s->diff_mag_2_3, nbuf1, sizeof(nbuf1));
+            printf("             ±2-3: %s (%.1f%%)\n", nbuf1, 100.0 * (double)s->diff_mag_2_3 / (double)total);
+            format_u64_commas(s->diff_mag_4_6, nbuf1, sizeof(nbuf1));
+            printf("             ±4-6: %s (%.1f%%)\n", nbuf1, 100.0 * (double)s->diff_mag_4_6 / (double)total);
+            format_u64_commas(s->diff_mag_7_plus, nbuf1, sizeof(nbuf1));
+            printf("             ±7+:  %s (%.1f%%)\n", nbuf1, 100.0 * (double)s->diff_mag_7_plus / (double)total);
+            printf("             Max |dR|=%d |dG|=%d |dB|=%d (RGB565)\n",
+                   s->max_abs_dr, s->max_abs_dg, s->max_abs_db);
         }
     }
 
@@ -1995,9 +2272,14 @@ static void print_report(const char *path, double file_mb, const Stats *s, const
         snprintf(row_scanlines, sizeof(row_scanlines), "No data");
     }
 
-    char row_verify[64];
+    char row_verify[128];
     if (s->verify_mismatch_count > 0) {
-        snprintf(row_verify, sizeof(row_verify), "%" PRIu64 " MISMATCHES", s->verify_mismatch_count);
+        if (s->pixel_count_total > 0 && s->verify_pixels_differ > 0) {
+            double match_pct = 100.0 * (1.0 - (double)s->verify_pixels_differ / (double)s->pixel_count_total);
+            snprintf(row_verify, sizeof(row_verify), "%" PRIu64 " MISMATCHES (%.2f%% match)", s->verify_mismatch_count, match_pct);
+        } else {
+            snprintf(row_verify, sizeof(row_verify), "%" PRIu64 " MISMATCHES", s->verify_mismatch_count);
+        }
     } else {
         snprintf(row_verify, sizeof(row_verify), "Clean (no mismatches)");
     }

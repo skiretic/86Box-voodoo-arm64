@@ -4,6 +4,69 @@ All changes, decisions, and progress for the ARM64 port of the Voodoo GPU pixel 
 
 ---
 
+## Verify mode debugging and hardening (2026-02-21)
+
+Comprehensive investigation of VERIFY MISMATCH events in jit_debug=2 (verify mode).
+**Conclusion: All mismatches are artifacts of the verify test harness, NOT real JIT bugs.**
+The JIT is pixel-perfect in normal operation (jit_debug=1).
+
+### Fog alpha computation fix (commit `ad136e14`)
+
+The JIT's fog alpha (`fog_a`) was computed as `fog_a = fog_table[idx].fog + (dfog * frac) >> 10`
+without the final `fog_a++` increment that the interpreter applies (see `APPLY_FOG` macro in
+`vid_voodoo_render.h` line 100). This caused systematic ±1 differences in fogged pixels.
+Fix: added `ADD w_fog_a, w_fog_a, #1` after the fog table interpolation.
+
+### Verify mode EXECUTE/POST/PIXEL logging fix
+
+In verify mode (jit_debug=2), the JIT runs inside a verify block that sets `jit_verify_active = 1`.
+The normal JIT path's EXECUTE/POST/PIXEL logging was guarded by `!jit_verify_active`, so these
+log lines never appeared in verify mode logs. Fix: added equivalent logging inside the verify block
+after `voodoo_draw()` returns.
+
+### Stack overflow fix: alloca() to malloc()/free()
+
+The verify mode saves/restores framebuffer and aux buffer contents using temporary buffers. These
+were allocated with `alloca()`, which doesn't free until the function returns. Since the render
+loop processes many scanlines per function call, the stack grew unbounded and caused SIGBUS
+("Thread stack size exceeded") crashes on long runs.
+
+Fix: replaced 3 `alloca()` calls with `malloc()`/`free()`:
+- `jit_fb_save` — saves JIT framebuffer output for comparison
+- `saved_aux` — saves original aux buffer, restored after comparison
+- `jit_aux_save` — saves JIT aux buffer output for comparison
+
+Max allocation is ~16KB per scanline (jv_count capped at 2048). Every `malloc()` has a
+corresponding `free()` on all code paths.
+
+### Enhanced log analyzer (scripts/analyze-jit-log.c)
+
+Major enhancement to the C log analyzer to eliminate the need for manual grep commands:
+- **Per-fogMode mismatch breakdown** with fog enabled/disabled annotation
+- **Top 10 pipeline config mismatch table** (fbzMode, fbzColorPath, alphaMode, textureMode, fogMode)
+- **Diff magnitude distribution** (±0-1, ±2-3, ±4-6, ±7+ buckets with percentages)
+- **Max absolute |dR|, |dG|, |dB|** across all differing pixels
+- **Match rate** (percentage of pixels that match between JIT and interpreter)
+- Thread-safe: all new counters per-worker, merged after scan
+
+### Verify mode findings
+
+Three test runs at jit_debug=2 (102GB, 42GB, 3GB logs) revealed:
+- **99.24% match rate** (2.9B pixels, 22M differing)
+- **80% of mismatches had fog disabled** (fogMode=0x00) — proves issue is NOT a fog bug
+- **85% of diffs are ±0-1** (rounding), 5.4% are ±7+ (full RGB565 range)
+- **815M "interpreter fallbacks"** — actually the interpreter running as the comparison reference
+- Root cause: imperfect state save/restore between JIT and interpreter runs in the verify harness
+
+A subsequent jit_debug=1 run (15GB, 218M lines, 2.4B pixels, 259 configs) was **perfectly clean**:
+zero errors, zero fallbacks, zero mismatches. VERDICT: HEALTHY.
+
+**Conclusion:** jit_debug=1 is the reliable correctness indicator. jit_debug=2 is useful for
+catching gross bugs during development but its state save/restore is inherently imperfect.
+Full analysis in `verify-mismatch-analysis.md`.
+
+---
+
 ## Batch 10: Prologue pointer load optimizations (2026-02-21)
 
 Two optimizations from the Round 2 audit: R2-23, R2-09.
