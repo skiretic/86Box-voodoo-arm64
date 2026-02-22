@@ -14,7 +14,6 @@ This fork ports the Voodoo JIT to ARM64, generating native AArch64 instructions 
 
 - **Full Voodoo pixel pipeline JIT** — all 6 phases ported from x86-64 to ARM64
 - **macOS Apple Silicon support** — W^X handling via `pthread_jit_write_protect_np`, JIT entitlements
-- **Linux ARM64 AppImage** — fully bundled, runs on Raspberry Pi OS, Fedora, Debian, etc.
 - **JIT debug/verify mode** — optional runtime toggle to compare JIT output against the C interpreter pixel-by-pixel
 
 ### Upstream
