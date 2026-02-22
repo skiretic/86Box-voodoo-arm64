@@ -708,7 +708,14 @@ typedef struct voodoo_t {
     mutex_t *force_blit_mutex;
 
     int   use_recompiler;
+    int   jit_debug;
+    FILE *jit_debug_log;
     void *codegen_data;
+
+    ATOMIC_INT jit_gen_count;
+    ATOMIC_INT jit_exec_count;
+    ATOMIC_INT jit_interp_count;
+    ATOMIC_INT jit_verify_mismatches;
 
     struct voodoo_set_t *set;
 

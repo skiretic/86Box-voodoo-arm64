@@ -67,3 +67,17 @@ CMakeLists.txt.user
 
 # Jetbrains CLion
 .idea
+
+# AI tooling
+.claude/
+.serena/
+CLAUDE.md
+
+# Fork-specific working dirs
+appimage/
+riva128-nv3-port/
+voodoo-arm64-port/
+somefix/
+
+# Compiled binaries
+scripts/analyze-jit-log
