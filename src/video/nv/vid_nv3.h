@@ -21,6 +21,7 @@
 #include <86box/vid_svga.h>
 #include <86box/mem.h>
 #include <86box/rom.h>
+#include <86box/timer.h>
 #include <86box/nv/vid_nv3_regs.h>
 
 /*
@@ -36,12 +37,12 @@ enum {
 
 /*
  * PMC (Chip Master Control) state.
- * Per envytools nv3_pmc.xml.
+ * Per envytools pmc.xml.
  */
 typedef struct nv3_pmc_s {
-    uint32_t boot_0;         /* Chip ID register */
-    uint32_t intr_0;         /* Interrupt status */
-    uint32_t intr_en_0;      /* Interrupt enable */
+    uint32_t boot_0;         /* Chip ID register (read-only) */
+    uint32_t intr_0;         /* Interrupt status (aggregated, read-only) */
+    uint32_t intr_en_0;      /* Interrupt enable (0=disabled, 1=hardware, 2=software) */
     uint32_t enable;         /* Subsystem enable bitmask */
 } nv3_pmc_t;
 
@@ -71,6 +72,15 @@ typedef struct nv3_pextdev_s {
 
 /*
  * PTIMER (Programmable Interval Timer) state.
+ *
+ * The NV3 PTIMER provides a monotonically increasing 64-bit nanosecond
+ * counter (TIME_1:TIME_0) that increments at a rate determined by
+ * NUMERATOR/DENOMINATOR relative to the core crystal clock.
+ *
+ * When TIME reaches ALARM_0, bit 0 of INTR_0 is set, which propagates
+ * to PMC_INTR_0 bit 20 (PTIMER).
+ *
+ * Per envytools nv1-clock.xml and pmc.xml.
  */
 typedef struct nv3_ptimer_s {
     uint32_t intr_0;
@@ -83,14 +93,40 @@ typedef struct nv3_ptimer_s {
 } nv3_ptimer_t;
 
 /*
- * PRAMDAC (DAC / PLL) state.
- * Stub for Phase 1; will be expanded in Phase 2.
+ * PCRTC (Display Controller) state.
+ *
+ * Per envytools nv3_pcrtc.xml:
+ *   INTR (0x600100) — bit 0 is VBLANK interrupt pending.
+ *   INTR_EN (0x600140) — bit 0 enables VBLANK interrupt.
+ *   CONFIG (0x600200) — display config (interlace, etc.).
+ *   START (0x600800) — framebuffer start address for scanout.
+ */
+typedef struct nv3_pcrtc_s {
+    uint32_t intr;           /* VBlank interrupt status, bit 0 = VBLANK */
+    uint32_t intr_en;        /* VBlank interrupt enable, bit 0 = VBLANK_EN */
+    uint32_t config;         /* Display configuration */
+    uint32_t start_addr;     /* Framebuffer scanout start address */
+} nv3_pcrtc_t;
+
+/*
+ * PRAMDAC (DAC / PLL / Cursor) state.
+ *
+ * Per envytools nv3_pramdac.xml:
+ *   VPLL (0x680508): Pixel clock PLL coefficients [M, N, P]
+ *   NVPLL (0x680500): Core clock PLL coefficients
+ *   MPLL (0x680504): Memory clock PLL coefficients
+ *   GENERAL_CONTROL (0x680600): DAC mode, cursor enable, pixel format
+ *   CURSOR_START (0x680300): Cursor image VRAM address
+ *
+ * PLL formula: Freq = (crystal * N) / (M * (1 << P))
+ * where crystal is 13.5MHz or 14.318MHz selected by straps.
  */
 typedef struct nv3_pramdac_s {
-    uint32_t vpll_coeff;     /* Pixel clock PLL coefficients */
     uint32_t nvpll_coeff;    /* Core clock PLL coefficients */
     uint32_t mpll_coeff;     /* Memory clock PLL coefficients */
+    uint32_t vpll_coeff;     /* Pixel clock PLL coefficients */
     uint32_t general_control;
+    uint32_t cursor_start;   /* Cursor image VRAM address */
 } nv3_pramdac_t;
 
 /*
@@ -138,6 +174,12 @@ typedef struct nv3_s {
 
     uint32_t vram_size;         /* Total VRAM in bytes */
 
+    /*
+     * Crystal oscillator frequency in Hz.
+     * Determined by PEXTDEV straps bit 6: 13.5MHz or 14.318MHz.
+     */
+    uint32_t crystal_freq;
+
     /* PCI BAR base addresses (host physical) */
     uint32_t bar0_base;         /* BAR0: MMIO base */
     uint32_t bar1_base;         /* BAR1: Linear framebuffer base */
@@ -161,6 +203,7 @@ typedef struct nv3_s {
     nv3_pfb_t     pfb;
     nv3_pextdev_t pextdev;
     nv3_ptimer_t  ptimer;
+    nv3_pcrtc_t   pcrtc;
     nv3_pramdac_t pramdac;
     nv3_pgraph_t  pgraph;
     nv3_pfifo_t   pfifo;

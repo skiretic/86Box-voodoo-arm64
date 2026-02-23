@@ -103,6 +103,12 @@
 #define NV3_PTIMER_ALARM_0        0x009420
 #define NV3_PTIMER_END            0x009FFF
 
+/*
+ * PTIMER_INTR_0 bit positions.
+ * Per envytools: bit 0 = ALARM (time reached alarm threshold).
+ */
+#define NV3_PTIMER_INTR_ALARM     (1 << 0)
+
 /* VGA emulation VRAM window */
 #define NV3_VGA_VRAM_START        0x0A0000
 #define NV3_VGA_VRAM_END          0x0BFFFF
@@ -163,15 +169,112 @@
 
 /* PGRAPH - 2D/3D Graphics Engine */
 #define NV3_PGRAPH_START          0x400000
+#define NV3_PGRAPH_INTR_0         0x400100
+#define NV3_PGRAPH_INTR_EN_0      0x400140
 #define NV3_PGRAPH_END            0x400FFF
+
+/* ========================================================================
+ * PCRTC - Display Controller (0x600000-0x600FFF)
+ *
+ * Per envytools nv3_pcrtc.xml:
+ *   INTR at 0x600100 — VBlank interrupt status.
+ *   INTR_EN at 0x600140 — VBlank interrupt enable.
+ *   CONFIG at 0x600200 — Display configuration (interlace, double-scan).
+ *   START at 0x600800 — Framebuffer start address for display scanout.
+ * ======================================================================== */
+#define NV3_PCRTC_START           0x600000
+#define NV3_PCRTC_INTR            0x600100
+#define NV3_PCRTC_INTR_EN         0x600140
+#define NV3_PCRTC_CONFIG          0x600200
+#define NV3_PCRTC_START_ADDR      0x600800
+#define NV3_PCRTC_END             0x600FFF
+
+/*
+ * PCRTC_INTR / PCRTC_INTR_EN bit positions.
+ * Per envytools: bit 0 = VBLANK.
+ */
+#define NV3_PCRTC_INTR_VBLANK     (1 << 0)
 
 /* PRMCIO - CRTC registers through MMIO */
 #define NV3_PRMCIO_START          0x601000
 #define NV3_PRMCIO_END            0x601FFF
 
-/* PRAMDAC - DAC/PLL */
+/* ========================================================================
+ * PRAMDAC - DAC/PLL/Cursor (0x680000-0x680FFF)
+ *
+ * Register layout per envytools nv3_pramdac.xml and xf86-video-nv riva_hw.c.
+ *
+ * PLL coefficient registers encode three fields:
+ *   bits [7:0]   = M divider (1-based, values 1..13 valid per spec)
+ *   bits [15:8]  = N multiplier (1-based, values 1..255 valid)
+ *   bits [18:16] = P log2 post-divider (0..4 typically)
+ *
+ * PLL output frequency formula (per xf86-video-nv CalcVClock):
+ *   Freq = (crystal_freq * N) / (1 << P)
+ *   where the VCO frequency is: crystal_freq * N / M
+ *   and the output is divided by (1 << P).
+ *   So: Freq = (crystal_freq * N) / (M * (1 << P))
+ * ======================================================================== */
 #define NV3_PRAMDAC_START         0x680000
 #define NV3_PRAMDAC_END           0x680FFF
+
+/* PLL coefficient registers */
+#define NV3_PRAMDAC_NVPLL_COEFF   0x680500   /* Core clock PLL */
+#define NV3_PRAMDAC_MPLL_COEFF    0x680504   /* Memory clock PLL */
+#define NV3_PRAMDAC_VPLL_COEFF    0x680508   /* Pixel clock PLL */
+
+/* PRAMDAC general control register.
+ * Per envytools nv3_pramdac.xml:
+ *   bits [1:0]   = BPC (bits per color component for DAC)
+ *                  0=6bit, 1=8bit, 2=reserved, 3=reserved
+ *   bit 4        = VGA_STATE — 0=VGA passthrough, 1=NV accelerated
+ *   bit 8        = ALT_MODE — alternative pixel format interpretation
+ *   bits [13:12] = CURSOR_MODE — 00=disabled, 01=32x32 2-color,
+ *                  10=32x32 ARGB, 11=64x64 2-color (NV3T only)
+ *   bit 16       = PIXEL_DOUBLE — double pixels horizontally
+ *   bits [20:17] = TV_BLANK_HOFF (TV encoder related)
+ *   bit 28       = SPREAD_SPECTRUM — enable spread spectrum clocking
+ */
+#define NV3_PRAMDAC_GENERAL_CTRL  0x680600
+
+/* Hardware cursor registers.
+ * Per envytools nv3_pramdac.xml:
+ *   Cursor image is stored in VRAM.
+ *   CURSOR_START points to the 256-byte aligned address in VRAM
+ *   where the 32x32 2-color cursor data begins (128 bytes AND mask,
+ *   128 bytes XOR mask, similar to Windows hardware cursor format).
+ */
+#define NV3_PRAMDAC_CURSOR_START  0x680300
+
+/* NV3 PRAMDAC general control bitfield masks */
+#define NV3_PRAMDAC_GCTRL_BPC_MASK       0x00000003
+#define NV3_PRAMDAC_GCTRL_BPC_6BIT       0
+#define NV3_PRAMDAC_GCTRL_BPC_8BIT       1
+#define NV3_PRAMDAC_GCTRL_VGA_STATE      (1 << 4)
+#define NV3_PRAMDAC_GCTRL_ALT_MODE       (1 << 8)
+#define NV3_PRAMDAC_GCTRL_CURSOR_MODE_SHIFT  12
+#define NV3_PRAMDAC_GCTRL_CURSOR_MODE_MASK   (0x3 << 12)
+#define NV3_PRAMDAC_GCTRL_CURSOR_OFF     (0 << 12)
+#define NV3_PRAMDAC_GCTRL_CURSOR_32_2C   (1 << 12)
+#define NV3_PRAMDAC_GCTRL_CURSOR_32_ARGB (2 << 12)
+#define NV3_PRAMDAC_GCTRL_CURSOR_64_2C   (3 << 12)
+
+/* PLL coefficient field extraction macros.
+ * Per envytools nv3_pramdac.xml:
+ *   [7:0]   = M divider
+ *   [15:8]  = N multiplier
+ *   [18:16] = P post-divider exponent
+ */
+#define NV3_PLL_M(coeff)   ((coeff) & 0xFF)
+#define NV3_PLL_N(coeff)   (((coeff) >> 8) & 0xFF)
+#define NV3_PLL_P(coeff)   (((coeff) >> 16) & 0x07)
+
+/* Crystal oscillator frequencies in Hz.
+ * Per envytools and xf86-video-nv:
+ *   Straps bit 6 selects between these two.
+ */
+#define NV3_CRYSTAL_FREQ_13500   13500000   /* 13.500 MHz */
+#define NV3_CRYSTAL_FREQ_14318   14318180   /* 14.31818 MHz */
 
 /* USER DAC registers (palette access through MMIO) */
 #define NV3_USER_DAC_START        0x681200
@@ -238,6 +341,10 @@
 
 /* ========================================================================
  * PMC_INTR_0 interrupt bit positions
+ *
+ * Per envytools pmc.xml: PMC_INTR_0 is a read-only aggregation of all
+ * subsystem interrupt lines. Each bit reflects whether that subsystem
+ * has a pending interrupt (subsystem INTR_0 & subsystem INTR_EN_0 != 0).
  * ======================================================================== */
 #define NV3_PMC_INTR_PMEDIA       4
 #define NV3_PMC_INTR_PFIFO        8
@@ -245,7 +352,7 @@
 #define NV3_PMC_INTR_PGRAPH1      13
 #define NV3_PMC_INTR_PVIDEO       16
 #define NV3_PMC_INTR_PTIMER       20
-#define NV3_PMC_INTR_PFB          24
+#define NV3_PMC_INTR_PCRTC        24
 #define NV3_PMC_INTR_PBUS         28
 #define NV3_PMC_INTR_SOFTWARE     31
 
@@ -259,5 +366,17 @@
 #define NV3_PMC_ENABLE_PFB        (1 << 20)
 #define NV3_PMC_ENABLE_PCRTC      (1 << 24)
 #define NV3_PMC_ENABLE_PVIDEO     (1 << 28)
+
+/* ========================================================================
+ * PMC_INTR_EN_0 values
+ *
+ * Per envytools: this is NOT a bitmask. It is a 2-bit enum:
+ *   0 = DISABLED — no interrupt output
+ *   1 = HARDWARE — route to PCI INTA
+ *   2 = SOFTWARE — route to software interrupt (bit 31 of INTR_0)
+ * ======================================================================== */
+#define NV3_PMC_INTR_EN_DISABLED  0x00000000
+#define NV3_PMC_INTR_EN_HARDWARE  0x00000001
+#define NV3_PMC_INTR_EN_SOFTWARE  0x00000002
 
 #endif /* VID_NV3_REGS_H */

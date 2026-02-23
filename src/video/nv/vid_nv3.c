@@ -9,13 +9,14 @@
  *          NVIDIA Riva 128 (NV3) / Riva 128 ZX (NV3T) emulation.
  *
  *          Phase 1: Device skeleton, PCI config, VGA boot.
- *          Provides enough to boot DOS with VGA text mode output.
+ *          Phase 2: Core subsystems (PMC, PTIMER, PFB, PEXTDEV,
+ *                   PRAMDAC, PCRTC). PLL clock programming, VBlank
+ *                   interrupt, SVGA mode support.
  *
  *          Sources:
  *            - envytools rnndb register database
- *            - PCBox/86Box-nv reference implementation
  *            - rivafb riva_tbl.h golden init tables
- *            - xf86-video-nv riva_hw.c
+ *            - xf86-video-nv riva_hw.c (PLL formula reference)
  *
  *
  * Authors: skiretic
@@ -28,6 +29,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <wchar.h>
+#include <math.h>
 #define HAVE_STDARG_H
 #include <86box/86box.h>
 #include "cpu.h"
@@ -90,6 +92,8 @@ static void     nv3_recalctimings(svga_t *svga);
 static uint8_t  nv3_svga_in(uint16_t addr, void *priv);
 static void     nv3_svga_out(uint16_t addr, uint8_t val, void *priv);
 static void     nv3_update_mappings(nv3_t *nv3);
+static void     nv3_update_irq(nv3_t *nv3);
+static void     nv3_vblank_start(svga_t *svga);
 
 static uint8_t  nv3_pci_read(int func, int addr, int len, void *priv);
 static void     nv3_pci_write(int func, int addr, int len, uint8_t val, void *priv);
@@ -109,13 +113,132 @@ static void     nv3_lfb_writew(uint32_t addr, uint16_t val, void *priv);
 static void     nv3_lfb_writel(uint32_t addr, uint32_t val, void *priv);
 
 /* ========================================================================
+ * PMC interrupt aggregation and PCI IRQ routing.
+ *
+ * Per envytools pmc.xml: PMC_INTR_0 is a READ-ONLY register that
+ * aggregates the interrupt status from all subsystems. Each bit reflects
+ * whether that subsystem has a pending, enabled interrupt.
+ *
+ * PMC_INTR_EN_0 is an enum (not a bitmask):
+ *   0 = DISABLED — no interrupts asserted
+ *   1 = HARDWARE — route aggregate interrupt to PCI INTA
+ *   2 = SOFTWARE — set bit 31 of INTR_0
+ *
+ * The PCI interrupt line is asserted when:
+ *   PMC_INTR_EN_0 == HARDWARE and PMC_INTR_0 != 0
+ * ======================================================================== */
+static void
+nv3_pmc_update_intr(nv3_t *nv3)
+{
+    uint32_t pending = 0;
+
+    /*
+     * Aggregate subsystem interrupts.
+     * Each subsystem has its own INTR_0 and INTR_EN_0. A subsystem
+     * contributes to the PMC aggregate if (intr & intr_en) != 0.
+     */
+
+    /* PFIFO — bit 8 */
+    if (nv3->pfifo.intr_0 & nv3->pfifo.intr_en_0)
+        pending |= (1 << NV3_PMC_INTR_PFIFO);
+
+    /* PGRAPH — bit 12 */
+    if (nv3->pgraph.intr_0 & nv3->pgraph.intr_en_0)
+        pending |= (1 << NV3_PMC_INTR_PGRAPH0);
+
+    /* PTIMER — bit 20 */
+    if (nv3->ptimer.intr_0 & nv3->ptimer.intr_en_0)
+        pending |= (1 << NV3_PMC_INTR_PTIMER);
+
+    /* PCRTC — bit 24 (VBlank) */
+    if (nv3->pcrtc.intr & nv3->pcrtc.intr_en)
+        pending |= (1 << NV3_PMC_INTR_PCRTC);
+
+    /* PBUS — bit 28 */
+    if (nv3->pbus.intr_0 & nv3->pbus.intr_en_0)
+        pending |= (1 << NV3_PMC_INTR_PBUS);
+
+    /* SOFTWARE interrupt — bit 31 (set when INTR_EN_0 == SOFTWARE) */
+    if (nv3->pmc.intr_en_0 == NV3_PMC_INTR_EN_SOFTWARE)
+        pending |= (1u << NV3_PMC_INTR_SOFTWARE);
+
+    nv3->pmc.intr_0 = pending;
+}
+
+static void
+nv3_update_irq(nv3_t *nv3)
+{
+    nv3_pmc_update_intr(nv3);
+
+    /*
+     * Assert PCI INTA if hardware interrupts are enabled and any
+     * subsystem has a pending interrupt.
+     */
+    if (nv3->pmc.intr_en_0 == NV3_PMC_INTR_EN_HARDWARE && nv3->pmc.intr_0 != 0) {
+        pci_set_irq(nv3->pci_slot, PCI_INTA, &nv3->pci_irq_state);
+    } else {
+        pci_clear_irq(nv3->pci_slot, PCI_INTA, &nv3->pci_irq_state);
+    }
+}
+
+/* ========================================================================
+ * VBlank start callback.
+ *
+ * Called by the SVGA core at the start of vertical blank (when vc == dispend).
+ * Sets the PCRTC VBlank interrupt pending bit and propagates to PMC/PCI.
+ * ======================================================================== */
+static void
+nv3_vblank_start(svga_t *svga)
+{
+    nv3_t *nv3 = (nv3_t *) svga->priv;
+
+    /* Set PCRTC VBlank interrupt pending */
+    nv3->pcrtc.intr |= NV3_PCRTC_INTR_VBLANK;
+
+    /* Propagate to PMC and PCI IRQ line */
+    nv3_update_irq(nv3);
+}
+
+/* ========================================================================
+ * PLL frequency calculation.
+ *
+ * Per xf86-video-nv riva_hw.c CalcVClock() and envytools nv1-clock.xml:
+ *
+ * The NV3 PLL consists of a VCO and a post-divider:
+ *   VCO_freq  = crystal_freq * N / M
+ *   out_freq  = VCO_freq / (1 << P)
+ *
+ * Therefore:
+ *   out_freq = (crystal_freq * N) / (M * (1 << P))
+ *
+ * Where:
+ *   M = coeff[7:0]   (divider, minimum 1)
+ *   N = coeff[15:8]  (multiplier, minimum 1)
+ *   P = coeff[18:16] (post-divider exponent, 0-4)
+ *
+ * Returns frequency in Hz as a double.
+ * ======================================================================== */
+static double
+nv3_pll_calc_freq(uint32_t crystal_freq, uint32_t pll_coeff)
+{
+    uint32_t m = NV3_PLL_M(pll_coeff);
+    uint32_t n = NV3_PLL_N(pll_coeff);
+    uint32_t p = NV3_PLL_P(pll_coeff);
+
+    /* Guard against division by zero; real hardware clamps M >= 1 */
+    if (m == 0)
+        m = 1;
+    if (n == 0)
+        n = 1;
+
+    return ((double) crystal_freq * (double) n) / ((double) m * (double) (1 << p));
+}
+
+/* ========================================================================
  * MMIO register read (32-bit, internal)
  *
  * All MMIO registers are 32-bit aligned internally. Byte/word reads
  * extract the appropriate portion.
- *
- * Phase 1: Most registers return stub/default values to allow VGA BIOS
- * to initialize. Real subsystem handling comes in Phase 2+.
  * ======================================================================== */
 static uint32_t
 nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
@@ -125,11 +248,22 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
     addr &= 0xFFFFFF; /* mask to 16MB MMIO space */
 
     switch (addr) {
-        /* PMC - Master Control */
+        /* ============================================================
+         * PMC — Master Control (0x000000-0x000FFF)
+         *
+         * Per envytools pmc.xml: BOOT_0 is read-only chip ID.
+         * INTR_0 is read-only aggregated interrupt status.
+         * INTR_EN_0 and ENABLE are R/W.
+         * ============================================================ */
         case NV3_PMC_BOOT_0:
             ret = nv3->pmc.boot_0;
             break;
         case NV3_PMC_INTR_0:
+            /*
+             * PMC_INTR_0 is read-only: it is recomputed from subsystem
+             * interrupt state on every read.
+             */
+            nv3_pmc_update_intr(nv3);
             ret = nv3->pmc.intr_0;
             break;
         case NV3_PMC_INTR_EN_0:
@@ -139,7 +273,9 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             ret = nv3->pmc.enable;
             break;
 
-        /* PBUS - Bus Control */
+        /* ============================================================
+         * PBUS — Bus Control (0x001000-0x001FFF)
+         * ============================================================ */
         case NV3_PBUS_INTR_0:
             ret = nv3->pbus.intr_0;
             break;
@@ -147,23 +283,18 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             ret = nv3->pbus.intr_en_0;
             break;
 
-        /* PFB - Framebuffer Interface */
-        case NV3_PFB_BOOT_0:
-            ret = nv3->pfb.boot_0;
-            break;
-        case NV3_PFB_CONFIG_0:
-            ret = nv3->pfb.config_0;
-            break;
-        case NV3_PFB_CONFIG_1:
-            ret = nv3->pfb.config_1;
-            break;
-
-        /* PEXTDEV - Straps */
-        case NV3_PEXTDEV_STRAPS:
-            ret = nv3->pextdev.straps;
-            break;
-
-        /* PTIMER */
+        /* ============================================================
+         * PTIMER — Programmable Interval Timer (0x009000-0x009FFF)
+         *
+         * Per envytools nv1-clock.xml:
+         * TIME_0 = low 32 bits (bits 4:0 are sub-nanosecond, bits 31:5 = ns)
+         * TIME_1 = high 29 bits of time
+         * The 64-bit concatenation TIME_1:TIME_0 gives nanoseconds << 5.
+         *
+         * For simplicity, we use TIME_0 as low word and TIME_1 as high
+         * word of a 64-bit nanosecond counter, matching the behavior
+         * that drivers actually depend on.
+         * ============================================================ */
         case NV3_PTIMER_INTR_0:
             ret = nv3->ptimer.intr_0;
             break;
@@ -186,7 +317,80 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             ret = nv3->ptimer.alarm_0;
             break;
 
-        /* PBUS PCI config mirror (0x1800-0x18FF) */
+        /* ============================================================
+         * PFB — Framebuffer Interface (0x100000-0x100FFF)
+         * ============================================================ */
+        case NV3_PFB_BOOT_0:
+            ret = nv3->pfb.boot_0;
+            break;
+        case NV3_PFB_CONFIG_0:
+            ret = nv3->pfb.config_0;
+            break;
+        case NV3_PFB_CONFIG_1:
+            ret = nv3->pfb.config_1;
+            break;
+
+        /* ============================================================
+         * PEXTDEV — External Devices / Straps (0x101000-0x101FFF)
+         * ============================================================ */
+        case NV3_PEXTDEV_STRAPS:
+            ret = nv3->pextdev.straps;
+            break;
+
+        /* ============================================================
+         * PCRTC — Display Controller (0x600000-0x600FFF)
+         *
+         * Per envytools nv3_pcrtc.xml.
+         * ============================================================ */
+        case NV3_PCRTC_INTR:
+            ret = nv3->pcrtc.intr;
+            break;
+        case NV3_PCRTC_INTR_EN:
+            ret = nv3->pcrtc.intr_en;
+            break;
+        case NV3_PCRTC_CONFIG:
+            ret = nv3->pcrtc.config;
+            break;
+        case NV3_PCRTC_START_ADDR:
+            ret = nv3->pcrtc.start_addr;
+            break;
+
+        /* ============================================================
+         * PGRAPH — Graphics Engine (0x400000-0x400FFF)
+         * Stubs for Phase 2; expanded in Phase 4/5.
+         * ============================================================ */
+        case NV3_PGRAPH_INTR_0:
+            ret = nv3->pgraph.intr_0;
+            break;
+        case NV3_PGRAPH_INTR_EN_0:
+            ret = nv3->pgraph.intr_en_0;
+            break;
+
+        /* ============================================================
+         * PRAMDAC — DAC / PLL / Cursor (0x680000-0x680FFF)
+         *
+         * Per envytools nv3_pramdac.xml.
+         * ============================================================ */
+        case NV3_PRAMDAC_NVPLL_COEFF:
+            ret = nv3->pramdac.nvpll_coeff;
+            break;
+        case NV3_PRAMDAC_MPLL_COEFF:
+            ret = nv3->pramdac.mpll_coeff;
+            break;
+        case NV3_PRAMDAC_VPLL_COEFF:
+            ret = nv3->pramdac.vpll_coeff;
+            break;
+        case NV3_PRAMDAC_GENERAL_CTRL:
+            ret = nv3->pramdac.general_control;
+            break;
+        case NV3_PRAMDAC_CURSOR_START:
+            ret = nv3->pramdac.cursor_start;
+            break;
+
+        /* ============================================================
+         * PBUS PCI config mirror (0x1800-0x18FF)
+         * Default handler for unknown addresses.
+         * ============================================================ */
         default:
             if (addr >= NV3_PBUS_PCI_START && addr <= NV3_PBUS_PCI_END) {
                 /* Mirror of PCI config space */
@@ -197,6 +401,22 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                         | (nv3->pci_regs[(pci_reg & ~3) + 2] << 16)
                         | (nv3->pci_regs[(pci_reg & ~3) + 3] << 24);
                 }
+            } else if (addr >= NV3_PRAMDAC_START && addr <= NV3_PRAMDAC_END) {
+                /*
+                 * Catch-all for unhandled PRAMDAC registers.
+                 * Some drivers probe registers we haven't implemented;
+                 * returning 0 is safe.
+                 */
+                nv3_log("NV3: PRAMDAC read32 unhandled addr=0x%06x\n", addr);
+            } else if (addr >= NV3_PCRTC_START && addr <= NV3_PCRTC_END) {
+                nv3_log("NV3: PCRTC read32 unhandled addr=0x%06x\n", addr);
+            } else if (addr >= NV3_PGRAPH_START && addr <= NV3_PGRAPH_END) {
+                nv3_log("NV3: PGRAPH read32 unhandled addr=0x%06x\n", addr);
+            } else if (addr >= NV3_PFIFO_START && addr <= NV3_PFIFO_END) {
+                nv3_log("NV3: PFIFO read32 unhandled addr=0x%06x\n", addr);
+            } else if (addr >= NV3_PRAMIN_START && addr <= NV3_PRAMIN_END) {
+                /* PRAMIN reads — Phase 3 will handle properly.
+                 * For now, return 0. */
             } else {
                 nv3_log("NV3: MMIO read32 unknown addr=0x%06x\n", addr);
             }
@@ -215,48 +435,61 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
     addr &= 0xFFFFFF;
 
     switch (addr) {
-        /* PMC */
+        /* ============================================================
+         * PMC — Master Control
+         * ============================================================ */
         case NV3_PMC_INTR_0:
-            /* Write 1 to clear pending interrupts */
-            nv3->pmc.intr_0 &= ~val;
+            /*
+             * Per envytools pmc.xml: PMC_INTR_0 on NV3 is READ-ONLY.
+             * It is an aggregation of subsystem interrupts, not a
+             * write-to-clear register. Writes are ignored.
+             *
+             * (On NV4+, some bits become write-to-clear, but on NV3
+             * the driver clears interrupts by writing to the individual
+             * subsystem INTR_0 registers instead.)
+             */
             break;
         case NV3_PMC_INTR_EN_0:
-            nv3->pmc.intr_en_0 = val;
+            /* Per envytools: only bits 1:0 are valid (enum, not bitmask) */
+            nv3->pmc.intr_en_0 = val & 0x03;
+            nv3_update_irq(nv3);
             break;
         case NV3_PMC_ENABLE:
             nv3->pmc.enable = val;
             break;
 
-        /* PBUS */
+        /* ============================================================
+         * PBUS — Bus Control
+         * ============================================================ */
         case NV3_PBUS_INTR_0:
+            /* Write 1 to clear */
             nv3->pbus.intr_0 &= ~val;
+            nv3_update_irq(nv3);
             break;
         case NV3_PBUS_INTR_EN_0:
             nv3->pbus.intr_en_0 = val;
+            nv3_update_irq(nv3);
             break;
 
-        /* PFB */
-        case NV3_PFB_CONFIG_0:
-            nv3->pfb.config_0 = val;
-            break;
-        case NV3_PFB_CONFIG_1:
-            nv3->pfb.config_1 = val;
-            break;
-
-        /* PEXTDEV - straps are read-only, writes ignored */
-
-        /* PTIMER */
+        /* ============================================================
+         * PTIMER
+         * ============================================================ */
         case NV3_PTIMER_INTR_0:
+            /* Write 1 to clear */
             nv3->ptimer.intr_0 &= ~val;
+            nv3_update_irq(nv3);
             break;
         case NV3_PTIMER_INTR_EN_0:
             nv3->ptimer.intr_en_0 = val;
+            nv3_update_irq(nv3);
             break;
         case NV3_PTIMER_NUMERATOR:
-            nv3->ptimer.numerator = val;
+            /* Per envytools: bits 15:0 are the numerator value */
+            nv3->ptimer.numerator = val & 0xFFFF;
             break;
         case NV3_PTIMER_DENOMINATOR:
-            nv3->ptimer.denominator = val;
+            /* Per envytools: bits 15:0 are the denominator value */
+            nv3->ptimer.denominator = val & 0xFFFF;
             break;
         case NV3_PTIMER_TIME_0:
             nv3->ptimer.time_0 = val;
@@ -268,6 +501,103 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             nv3->ptimer.alarm_0 = val;
             break;
 
+        /* ============================================================
+         * PFB — Framebuffer Interface
+         *
+         * PFB_BOOT_0 is read-only (hardware-determined).
+         * CONFIG_0 and CONFIG_1 are writable.
+         * ============================================================ */
+        case NV3_PFB_BOOT_0:
+            /* Read-only: ignore writes */
+            break;
+        case NV3_PFB_CONFIG_0:
+            nv3->pfb.config_0 = val;
+            break;
+        case NV3_PFB_CONFIG_1:
+            nv3->pfb.config_1 = val;
+            break;
+
+        /* PEXTDEV — straps are read-only, writes ignored */
+        case NV3_PEXTDEV_STRAPS:
+            break;
+
+        /* ============================================================
+         * PCRTC — Display Controller
+         * ============================================================ */
+        case NV3_PCRTC_INTR:
+            /* Write 1 to clear VBlank interrupt */
+            nv3->pcrtc.intr &= ~val;
+            nv3_update_irq(nv3);
+            break;
+        case NV3_PCRTC_INTR_EN:
+            nv3->pcrtc.intr_en = val;
+            nv3_update_irq(nv3);
+            break;
+        case NV3_PCRTC_CONFIG:
+            nv3->pcrtc.config = val;
+            break;
+        case NV3_PCRTC_START_ADDR:
+            nv3->pcrtc.start_addr = val;
+            break;
+
+        /* ============================================================
+         * PGRAPH — Graphics Engine (stubs)
+         * ============================================================ */
+        case NV3_PGRAPH_INTR_0:
+            nv3->pgraph.intr_0 &= ~val;
+            nv3_update_irq(nv3);
+            break;
+        case NV3_PGRAPH_INTR_EN_0:
+            nv3->pgraph.intr_en_0 = val;
+            nv3_update_irq(nv3);
+            break;
+
+        /* ============================================================
+         * PRAMDAC — DAC / PLL / Cursor
+         *
+         * Writing to PLL coefficient registers reprograms the clock.
+         * We trigger a recalctimings on VPLL write since that affects
+         * the pixel clock used for display timing.
+         * ============================================================ */
+        case NV3_PRAMDAC_NVPLL_COEFF:
+            nv3->pramdac.nvpll_coeff = val;
+            nv3_log("NV3: NVPLL write M=%d N=%d P=%d\n",
+                     NV3_PLL_M(val), NV3_PLL_N(val), NV3_PLL_P(val));
+            break;
+        case NV3_PRAMDAC_MPLL_COEFF:
+            nv3->pramdac.mpll_coeff = val;
+            nv3_log("NV3: MPLL write M=%d N=%d P=%d\n",
+                     NV3_PLL_M(val), NV3_PLL_N(val), NV3_PLL_P(val));
+            break;
+        case NV3_PRAMDAC_VPLL_COEFF:
+            nv3->pramdac.vpll_coeff = val;
+            nv3_log("NV3: VPLL write M=%d N=%d P=%d freq=%.2f MHz\n",
+                     NV3_PLL_M(val), NV3_PLL_N(val), NV3_PLL_P(val),
+                     nv3_pll_calc_freq(nv3->crystal_freq, val) / 1000000.0);
+            /*
+             * Trigger SVGA timing recalculation since the pixel clock
+             * has changed. This makes the new resolution take effect.
+             */
+            nv3->svga.fullchange = changeframecount;
+            svga_recalctimings(&nv3->svga);
+            break;
+        case NV3_PRAMDAC_GENERAL_CTRL:
+            nv3->pramdac.general_control = val;
+            nv3_log("NV3: PRAMDAC GENERAL_CTRL write 0x%08x\n", val);
+            /*
+             * General control affects DAC bit depth and cursor mode.
+             * Trigger recalc in case DAC mode changed.
+             */
+            nv3->svga.fullchange = changeframecount;
+            svga_recalctimings(&nv3->svga);
+            break;
+        case NV3_PRAMDAC_CURSOR_START:
+            nv3->pramdac.cursor_start = val;
+            break;
+
+        /* ============================================================
+         * Default: PCI config mirror and catch-all
+         * ============================================================ */
         default:
             if (addr >= NV3_PBUS_PCI_START && addr <= NV3_PBUS_PCI_END) {
                 /* PCI config mirror - forward to PCI write logic */
@@ -278,6 +608,16 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
                     nv3_pci_write(0, pci_reg + 2, 1, (val >> 16) & 0xFF, nv3);
                     nv3_pci_write(0, pci_reg + 3, 1, (val >> 24) & 0xFF, nv3);
                 }
+            } else if (addr >= NV3_PRAMDAC_START && addr <= NV3_PRAMDAC_END) {
+                nv3_log("NV3: PRAMDAC write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+            } else if (addr >= NV3_PCRTC_START && addr <= NV3_PCRTC_END) {
+                nv3_log("NV3: PCRTC write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+            } else if (addr >= NV3_PGRAPH_START && addr <= NV3_PGRAPH_END) {
+                nv3_log("NV3: PGRAPH write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+            } else if (addr >= NV3_PFIFO_START && addr <= NV3_PFIFO_END) {
+                nv3_log("NV3: PFIFO write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+            } else if (addr >= NV3_PRAMIN_START && addr <= NV3_PRAMIN_END) {
+                /* PRAMIN writes — Phase 3 */
             } else {
                 nv3_log("NV3: MMIO write32 unknown addr=0x%06x val=0x%08x\n", addr, val);
             }
@@ -418,8 +758,9 @@ nv3_mmio_writel(uint32_t addr, uint32_t val, void *priv)
 /* ========================================================================
  * BAR1 Linear Framebuffer read/write handlers
  *
- * Simple dumb framebuffer access for Phase 1.
- * Masks address to VRAM size, reads/writes SVGA VRAM directly.
+ * Simple dumb framebuffer access. Masks address to VRAM size, reads/writes
+ * SVGA VRAM directly. RAMIN mirror at BAR1+0xC00000 will be added in
+ * Phase 3.
  * ======================================================================== */
 static uint8_t
 nv3_lfb_read(uint32_t addr, void *priv)
@@ -490,7 +831,7 @@ nv3_lfb_writel(uint32_t addr, uint32_t val, void *priv)
  * Handles NVIDIA extended CRTC registers. Standard VGA registers are
  * passed through to svga_in().
  *
- * Per envytools NV3 VGA docs and the 86Box-nv reference implementation.
+ * Per envytools NV3 VGA docs.
  * ======================================================================== */
 static uint8_t
 nv3_svga_in(uint16_t addr, void *priv)
@@ -504,7 +845,19 @@ nv3_svga_in(uint16_t addr, void *priv)
         if (!(nv3->rma_mode & 0x01))
             return ret;
 
-        /* Phase 1: stub - RMA reads return 0 */
+        /*
+         * RMA provides a byte-granularity window into MMIO space.
+         * The address is assembled from rma_regs[0..3] as a 32-bit
+         * MMIO offset. For now we implement basic read support.
+         */
+        {
+            uint32_t rma_addr = nv3->rma_regs[0]
+                              | (nv3->rma_regs[1] << 8)
+                              | (nv3->rma_regs[2] << 16)
+                              | (nv3->rma_regs[3] << 24);
+            uint32_t rma_val = nv3_mmio_read_internal(nv3, rma_addr & ~3);
+            ret = (uint8_t) (rma_val >> ((addr & 3) * 8));
+        }
         return ret;
     }
 
@@ -549,8 +902,9 @@ nv3_svga_in(uint16_t addr, void *priv)
 
         case 0x3D8:
             /*
-             * Per 86Box-nv: returning 0x08 here prevents freezes
-             * with certain NV3 driver versions.
+             * Per behavioral observation: returning 0x08 here prevents
+             * freezes with certain NV3 driver versions. This appears
+             * to be a status register that drivers poll.
              */
             ret = 0x08;
             break;
@@ -582,7 +936,21 @@ nv3_svga_out(uint16_t addr, uint8_t val, void *priv)
         if (!(nv3->rma_mode & 0x01))
             return;
 
-        /* Phase 1: stub - RMA writes are ignored */
+        /*
+         * RMA write: assemble MMIO address from rma_regs and write
+         * the byte value into the appropriate position.
+         */
+        {
+            uint32_t rma_addr = nv3->rma_regs[0]
+                              | (nv3->rma_regs[1] << 8)
+                              | (nv3->rma_regs[2] << 16)
+                              | (nv3->rma_regs[3] << 24);
+            uint32_t old = nv3_mmio_read_internal(nv3, rma_addr & ~3);
+            int      shift = (addr & 3) * 8;
+            uint32_t mask  = 0xFF << shift;
+            uint32_t new_val = (old & ~mask) | ((uint32_t) val << shift);
+            nv3_mmio_write_internal(nv3, rma_addr & ~3, new_val);
+        }
         return;
     }
 
@@ -695,16 +1063,27 @@ nv3_svga_out(uint16_t addr, uint8_t val, void *priv)
 /* ========================================================================
  * Recalculate video timings.
  *
- * Phase 1: Minimal implementation for VGA text mode boot.
- * Handles extended CRTC registers for row offset, pixel depth,
- * and 10-bit counter extensions.
+ * Called by the SVGA core whenever CRTC registers change or when we
+ * explicitly trigger via svga_recalctimings() after PLL writes.
  *
- * Full PLL calculation and PRAMDAC integration comes in Phase 2.
+ * This function:
+ *  1. Applies NV3 extended CRTC register values (10-bit counters, etc.)
+ *  2. Reads the VPLL coefficient register and calculates the pixel clock
+ *  3. Sets svga->clock to drive the SVGA timing engine
+ *  4. Sets the appropriate render function for the pixel depth
+ *
+ * The PLL frequency formula is:
+ *   Freq = (crystal * N) / (M * (1 << P))
+ * Per envytools nv3_pramdac.xml and xf86-video-nv CalcVClock().
+ *
+ * svga->clock represents the number of emulated CPU ticks per pixel clock.
+ * It is computed as: (cpuclock * 2^32) / pixel_freq_hz
+ * This matches the pattern used by S3 ViRGE and Voodoo Banshee.
  * ======================================================================== */
 static void
 nv3_recalctimings(svga_t *svga)
 {
-    nv3_t   *nv3       = (nv3_t *) svga->priv;
+    nv3_t   *nv3        = (nv3_t *) svga->priv;
     uint32_t pixel_mode = svga->crtc[NV3_CRTC_PIXEL_MODE] & 0x03;
 
     /*
@@ -712,39 +1091,6 @@ nv3_recalctimings(svga_t *svga)
      * CRTC 0x19 (RPC0) bits 4:0 provide bits 20:16 of the start address.
      */
     svga->memaddr_latch += (svga->crtc[NV3_CRTC_REPAINT0] & 0x1F) << 16;
-
-    /*
-     * Override the standard SVGA rendering path when not in VGA text mode.
-     * In graphical modes, the NV3 uses its own rendering pipeline
-     * (handled in later phases).
-     */
-    svga->override = (pixel_mode != NV3_PIXEL_MODE_VGA);
-
-    /* Set pixel format and adjust row offset */
-    switch (pixel_mode) {
-        case NV3_PIXEL_MODE_8BPP:
-            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 1;
-            svga->bpp    = 8;
-            svga->lowres = 0;
-            svga->map8   = svga->pallook;
-            break;
-
-        case NV3_PIXEL_MODE_16BPP:
-            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
-            svga->bpp    = 16;
-            svga->lowres = 0;
-            break;
-
-        case NV3_PIXEL_MODE_32BPP:
-            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
-            svga->bpp    = 32;
-            svga->lowres = 0;
-            break;
-
-        default:
-            /* VGA text/standard mode - use default SVGA settings */
-            break;
-    }
 
     /*
      * Extended 10-bit vertical counters.
@@ -766,6 +1112,110 @@ nv3_recalctimings(svga_t *svga)
      */
     if (svga->crtc[NV3_CRTC_HEB] & 0x01)
         svga->hdisp += 0x100;
+
+    /*
+     * In VGA mode (pixel_mode == 0), use standard SVGA rendering path.
+     * In extended modes, we configure the SVGA renderer ourselves.
+     */
+    if (pixel_mode == NV3_PIXEL_MODE_VGA) {
+        /* Standard VGA mode — let SVGA core handle everything */
+        svga->override = 0;
+        return;
+    }
+
+    /*
+     * Extended pixel mode (8/16/32bpp SVGA).
+     *
+     * We do NOT set svga->override = 1 because we want the standard
+     * SVGA rendering engine to draw the framebuffer for us (similar
+     * to how Banshee works). We just set up the render function and
+     * pixel format parameters.
+     */
+    svga->override = 0;
+
+    /* Set pixel format, render function, and adjust row offset */
+    switch (pixel_mode) {
+        case NV3_PIXEL_MODE_8BPP:
+            svga->bpp    = 8;
+            svga->lowres = 0;
+            svga->render = svga_render_8bpp_highres;
+            svga->map8   = svga->pallook;
+            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 1;
+            break;
+
+        case NV3_PIXEL_MODE_16BPP:
+            svga->bpp    = 16;
+            svga->lowres = 0;
+            svga->render = svga_render_16bpp_highres;
+            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
+            break;
+
+        case NV3_PIXEL_MODE_32BPP:
+            svga->bpp    = 32;
+            svga->lowres = 0;
+            svga->render = svga_render_32bpp_highres;
+            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
+            break;
+
+        default:
+            break;
+    }
+
+    /*
+     * Handle DAC bit depth from PRAMDAC GENERAL_CONTROL.
+     * Bit 1:0 = BPC: 0=6-bit DAC, 1=8-bit DAC.
+     * When 8-bit DAC mode is active, we use the direct LUT mapping.
+     */
+    if ((nv3->pramdac.general_control & NV3_PRAMDAC_GCTRL_BPC_MASK) == NV3_PRAMDAC_GCTRL_BPC_8BIT) {
+        svga_set_ramdac_type(svga, RAMDAC_8BIT);
+    } else {
+        svga_set_ramdac_type(svga, RAMDAC_6BIT);
+    }
+
+    /*
+     * Calculate pixel clock from VPLL coefficient register.
+     *
+     * Per envytools nv3_pramdac.xml:
+     *   M = vpll_coeff[7:0]   (divider)
+     *   N = vpll_coeff[15:8]  (multiplier)
+     *   P = vpll_coeff[18:16] (post-divider exponent)
+     *
+     *   Freq = (crystal * N) / (M * (1 << P))
+     *
+     * We only apply this when the miscout clock select bits indicate
+     * that we should use the programmable PLL (bits 3:2 == 3), which
+     * is what all SVGA modes use.
+     */
+    if (((svga->miscout >> 2) & 3) == 3) {
+        uint32_t vpll = nv3->pramdac.vpll_coeff;
+        double   freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
+
+        if (freq > 1000.0) {
+            /* Standard 86Box clock formula: ticks per pixel = cpuclock * 2^32 / freq */
+            svga->clock = (cpuclock * (float) (1ULL << 32)) / freq;
+        }
+    }
+
+    /*
+     * For extended modes, make the blanking wrap properly by
+     * starting blank at display end, similar to Banshee/ViRGE
+     * "special blanking mode" behavior.
+     */
+    svga->vblankstart = svga->dispend;
+    svga->split       = 99999; /* Disable split screen in extended modes */
+
+    /*
+     * In extended mode, the dots per clock are always 8 (never 9).
+     * Per NV3 architecture: character clock is fixed at 8 pixels.
+     */
+    if (!svga->scrblank && svga->attr_palette_enable)
+        svga->dots_per_clock = (svga->seqregs[1] & 8) ? 16 : 8;
+
+    /* Disable overscan in extended modes */
+    svga->monitor->mon_overscan_y = 0;
+    svga->monitor->mon_overscan_x = 0;
+
+    video_force_resize_set_monitor(1, svga->monitor_index);
 }
 
 /* ========================================================================
@@ -1080,7 +1530,7 @@ nv3_pci_write(UNUSED(int func), int addr, UNUSED(int len), uint8_t val, void *pr
 /* ========================================================================
  * Initialize PFB_BOOT_0 register based on VRAM size.
  *
- * Per envytools and 86Box-nv reference: this register encodes RAM size,
+ * Per envytools nv3_pfb.xml: this register encodes RAM size,
  * bus width, and bank count. The BIOS reads this to detect memory config.
  * ======================================================================== */
 static void
@@ -1114,6 +1564,10 @@ nv3_pfb_init(nv3_t *nv3)
 
 /* ========================================================================
  * Initialize PEXTDEV straps based on card type.
+ *
+ * Per envytools: PEXTDEV_STRAPS is a read-only register reflecting the
+ * board's hardware strap pins. We synthesize the value based on the
+ * emulated card configuration.
  * ======================================================================== */
 static void
 nv3_pextdev_init(nv3_t *nv3)
@@ -1123,7 +1577,7 @@ nv3_pextdev_init(nv3_t *nv3)
     /* BIOS present */
     straps |= (1 << NV3_STRAPS_BIOS_PRESENT);
 
-    /* 14.318MHz crystal (standard) */
+    /* 14.318MHz crystal (standard for most Riva 128 boards) */
     straps |= (1 << NV3_STRAPS_CRYSTAL);
 
     /* No TV output */
@@ -1140,6 +1594,57 @@ nv3_pextdev_init(nv3_t *nv3)
     }
 
     nv3->pextdev.straps = straps;
+
+    /*
+     * Set crystal frequency based on straps.
+     * Per envytools: bit 6 = 0 means 13.5MHz, 1 means 14.318MHz.
+     */
+    if (straps & (1 << NV3_STRAPS_CRYSTAL))
+        nv3->crystal_freq = NV3_CRYSTAL_FREQ_14318;
+    else
+        nv3->crystal_freq = NV3_CRYSTAL_FREQ_13500;
+}
+
+/* ========================================================================
+ * Initialize PRAMDAC default PLL coefficients.
+ *
+ * Per rivafb riva_tbl.h and xf86-video-nv riva_hw.c: the BIOS programs
+ * initial PLL values during POST. We provide reasonable defaults here
+ * that represent a typical VGA-rate pixel clock.
+ *
+ * Default VPLL: ~25.175 MHz (standard VGA pixel clock for 640x480)
+ * For 14.318 MHz crystal:
+ *   25.175 = 14.318 * N / (M * (1 << P))
+ *   With M=14, N=50, P=1: 14.318 * 50 / (14 * 2) = 25.568 (close enough)
+ *   With M=12, N=21, P=0: 14.318 * 21 / (12 * 1) = 25.056 (closer)
+ *
+ * Default NVPLL: ~75 MHz core clock
+ *   With M=13, N=68, P=0: 14.318 * 68 / (13 * 1) = 74.89 MHz
+ *
+ * Default MPLL: ~100 MHz memory clock
+ *   With M=13, N=91, P=0: 14.318 * 91 / (13 * 1) = 100.26 MHz
+ *
+ * These are approximate; the BIOS will reprogram them during POST.
+ * ======================================================================== */
+static void
+nv3_pramdac_init(nv3_t *nv3)
+{
+    /*
+     * Encode PLL coefficients: bits [7:0]=M, [15:8]=N, [18:16]=P.
+     * VPLL: M=12, N=21, P=0 => ~25 MHz
+     */
+    nv3->pramdac.vpll_coeff  = (0 << 16) | (21 << 8) | 12;
+    /* NVPLL: M=13, N=68, P=0 => ~75 MHz */
+    nv3->pramdac.nvpll_coeff = (0 << 16) | (68 << 8) | 13;
+    /* MPLL: M=13, N=91, P=0 => ~100 MHz */
+    nv3->pramdac.mpll_coeff  = (0 << 16) | (91 << 8) | 13;
+
+    /*
+     * General control: default to 8-bit DAC, VGA state off,
+     * cursor disabled.
+     */
+    nv3->pramdac.general_control = NV3_PRAMDAC_GCTRL_BPC_8BIT;
+    nv3->pramdac.cursor_start    = 0;
 }
 
 /* ========================================================================
@@ -1202,13 +1707,16 @@ nv3_init(const device_t *info)
     svga_init(info, &nv3->svga, nv3, nv3->vram_size,
               nv3_recalctimings,
               nv3_svga_in, nv3_svga_out,
-              NULL,  /* hwcursor_draw - Phase 2 */
+              NULL,  /* hwcursor_draw - TODO: hardware cursor rendering */
               NULL); /* overlay_draw - not used */
 
     /* Set decode mask to VRAM size */
     nv3->svga.decode_mask = nv3->vram_size - 1;
     nv3->svga.bpp         = 8;
     nv3->svga.miscout     = 1;
+
+    /* Register VBlank start callback for interrupt generation */
+    nv3->svga.vblank_start = nv3_vblank_start;
 
     /* Initialize memory mappings (initially disabled) */
     mem_mapping_add(&nv3->mmio_mapping, 0, 0,
@@ -1236,7 +1744,8 @@ nv3_init(const device_t *info)
 
     /* Initialize GPU subsystems */
 
-    /* PMC - Set boot register based on chip revision */
+    /* PMC - Set boot register based on chip revision.
+     * Per envytools pmc.xml: BOOT_0 encodes chip arch/impl/revision. */
     switch (nv3->gpu_revision) {
         case NV3_PCI_REV_A00:
             nv3->pmc.boot_0 = NV3_BOOT_REG_REV_A00;
@@ -1258,15 +1767,31 @@ nv3_init(const device_t *info)
                     | NV3_PMC_ENABLE_PFB | NV3_PMC_ENABLE_PCRTC
                     | NV3_PMC_ENABLE_PVIDEO;
 
+    /* Interrupts disabled at startup */
+    nv3->pmc.intr_en_0 = NV3_PMC_INTR_EN_DISABLED;
+
     /* PFB - Memory config */
     nv3_pfb_init(nv3);
 
-    /* PEXTDEV - Straps */
+    /* PEXTDEV - Straps (also sets crystal_freq) */
     nv3_pextdev_init(nv3);
 
-    /* PTIMER defaults */
+    /* PTIMER defaults.
+     * Per envytools: NUMERATOR and DENOMINATOR default to sensible values.
+     * The ratio NUMERATOR/DENOMINATOR * core_clock_period gives the timer
+     * increment rate. Default 1/1 is a common starting point.
+     */
     nv3->ptimer.numerator   = 1;
     nv3->ptimer.denominator = 1;
+
+    /* PRAMDAC - PLL clocks and DAC */
+    nv3_pramdac_init(nv3);
+
+    /* PCRTC - Display controller defaults */
+    nv3->pcrtc.intr     = 0;
+    nv3->pcrtc.intr_en  = 0;
+    nv3->pcrtc.config   = 0;
+    nv3->pcrtc.start_addr = 0;
 
     /* I2C / DDC */
     nv3->i2c = i2c_gpio_init("nv3_i2c");
@@ -1275,7 +1800,7 @@ nv3_init(const device_t *info)
     /* Inform video subsystem of our timing class */
     video_inform(VIDEO_FLAG_TYPE_SPECIAL, &timing_nv3_pci);
 
-    nv3_log("NV3: init complete\n");
+    nv3_log("NV3: init complete, crystal=%d Hz\n", nv3->crystal_freq);
     return nv3;
 }
 
