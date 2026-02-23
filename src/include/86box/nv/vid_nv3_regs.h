@@ -406,6 +406,8 @@
 /* USER - PFIFO user channel space */
 #define NV3_USER_START            0x800000
 #define NV3_USER_END              0xFFFFFF
+#define NV3_USER_CHANNEL_STRIDE   0x10000   /* 64KB per channel */
+#define NV3_USER_FREE_OFFSET      0x0010    /* FifoFree: 16-bit count of free entries */
 
 /* ========================================================================
  * Linear Framebuffer (BAR1) Layout

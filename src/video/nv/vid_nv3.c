@@ -366,6 +366,22 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             break;
         }
 
+        /*
+         * PFIFO RUNOUT STATUS register (0x002400).
+         *
+         * Per envytools nv1_pfifo.xml: same bit layout as CACHE STATUS.
+         * Bit 4 (EMPTY) is set when RUNOUT_PUT == RUNOUT_GET.
+         * The driver polls this after CACHE1_STATUS during PFIFO init.
+         */
+        case NV3_PFIFO_RUNOUT_STATUS: {
+            uint32_t ro_put = nv3->pfifo.regs[(NV3_PFIFO_RUNOUT_PUT - NV3_PFIFO_START) >> 2];
+            uint32_t ro_get = nv3->pfifo.regs[(NV3_PFIFO_RUNOUT_GET - NV3_PFIFO_START) >> 2];
+            ret = 0;
+            if (ro_put == ro_get)
+                ret |= NV3_PFIFO_CACHE_STATUS_EMPTY;
+            break;
+        }
+
         /* ============================================================
          * PTIMER — Programmable Interval Timer (0x009000-0x009FFF)
          *
@@ -640,6 +656,24 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                         | ((uint32_t) nv3->bios_rom.rom[rom_off + 2] << 16)
                         | ((uint32_t) nv3->bios_rom.rom[rom_off + 3] << 24);
                 }
+            } else if (addr >= NV3_USER_START && addr <= NV3_USER_END) {
+                /*
+                 * USER space: PIO channel submission interface.
+                 *
+                 * Per rivafb riva_hw.h, each channel has a 64KB window.
+                 * Offset 0x10 within a channel is FifoFree (uint16_t):
+                 * the number of 32-bit entries the PIO FIFO can accept.
+                 *
+                 * The driver polls FifoFree before submitting methods.
+                 * Since we have no real PFIFO engine consuming commands,
+                 * always report the FIFO as having free space.
+                 */
+                uint32_t channel_offset = (addr - NV3_USER_START) % NV3_USER_CHANNEL_STRIDE;
+                uint32_t subchan_offset = channel_offset & 0x1FFF;  /* 8KB subchannel stride */
+                if (subchan_offset == NV3_USER_FREE_OFFSET)
+                    ret = 128;  /* plenty of free entries */
+                else
+                    ret = 0;
             } else {
                 /*
                  * Fix 1: Truly unmapped MMIO space.
@@ -756,6 +790,7 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
          */
         case NV3_PFIFO_CACHE0_STATUS:
         case NV3_PFIFO_CACHE1_STATUS:
+        case NV3_PFIFO_RUNOUT_STATUS:
             /* Read-only: ignore writes */
             break;
 
@@ -1059,6 +1094,11 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
                 }
             } else if (addr >= NV3_PROM_START && addr <= NV3_PROM_END) {
                 /* PROM is read-only, ignore writes */
+            } else if (addr >= NV3_USER_START && addr <= NV3_USER_END) {
+                /*
+                 * USER space: PIO channel method submissions.
+                 * Silently accept — full PFIFO dispatch deferred to Phase 3.
+                 */
             } else {
                 /*
                  * Fix 1: Truly unmapped MMIO space -- silently drop writes.
