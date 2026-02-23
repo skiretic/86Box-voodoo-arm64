@@ -88,6 +88,26 @@ nv3_log(const char *fmt, ...)
 static int nv3_trace_active  = 0;
 static int nv3_trace_count   = 0;
 
+/*
+ * Detailed MMIO read/write trace logging (Fix 3).
+ * Controlled by ENABLE_NV3_MMIO_TRACE_LOG. Disabled by default.
+ * When enabled, every MMIO read and write is logged with address,
+ * value, and which subsystem handled the access.
+ */
+/* #define ENABLE_NV3_MMIO_TRACE_LOG 1 */
+#ifdef ENABLE_NV3_MMIO_TRACE_LOG
+static void
+nv3_mmio_trace_log(const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    pclog_ex(fmt, ap);
+    va_end(ap);
+}
+#else
+#    define nv3_mmio_trace_log(fmt, ...)
+#endif
+
 /* ========================================================================
  * Video timing constants (placeholder values from Banshee)
  * ======================================================================== */
@@ -347,15 +367,22 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
              *
              * Formula: ns = tsc_cycles * 1e9 / cpuclock_hz
              * Then scaled by NUMERATOR/DENOMINATOR per envytools nv1-clock.xml.
+             *
+             * Fix 4: compute into local variables only -- do NOT write back
+             * to nv3->ptimer.time_0 / time_1 here. Writing back corrupts
+             * state during byte/word RMW sequences (the byte read triggers
+             * a full dword read_internal, which would overwrite the stored
+             * time, then the RMW merges the wrong value). The stored fields
+             * should only be modified by explicit MMIO writes.
              */
             {
                 double ns = (double) tsc * 1e9 / cpuclock;
                 if (nv3->ptimer.denominator > 0)
                     ns = ns * (double) nv3->ptimer.numerator / (double) nv3->ptimer.denominator;
                 uint64_t time64 = (uint64_t) ns;
-                nv3->ptimer.time_0 = (uint32_t) (time64 & 0xFFFFFFFF);
-                nv3->ptimer.time_1 = (uint32_t) (time64 >> 32);
-                ret = (addr == NV3_PTIMER_TIME_0) ? nv3->ptimer.time_0 : nv3->ptimer.time_1;
+                uint32_t t0_local = (uint32_t) (time64 & 0xFFFFFFFF);
+                uint32_t t1_local = (uint32_t) (time64 >> 32);
+                ret = (addr == NV3_PTIMER_TIME_0) ? t0_local : t1_local;
             }
             break;
         case NV3_PTIMER_ALARM_0:
@@ -583,12 +610,21 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                 }
             } else {
                 /*
-                 * Generic MMIO fallback: provide store/readback for
-                 * unmapped ranges. The driver probes bus connectivity
-                 * by writing test patterns and reading them back.
-                 * Without this, reads return 0 and init loops forever.
+                 * Fix 1: Truly unmapped MMIO space.
+                 *
+                 * On real NV3 hardware, reading addresses that don't belong
+                 * to any known subsystem returns 0x00000000 (bus floats low
+                 * within the BAR0 decode range). The previous implementation
+                 * used a mmio_fallback[] array that stored written values and
+                 * returned them, which made the driver think it found a device
+                 * at unmapped addresses like 0x030000-0x03FFFF, causing it to
+                 * enter infinite init loops.
+                 *
+                 * Known subsystem ranges are already covered by the if-else
+                 * chain above. Anything that falls through here is genuinely
+                 * unmapped on NV3 and should return 0.
                  */
-                ret = nv3->mmio_fallback[(addr >> 2) & 0x1FFF];
+                ret = 0x00000000;
             }
             break;
     }
@@ -599,6 +635,8 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
         pclog("NV3 R %06x = %08x\n", addr, ret);
     }
 #endif
+
+    nv3_mmio_trace_log("NV3 MMIO R %06X = %08X\n", addr, ret);
 
     return ret;
 }
@@ -645,7 +683,7 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
          * PBUS — Bus Control
          * ============================================================ */
         case NV3_PBUS_INTR_0:
-            /* Write 1 to clear */
+            /* Write 1 to clear (Fix 5: W1C RMW corruption note — see PCRTC_INTR) */
             nv3->pbus.intr_0 &= ~val;
             nv3_update_irq(nv3);
             break;
@@ -664,12 +702,16 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
          * in the default handler below.
          * ============================================================ */
         case NV3_PFIFO_INTR_0:
-            /* Write 1 to clear */
+            /* Write 1 to clear (Fix 5: W1C RMW corruption note — see PCRTC_INTR) */
             nv3->pfifo.intr_0 &= ~val;
+            /* Fix 2: sync to register bank */
+            nv3->pfifo.regs[(NV3_PFIFO_INTR_0 - NV3_PFIFO_START) >> 2] = nv3->pfifo.intr_0;
             nv3_update_irq(nv3);
             break;
         case NV3_PFIFO_INTR_EN_0:
             nv3->pfifo.intr_en_0 = val;
+            /* Fix 2: sync to register bank */
+            nv3->pfifo.regs[(NV3_PFIFO_INTR_EN_0 - NV3_PFIFO_START) >> 2] = val;
             nv3_update_irq(nv3);
             break;
 
@@ -677,7 +719,7 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
          * PTIMER
          * ============================================================ */
         case NV3_PTIMER_INTR_0:
-            /* Write 1 to clear */
+            /* Write 1 to clear (Fix 5: W1C RMW corruption note — see PCRTC_INTR) */
             nv3->ptimer.intr_0 &= ~val;
             nv3_update_irq(nv3);
             break;
@@ -731,30 +773,52 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
          * PCRTC — Display Controller
          * ============================================================ */
         case NV3_PCRTC_INTR:
-            /* Write 1 to clear VBlank interrupt */
+            /*
+             * Write 1 to clear VBlank interrupt.
+             *
+             * Fix 5 note: byte/word RMW on this W1C register can
+             * spuriously clear bits in unwritten bytes, because the
+             * byte/word write path reads the full dword via
+             * read_internal, merges, then writes the full dword here.
+             * A proper fix requires access-width awareness in the
+             * write path. This is a known limitation for now.
+             */
             nv3->pcrtc.intr &= ~val;
+            /* Fix 2: sync to register bank */
+            nv3->pcrtc.regs[(NV3_PCRTC_INTR - NV3_PCRTC_START) >> 2] = nv3->pcrtc.intr;
             nv3_update_irq(nv3);
             break;
         case NV3_PCRTC_INTR_EN:
             nv3->pcrtc.intr_en = val;
+            /* Fix 2: sync to register bank */
+            nv3->pcrtc.regs[(NV3_PCRTC_INTR_EN - NV3_PCRTC_START) >> 2] = val;
             nv3_update_irq(nv3);
             break;
         case NV3_PCRTC_CONFIG:
             nv3->pcrtc.config = val;
+            /* Fix 2: sync to register bank */
+            nv3->pcrtc.regs[(NV3_PCRTC_CONFIG - NV3_PCRTC_START) >> 2] = val;
             break;
         case NV3_PCRTC_START_ADDR:
             nv3->pcrtc.start_addr = val;
+            /* Fix 2: sync to register bank */
+            nv3->pcrtc.regs[(NV3_PCRTC_START_ADDR - NV3_PCRTC_START) >> 2] = val;
             break;
 
         /* ============================================================
          * PGRAPH — Graphics Engine (stubs)
          * ============================================================ */
         case NV3_PGRAPH_INTR_0:
+            /* Write 1 to clear (Fix 5: W1C RMW corruption note — see PCRTC_INTR) */
             nv3->pgraph.intr_0 &= ~val;
+            /* Fix 2: sync to register bank */
+            nv3->pgraph.regs[(NV3_PGRAPH_INTR_0 - NV3_PGRAPH_START) >> 2] = nv3->pgraph.intr_0;
             nv3_update_irq(nv3);
             break;
         case NV3_PGRAPH_INTR_EN_0:
             nv3->pgraph.intr_en_0 = val;
+            /* Fix 2: sync to register bank */
+            nv3->pgraph.regs[(NV3_PGRAPH_INTR_EN_0 - NV3_PGRAPH_START) >> 2] = val;
             nv3_update_irq(nv3);
             break;
 
@@ -767,16 +831,22 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
          * ============================================================ */
         case NV3_PRAMDAC_NVPLL_COEFF:
             nv3->pramdac.nvpll_coeff = val;
+            /* Fix 2: sync dedicated field to register bank for consistent readback */
+            nv3->pramdac.regs[(NV3_PRAMDAC_NVPLL_COEFF - NV3_PRAMDAC_START) >> 2] = val;
             nv3_log("NV3: NVPLL write M=%d N=%d P=%d\n",
                      NV3_PLL_M(val), NV3_PLL_N(val), NV3_PLL_P(val));
             break;
         case NV3_PRAMDAC_MPLL_COEFF:
             nv3->pramdac.mpll_coeff = val;
+            /* Fix 2: sync dedicated field to register bank for consistent readback */
+            nv3->pramdac.regs[(NV3_PRAMDAC_MPLL_COEFF - NV3_PRAMDAC_START) >> 2] = val;
             nv3_log("NV3: MPLL write M=%d N=%d P=%d\n",
                      NV3_PLL_M(val), NV3_PLL_N(val), NV3_PLL_P(val));
             break;
         case NV3_PRAMDAC_VPLL_COEFF:
             nv3->pramdac.vpll_coeff = val;
+            /* Fix 2: sync dedicated field to register bank for consistent readback */
+            nv3->pramdac.regs[(NV3_PRAMDAC_VPLL_COEFF - NV3_PRAMDAC_START) >> 2] = val;
             nv3_log("NV3: VPLL write M=%d N=%d P=%d freq=%.2f MHz\n",
                      NV3_PLL_M(val), NV3_PLL_N(val), NV3_PLL_P(val),
                      nv3_pll_calc_freq(nv3->crystal_freq, val) / 1000000.0);
@@ -795,15 +865,21 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
              * a recalc.
              */
             nv3->pramdac.pll_control = val;
+            /* Fix 2: sync dedicated field to register bank for consistent readback */
+            nv3->pramdac.regs[(NV3_PRAMDAC_PLL_CONTROL - NV3_PRAMDAC_START) >> 2] = val;
             nv3_log("NV3: PLL_CONTROL write 0x%08x\n", val);
             nv3->svga.fullchange = changeframecount;
             svga_recalctimings(&nv3->svga);
             break;
         case NV3_PRAMDAC_PLL_SETUP:
             nv3->pramdac.pll_setup = val;
+            /* Fix 2: sync dedicated field to register bank for consistent readback */
+            nv3->pramdac.regs[(NV3_PRAMDAC_PLL_SETUP - NV3_PRAMDAC_START) >> 2] = val;
             break;
         case NV3_PRAMDAC_GENERAL_CTRL:
             nv3->pramdac.general_control = val;
+            /* Fix 2: sync dedicated field to register bank for consistent readback */
+            nv3->pramdac.regs[(NV3_PRAMDAC_GENERAL_CTRL - NV3_PRAMDAC_START) >> 2] = val;
             nv3_log("NV3: PRAMDAC GENERAL_CTRL write 0x%08x\n", val);
             /*
              * General control affects DAC bit depth and display mode.
@@ -815,6 +891,8 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
         case NV3_PRAMDAC_CURSOR_POS:
             /* Per envytools: bits 15:0 = X, bits 31:16 = Y */
             nv3->pramdac.cursor_pos = val;
+            /* Fix 2: sync dedicated field to register bank for consistent readback */
+            nv3->pramdac.regs[(NV3_PRAMDAC_CURSOR_POS - NV3_PRAMDAC_START) >> 2] = val;
             nv3->svga.hwcursor.x = val & 0xFFFF;
             nv3->svga.hwcursor.y = (val >> 16) & 0xFFFF;
             break;
@@ -939,12 +1017,18 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
                 /* PROM is read-only, ignore writes */
             } else {
                 /*
-                 * Generic MMIO fallback: store values for readback.
+                 * Fix 1: Truly unmapped MMIO space -- silently drop writes.
+                 *
+                 * All known subsystem ranges are handled by the if-else chain
+                 * above. Writes to addresses outside any known subsystem are
+                 * silently dropped, matching real hardware behavior where
+                 * unmapped BAR0 space does not store values.
                  */
-                nv3->mmio_fallback[(addr >> 2) & 0x1FFF] = val;
             }
             break;
     }
+
+    nv3_mmio_trace_log("NV3 MMIO W %06X = %08X\n", addr, val);
 
     if (nv3_trace_active && nv3_trace_count < NV3_TRACE_LIMIT) {
         nv3_trace_count++;
@@ -2018,6 +2102,18 @@ nv3_pramdac_init(nv3_t *nv3)
      */
     nv3->pramdac.general_control = NV3_PRAMDAC_GCTRL_BPC_8BIT;
     nv3->pramdac.cursor_pos      = 0;
+
+    /*
+     * Fix 2: sync all dedicated PRAMDAC fields to register bank at init
+     * so reads through the default bank path are consistent.
+     */
+    nv3->pramdac.regs[(NV3_PRAMDAC_NVPLL_COEFF - NV3_PRAMDAC_START) >> 2] = nv3->pramdac.nvpll_coeff;
+    nv3->pramdac.regs[(NV3_PRAMDAC_MPLL_COEFF - NV3_PRAMDAC_START) >> 2] = nv3->pramdac.mpll_coeff;
+    nv3->pramdac.regs[(NV3_PRAMDAC_VPLL_COEFF - NV3_PRAMDAC_START) >> 2] = nv3->pramdac.vpll_coeff;
+    nv3->pramdac.regs[(NV3_PRAMDAC_PLL_CONTROL - NV3_PRAMDAC_START) >> 2] = nv3->pramdac.pll_control;
+    nv3->pramdac.regs[(NV3_PRAMDAC_PLL_SETUP - NV3_PRAMDAC_START) >> 2] = nv3->pramdac.pll_setup;
+    nv3->pramdac.regs[(NV3_PRAMDAC_GENERAL_CTRL - NV3_PRAMDAC_START) >> 2] = nv3->pramdac.general_control;
+    nv3->pramdac.regs[(NV3_PRAMDAC_CURSOR_POS - NV3_PRAMDAC_START) >> 2] = nv3->pramdac.cursor_pos;
 }
 
 /* ========================================================================

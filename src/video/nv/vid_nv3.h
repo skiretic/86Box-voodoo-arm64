@@ -266,15 +266,6 @@ typedef struct nv3_s {
     nv3_pgraph_t  pgraph;
     nv3_pfifo_t   pfifo;
 
-    /*
-     * Generic MMIO fallback: provides store/readback for unmapped ranges.
-     * The driver probes bus connectivity by writing patterns and reading
-     * them back. Without this, reads return 0 and init loops forever.
-     * 8192 dwords covers a 32KB address hash space, which is sufficient
-     * for the sparse unmapped accesses seen during driver init.
-     */
-    uint32_t mmio_fallback[8192];
-
     /* I2C / DDC for monitor EDID */
     void *i2c;
     void *ddc;
