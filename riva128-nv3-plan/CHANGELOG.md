@@ -2,6 +2,57 @@
 
 ## Phase 2: Core Subsystems
 
+### 2026-02-23 -- SVGA Scanout Partially Working (VPLL Bug Found)
+
+**Summary:**
+Implemented SVGA extended mode rendering path. Framebuffer data is now visible
+after the Win98 driver mode switch (previously blank screen). However, the display
+is distorted at 14 Hz because the VPLL pixel clock is only 5.97 MHz instead of
+the expected ~25 MHz for 640x480@60Hz.
+
+**What was fixed:**
+
+1. **Extended mode detection via GENERAL_CTRL** -- The Win98 NVIDIA driver does
+   NOT set CRTC 0x28 (PIXEL_MODE). Detection now also checks PRAMDAC
+   GENERAL_CTRL bit 8 (VGA_STATE_SEL) as a secondary indicator. When set,
+   defaults to 8bpp extended mode.
+
+2. **hdisp computation bypass** -- The SVGA core only multiplies hdisp by
+   dots_per_clock when `!scrblank && crtc[0x17] bit 7 && attr_palette_enable`.
+   During mode switch these conditions can fail, leaving hdisp=80 (characters)
+   instead of 640 (pixels). We now compute `hdisp = hdisp_time * 8` ourselves
+   in extended mode, unconditionally.
+
+3. **Framebuffer-only mode** -- Set `svga->fb_only = 1`, `svga->char_width = 8`,
+   `svga->linedbl = 0`, `svga->split = 99999` in extended mode, matching the
+   Banshee/ViRGE pattern for linear framebuffer rendering.
+
+4. **Row offset scaling for 8bpp** -- VGA CRTC[0x13] = 40 gives stride = 320
+   bytes (correct for 4bpp planar). For 8bpp we double to rowoffset=80
+   (stride=640). Includes REPAINT0 bits 7:5 as bits 10:8 of extended rowoffset.
+
+**Root cause of 14 Hz (NOT YET FIXED):**
+
+The VPLL coefficient register reads 0x050C (M=12, N=5, P=0), giving a pixel
+clock of only 5.97 MHz. At 640x480 this produces ~14 Hz refresh. The BIOS
+writes this value during POST and the Win98 driver never reprograms it to the
+expected ~25 MHz. Register offsets verified correct across 5 independent sources
+(envytools, rivafb, libretro-pcem, 86Box-nv, xf86-video-nv).
+
+**Diagnostic data (SVGA mode, verified by log):**
+- vtotal=525, htotal=100, dispend=480 (all correct for 640x480)
+- hdisp=640, rowoffset=80, bpp=8 (all correct)
+- seqregs[1]=0x01, fmt=0x00, char_width=8 (correct)
+- vpll=0x050C, crystal=14318180, cpuclock=266666667
+- gen_ctrl=0x00000710 (VGA_STATE_SEL=1, BPC_8BIT=0 → 6-bit DAC)
+
+**Next steps:**
+- Investigate why BIOS/driver doesn't program correct VPLL frequency
+- Check PLL_COEFF_SELECT (0x68050C) for clock source selection
+- Check if BIOS uses byte writes that get corrupted in RMW path
+
+---
+
 ### 2026-02-23 -- Driver Init Hang RESOLVED
 
 **Commits:** `0b1b54ebd`, `a48181e38`, `51a4c7644`

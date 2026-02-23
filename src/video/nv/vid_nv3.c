@@ -1580,6 +1580,22 @@ nv3_recalctimings(svga_t *svga)
 {
     nv3_t   *nv3        = (nv3_t *) svga->priv;
     uint32_t pixel_mode = svga->crtc[NV3_CRTC_PIXEL_MODE] & 0x03;
+    uint32_t gen_ctrl   = nv3->pramdac.general_control;
+
+    nv3_log("NV3: recalctimings: pixel_mode=%d gen_ctrl=0x%08x "
+            "scrblank=%d crtc17=0x%02x attr_pal_en=%d\n",
+            pixel_mode, gen_ctrl,
+            svga->scrblank, svga->crtc[0x17], svga->attr_palette_enable);
+    nv3_log("NV3: recalctimings: hdisp_time=%d hdisp=%d rowoffset=%d "
+            "memaddr_latch=0x%x dots_per_clock=%d\n",
+            svga->hdisp_time, svga->hdisp, svga->rowoffset,
+            svga->memaddr_latch, svga->dots_per_clock);
+    nv3_log("NV3: recalctimings: vtotal=%d htotal=%d dispend=%d "
+            "seqregs1=0x%02x fmt=0x%02x char_width=%d\n",
+            svga->vtotal, svga->htotal, svga->dispend,
+            svga->seqregs[1], svga->crtc[NV3_CRTC_FORMAT], svga->char_width);
+    nv3_log("NV3: recalctimings: vpll=0x%08x crystal=%d cpuclock=%.0f\n",
+            nv3->pramdac.vpll_coeff, nv3->crystal_freq, cpuclock);
 
     /*
      * Extended display buffer start address.
@@ -1603,45 +1619,102 @@ nv3_recalctimings(svga_t *svga)
         svga->vsyncstart += 0x400;
 
     /*
-     * Extended horizontal: CRTC 0x2D bit 0 adds 0x100 to hdisp.
+     * Detect extended (SVGA) mode.
+     *
+     * Primary: CRTC 0x28 (PIXEL_MODE) non-zero indicates extended mode.
+     * Secondary: PRAMDAC GENERAL_CTRL VGA_STATE_SEL (bit 8) = 1 indicates
+     * NV accelerated mode. The Windows 98 NVIDIA driver uses GENERAL_CTRL
+     * to switch from VGA passthrough to accelerated mode; some drivers may
+     * not explicitly set CRTC 0x28.
      */
-    if (svga->crtc[NV3_CRTC_HEB] & 0x01)
-        svga->hdisp += 0x100;
+    int is_extended = (pixel_mode != NV3_PIXEL_MODE_VGA)
+                   || (gen_ctrl & NV3_PRAMDAC_GCTRL_VGA_STATE);
 
-    /*
-     * In VGA mode (pixel_mode == 0), use standard SVGA rendering path.
-     * In extended modes, we configure the SVGA renderer ourselves.
-     */
-    if (pixel_mode == NV3_PIXEL_MODE_VGA) {
-        /* Standard VGA mode — let SVGA core handle everything */
+    if (!is_extended) {
+        /*
+         * Standard VGA mode.
+         * Add HEB (horizontal extension bit) in pixel units.
+         */
+        if (svga->crtc[NV3_CRTC_HEB] & 0x01)
+            svga->hdisp += svga->dots_per_clock * 0x100;
+        svga->fb_only = 0;
         svga->override = 0;
         return;
     }
 
     /*
-     * Extended pixel mode (8/16/32bpp SVGA).
+     * ================================================================
+     * Extended SVGA mode
+     * ================================================================
      *
      * We do NOT set svga->override = 1 because we want the standard
      * SVGA rendering engine to draw the framebuffer for us (similar
-     * to how Banshee works). We just set up the render function and
-     * pixel format parameters.
+     * to how Banshee works). We set up the render function and pixel
+     * format parameters ourselves.
      */
     svga->override = 0;
 
-    /* Set pixel format, render function, and adjust row offset */
+    /*
+     * Compute horizontal display width in pixels ourselves.
+     *
+     * The SVGA core computes hdisp = (crtc[1] + 1) and then
+     * multiplies it by dots_per_clock ONLY if:
+     *   !scrblank && crtc[0x17] bit 7 && attr_palette_enable
+     * During a mode switch, the screen may be momentarily blanked
+     * (SR1 bit 5 set, or CRTC[0x17] bit 7 cleared), which prevents
+     * the multiplication. This leaves hdisp as the raw character
+     * count (e.g. 80 instead of 640).
+     *
+     * To avoid this, we compute hdisp ourselves from hdisp_time
+     * (the character count saved before any multiplication).
+     * NV3 always uses 8-pixel character clocks in extended modes.
+     */
+    svga->hdisp = svga->hdisp_time * 8;
+
+    /* Extended horizontal bit: add 256 characters * 8 pixels */
+    if (svga->crtc[NV3_CRTC_HEB] & 0x01)
+        svga->hdisp += 0x100 * 8;
+
+    /*
+     * Determine pixel depth.
+     * If CRTC 0x28 (PIXEL_MODE) was not explicitly set by the driver,
+     * but GENERAL_CTRL VGA_STATE_SEL indicates accelerated mode,
+     * default to 8bpp. This is the most common initial SVGA mode for
+     * the Windows 98 NVIDIA driver.
+     */
+    if (pixel_mode == NV3_PIXEL_MODE_VGA)
+        pixel_mode = NV3_PIXEL_MODE_8BPP;
+
+    /*
+     * Adjust row offset for extended pixel modes.
+     *
+     * The SVGA core computes rowoffset = CRTC[0x13] which is in units
+     * of 8 bytes (the scan code shifts by 3: memaddr += rowoffset << 3).
+     * The VGA CRTC 0x13 is programmed for 4bpp planar mode, giving
+     * stride = rowoffset * 8 = half the actual byte stride at 8bpp.
+     *
+     * We scale the VGA base rowoffset by the bytes-per-pixel ratio:
+     *   8bpp:  2x (1 byte/pixel vs VGA's 0.5 byte/pixel effective)
+     *   16bpp: 4x
+     *   32bpp: 8x
+     *
+     * Then add REPAINT0 bits 7:5 as bits 10:8 of the extended rowoffset.
+     */
     switch (pixel_mode) {
         case NV3_PIXEL_MODE_8BPP:
             svga->bpp    = 8;
             svga->lowres = 0;
             svga->render = svga_render_8bpp_highres;
             svga->map8   = svga->pallook;
-            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 1;
+            svga->rowoffset <<= 1;
+            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
             break;
 
         case NV3_PIXEL_MODE_16BPP:
             svga->bpp    = 16;
             svga->lowres = 0;
             svga->render = svga_render_16bpp_highres;
+            svga->rowoffset <<= 2;
             svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
             break;
 
@@ -1649,6 +1722,7 @@ nv3_recalctimings(svga_t *svga)
             svga->bpp    = 32;
             svga->lowres = 0;
             svga->render = svga_render_32bpp_highres;
+            svga->rowoffset <<= 3;
             svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
             break;
 
@@ -1661,70 +1735,27 @@ nv3_recalctimings(svga_t *svga)
      *
      * Per envytools nv3_pramdac.xml: bit 20 = BPC_8BITS.
      *   0 = 6-bit DAC, 1 = 8-bit DAC.
-     *
-     * Cross-reference: xf86-video-nv sets general_control to 0x00100100
-     * for SVGA modes (bit 8 = VGA_STATE_SEL, bit 20 = BPC_8BITS).
      */
-    if (nv3->pramdac.general_control & NV3_PRAMDAC_GCTRL_BPC_8BIT) {
+    if (nv3->pramdac.general_control & NV3_PRAMDAC_GCTRL_BPC_8BIT)
         svga_set_ramdac_type(svga, RAMDAC_8BIT);
-    } else {
+    else
         svga_set_ramdac_type(svga, RAMDAC_6BIT);
-    }
 
     /*
      * Calculate pixel clock from VPLL coefficient register.
-     *
-     * Per envytools nv3_pramdac.xml:
-     *   M = vpll_coeff[7:0]   (divider)
-     *   N = vpll_coeff[15:8]  (multiplier)
-     *   P = vpll_coeff[18:16] (post-divider exponent)
-     *
-     *   Freq = (crystal * N) / (M * (1 << P))
-     *
-     * Clock source selection: on NV3 the pixel clock source is
-     * determined by two mechanisms:
-     *
-     * 1. VGA miscout bits 3:2 (standard VGA clock select):
-     *    00 = 25.175MHz, 01 = 28.322MHz, 10/11 = external/programmable
-     *
-     * 2. PLL_CONTROL register (0x68050C) bit 16 (VPLL_PROG):
-     *    When set, the programmable VPLL is used as pixel clock source.
-     *
-     * The Windows NVIDIA driver uses miscout bits 3:2 == 10 (external
-     * clock), not 11. The Linux xf86-video-nv driver uses PLL_CONTROL
-     * VPLL_PROG. We accept the PLL clock whenever EITHER mechanism
-     * selects the programmable PLL, or when we are in extended pixel
-     * mode (pixel_mode != 0), since extended modes always use the PLL.
+     * In extended mode, always use the programmable VPLL.
      */
     {
-        int use_vpll = 0;
+        uint32_t vpll = nv3->pramdac.vpll_coeff;
+        double   freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
 
-        /* Check VGA miscout: bits 3:2 >= 2 means external/programmable */
-        if (((svga->miscout >> 2) & 3) >= 2)
-            use_vpll = 1;
-
-        /* Check NV3 PLL_CONTROL: VPLL_PROG (bit 16) */
-        if (nv3->pramdac.pll_control & NV3_PLL_CTRL_VPLL_PROG)
-            use_vpll = 1;
-
-        /* In extended pixel mode, always use VPLL */
-        if (pixel_mode != NV3_PIXEL_MODE_VGA)
-            use_vpll = 1;
-
-        if (use_vpll) {
-            uint32_t vpll = nv3->pramdac.vpll_coeff;
-            double   freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
-
-            if (freq > 1000.0) {
-                /* Standard 86Box clock formula: ticks per pixel = cpuclock * 2^32 / freq */
-                svga->clock = (cpuclock * (float) (1ULL << 32)) / freq;
-            }
-        }
+        if (freq > 1000.0)
+            svga->clock = (cpuclock * (float) (1ULL << 32)) / freq;
     }
 
     /*
-     * For extended modes, make the blanking wrap properly by
-     * starting blank at display end, similar to Banshee/ViRGE
+     * Extended mode blanking.
+     * Start blank at display end, similar to Banshee/ViRGE
      * "special blanking mode" behavior.
      */
     svga->vblankstart = svga->dispend;
@@ -1732,14 +1763,30 @@ nv3_recalctimings(svga_t *svga)
 
     /*
      * In extended mode, the dots per clock are always 8 (never 9).
-     * Per NV3 architecture: character clock is fixed at 8 pixels.
+     * Set unconditionally — do NOT gate on scrblank/attr_palette_enable,
+     * because the screen may be momentarily blanked during mode switch
+     * and we need the timing to be correct regardless.
      */
-    if (!svga->scrblank && svga->attr_palette_enable)
-        svga->dots_per_clock = (svga->seqregs[1] & 8) ? 16 : 8;
+    svga->dots_per_clock = (svga->seqregs[1] & 8) ? 16 : 8;
+
+    /* NV3 uses 8-pixel character clocks in extended modes (never 9) */
+    svga->char_width = 8;
+
+    /* Disable line doubling in extended modes */
+    svga->linedbl = 0;
+
+    /* Enable linear framebuffer addressing for the write path */
+    svga->fb_only = 1;
 
     /* Disable overscan in extended modes */
     svga->monitor->mon_overscan_y = 0;
     svga->monitor->mon_overscan_x = 0;
+
+    nv3_log("NV3: recalctimings EXTENDED: bpp=%d hdisp=%d dispend=%d "
+            "rowoffset=%d memaddr_latch=0x%x clock=0x%016llx\n",
+            svga->bpp, svga->hdisp, svga->dispend,
+            svga->rowoffset, svga->memaddr_latch,
+            (unsigned long long) svga->clock);
 
     video_force_resize_set_monitor(1, svga->monitor_index);
 }

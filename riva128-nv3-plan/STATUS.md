@@ -11,12 +11,12 @@
 
 | | |
 |---|---|
-| **Current Phase** | Phase 2 — SVGA scanout needed |
+| **Current Phase** | Phase 2 — SVGA scanout partially working |
 | **Build** | Compiles clean (zero NV3 warnings) |
 | **Boot** | Win98 boots, driver init completes, mode switch succeeds |
-| **Display** | VGA working; SVGA mode switch works but screen blank (no scanout) |
+| **Display** | VGA working; SVGA shows distorted framebuffer data (14 Hz, wrong pixel clock) |
 | **Acceleration** | None (stubs only) |
-| **Blockers** | SVGA display blank after mode switch — needs PCRTC/PRAMDAC scanout |
+| **Blockers** | VPLL reads 5.97 MHz instead of ~25 MHz — BIOS not programming correct PLL value |
 
 ---
 
@@ -56,10 +56,13 @@
 - **DAC bit depth** (6-bit/8-bit) via PRAMDAC GENERAL_CONTROL
 - **RMA (Real Mode Access)** window functional for MMIO reads/writes
 - **Crystal frequency** derived from PEXTDEV straps
+- **SVGA extended mode detection** via GENERAL_CTRL VGA_STATE_SEL (bit 8)
+- **Extended mode rendering path**: hdisp, rowoffset, bpp, dots_per_clock all correct
+- **Framebuffer data visible** in SVGA mode (distorted but present)
 
 ## What Doesn't Work Yet
 
-- **SVGA scanout after mode switch** -- Driver init completes and writes VPLL=26.71 MHz, GENERAL_CTRL=0x00100710, but screen goes blank. Need recalctimings to pick up NV3 extended mode and render from framebuffer (Phase 2 remaining)
+- **VPLL pixel clock is wrong (5.97 MHz)** -- BIOS writes VPLL=0x050C (M=12 N=5 P=0 → 5.97 MHz) during POST, and the Windows 98 driver does NOT reprogram it to a higher frequency. This gives 14 Hz refresh instead of ~60 Hz. The display shows distorted framebuffer content compressed into a thin strip at the top. Root cause: either (a) the BIOS VPLL programming path isn't reaching our register, (b) the BIOS is confused by some earlier init state, or (c) the driver uses PLL_COEFF_SELECT (0x68050C) to select a different clock source. Register offsets verified correct across 5 independent sources.
 - **Hardware cursor rendering** -- CURSOR_START register exists but no draw callback (Phase 2 remaining)
 - **PTIMER time counter increment** -- registers exist but counter is not auto-advancing (needs rivatimer integration)
 - **2D acceleration** -- blit, rectangle, GDI text (Phase 4)
@@ -72,9 +75,9 @@
 ### Source Files
 | File | Lines | Purpose |
 |------|-------|---------|
-| `src/video/nv/vid_nv3.c` | ~1100 | Main device (PCI, VGA I/O, MMIO, subsystems) |
+| `src/video/nv/vid_nv3.c` | ~1200 | Main device (PCI, VGA I/O, MMIO, subsystems) |
 | `src/video/nv/vid_nv3.h` | ~210 | Private header (nv3_t, subsystem structs) |
-| `src/include/86box/nv/vid_nv3_regs.h` | ~310 | Register defines (PMC, PFB, PEXTDEV, PTIMER, PRAMDAC, PCRTC) |
+| `src/include/86box/nv/vid_nv3_regs.h` | ~430 | Register defines (PMC, PFB, PEXTDEV, PTIMER, PRAMDAC, PCRTC, PFIFO) |
 
 ### Modified Files
 | File | Change |
@@ -107,4 +110,4 @@
 
 ---
 
-*Last updated: 2026-02-23 -- Driver init hang resolved, SVGA scanout next*
+*Last updated: 2026-02-23 -- SVGA scanout partially working, VPLL frequency bug next*
