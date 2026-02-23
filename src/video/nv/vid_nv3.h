@@ -62,19 +62,47 @@ typedef struct nv3_pbus_s {
 
 /*
  * PFB (Framebuffer Interface) state.
+ *
+ * PFB spans 0x100000-0x100FFF (4KB = 1024 dwords).
+ * The regs[] array provides a general register bank for driver readback
+ * of registers not explicitly handled (e.g., 0x100044 DELAY, 0x100080
+ * DEBUG_0, 0x1000C0 GREEN_0, 0x100100 UNK100, 0x100110).
+ * Explicitly handled registers (BOOT_0, CONFIG_0, CONFIG_1) have
+ * dedicated fields AND are mirrored into the bank for consistent readback.
  */
 typedef struct nv3_pfb_s {
     uint32_t boot_0;         /* Memory config (size, width, banks) */
     uint32_t config_0;       /* Framebuffer config register 0 */
     uint32_t config_1;       /* Framebuffer config register 1 */
+    uint32_t regs[1024];     /* General register bank for unhandled PFB regs */
 } nv3_pfb_t;
 
 /*
  * PEXTDEV (External Devices / Straps) state.
+ *
+ * PEXTDEV spans 0x101000-0x101FFF (4KB = 1024 dwords).
+ * The regs[] array provides a general register bank for driver readback
+ * of registers not explicitly handled (e.g., 0x101114, 0x101200).
+ * The STRAPS register at offset 0 has a dedicated field AND is mirrored
+ * into the bank for consistent readback.
  */
 typedef struct nv3_pextdev_s {
     uint32_t straps;         /* Board configuration straps */
+    uint32_t regs[1024];     /* General register bank for unhandled PEXTDEV regs */
 } nv3_pextdev_t;
+
+/*
+ * PME (PMEDIA / Mediaport) state.
+ *
+ * PME spans 0x200000-0x200FFF (4KB = 1024 dwords).
+ * Per envytools: PMEDIA has its own interrupt registers that aggregate
+ * to PMC_INTR_0 bit 4. The regs[] array handles unhandled offsets.
+ */
+typedef struct nv3_pme_s {
+    uint32_t intr_0;         /* PMEDIA interrupt status (write-1-to-clear) */
+    uint32_t intr_en_0;      /* PMEDIA interrupt enable mask */
+    uint32_t regs[1024];     /* General register bank for unhandled PME regs */
+} nv3_pme_t;
 
 /*
  * PTIMER (Programmable Interval Timer) state.
@@ -231,11 +259,21 @@ typedef struct nv3_s {
     nv3_pbus_t    pbus;
     nv3_pfb_t     pfb;
     nv3_pextdev_t pextdev;
+    nv3_pme_t     pme;
     nv3_ptimer_t  ptimer;
     nv3_pcrtc_t   pcrtc;
     nv3_pramdac_t pramdac;
     nv3_pgraph_t  pgraph;
     nv3_pfifo_t   pfifo;
+
+    /*
+     * Generic MMIO fallback: provides store/readback for unmapped ranges.
+     * The driver probes bus connectivity by writing patterns and reading
+     * them back. Without this, reads return 0 and init loops forever.
+     * 8192 dwords covers a 32KB address hash space, which is sufficient
+     * for the sparse unmapped accesses seen during driver init.
+     */
+    uint32_t mmio_fallback[8192];
 
     /* I2C / DDC for monitor EDID */
     void *i2c;

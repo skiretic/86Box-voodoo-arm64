@@ -149,6 +149,10 @@ nv3_pmc_update_intr(nv3_t *nv3)
      * contributes to the PMC aggregate if (intr & intr_en) != 0.
      */
 
+    /* PMEDIA — bit 4 */
+    if (nv3->pme.intr_0 & nv3->pme.intr_en_0)
+        pending |= (1 << NV3_PMC_INTR_PMEDIA);
+
     /* PFIFO — bit 8 */
     if (nv3->pfifo.intr_0 & nv3->pfifo.intr_en_0)
         pending |= (1 << NV3_PMC_INTR_PFIFO);
@@ -525,13 +529,66 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                  * above. Other PMC addresses are silently ignored (the
                  * driver writes to BOOT_0 which is read-only).
                  */
+            } else if (addr >= NV3_PFB_START && addr <= NV3_PFB_END) {
+                /*
+                 * PFB register bank for registers not handled in the
+                 * switch statement above (e.g. 0x100044 DELAY, 0x100080
+                 * DEBUG_0, 0x1000C0 GREEN_0). The explicitly handled
+                 * registers (BOOT_0, CONFIG_0, CONFIG_1) are synced into
+                 * the bank so reads through either path return the same value.
+                 */
+                uint32_t pfb_idx = (addr - NV3_PFB_START) >> 2;
+                if (pfb_idx < 1024)
+                    ret = nv3->pfb.regs[pfb_idx];
+            } else if (addr >= NV3_PEXTDEV_START && addr <= NV3_PEXTDEV_END) {
+                /*
+                 * PEXTDEV register bank for registers not handled in the
+                 * switch statement above (e.g. 0x101114, 0x101200).
+                 * The STRAPS register is synced into the bank at init.
+                 */
+                uint32_t pextdev_idx = (addr - NV3_PEXTDEV_START) >> 2;
+                if (pextdev_idx < 1024)
+                    ret = nv3->pextdev.regs[pextdev_idx];
+            } else if (addr >= NV3_PME_START && addr <= NV3_PME_END) {
+                /*
+                 * PMEDIA (Mediaport) register space.
+                 * Per envytools: INTR at 0x200100, INTR_EN at 0x200140.
+                 * Other offsets go through the register bank.
+                 */
+                switch (addr) {
+                    case 0x200100:
+                        ret = nv3->pme.intr_0;
+                        break;
+                    case 0x200140:
+                        ret = nv3->pme.intr_en_0;
+                        break;
+                    default: {
+                        uint32_t pme_idx = (addr - NV3_PME_START) >> 2;
+                        if (pme_idx < 1024)
+                            ret = nv3->pme.regs[pme_idx];
+                        break;
+                    }
+                }
+            } else if (addr >= NV3_PROM_START && addr <= NV3_PROM_END) {
+                /*
+                 * PROM: read BIOS ROM data through MMIO.
+                 * Maps the video BIOS as a byte-addressable read window.
+                 */
+                uint32_t rom_off = addr - NV3_PROM_START;
+                if (rom_off + 3 < (uint32_t) nv3->bios_rom.sz) {
+                    ret = (uint32_t) nv3->bios_rom.rom[rom_off]
+                        | ((uint32_t) nv3->bios_rom.rom[rom_off + 1] << 8)
+                        | ((uint32_t) nv3->bios_rom.rom[rom_off + 2] << 16)
+                        | ((uint32_t) nv3->bios_rom.rom[rom_off + 3] << 24);
+                }
             } else {
                 /*
-                 * Unmapped ranges (0x010000-0x08FFFF, 0x0A0000-0x0BFFFF, etc.)
-                 * are silently absorbed. The driver may probe ranges that
-                 * don't exist on NV3 hardware; returning 0 is correct behavior.
+                 * Generic MMIO fallback: provide store/readback for
+                 * unmapped ranges. The driver probes bus connectivity
+                 * by writing test patterns and reading them back.
+                 * Without this, reads return 0 and init loops forever.
                  */
-                nv3_log("NV3: MMIO read32 unknown addr=0x%06x\n", addr);
+                ret = nv3->mmio_fallback[(addr >> 2) & 0x1FFF];
             }
             break;
     }
@@ -657,9 +714,13 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             break;
         case NV3_PFB_CONFIG_0:
             nv3->pfb.config_0 = val;
+            /* Sync to register bank for consistent readback through default path */
+            nv3->pfb.regs[(NV3_PFB_CONFIG_0 - NV3_PFB_START) >> 2] = val;
             break;
         case NV3_PFB_CONFIG_1:
             nv3->pfb.config_1 = val;
+            /* Sync to register bank for consistent readback through default path */
+            nv3->pfb.regs[(NV3_PFB_CONFIG_1 - NV3_PFB_START) >> 2] = val;
             break;
 
         /* PEXTDEV — straps are read-only, writes ignored */
@@ -835,11 +896,52 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
                  * Other PMC writes (e.g. to BOOT_0 which is read-only)
                  * are silently dropped.
                  */
+            } else if (addr >= NV3_PFB_START && addr <= NV3_PFB_END) {
+                /*
+                 * PFB register bank for unhandled registers.
+                 * Note: BOOT_0, CONFIG_0, CONFIG_1 are handled in the
+                 * switch above and synced to the bank there.
+                 */
+                uint32_t pfb_idx = (addr - NV3_PFB_START) >> 2;
+                if (pfb_idx < 1024)
+                    nv3->pfb.regs[pfb_idx] = val;
+            } else if (addr >= NV3_PEXTDEV_START && addr <= NV3_PEXTDEV_END) {
+                /*
+                 * PEXTDEV register bank for unhandled registers.
+                 * Straps at offset 0 are read-only (handled in switch above).
+                 */
+                uint32_t pextdev_idx = (addr - NV3_PEXTDEV_START) >> 2;
+                if (pextdev_idx < 1024)
+                    nv3->pextdev.regs[pextdev_idx] = val;
+            } else if (addr >= NV3_PME_START && addr <= NV3_PME_END) {
+                /*
+                 * PMEDIA (Mediaport) register space.
+                 * Per envytools: INTR at 0x200100 (write-1-to-clear),
+                 * INTR_EN at 0x200140.
+                 */
+                switch (addr) {
+                    case 0x200100:
+                        nv3->pme.intr_0 &= ~val;
+                        nv3_update_irq(nv3);
+                        break;
+                    case 0x200140:
+                        nv3->pme.intr_en_0 = val;
+                        nv3_update_irq(nv3);
+                        break;
+                    default: {
+                        uint32_t pme_idx = (addr - NV3_PME_START) >> 2;
+                        if (pme_idx < 1024)
+                            nv3->pme.regs[pme_idx] = val;
+                        break;
+                    }
+                }
+            } else if (addr >= NV3_PROM_START && addr <= NV3_PROM_END) {
+                /* PROM is read-only, ignore writes */
             } else {
                 /*
-                 * Unmapped ranges are silently absorbed.
+                 * Generic MMIO fallback: store values for readback.
                  */
-                nv3_log("NV3: MMIO write32 unknown addr=0x%06x val=0x%08x\n", addr, val);
+                nv3->mmio_fallback[(addr >> 2) & 0x1FFF] = val;
             }
             break;
     }
@@ -1816,6 +1918,8 @@ nv3_pfb_init(nv3_t *nv3)
     }
 
     nv3->pfb.boot_0 = boot_0;
+    /* Sync to register bank for consistent readback through default path */
+    nv3->pfb.regs[(NV3_PFB_BOOT_0 - NV3_PFB_START) >> 2] = boot_0;
 }
 
 /* ========================================================================
@@ -1850,6 +1954,8 @@ nv3_pextdev_init(nv3_t *nv3)
     }
 
     nv3->pextdev.straps = straps;
+    /* Sync to register bank for consistent readback through default path */
+    nv3->pextdev.regs[(NV3_PEXTDEV_STRAPS - NV3_PEXTDEV_START) >> 2] = straps;
 
     /*
      * Set crystal frequency based on straps.
