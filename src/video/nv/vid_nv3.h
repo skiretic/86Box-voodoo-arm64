@@ -132,6 +132,11 @@ typedef struct nv3_pramdac_s {
 /*
  * PGRAPH (2D/3D Graphics Engine) state.
  * Stub for Phase 1; will be expanded in Phase 4/5.
+ *
+ * The regs[] array provides a general register bank for driver readback.
+ * PGRAPH spans 0x400000-0x400FFF (4KB = 1024 dwords). Registers handled
+ * explicitly in the switch statement (INTR_0, INTR_EN_0) are returned
+ * from their dedicated fields; all other registers go through the bank.
  */
 typedef struct nv3_pgraph_s {
     uint32_t intr_0;
@@ -140,15 +145,22 @@ typedef struct nv3_pgraph_s {
     uint32_t debug_1;
     uint32_t debug_2;
     uint32_t debug_3;
+    uint32_t regs[1024];
 } nv3_pgraph_t;
 
 /*
  * PFIFO (Command FIFO) state.
  * Stub for Phase 1; will be expanded in Phase 3.
+ *
+ * The regs[] array provides a general register bank for driver readback.
+ * PFIFO spans 0x002000-0x003FFF (8KB = 2048 dwords). Registers handled
+ * explicitly in the switch statement (INTR_0, INTR_EN_0) are returned
+ * from their dedicated fields; all other registers go through the bank.
  */
 typedef struct nv3_pfifo_s {
     uint32_t intr_0;
     uint32_t intr_en_0;
+    uint32_t regs[2048];
 } nv3_pfifo_t;
 
 /*

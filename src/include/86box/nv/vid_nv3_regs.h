@@ -78,6 +78,8 @@
 
 /* PFIFO - Command FIFO */
 #define NV3_PFIFO_START           0x002000
+#define NV3_PFIFO_INTR_0          0x002100
+#define NV3_PFIFO_INTR_EN_0       0x002140
 #define NV3_PFIFO_END             0x003FFF
 
 /* PRM - Real Mode Device Support */
@@ -285,6 +287,7 @@
 /* PRAMIN - RAM INput area (DMA objects, hash tables) */
 #define NV3_PRAMIN_START          0x700000
 #define NV3_PRAMIN_END            0x7FFFFF
+#define NV3_PRAMIN_VRAM_SIZE      0x100000  /* 1MB PRAMIN window into top of VRAM */
 
 /* USER - PFIFO user channel space */
 #define NV3_USER_START            0x800000

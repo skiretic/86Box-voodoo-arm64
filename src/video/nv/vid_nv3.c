@@ -284,6 +284,22 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             break;
 
         /* ============================================================
+         * PFIFO — Command FIFO interrupt registers (0x002000-0x003FFF)
+         *
+         * Per envytools nv1_pfifo.xml:
+         * INTR_0 (0x002100): write-1-to-clear interrupt status.
+         * INTR_EN_0 (0x002140): interrupt enable mask.
+         * All other PFIFO registers go through the register bank
+         * in the default handler below.
+         * ============================================================ */
+        case NV3_PFIFO_INTR_0:
+            ret = nv3->pfifo.intr_0;
+            break;
+        case NV3_PFIFO_INTR_EN_0:
+            ret = nv3->pfifo.intr_en_0;
+            break;
+
+        /* ============================================================
          * PTIMER — Programmable Interval Timer (0x009000-0x009FFF)
          *
          * Per envytools nv1-clock.xml:
@@ -393,13 +409,17 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
          * ============================================================ */
         default:
             if (addr >= NV3_PBUS_PCI_START && addr <= NV3_PBUS_PCI_END) {
-                /* Mirror of PCI config space */
-                int pci_reg = addr - NV3_PBUS_PCI_START;
+                /* Mirror of PCI config space via nv3_pci_read().
+                 * Must use the read function (not pci_regs[] directly) because
+                 * vendor ID, device ID, class code etc. are returned as
+                 * hardcoded constants from nv3_pci_read(), not stored in
+                 * pci_regs[]. */
+                int pci_reg = (addr - NV3_PBUS_PCI_START) & ~3;
                 if (pci_reg < 256) {
-                    ret = nv3->pci_regs[pci_reg & ~3]
-                        | (nv3->pci_regs[(pci_reg & ~3) + 1] << 8)
-                        | (nv3->pci_regs[(pci_reg & ~3) + 2] << 16)
-                        | (nv3->pci_regs[(pci_reg & ~3) + 3] << 24);
+                    ret = nv3_pci_read(0, pci_reg, 1, nv3)
+                        | (nv3_pci_read(0, pci_reg + 1, 1, nv3) << 8)
+                        | (nv3_pci_read(0, pci_reg + 2, 1, nv3) << 16)
+                        | (nv3_pci_read(0, pci_reg + 3, 1, nv3) << 24);
                 }
             } else if (addr >= NV3_PRAMDAC_START && addr <= NV3_PRAMDAC_END) {
                 /*
@@ -411,12 +431,40 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             } else if (addr >= NV3_PCRTC_START && addr <= NV3_PCRTC_END) {
                 nv3_log("NV3: PCRTC read32 unhandled addr=0x%06x\n", addr);
             } else if (addr >= NV3_PGRAPH_START && addr <= NV3_PGRAPH_END) {
-                nv3_log("NV3: PGRAPH read32 unhandled addr=0x%06x\n", addr);
+                /*
+                 * PGRAPH register bank: store/return values for driver
+                 * init readback. Registers handled in the switch above
+                 * (INTR_0, INTR_EN_0) never reach here.
+                 * Full PGRAPH engine deferred to Phase 4/5.
+                 */
+                uint32_t pgraph_idx = (addr - NV3_PGRAPH_START) >> 2;
+                if (pgraph_idx < 1024)
+                    ret = nv3->pgraph.regs[pgraph_idx];
             } else if (addr >= NV3_PFIFO_START && addr <= NV3_PFIFO_END) {
-                nv3_log("NV3: PFIFO read32 unhandled addr=0x%06x\n", addr);
+                /*
+                 * PFIFO register bank: store/return values for driver
+                 * init readback. Registers handled in the switch above
+                 * (INTR_0, INTR_EN_0) never reach here.
+                 * Full PFIFO state machine deferred to Phase 3.
+                 */
+                uint32_t pfifo_idx = (addr - NV3_PFIFO_START) >> 2;
+                if (pfifo_idx < 2048)
+                    ret = nv3->pfifo.regs[pfifo_idx];
             } else if (addr >= NV3_PRAMIN_START && addr <= NV3_PRAMIN_END) {
-                /* PRAMIN reads — Phase 3 will handle properly.
-                 * For now, return 0. */
+                /*
+                 * PRAMIN: 1MB window into the top of VRAM.
+                 * Used by the driver to store DMA objects, hash tables
+                 * (RAMHT), and channel contexts (RAMFC).
+                 *
+                 * VRAM address = (vram_size - 1MB) + pramin_offset
+                 *
+                 * For 4MB card: offset 0 => VRAM 0x300000
+                 * For 8MB card: offset 0 => VRAM 0x700000
+                 */
+                uint32_t pramin_offset = addr - NV3_PRAMIN_START;
+                uint32_t vram_offset = (nv3->vram_size - NV3_PRAMIN_VRAM_SIZE) + pramin_offset;
+                if (vram_offset + 3 < nv3->vram_size)
+                    ret = *(uint32_t *) &nv3->svga.vram[vram_offset];
             } else {
                 nv3_log("NV3: MMIO read32 unknown addr=0x%06x\n", addr);
             }
@@ -468,6 +516,25 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             break;
         case NV3_PBUS_INTR_EN_0:
             nv3->pbus.intr_en_0 = val;
+            nv3_update_irq(nv3);
+            break;
+
+        /* ============================================================
+         * PFIFO — Command FIFO interrupt registers
+         *
+         * Per envytools nv1_pfifo.xml:
+         * INTR_0 (0x002100): write-1-to-clear interrupt status.
+         * INTR_EN_0 (0x002140): interrupt enable mask.
+         * All other PFIFO registers go through the register bank
+         * in the default handler below.
+         * ============================================================ */
+        case NV3_PFIFO_INTR_0:
+            /* Write 1 to clear */
+            nv3->pfifo.intr_0 &= ~val;
+            nv3_update_irq(nv3);
+            break;
+        case NV3_PFIFO_INTR_EN_0:
+            nv3->pfifo.intr_en_0 = val;
             nv3_update_irq(nv3);
             break;
 
@@ -613,11 +680,37 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             } else if (addr >= NV3_PCRTC_START && addr <= NV3_PCRTC_END) {
                 nv3_log("NV3: PCRTC write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
             } else if (addr >= NV3_PGRAPH_START && addr <= NV3_PGRAPH_END) {
-                nv3_log("NV3: PGRAPH write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+                /*
+                 * PGRAPH register bank: accept writes for driver init
+                 * readback. Registers handled in the switch above
+                 * (INTR_0, INTR_EN_0) never reach here.
+                 * Full PGRAPH engine deferred to Phase 4/5.
+                 */
+                uint32_t pgraph_idx = (addr - NV3_PGRAPH_START) >> 2;
+                if (pgraph_idx < 1024)
+                    nv3->pgraph.regs[pgraph_idx] = val;
             } else if (addr >= NV3_PFIFO_START && addr <= NV3_PFIFO_END) {
-                nv3_log("NV3: PFIFO write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+                /*
+                 * PFIFO register bank: accept writes for driver init
+                 * readback. Registers handled in the switch above
+                 * (INTR_0, INTR_EN_0) never reach here.
+                 * Full PFIFO state machine deferred to Phase 3.
+                 */
+                uint32_t pfifo_idx = (addr - NV3_PFIFO_START) >> 2;
+                if (pfifo_idx < 2048)
+                    nv3->pfifo.regs[pfifo_idx] = val;
             } else if (addr >= NV3_PRAMIN_START && addr <= NV3_PRAMIN_END) {
-                /* PRAMIN writes — Phase 3 */
+                /*
+                 * PRAMIN: 1MB window into the top of VRAM.
+                 * Writes go directly to VRAM and mark the page dirty
+                 * for display refresh tracking.
+                 */
+                uint32_t pramin_offset = addr - NV3_PRAMIN_START;
+                uint32_t vram_offset = (nv3->vram_size - NV3_PRAMIN_VRAM_SIZE) + pramin_offset;
+                if (vram_offset + 3 < nv3->vram_size) {
+                    *(uint32_t *) &nv3->svga.vram[vram_offset] = val;
+                    nv3->svga.changedvram[vram_offset >> 12] = changeframecount;
+                }
             } else {
                 nv3_log("NV3: MMIO write32 unknown addr=0x%06x val=0x%08x\n", addr, val);
             }
