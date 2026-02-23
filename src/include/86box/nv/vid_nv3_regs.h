@@ -80,6 +80,79 @@
 #define NV3_PFIFO_START           0x002000
 #define NV3_PFIFO_INTR_0          0x002100
 #define NV3_PFIFO_INTR_EN_0       0x002140
+
+/*
+ * PFIFO configuration registers.
+ * Per envytools nv1_pfifo.xml.
+ */
+#define NV3_PFIFO_RAMHT           0x002210   /* Hash table config */
+#define NV3_PFIFO_RAMFC           0x002214   /* FIFO context config */
+#define NV3_PFIFO_RAMRO           0x002218   /* Runout area config */
+
+/* PFIFO CACHE_ERROR (read-only status) */
+#define NV3_PFIFO_CACHE_ERROR     0x002080
+
+/*
+ * PFIFO CACHES register.
+ * Per envytools: boolean enable for the reassignment engine.
+ */
+#define NV3_PFIFO_CACHES          0x002500
+
+/*
+ * PFIFO RUNOUT registers.
+ * Per envytools nv1_pfifo.xml.
+ */
+#define NV3_PFIFO_RUNOUT_STATUS   0x002400
+#define NV3_PFIFO_RUNOUT_PUT      0x002410
+#define NV3_PFIFO_RUNOUT_GET      0x002420
+
+/*
+ * PFIFO CACHE0 registers.
+ * Per envytools nv1_pfifo.xml (NV3 variant):
+ *   PUSH0 (0x003000): bit 0 = push access enable
+ *   PUT   (0x003010): pusher write pointer
+ *   STATUS(0x003014): bit 0=RANOUT, bit 4=EMPTY, bit 8=FULL
+ *   PULL0 (0x003040): bit 0 = puller access enable
+ *   GET   (0x003070): puller read pointer
+ */
+#define NV3_PFIFO_CACHE0_PUSH0    0x003000
+#define NV3_PFIFO_CACHE0_PUT      0x003010
+#define NV3_PFIFO_CACHE0_STATUS   0x003014
+#define NV3_PFIFO_CACHE0_PULL0    0x003040
+#define NV3_PFIFO_CACHE0_GET      0x003070
+
+/*
+ * PFIFO CACHE1 registers (NV3 layout).
+ * Per envytools nv1_pfifo.xml (NV3 variant):
+ *   PUSH0  (0x003200): bit 0 = push access enable
+ *   PUSH1  (0x003204): channel ID for pusher
+ *   PUT    (0x003210): pusher write pointer
+ *   STATUS (0x003214): bit 0=RANOUT, bit 4=EMPTY, bit 8=FULL
+ *   PULL0  (0x003240): bit 0 = puller access enable
+ *   PULL1  (0x003250): puller engine state
+ *   GET    (0x003270): puller read pointer
+ */
+#define NV3_PFIFO_CACHE1_PUSH0    0x003200
+#define NV3_PFIFO_CACHE1_PUSH1    0x003204
+#define NV3_PFIFO_CACHE1_PUT      0x003210
+#define NV3_PFIFO_CACHE1_STATUS   0x003214
+#define NV3_PFIFO_CACHE1_PULL0    0x003240
+#define NV3_PFIFO_CACHE1_PULL1    0x003250
+#define NV3_PFIFO_CACHE1_GET      0x003270
+
+/*
+ * CACHE STATUS register bit definitions.
+ * Per envytools nv1_pfifo.xml:
+ *   bit 0 = RANOUT — cache has run out of entries
+ *   bit 4 = EMPTY  — cache contains no pending entries (PUT == GET)
+ *   bit 8 = FULL   — cache has no free entry slots
+ *
+ * These apply to both CACHE0_STATUS and CACHE1_STATUS.
+ */
+#define NV3_PFIFO_CACHE_STATUS_RANOUT  (1 << 0)
+#define NV3_PFIFO_CACHE_STATUS_EMPTY   (1 << 4)
+#define NV3_PFIFO_CACHE_STATUS_FULL    (1 << 8)
+
 #define NV3_PFIFO_END             0x003FFF
 
 /* PRM - Real Mode Device Support */

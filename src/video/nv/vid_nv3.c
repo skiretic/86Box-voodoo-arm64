@@ -319,11 +319,13 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             break;
 
         /* ============================================================
-         * PFIFO — Command FIFO interrupt registers (0x002000-0x003FFF)
+         * PFIFO — Command FIFO (0x002000-0x003FFF)
          *
          * Per envytools nv1_pfifo.xml:
          * INTR_0 (0x002100): write-1-to-clear interrupt status.
          * INTR_EN_0 (0x002140): interrupt enable mask.
+         * CACHE0_STATUS (0x003014): read-only, computed from PUT/GET.
+         * CACHE1_STATUS (0x003214): read-only, computed from PUT/GET.
          * All other PFIFO registers go through the register bank
          * in the default handler below.
          * ============================================================ */
@@ -333,6 +335,36 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
         case NV3_PFIFO_INTR_EN_0:
             ret = nv3->pfifo.intr_en_0;
             break;
+
+        /*
+         * PFIFO CACHE0/CACHE1 STATUS registers.
+         *
+         * Per envytools nv1_pfifo.xml: STATUS is a read-only register
+         * computed from the cache state. Bit 4 (EMPTY) is set when the
+         * cache contains no pending entries (PUT == GET). Bit 8 (FULL)
+         * is set when no free slots remain.
+         *
+         * The NVIDIA Windows driver polls CACHE1_STATUS waiting for the
+         * EMPTY bit after enabling PFIFO. On a freshly initialized cache
+         * PUT and GET are both zero, so EMPTY must be set. Without this,
+         * the driver hangs in an infinite polling loop during init.
+         */
+        case NV3_PFIFO_CACHE0_STATUS: {
+            uint32_t c0_put = nv3->pfifo.regs[(NV3_PFIFO_CACHE0_PUT - NV3_PFIFO_START) >> 2];
+            uint32_t c0_get = nv3->pfifo.regs[(NV3_PFIFO_CACHE0_GET - NV3_PFIFO_START) >> 2];
+            ret = 0;
+            if (c0_put == c0_get)
+                ret |= NV3_PFIFO_CACHE_STATUS_EMPTY;
+            break;
+        }
+        case NV3_PFIFO_CACHE1_STATUS: {
+            uint32_t c1_put = nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PUT - NV3_PFIFO_START) >> 2];
+            uint32_t c1_get = nv3->pfifo.regs[(NV3_PFIFO_CACHE1_GET - NV3_PFIFO_START) >> 2];
+            ret = 0;
+            if (c1_put == c1_get)
+                ret |= NV3_PFIFO_CACHE_STATUS_EMPTY;
+            break;
+        }
 
         /* ============================================================
          * PTIMER — Programmable Interval Timer (0x009000-0x009FFF)
@@ -698,6 +730,8 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
          * Per envytools nv1_pfifo.xml:
          * INTR_0 (0x002100): write-1-to-clear interrupt status.
          * INTR_EN_0 (0x002140): interrupt enable mask.
+         * CACHE0_STATUS (0x003014) and CACHE1_STATUS (0x003214)
+         * are read-only (handled in read path only).
          * All other PFIFO registers go through the register bank
          * in the default handler below.
          * ============================================================ */
@@ -713,6 +747,16 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             /* Fix 2: sync to register bank */
             nv3->pfifo.regs[(NV3_PFIFO_INTR_EN_0 - NV3_PFIFO_START) >> 2] = val;
             nv3_update_irq(nv3);
+            break;
+
+        /*
+         * CACHE0_STATUS and CACHE1_STATUS are read-only.
+         * Intercept writes here to prevent byte/word RMW from
+         * polluting the register bank with stale computed values.
+         */
+        case NV3_PFIFO_CACHE0_STATUS:
+        case NV3_PFIFO_CACHE1_STATUS:
+            /* Read-only: ignore writes */
             break;
 
         /* ============================================================
