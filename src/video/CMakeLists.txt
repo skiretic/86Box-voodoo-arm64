@@ -139,8 +139,9 @@ add_library(vid OBJECT
     # Matrox
     vid_mga.c
 
-    # NVidia (pending)
+    # NVidia
     nv/nv_rivatimer.c
+    nv/vid_nv3.c
 
     # Generic
     vid_bochs_vbe.c

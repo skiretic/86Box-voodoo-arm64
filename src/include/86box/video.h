@@ -597,6 +597,10 @@ extern const device_t s3_diamond_stealth_4000_agp_device;
 extern const device_t s3_trio3d2x_pci_device;
 extern const device_t s3_trio3d2x_agp_device;
 
+/* NVIDIA Riva 128 (NV3) */
+extern const device_t nv3_device_pci;
+extern const device_t nv3t_device_pci;
+
 /* Sigma Color 400 */
 extern const device_t sigma_device;
 

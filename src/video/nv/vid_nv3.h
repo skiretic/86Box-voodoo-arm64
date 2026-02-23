@@ -1,0 +1,178 @@
+/*
+ * 86Box    A hypervisor and IBM PC system emulator that specializes in
+ *          running old operating systems and software designed for IBM
+ *          PC systems and compatibles from 1981 through fairly recent
+ *          system designs based on the PCI bus.
+ *
+ *          This file is part of the 86Box distribution.
+ *
+ *          NVIDIA Riva 128 (NV3) private header.
+ *          Defines the nv3_t struct and subsystem state.
+ *
+ *
+ * Authors: skiretic
+ *
+ */
+#ifndef VID_NV3_H
+#define VID_NV3_H
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <86box/vid_svga.h>
+#include <86box/mem.h>
+#include <86box/rom.h>
+#include <86box/nv/vid_nv3_regs.h>
+
+/*
+ * NV3 chip variant enum.
+ * Determines PCI device ID, VRAM, revision, and feature set.
+ */
+enum {
+    NV3_TYPE_NV3_PCI = 0,   /* Riva 128, PCI, 4MB */
+    NV3_TYPE_NV3_AGP,       /* Riva 128, AGP, 4MB */
+    NV3_TYPE_NV3T_PCI,      /* Riva 128 ZX, PCI, 8MB */
+    NV3_TYPE_NV3T_AGP,      /* Riva 128 ZX, AGP, 8MB */
+};
+
+/*
+ * PMC (Chip Master Control) state.
+ * Per envytools nv3_pmc.xml.
+ */
+typedef struct nv3_pmc_s {
+    uint32_t boot_0;         /* Chip ID register */
+    uint32_t intr_0;         /* Interrupt status */
+    uint32_t intr_en_0;      /* Interrupt enable */
+    uint32_t enable;         /* Subsystem enable bitmask */
+} nv3_pmc_t;
+
+/*
+ * PBUS (Bus Control) state.
+ */
+typedef struct nv3_pbus_s {
+    uint32_t intr_0;         /* Interrupt status */
+    uint32_t intr_en_0;      /* Interrupt enable */
+} nv3_pbus_t;
+
+/*
+ * PFB (Framebuffer Interface) state.
+ */
+typedef struct nv3_pfb_s {
+    uint32_t boot_0;         /* Memory config (size, width, banks) */
+    uint32_t config_0;       /* Framebuffer config register 0 */
+    uint32_t config_1;       /* Framebuffer config register 1 */
+} nv3_pfb_t;
+
+/*
+ * PEXTDEV (External Devices / Straps) state.
+ */
+typedef struct nv3_pextdev_s {
+    uint32_t straps;         /* Board configuration straps */
+} nv3_pextdev_t;
+
+/*
+ * PTIMER (Programmable Interval Timer) state.
+ */
+typedef struct nv3_ptimer_s {
+    uint32_t intr_0;
+    uint32_t intr_en_0;
+    uint32_t numerator;
+    uint32_t denominator;
+    uint32_t time_0;         /* Low 32 bits of time in nanoseconds */
+    uint32_t time_1;         /* High 32 bits of time */
+    uint32_t alarm_0;
+} nv3_ptimer_t;
+
+/*
+ * PRAMDAC (DAC / PLL) state.
+ * Stub for Phase 1; will be expanded in Phase 2.
+ */
+typedef struct nv3_pramdac_s {
+    uint32_t vpll_coeff;     /* Pixel clock PLL coefficients */
+    uint32_t nvpll_coeff;    /* Core clock PLL coefficients */
+    uint32_t mpll_coeff;     /* Memory clock PLL coefficients */
+    uint32_t general_control;
+} nv3_pramdac_t;
+
+/*
+ * PGRAPH (2D/3D Graphics Engine) state.
+ * Stub for Phase 1; will be expanded in Phase 4/5.
+ */
+typedef struct nv3_pgraph_s {
+    uint32_t intr_0;
+    uint32_t intr_en_0;
+    uint32_t debug_0;
+    uint32_t debug_1;
+    uint32_t debug_2;
+    uint32_t debug_3;
+} nv3_pgraph_t;
+
+/*
+ * PFIFO (Command FIFO) state.
+ * Stub for Phase 1; will be expanded in Phase 3.
+ */
+typedef struct nv3_pfifo_s {
+    uint32_t intr_0;
+    uint32_t intr_en_0;
+} nv3_pfifo_t;
+
+/*
+ * Main NV3 device structure.
+ *
+ * CRITICAL: svga_t MUST be the first member so that the 86Box SVGA layer
+ * can cast nv3_t* <-> svga_t* transparently. This is the standard pattern
+ * used by all SVGA-based video drivers in 86Box (see S3 ViRGE, ATI Mach64,
+ * Cirrus GD543x, etc.).
+ */
+typedef struct nv3_s {
+    svga_t   svga;              /* MUST be first member */
+
+    rom_t    bios_rom;          /* Video BIOS ROM */
+
+    uint8_t  pci_regs[256];     /* PCI config space shadow */
+    uint8_t  pci_slot;          /* PCI slot number assigned by 86Box */
+    uint8_t  pci_irq_state;     /* Current PCI IRQ line state */
+
+    int      card_type;         /* NV3_TYPE_* enum value */
+    int      is_agp;            /* True if AGP bus */
+    uint32_t gpu_revision;      /* PCI revision ID (0x00, 0x10, 0x20) */
+
+    uint32_t vram_size;         /* Total VRAM in bytes */
+
+    /* PCI BAR base addresses (host physical) */
+    uint32_t bar0_base;         /* BAR0: MMIO base */
+    uint32_t bar1_base;         /* BAR1: Linear framebuffer base */
+
+    /* Memory mappings */
+    mem_mapping_t mmio_mapping;           /* BAR0 MMIO region */
+    mem_mapping_t lfb_mapping;            /* BAR1 linear framebuffer */
+    mem_mapping_t lfb_ramin_mapping;      /* RAMIN window within BAR1 */
+
+    /* Extended VGA state (not in svga_t) */
+    uint32_t cio_read_bank;     /* Extended read bank register (CRTC 0x1D) */
+    uint32_t cio_write_bank;    /* Extended write bank register (CRTC 0x1E) */
+
+    /* RMA (Real Mode Access) - CRTC 0x38-based MMIO access */
+    uint8_t  rma_mode;          /* RMA mode register */
+    uint8_t  rma_regs[4];      /* RMA data staging registers */
+
+    /* GPU subsystem state */
+    nv3_pmc_t     pmc;
+    nv3_pbus_t    pbus;
+    nv3_pfb_t     pfb;
+    nv3_pextdev_t pextdev;
+    nv3_ptimer_t  ptimer;
+    nv3_pramdac_t pramdac;
+    nv3_pgraph_t  pgraph;
+    nv3_pfifo_t   pfifo;
+
+    /* I2C / DDC for monitor EDID */
+    void *i2c;
+    void *ddc;
+
+} nv3_t;
+
+/* device_t declarations for vid_table.c */
+extern const device_t nv3_device_pci;
+extern const device_t nv3t_device_pci;
+
+#endif /* VID_NV3_H */

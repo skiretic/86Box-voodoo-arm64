@@ -240,6 +240,8 @@ video_cards[] = {
     { .device = &s3_virge_385_pci_device,                       .flags = VIDEO_FLAG_TYPE_NONE },
     { .device = &s3_virge_357_pci_device,                       .flags = VIDEO_FLAG_TYPE_NONE },
     { .device = &s3_trio3d2x_pci_device,                        .flags = VIDEO_FLAG_TYPE_NONE },
+    { .device = &nv3_device_pci,                                .flags = VIDEO_FLAG_TYPE_NONE },
+    { .device = &nv3t_device_pci,                               .flags = VIDEO_FLAG_TYPE_NONE },
     { .device = &tgui9440_pci_device,                           .flags = VIDEO_FLAG_TYPE_NONE },
     { .device = &tgui9660_pci_device,                           .flags = VIDEO_FLAG_TYPE_NONE },
     { .device = &tgui9680_pci_device,                           .flags = VIDEO_FLAG_TYPE_NONE },
