@@ -324,10 +324,24 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             ret = nv3->ptimer.denominator;
             break;
         case NV3_PTIMER_TIME_0:
-            ret = nv3->ptimer.time_0;
-            break;
         case NV3_PTIMER_TIME_1:
-            ret = nv3->ptimer.time_1;
+            /*
+             * Compute PTIMER from CPU TSC to get a running nanosecond counter.
+             * This prevents infinite timeout loops in driver init code that
+             * polls PTIMER for elapsed time measurement.
+             *
+             * Formula: ns = tsc_cycles * 1e9 / cpuclock_hz
+             * Then scaled by NUMERATOR/DENOMINATOR per envytools nv1-clock.xml.
+             */
+            {
+                double ns = (double) tsc * 1e9 / cpuclock;
+                if (nv3->ptimer.denominator > 0)
+                    ns = ns * (double) nv3->ptimer.numerator / (double) nv3->ptimer.denominator;
+                uint64_t time64 = (uint64_t) ns;
+                nv3->ptimer.time_0 = (uint32_t) (time64 & 0xFFFFFFFF);
+                nv3->ptimer.time_1 = (uint32_t) (time64 >> 32);
+                ret = (addr == NV3_PTIMER_TIME_0) ? nv3->ptimer.time_0 : nv3->ptimer.time_1;
+            }
             break;
         case NV3_PTIMER_ALARM_0:
             ret = nv3->ptimer.alarm_0;
