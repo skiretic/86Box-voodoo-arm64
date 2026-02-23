@@ -220,46 +220,87 @@
 #define NV3_PRAMDAC_START         0x680000
 #define NV3_PRAMDAC_END           0x680FFF
 
-/* PLL coefficient registers */
-#define NV3_PRAMDAC_NVPLL_COEFF   0x680500   /* Core clock PLL */
+/*
+ * PLL coefficient registers.
+ *
+ * Per envytools nv3_pramdac.xml:
+ *   0x500 is "DLL" on NV3, "NVPLL" on NV4+. We use NVPLL_COEFF for
+ *   compatibility with the init code, but note the NV3 distinction.
+ */
+#define NV3_PRAMDAC_NVPLL_COEFF   0x680500   /* DLL/Core clock PLL */
 #define NV3_PRAMDAC_MPLL_COEFF    0x680504   /* Memory clock PLL */
 #define NV3_PRAMDAC_VPLL_COEFF    0x680508   /* Pixel clock PLL */
 
-/* PRAMDAC general control register.
+/*
+ * PLL_CONTROL register (0x68050C).
+ *
+ * Per envytools nv3_pramdac.xml (NV3:NV4 variant):
+ *   bit 0  = DLL_PROG  — DLL is programmable (vs. fixed)
+ *   bit 4  = DLL_BYPASS — bypass DLL
+ *   bit 8  = MPLL_PROG — memory PLL is programmable
+ *   bit 12 = MPLL_BYPASS — bypass memory PLL
+ *   bit 16 = VPLL_PROG — video/pixel PLL is programmable
+ *   bit 20 = VPLL_BYPASS — bypass video PLL
+ *   bits [25:24] = PCLK_SOURCE — pixel clock source select:
+ *                  0=VPLL, 1=VIP, 2=XTAL
+ *   bit 28 = VCLK_DB2 — divide VCLK by 2
+ *
+ * The xf86-video-nv driver sets this to 0x10010100 for SVGA modes:
+ *   MPLL_PROG=1, VPLL_PROG=1, VCLK_DB2=1
+ */
+#define NV3_PRAMDAC_PLL_CONTROL   0x68050C
+#define NV3_PRAMDAC_PLL_SETUP     0x680510   /* PLL setup control */
+
+#define NV3_PLL_CTRL_DLL_PROG     (1 << 0)
+#define NV3_PLL_CTRL_DLL_BYPASS   (1 << 4)
+#define NV3_PLL_CTRL_MPLL_PROG    (1 << 8)
+#define NV3_PLL_CTRL_MPLL_BYPASS  (1 << 12)
+#define NV3_PLL_CTRL_VPLL_PROG    (1 << 16)
+#define NV3_PLL_CTRL_VPLL_BYPASS  (1 << 20)
+#define NV3_PLL_CTRL_PCLK_SRC_SHIFT 24
+#define NV3_PLL_CTRL_PCLK_SRC_MASK  (0x3 << 24)
+#define NV3_PLL_CTRL_PCLK_SRC_VPLL  (0 << 24)
+#define NV3_PLL_CTRL_PCLK_SRC_VIP   (1 << 24)
+#define NV3_PLL_CTRL_PCLK_SRC_XTAL  (2 << 24)
+#define NV3_PLL_CTRL_VCLK_DB2    (1 << 28)
+
+/*
+ * PRAMDAC GENERAL_CONTROL register (0x680600).
+ *
  * Per envytools nv3_pramdac.xml:
- *   bits [1:0]   = BPC (bits per color component for DAC)
- *                  0=6bit, 1=8bit, 2=reserved, 3=reserved
- *   bit 4        = VGA_STATE — 0=VGA passthrough, 1=NV accelerated
- *   bit 8        = ALT_MODE — alternative pixel format interpretation
- *   bits [13:12] = CURSOR_MODE — 00=disabled, 01=32x32 2-color,
- *                  10=32x32 ARGB, 11=64x64 2-color (NV3T only)
- *   bit 16       = PIXEL_DOUBLE — double pixels horizontally
- *   bits [20:17] = TV_BLANK_HOFF (TV encoder related)
- *   bit 28       = SPREAD_SPECTRUM — enable spread spectrum clocking
+ *   bits [5:4]  = PIXMIX — 0=OFF, 3=ON
+ *   bit 8       = VGA_STATE_SEL — 0=VGA passthrough, 1=NV accelerated
+ *   bit 12      = ALT_MODE_SEL — alternative pixel format mode
+ *   bits [19:16]= TERMINATION — termination impedance (2=750 ohm)
+ *   bit 20      = BPC_8BITS — 0=6-bit DAC, 1=8-bit DAC
+ *   bit 29      = PIPE_LONG — long pipeline mode
+ *
+ * Cross-reference: xf86-video-nv sets this to 0x00100100 for SVGA modes
+ * (VGA_STATE_SEL=1 at bit 8, BPC_8BITS=1 at bit 20).
  */
 #define NV3_PRAMDAC_GENERAL_CTRL  0x680600
 
-/* Hardware cursor registers.
+/*
+ * Hardware cursor position register (0x680300).
+ *
  * Per envytools nv3_pramdac.xml:
- *   Cursor image is stored in VRAM.
- *   CURSOR_START points to the 256-byte aligned address in VRAM
- *   where the 32x32 2-color cursor data begins (128 bytes AND mask,
- *   128 bytes XOR mask, similar to Windows hardware cursor format).
+ *   bits [15:0]  = X position
+ *   bits [31:16] = Y position
  */
-#define NV3_PRAMDAC_CURSOR_START  0x680300
+#define NV3_PRAMDAC_CURSOR_POS    0x680300
 
-/* NV3 PRAMDAC general control bitfield masks */
-#define NV3_PRAMDAC_GCTRL_BPC_MASK       0x00000003
-#define NV3_PRAMDAC_GCTRL_BPC_6BIT       0
-#define NV3_PRAMDAC_GCTRL_BPC_8BIT       1
-#define NV3_PRAMDAC_GCTRL_VGA_STATE      (1 << 4)
-#define NV3_PRAMDAC_GCTRL_ALT_MODE       (1 << 8)
-#define NV3_PRAMDAC_GCTRL_CURSOR_MODE_SHIFT  12
-#define NV3_PRAMDAC_GCTRL_CURSOR_MODE_MASK   (0x3 << 12)
-#define NV3_PRAMDAC_GCTRL_CURSOR_OFF     (0 << 12)
-#define NV3_PRAMDAC_GCTRL_CURSOR_32_2C   (1 << 12)
-#define NV3_PRAMDAC_GCTRL_CURSOR_32_ARGB (2 << 12)
-#define NV3_PRAMDAC_GCTRL_CURSOR_64_2C   (3 << 12)
+/* NV3 PRAMDAC general control bitfield masks.
+ * Per envytools nv3_pramdac.xml (verified against xf86-video-nv). */
+#define NV3_PRAMDAC_GCTRL_PIXMIX_SHIFT   4
+#define NV3_PRAMDAC_GCTRL_PIXMIX_MASK    (0x3 << 4)
+#define NV3_PRAMDAC_GCTRL_PIXMIX_OFF     (0 << 4)
+#define NV3_PRAMDAC_GCTRL_PIXMIX_ON      (3 << 4)
+#define NV3_PRAMDAC_GCTRL_VGA_STATE      (1 << 8)    /* 0=VGA, 1=NV accel */
+#define NV3_PRAMDAC_GCTRL_ALT_MODE       (1 << 12)
+#define NV3_PRAMDAC_GCTRL_TERMINATION_SHIFT  16
+#define NV3_PRAMDAC_GCTRL_TERMINATION_MASK   (0xF << 16)
+#define NV3_PRAMDAC_GCTRL_BPC_8BIT       (1 << 20)   /* 0=6-bit, 1=8-bit DAC */
+#define NV3_PRAMDAC_GCTRL_PIPE_LONG      (1 << 29)
 
 /* PLL coefficient field extraction macros.
  * Per envytools nv3_pramdac.xml:

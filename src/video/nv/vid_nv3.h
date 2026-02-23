@@ -48,10 +48,16 @@ typedef struct nv3_pmc_s {
 
 /*
  * PBUS (Bus Control) state.
+ *
+ * PBUS spans 0x001000-0x001FFF (4KB = 1024 dwords).
+ * The regs[] array provides a general register bank for driver readback
+ * of registers not explicitly handled (e.g., 0x001200 debug registers).
+ * Interrupt registers have dedicated fields.
  */
 typedef struct nv3_pbus_s {
     uint32_t intr_0;         /* Interrupt status */
     uint32_t intr_en_0;      /* Interrupt enable */
+    uint32_t regs[1024];     /* General register bank for unhandled PBUS regs */
 } nv3_pbus_t;
 
 /*
@@ -106,27 +112,38 @@ typedef struct nv3_pcrtc_s {
     uint32_t intr_en;        /* VBlank interrupt enable, bit 0 = VBLANK_EN */
     uint32_t config;         /* Display configuration */
     uint32_t start_addr;     /* Framebuffer scanout start address */
+    uint32_t regs[1024];     /* General register bank for unhandled regs */
 } nv3_pcrtc_t;
 
 /*
  * PRAMDAC (DAC / PLL / Cursor) state.
  *
  * Per envytools nv3_pramdac.xml:
- *   VPLL (0x680508): Pixel clock PLL coefficients [M, N, P]
- *   NVPLL (0x680500): Core clock PLL coefficients
+ *   DLL (0x680500): DLL PLL coefficients (NV3-specific, NVPLL on NV4+)
  *   MPLL (0x680504): Memory clock PLL coefficients
- *   GENERAL_CONTROL (0x680600): DAC mode, cursor enable, pixel format
- *   CURSOR_START (0x680300): Cursor image VRAM address
+ *   VPLL (0x680508): Pixel clock PLL coefficients [M, N, P]
+ *   PLL_CONTROL (0x68050C): PLL programming and clock source select
+ *   PLL_SETUP_CONTROL (0x680510): PLL setup parameters
+ *   CURSOR_POS (0x680300): Cursor X/Y position
+ *   GENERAL_CONTROL (0x680600): DAC mode, pixel format
  *
  * PLL formula: Freq = (crystal * N) / (M * (1 << P))
  * where crystal is 13.5MHz or 14.318MHz selected by straps.
+ *
+ * The regs[] array provides a general register bank for unhandled
+ * PRAMDAC registers (driver readback). PRAMDAC spans 0x680000-0x680FFF
+ * (4KB = 1024 dwords). Explicitly handled registers (PLLs, general_control)
+ * have dedicated fields and are NOT stored in the bank.
  */
 typedef struct nv3_pramdac_s {
-    uint32_t nvpll_coeff;    /* Core clock PLL coefficients */
-    uint32_t mpll_coeff;     /* Memory clock PLL coefficients */
-    uint32_t vpll_coeff;     /* Pixel clock PLL coefficients */
-    uint32_t general_control;
-    uint32_t cursor_start;   /* Cursor image VRAM address */
+    uint32_t nvpll_coeff;    /* DLL/core clock PLL coefficients (0x500) */
+    uint32_t mpll_coeff;     /* Memory clock PLL coefficients (0x504) */
+    uint32_t vpll_coeff;     /* Pixel clock PLL coefficients (0x508) */
+    uint32_t pll_control;    /* PLL programming mode and clock source (0x50C) */
+    uint32_t pll_setup;      /* PLL setup control (0x510) */
+    uint32_t general_control; /* DAC/display control (0x600) */
+    uint32_t cursor_pos;     /* Cursor X/Y position (0x300) */
+    uint32_t regs[1024];     /* General register bank for unhandled regs */
 } nv3_pramdac_t;
 
 /*

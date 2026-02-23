@@ -59,6 +59,7 @@
 /* ========================================================================
  * Logging
  * ======================================================================== */
+#define ENABLE_NV3_LOG 1
 #ifdef ENABLE_NV3_LOG
 int nv3_do_log = ENABLE_NV3_LOG;
 
@@ -76,6 +77,16 @@ nv3_log(const char *fmt, ...)
 #else
 #    define nv3_log(fmt, ...)
 #endif
+
+/*
+ * MMIO trace: controlled by ENABLE_NV3_TRACE. Disabled by default.
+ * When enabled, logs the first NV3_TRACE_LIMIT read/write accesses
+ * after PMC_ENABLE is written (driver init start signal).
+ */
+#define ENABLE_NV3_TRACE 0
+#define NV3_TRACE_LIMIT 50000
+static int nv3_trace_active  = 0;
+static int nv3_trace_count   = 0;
 
 /* ========================================================================
  * Video timing constants (placeholder values from Banshee)
@@ -410,16 +421,28 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
         case NV3_PRAMDAC_VPLL_COEFF:
             ret = nv3->pramdac.vpll_coeff;
             break;
+        case NV3_PRAMDAC_PLL_CONTROL:
+            /* Per envytools nv3_pramdac.xml: PLL programming mode select */
+            ret = nv3->pramdac.pll_control;
+            break;
+        case NV3_PRAMDAC_PLL_SETUP:
+            ret = nv3->pramdac.pll_setup;
+            break;
         case NV3_PRAMDAC_GENERAL_CTRL:
             ret = nv3->pramdac.general_control;
             break;
-        case NV3_PRAMDAC_CURSOR_START:
-            ret = nv3->pramdac.cursor_start;
+        case NV3_PRAMDAC_CURSOR_POS:
+            /* Per envytools: bits 15:0 = X, bits 31:16 = Y */
+            ret = nv3->pramdac.cursor_pos;
             break;
 
         /* ============================================================
-         * PBUS PCI config mirror (0x1800-0x18FF)
-         * Default handler for unknown addresses.
+         * Default handler: PCI config mirror, register banks, PRAMIN.
+         *
+         * Register banks provide store/readback for subsystem registers
+         * that are not explicitly handled above. This prevents the
+         * driver from seeing unexpected zero values on readback after
+         * writes, which can cause init failures.
          * ============================================================ */
         default:
             if (addr >= NV3_PBUS_PCI_START && addr <= NV3_PBUS_PCI_END) {
@@ -435,15 +458,32 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                         | (nv3_pci_read(0, pci_reg + 2, 1, nv3) << 16)
                         | (nv3_pci_read(0, pci_reg + 3, 1, nv3) << 24);
                 }
+            } else if (addr >= NV3_PBUS_START && addr <= NV3_PBUS_END) {
+                /*
+                 * PBUS register bank for non-interrupt, non-PCI registers.
+                 * The driver accesses debug/config registers (e.g. 0x1200)
+                 * that we don't explicitly handle.
+                 */
+                uint32_t pbus_idx = (addr - NV3_PBUS_START) >> 2;
+                if (pbus_idx < 1024)
+                    ret = nv3->pbus.regs[pbus_idx];
             } else if (addr >= NV3_PRAMDAC_START && addr <= NV3_PRAMDAC_END) {
                 /*
-                 * Catch-all for unhandled PRAMDAC registers.
-                 * Some drivers probe registers we haven't implemented;
-                 * returning 0 is safe.
+                 * PRAMDAC register bank for unhandled registers.
+                 * The driver probes various PRAMDAC registers during init
+                 * (e.g., 0x680000, 0x68010C, 0x680110, 0x680610, 0x680710).
+                 * These must store and readback written values.
                  */
-                nv3_log("NV3: PRAMDAC read32 unhandled addr=0x%06x\n", addr);
+                uint32_t pramdac_idx = (addr - NV3_PRAMDAC_START) >> 2;
+                if (pramdac_idx < 1024)
+                    ret = nv3->pramdac.regs[pramdac_idx];
             } else if (addr >= NV3_PCRTC_START && addr <= NV3_PCRTC_END) {
-                nv3_log("NV3: PCRTC read32 unhandled addr=0x%06x\n", addr);
+                /*
+                 * PCRTC register bank for unhandled registers.
+                 */
+                uint32_t pcrtc_idx = (addr - NV3_PCRTC_START) >> 2;
+                if (pcrtc_idx < 1024)
+                    ret = nv3->pcrtc.regs[pcrtc_idx];
             } else if (addr >= NV3_PGRAPH_START && addr <= NV3_PGRAPH_END) {
                 /*
                  * PGRAPH register bank: store/return values for driver
@@ -479,11 +519,29 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                 uint32_t vram_offset = (nv3->vram_size - NV3_PRAMIN_VRAM_SIZE) + pramin_offset;
                 if (vram_offset + 3 < nv3->vram_size)
                     ret = *(uint32_t *) &nv3->svga.vram[vram_offset];
+            } else if (addr >= NV3_PMC_START && addr <= NV3_PMC_END) {
+                /*
+                 * PMC: BOOT_0, INTR_0, INTR_EN_0, ENABLE are handled
+                 * above. Other PMC addresses are silently ignored (the
+                 * driver writes to BOOT_0 which is read-only).
+                 */
             } else {
+                /*
+                 * Unmapped ranges (0x010000-0x08FFFF, 0x0A0000-0x0BFFFF, etc.)
+                 * are silently absorbed. The driver may probe ranges that
+                 * don't exist on NV3 hardware; returning 0 is correct behavior.
+                 */
                 nv3_log("NV3: MMIO read32 unknown addr=0x%06x\n", addr);
             }
             break;
     }
+
+#if ENABLE_NV3_TRACE
+    if (nv3_trace_active && nv3_trace_count < NV3_TRACE_LIMIT) {
+        nv3_trace_count++;
+        pclog("NV3 R %06x = %08x\n", addr, ret);
+    }
+#endif
 
     return ret;
 }
@@ -518,6 +576,12 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             break;
         case NV3_PMC_ENABLE:
             nv3->pmc.enable = val;
+#if ENABLE_NV3_TRACE
+            if (!nv3_trace_active && val == 0) {
+                nv3_trace_active = 1;
+                pclog("NV3: === MMIO TRACE START (PMC_ENABLE=0 reset) ===\n");
+            }
+#endif
             break;
 
         /* ============================================================
@@ -662,22 +726,45 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             nv3->svga.fullchange = changeframecount;
             svga_recalctimings(&nv3->svga);
             break;
+        case NV3_PRAMDAC_PLL_CONTROL:
+            /*
+             * Per envytools nv3_pramdac.xml: PLL programming mode.
+             * VPLL_PROG (bit 16) selects programmable VPLL for pixel clock.
+             * Writing this affects which clock source is used, so trigger
+             * a recalc.
+             */
+            nv3->pramdac.pll_control = val;
+            nv3_log("NV3: PLL_CONTROL write 0x%08x\n", val);
+            nv3->svga.fullchange = changeframecount;
+            svga_recalctimings(&nv3->svga);
+            break;
+        case NV3_PRAMDAC_PLL_SETUP:
+            nv3->pramdac.pll_setup = val;
+            break;
         case NV3_PRAMDAC_GENERAL_CTRL:
             nv3->pramdac.general_control = val;
             nv3_log("NV3: PRAMDAC GENERAL_CTRL write 0x%08x\n", val);
             /*
-             * General control affects DAC bit depth and cursor mode.
+             * General control affects DAC bit depth and display mode.
              * Trigger recalc in case DAC mode changed.
              */
             nv3->svga.fullchange = changeframecount;
             svga_recalctimings(&nv3->svga);
             break;
-        case NV3_PRAMDAC_CURSOR_START:
-            nv3->pramdac.cursor_start = val;
+        case NV3_PRAMDAC_CURSOR_POS:
+            /* Per envytools: bits 15:0 = X, bits 31:16 = Y */
+            nv3->pramdac.cursor_pos = val;
+            nv3->svga.hwcursor.x = val & 0xFFFF;
+            nv3->svga.hwcursor.y = (val >> 16) & 0xFFFF;
             break;
 
         /* ============================================================
-         * Default: PCI config mirror and catch-all
+         * Default: PCI config mirror, register banks, PRAMIN.
+         *
+         * Register banks provide store/readback for subsystem registers
+         * that are not explicitly handled above. This prevents the
+         * driver from seeing unexpected zero values on readback after
+         * writes, which can cause init failures.
          * ============================================================ */
         default:
             if (addr >= NV3_PBUS_PCI_START && addr <= NV3_PBUS_PCI_END) {
@@ -689,10 +776,27 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
                     nv3_pci_write(0, pci_reg + 2, 1, (val >> 16) & 0xFF, nv3);
                     nv3_pci_write(0, pci_reg + 3, 1, (val >> 24) & 0xFF, nv3);
                 }
+            } else if (addr >= NV3_PBUS_START && addr <= NV3_PBUS_END) {
+                /*
+                 * PBUS register bank for non-interrupt, non-PCI registers.
+                 */
+                uint32_t pbus_idx = (addr - NV3_PBUS_START) >> 2;
+                if (pbus_idx < 1024)
+                    nv3->pbus.regs[pbus_idx] = val;
             } else if (addr >= NV3_PRAMDAC_START && addr <= NV3_PRAMDAC_END) {
-                nv3_log("NV3: PRAMDAC write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+                /*
+                 * PRAMDAC register bank for unhandled registers.
+                 */
+                uint32_t pramdac_idx = (addr - NV3_PRAMDAC_START) >> 2;
+                if (pramdac_idx < 1024)
+                    nv3->pramdac.regs[pramdac_idx] = val;
             } else if (addr >= NV3_PCRTC_START && addr <= NV3_PCRTC_END) {
-                nv3_log("NV3: PCRTC write32 unhandled addr=0x%06x val=0x%08x\n", addr, val);
+                /*
+                 * PCRTC register bank for unhandled registers.
+                 */
+                uint32_t pcrtc_idx = (addr - NV3_PCRTC_START) >> 2;
+                if (pcrtc_idx < 1024)
+                    nv3->pcrtc.regs[pcrtc_idx] = val;
             } else if (addr >= NV3_PGRAPH_START && addr <= NV3_PGRAPH_END) {
                 /*
                  * PGRAPH register bank: accept writes for driver init
@@ -725,10 +829,24 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
                     *(uint32_t *) &nv3->svga.vram[vram_offset] = val;
                     nv3->svga.changedvram[vram_offset >> 12] = changeframecount;
                 }
+            } else if (addr >= NV3_PMC_START && addr <= NV3_PMC_END) {
+                /*
+                 * PMC: INTR_0, INTR_EN_0, ENABLE handled above.
+                 * Other PMC writes (e.g. to BOOT_0 which is read-only)
+                 * are silently dropped.
+                 */
             } else {
+                /*
+                 * Unmapped ranges are silently absorbed.
+                 */
                 nv3_log("NV3: MMIO write32 unknown addr=0x%06x val=0x%08x\n", addr, val);
             }
             break;
+    }
+
+    if (nv3_trace_active && nv3_trace_count < NV3_TRACE_LIMIT) {
+        nv3_trace_count++;
+        pclog("NV3 W %06x = %08x\n", addr, val);
     }
 }
 
@@ -1270,10 +1388,14 @@ nv3_recalctimings(svga_t *svga)
 
     /*
      * Handle DAC bit depth from PRAMDAC GENERAL_CONTROL.
-     * Bit 1:0 = BPC: 0=6-bit DAC, 1=8-bit DAC.
-     * When 8-bit DAC mode is active, we use the direct LUT mapping.
+     *
+     * Per envytools nv3_pramdac.xml: bit 20 = BPC_8BITS.
+     *   0 = 6-bit DAC, 1 = 8-bit DAC.
+     *
+     * Cross-reference: xf86-video-nv sets general_control to 0x00100100
+     * for SVGA modes (bit 8 = VGA_STATE_SEL, bit 20 = BPC_8BITS).
      */
-    if ((nv3->pramdac.general_control & NV3_PRAMDAC_GCTRL_BPC_MASK) == NV3_PRAMDAC_GCTRL_BPC_8BIT) {
+    if (nv3->pramdac.general_control & NV3_PRAMDAC_GCTRL_BPC_8BIT) {
         svga_set_ramdac_type(svga, RAMDAC_8BIT);
     } else {
         svga_set_ramdac_type(svga, RAMDAC_6BIT);
@@ -1289,17 +1411,44 @@ nv3_recalctimings(svga_t *svga)
      *
      *   Freq = (crystal * N) / (M * (1 << P))
      *
-     * We only apply this when the miscout clock select bits indicate
-     * that we should use the programmable PLL (bits 3:2 == 3), which
-     * is what all SVGA modes use.
+     * Clock source selection: on NV3 the pixel clock source is
+     * determined by two mechanisms:
+     *
+     * 1. VGA miscout bits 3:2 (standard VGA clock select):
+     *    00 = 25.175MHz, 01 = 28.322MHz, 10/11 = external/programmable
+     *
+     * 2. PLL_CONTROL register (0x68050C) bit 16 (VPLL_PROG):
+     *    When set, the programmable VPLL is used as pixel clock source.
+     *
+     * The Windows NVIDIA driver uses miscout bits 3:2 == 10 (external
+     * clock), not 11. The Linux xf86-video-nv driver uses PLL_CONTROL
+     * VPLL_PROG. We accept the PLL clock whenever EITHER mechanism
+     * selects the programmable PLL, or when we are in extended pixel
+     * mode (pixel_mode != 0), since extended modes always use the PLL.
      */
-    if (((svga->miscout >> 2) & 3) == 3) {
-        uint32_t vpll = nv3->pramdac.vpll_coeff;
-        double   freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
+    {
+        int use_vpll = 0;
 
-        if (freq > 1000.0) {
-            /* Standard 86Box clock formula: ticks per pixel = cpuclock * 2^32 / freq */
-            svga->clock = (cpuclock * (float) (1ULL << 32)) / freq;
+        /* Check VGA miscout: bits 3:2 >= 2 means external/programmable */
+        if (((svga->miscout >> 2) & 3) >= 2)
+            use_vpll = 1;
+
+        /* Check NV3 PLL_CONTROL: VPLL_PROG (bit 16) */
+        if (nv3->pramdac.pll_control & NV3_PLL_CTRL_VPLL_PROG)
+            use_vpll = 1;
+
+        /* In extended pixel mode, always use VPLL */
+        if (pixel_mode != NV3_PIXEL_MODE_VGA)
+            use_vpll = 1;
+
+        if (use_vpll) {
+            uint32_t vpll = nv3->pramdac.vpll_coeff;
+            double   freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
+
+            if (freq > 1000.0) {
+                /* Standard 86Box clock formula: ticks per pixel = cpuclock * 2^32 / freq */
+                svga->clock = (cpuclock * (float) (1ULL << 32)) / freq;
+            }
         }
     }
 
@@ -1747,11 +1896,22 @@ nv3_pramdac_init(nv3_t *nv3)
     nv3->pramdac.mpll_coeff  = (0 << 16) | (91 << 8) | 13;
 
     /*
-     * General control: default to 8-bit DAC, VGA state off,
-     * cursor disabled.
+     * PLL_CONTROL defaults: all PLLs in fixed (non-programmable) mode
+     * initially. The BIOS will set VPLL_PROG and MPLL_PROG during POST.
+     * Per envytools nv3_pramdac.xml (NV3:NV4 variant).
+     */
+    nv3->pramdac.pll_control = 0;
+    nv3->pramdac.pll_setup   = 0;
+
+    /*
+     * General control: default to 8-bit DAC, VGA state off.
+     *
+     * Per envytools nv3_pramdac.xml: BPC_8BITS is bit 20.
+     * xf86-video-nv uses 0x00100100 (VGA_STATE_SEL=1, BPC_8BITS=1)
+     * for SVGA modes, but at init we just set BPC_8BITS.
      */
     nv3->pramdac.general_control = NV3_PRAMDAC_GCTRL_BPC_8BIT;
-    nv3->pramdac.cursor_start    = 0;
+    nv3->pramdac.cursor_pos      = 0;
 }
 
 /* ========================================================================
