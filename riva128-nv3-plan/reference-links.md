@@ -1,0 +1,66 @@
+# NV3 Reference Links
+
+## envytools Documentation (Primary Reference)
+- [GPU chips overview](https://envytools.readthedocs.io/en/latest/hw/gpu.html)
+- [MMIO register map](https://envytools.readthedocs.io/en/latest/hw/mmio.html)
+- [NV3:G80 display subsystem](https://envytools.readthedocs.io/en/latest/hw/display/nv3/)
+- [PCRTC scanout engine](https://envytools.readthedocs.io/en/latest/hw/display/nv3/pcrtc.html)
+- [PRAMDAC display output](https://envytools.readthedocs.io/en/latest/hw/display/nv3/pramdac.html)
+- [NV3 VGA registers](https://envytools.readthedocs.io/en/latest/hw/display/nv3/vga.html)
+- [PGRAPH overview](https://envytools.readthedocs.io/en/latest/hw/graph/intro.html)
+- [PGRAPH index (NV3 section)](https://envytools.readthedocs.io/en/latest/hw/graph/index.html)
+- [2D pipeline overview](https://envytools.readthedocs.io/en/latest/hw/graph/2d/intro.html)
+- [NV1:NV4 PFIFO engine](https://envytools.readthedocs.io/en/latest/hw/fifo/nv1-pfifo.html)
+- [FIFO overview](https://envytools.readthedocs.io/en/latest/hw/fifo/intro.html)
+- [DMA pusher](https://envytools.readthedocs.io/en/latest/hw/fifo/dma-pusher.html)
+- [FIFO puller](https://envytools.readthedocs.io/en/latest/hw/fifo/puller.html)
+- [NV1:NV40 clocks](https://envytools.readthedocs.io/en/latest/hw/pm/nv1-clock.html)
+- [PMC documentation](https://envytools.readthedocs.io/en/latest/hw/bus/pmc.html)
+- [NV1 VRAM structure](https://envytools.readthedocs.io/en/latest/hw/memory/nv1-vram.html)
+
+## envytools rnndb XML Register Databases (GitHub)
+- [nv3_pgraph.xml](https://github.com/envytools/envytools/blob/master/rnndb/graph/nv3_pgraph.xml)
+- [nv3_3d.xml](https://github.com/envytools/envytools/blob/master/rnndb/graph/nv3_3d.xml)
+- [nv3_gdi.xml](https://github.com/envytools/envytools/blob/master/rnndb/graph/nv3_gdi.xml)
+- [nv3_pdma.xml](https://github.com/envytools/envytools/blob/master/rnndb/graph/nv3_pdma.xml)
+- [nv3_pfb.xml](https://github.com/envytools/envytools/blob/master/rnndb/memory/nv3_pfb.xml)
+- [nv3_pcrtc.xml](https://github.com/envytools/envytools/blob/master/rnndb/display/nv3_pcrtc.xml)
+- [nv3_pramdac.xml](https://github.com/envytools/envytools/blob/master/rnndb/display/nv3_pramdac.xml)
+- [nv3_prmvio.xml](https://github.com/envytools/envytools/blob/master/rnndb/display/nv3_prmvio.xml)
+- [nv1_pfifo.xml](https://github.com/envytools/envytools/blob/master/rnndb/fifo/nv1_pfifo.xml)
+- [nv_mmio.xml](https://github.com/envytools/envytools/blob/master/rnndb/nv_mmio.xml)
+
+## Linux Kernel / Driver Source
+- [nouveau driver tree](https://github.com/torvalds/linux/tree/master/drivers/gpu/drm/nouveau)
+- [nouveau_reg.h (NV03 defines)](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nouveau_reg.h)
+- [nvkm/engine/gr/nv04.c (NV03 dispatch)](https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/engine/gr/nv04.c)
+- [nvkm/engine/fifo/nv04.c](https://github.com/ilbers/linux/blob/master/drivers/gpu/drm/nouveau/nvkm/engine/fifo/nv04.c)
+
+## xf86-video-nv / rivafb (2D Driver)
+- [xf86-video-nv repo](https://github.com/freedesktop/xorg-xf86-video-nv)
+- [X11Libre mirror](https://github.com/X11Libre/xf86-video-nv)
+- [riva_setup.c](https://github.com/freedesktop/xorg-xf86-video-nv/blob/master/src/riva_setup.c)
+- [rivafb riva_tbl.h (golden init tables)](https://git.toradex.com/cgit/linux-toradex.git/tree/drivers/video/riva/riva_tbl.h)
+
+## Emulation Projects
+- [PCBox/86Box-nv (active NV3 fork)](https://github.com/PCBox/86Box-nv)
+- [86Box PR #5135 (rivatimer)](https://github.com/86Box/86Box/pull/5135)
+- [86Box PR #409 (original attempt)](https://github.com/86Box/86Box/pull/409)
+- [86Box Issue #1742 (feature request)](https://github.com/86Box/86Box/issues/1742)
+- [NVPlay/nvplayground](https://github.com/starfrost013/nvplayground)
+- [libretro-pcem vid_nv_riva128.c](https://github.com/libretro/libretro-pcem/blob/master/src/vid_nv_riva128.c)
+
+## Community / Articles
+- [86Box Blog: RIVA 128 Part 1](https://86box.net/2025/02/25/riva128-part-1.html)
+- [NVWiki](https://nvwiki.org/index.php/NV3_Getting_Started)
+- [VOGONS NVPlay thread](https://www.vogons.org/viewtopic.php?t=106652)
+- [vintage3d.org Riva 128](https://vintage3d.org/riva128.php)
+- [DOS Days Riva 128](https://www.dosdays.co.uk/topics/Manufacturers/nvidia_riva128.php)
+- [IEEE Famous Chips: RIVA 128](https://www.computer.org/publications/tech-news/chasing-pixels/famous-graphics-chips-nvidias-riva128)
+- [Wikipedia RIVA 128](https://en.wikipedia.org/wiki/RIVA_128)
+- [Nouveau CodeNames](https://nouveau.freedesktop.org/CodeNames.html)
+- [theretroweb NV3](https://theretroweb.com/chips/3844)
+- [Hacker News discussion](https://news.ycombinator.com/item?id=43198379)
+
+## Hardware Specs
+- [TechPowerUp Riva 128 ZX](https://www.techpowerup.com/gpu-specs/riva-128zx.c1311)

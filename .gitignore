@@ -79,7 +79,6 @@ CLAUDE.md
 # Voodoo ARM64 port artifacts
 voodoo-arm64-port/
 riva128-nv3-port/
-riva128-nv3-plan/
 scripts/analyze-jit-log
 
 # Build/test logs
