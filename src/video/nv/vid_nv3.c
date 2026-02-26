@@ -29,7 +29,6 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <wchar.h>
-#include <math.h>
 #define HAVE_STDARG_H
 #include <86box/86box.h>
 #include "cpu.h"
@@ -926,7 +925,8 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             nv3->pramdac.vpll_coeff = val;
             /* Fix 2: sync dedicated field to register bank for consistent readback */
             nv3->pramdac.regs[(NV3_PRAMDAC_VPLL_COEFF - NV3_PRAMDAC_START) >> 2] = val;
-            nv3_log("NV3: VPLL write M=%d N=%d P=%d freq=%.2f MHz\n",
+            nv3_log("NV3: VPLL write addr=0x%06X val=0x%08X M=%d N=%d P=%d freq=%.2f MHz\n",
+                     addr, val,
                      NV3_PLL_M(val), NV3_PLL_N(val), NV3_PLL_P(val),
                      nv3_pll_calc_freq(nv3->crystal_freq, val) / 1000000.0);
             /*
@@ -946,7 +946,14 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             nv3->pramdac.pll_control = val;
             /* Fix 2: sync dedicated field to register bank for consistent readback */
             nv3->pramdac.regs[(NV3_PRAMDAC_PLL_CONTROL - NV3_PRAMDAC_START) >> 2] = val;
-            nv3_log("NV3: PLL_CONTROL write 0x%08x\n", val);
+            nv3_log("NV3: PLL_CONTROL write addr=0x%06X val=0x%08X "
+                     "DLL_PROG=%d MPLL_PROG=%d VPLL_PROG=%d PCLK_SRC=%d VCLK_DB2=%d\n",
+                     addr, val,
+                     (val & NV3_PLL_CTRL_DLL_PROG) ? 1 : 0,
+                     (val & NV3_PLL_CTRL_MPLL_PROG) ? 1 : 0,
+                     (val & NV3_PLL_CTRL_VPLL_PROG) ? 1 : 0,
+                     (int) ((val & NV3_PLL_CTRL_PCLK_SRC_MASK) >> NV3_PLL_CTRL_PCLK_SRC_SHIFT),
+                     (val & NV3_PLL_CTRL_VCLK_DB2) ? 1 : 0);
             nv3->svga.fullchange = changeframecount;
             svga_recalctimings(&nv3->svga);
             break;
@@ -1337,19 +1344,17 @@ nv3_svga_in(uint16_t addr, void *priv)
 
     /* Handle RMA (Real Mode Access) window at 0x3D0-0x3D3 */
     if (addr >= NV3_RMA_ADDR_START && addr <= NV3_RMA_ADDR_END) {
-        if (!(nv3->rma_mode & 0x01))
-            return ret;
-
-        /*
-         * RMA provides a byte-granularity window into MMIO space.
-         * The address is assembled from rma_regs[0..3] as a 32-bit
-         * MMIO offset. For now we implement basic read support.
-         */
+        if (nv3->rma_mode == 0)
+            return ret; /* RMA disabled */
+        if (nv3->rma_mode >= 1 && nv3->rma_mode <= 3) {
+            /* Address setup: read back the stored address byte */
+            return nv3->rma_regs[nv3->rma_mode - 1];
+        }
+        /* Data access mode (rma_mode >= 4) */
         {
             uint32_t rma_addr = nv3->rma_regs[0]
                               | (nv3->rma_regs[1] << 8)
-                              | (nv3->rma_regs[2] << 16)
-                              | (nv3->rma_regs[3] << 24);
+                              | (nv3->rma_regs[2] << 16);
             uint32_t rma_val = nv3_mmio_read_internal(nv3, rma_addr & ~3);
             ret = (uint8_t) (rma_val >> ((addr & 3) * 8));
         }
@@ -1427,23 +1432,39 @@ nv3_svga_out(uint16_t addr, uint8_t val, void *priv)
 
     /* Handle RMA (Real Mode Access) window at 0x3D0-0x3D3 */
     if (addr >= NV3_RMA_ADDR_START && addr <= NV3_RMA_ADDR_END) {
-        nv3->rma_regs[addr & 3] = val;
-        if (!(nv3->rma_mode & 0x01))
+        if (nv3->rma_mode == 0) {
+            /* RMA disabled — do not intercept ports */
             return;
-
+        }
+        if (nv3->rma_mode >= 1 && nv3->rma_mode <= 3) {
+            /*
+             * Address setup mode: store address byte indexed by mode.
+             * Mode 1 = addr byte 0, mode 2 = byte 1, mode 3 = byte 2.
+             * No MMIO access occurs during address setup.
+             */
+            nv3->rma_regs[nv3->rma_mode - 1] = val;
+            return;
+        }
         /*
-         * RMA write: assemble MMIO address from rma_regs and write
-         * the byte value into the appropriate position.
+         * Data access mode (rma_mode >= 4).
+         * Ports 0x3D0-0x3D3 provide byte-granularity access to the
+         * MMIO register at the address assembled from rma_regs[0..2].
+         * The byte position within the register is determined by the
+         * VGA port offset: 0x3D0 = byte 0, 0x3D1 = byte 1, etc.
+         *
+         * IMPORTANT: Do NOT modify rma_regs[] here — that would
+         * corrupt the address for subsequent accesses.
          */
         {
             uint32_t rma_addr = nv3->rma_regs[0]
                               | (nv3->rma_regs[1] << 8)
-                              | (nv3->rma_regs[2] << 16)
-                              | (nv3->rma_regs[3] << 24);
+                              | (nv3->rma_regs[2] << 16);
             uint32_t old = nv3_mmio_read_internal(nv3, rma_addr & ~3);
             int      shift = (addr & 3) * 8;
             uint32_t mask  = 0xFF << shift;
             uint32_t new_val = (old & ~mask) | ((uint32_t) val << shift);
+            nv3_log("NV3: RMA write mode=%d addr=0x%06X byte=%d val=0x%02X => 0x%08X\n",
+                    nv3->rma_mode, rma_addr, addr & 3, val, new_val);
             nv3_mmio_write_internal(nv3, rma_addr & ~3, new_val);
         }
         return;
@@ -1743,11 +1764,42 @@ nv3_recalctimings(svga_t *svga)
 
     /*
      * Calculate pixel clock from VPLL coefficient register.
-     * In extended mode, always use the programmable VPLL.
+     * In extended mode, use the programmable VPLL unless PLL_CONTROL
+     * indicates bypass or a different clock source.
+     *
+     * Per envytools nv3_pramdac.xml:
+     *   VPLL_BYPASS (bit 20) = bypass VPLL, use crystal
+     *   VPLL_PROG (bit 16) = VPLL is programmable
+     *   PCLK_SRC (bits 25:24) = pixel clock source (0=VPLL, 1=VIP, 2=XTAL)
      */
     {
-        uint32_t vpll = nv3->pramdac.vpll_coeff;
-        double   freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
+        uint32_t vpll     = nv3->pramdac.vpll_coeff;
+        uint32_t pll_ctrl = nv3->pramdac.pll_control;
+        double   freq;
+        int      pclk_src = (pll_ctrl & NV3_PLL_CTRL_PCLK_SRC_MASK) >> NV3_PLL_CTRL_PCLK_SRC_SHIFT;
+
+        if ((pll_ctrl & NV3_PLL_CTRL_VPLL_BYPASS) || pclk_src == 2) {
+            /* VPLL bypassed or crystal selected: use raw crystal frequency */
+            freq = (double) nv3->crystal_freq;
+        } else if (!(pll_ctrl & NV3_PLL_CTRL_VPLL_PROG)) {
+            /*
+             * VPLL not programmable: the BIOS hasn't set up PLL_CONTROL yet,
+             * or it failed to reach us. Use the VPLL coefficient anyway since
+             * we initialize it to a valid 25 MHz default.
+             */
+            freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
+        } else {
+            /* Normal case: VPLL is programmable and selected */
+            freq = nv3_pll_calc_freq(nv3->crystal_freq, vpll);
+        }
+
+        nv3_log("NV3: recalctimings PCLK: vpll=0x%08X M=%d N=%d P=%d "
+                "pll_ctrl=0x%08X VPLL_PROG=%d PCLK_SRC=%d freq=%.2f MHz\n",
+                vpll, NV3_PLL_M(vpll), NV3_PLL_N(vpll), NV3_PLL_P(vpll),
+                pll_ctrl,
+                (pll_ctrl & NV3_PLL_CTRL_VPLL_PROG) ? 1 : 0,
+                pclk_src,
+                freq / 1000000.0);
 
         if (freq > 1000.0)
             svga->clock = (cpuclock * (float) (1ULL << 32)) / freq;
@@ -2211,6 +2263,11 @@ nv3_pramdac_init(nv3_t *nv3)
      * VPLL: M=12, N=21, P=0 => ~25 MHz
      */
     nv3->pramdac.vpll_coeff  = (0 << 16) | (21 << 8) | 12;
+    nv3_log("NV3: pramdac_init: VPLL default = 0x%08X (M=%d N=%d P=%d)\n",
+            nv3->pramdac.vpll_coeff,
+            NV3_PLL_M(nv3->pramdac.vpll_coeff),
+            NV3_PLL_N(nv3->pramdac.vpll_coeff),
+            NV3_PLL_P(nv3->pramdac.vpll_coeff));
     /* NVPLL: M=13, N=68, P=0 => ~75 MHz */
     nv3->pramdac.nvpll_coeff = (0 << 16) | (68 << 8) | 13;
     /* MPLL: M=13, N=91, P=0 => ~100 MHz */
