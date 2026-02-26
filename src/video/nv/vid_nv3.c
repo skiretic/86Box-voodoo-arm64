@@ -1516,21 +1516,26 @@ nv3_svga_out(uint16_t addr, uint8_t val, void *priv)
             /* Act on extended NV3 CRTC registers */
             switch (crtcreg) {
                 case NV3_CRTC_READ_BANK:
-                    /* Extended read bank selection */
+                    /*
+                     * Extended read bank selection.
+                     * fb_only=1 (packed linear): 64KB granularity (val << 16).
+                     * fb_only=0 (VGA planar): 16KB pre-shift (val << 14),
+                     * which becomes 64KB after the planar addr <<= 2 transform.
+                     */
                     nv3->cio_read_bank = val;
-                    if (svga->chain4)
-                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 15;
+                    if (svga->fb_only)
+                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 16;
                     else
-                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 13;
+                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 14;
                     break;
 
                 case NV3_CRTC_WRITE_BANK:
-                    /* Extended write bank selection */
+                    /* Extended write bank selection (same granularity as read) */
                     nv3->cio_write_bank = val;
-                    if (svga->chain4)
-                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 15;
+                    if (svga->fb_only)
+                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 16;
                     else
-                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 13;
+                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 14;
                     break;
 
                 case NV3_CRTC_RMA:
@@ -1609,6 +1614,14 @@ nv3_recalctimings(svga_t *svga)
             svga->seqregs[1], svga->crtc[NV3_CRTC_FORMAT], svga->char_width);
     nv3_log("NV3: recalctimings: vpll=0x%08x crystal=%d cpuclock=%.0f\n",
             nv3->pramdac.vpll_coeff, nv3->crystal_freq, cpuclock);
+    nv3_log("NV3: recalctimings: CRTC[0x13]=0x%02x CRTC[0x14]=0x%02x "
+            "CRTC[0x17]=0x%02x CRTC[0x19]=0x%02x CRTC[0x28]=0x%02x\n",
+            svga->crtc[0x13], svga->crtc[0x14], svga->crtc[0x17],
+            svga->crtc[NV3_CRTC_REPAINT0], svga->crtc[NV3_CRTC_PIXEL_MODE]);
+    nv3_log("NV3: recalctimings: chain4=%d packed_chain4=%d force_old_addr=%d "
+            "fb_only=%d gdcreg5=0x%02x seqregs4=0x%02x\n",
+            svga->chain4, svga->packed_chain4, svga->force_old_addr,
+            svga->fb_only, svga->gdcreg[5], svga->seqregs[4]);
 
     /*
      * Extended display buffer start address.
@@ -1653,6 +1666,9 @@ nv3_recalctimings(svga_t *svga)
         svga->fb_only       = 0;
         svga->packed_chain4 = 0;
         svga->override      = 0;
+        /* Recalculate bank offsets for VGA planar addressing (16KB pre-shift) */
+        svga->write_bank = (uint32_t) nv3->cio_write_bank << 14;
+        svga->read_bank  = (uint32_t) nv3->cio_read_bank << 14;
         return;
     }
 
@@ -1714,50 +1730,43 @@ nv3_recalctimings(svga_t *svga)
     /*
      * Adjust row offset for extended pixel modes.
      *
-     * The SVGA core computes rowoffset = CRTC[0x13] which is in units
-     * of 8 bytes (vid_svga.c advances memaddr by rowoffset << 3 per
-     * scanline, so byte_stride = rowoffset * 8).
+     * The SVGA core computes rowoffset from CRTC[0x13] and advances
+     * memaddr by rowoffset << 3 per scanline (1 unit = 8 bytes).
      *
-     * The NV3 driver programs CRTC[0x13] with the byte pitch already
-     * divided by 8 for the target pixel depth. For example, at
-     * 640x480x8bpp: pitch = 640 bytes, CRTC[0x13] = 80 (= 640/8).
-     * At 640x480x16bpp: pitch = 1280, CRTC[0x13] = 160 (= 1280/8).
+     * The NV3 driver programs CRTC[0x13] = byte_pitch / 16 for ALL
+     * color depths (e.g. 640-wide: CRTC[0x13] = 40). We must scale
+     * rowoffset by the pixel depth to produce the correct byte stride:
+     *   8bpp:  40 << 1 = 80,  byte stride = 80  * 8 = 640
+     *   16bpp: 40 << 2 = 160, byte stride = 160 * 8 = 1280
+     *   32bpp: 40 << 3 = 320, byte stride = 320 * 8 = 2560
      *
-     * So the base rowoffset from CRTC[0x13] is already correct for
-     * 8bpp. For 16bpp and 32bpp, the driver programs proportionally
-     * larger values, but the CRTC[0x13] register is only 8 bits.
-     * We scale by bytes-per-pixel relative to 8bpp:
-     *   8bpp:  no shift (CRTC[0x13] already has pitch/8)
-     *   16bpp: 1 extra shift (pitch is 2x wider per row)
-     *   32bpp: 2 extra shifts (pitch is 4x wider per row)
-     *
-     * REPAINT0 bits 7:5 provide bits 10:8 of the extended rowoffset,
-     * allowing strides larger than 255*8 = 2040 bytes.
+     * REPAINT0 bits 7:5 provide rowoffset[10:8], extending the 8-bit
+     * CRTC[0x13] to an 11-bit base value. These high bits must be added
+     * BEFORE the depth scaling shift.
      */
+    svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
+
     switch (pixel_mode) {
         case NV3_PIXEL_MODE_8BPP:
             svga->bpp    = 8;
             svga->lowres = 0;
             svga->render = svga_render_8bpp_highres;
             svga->map8   = svga->pallook;
-            /* No shift: CRTC[0x13] already has byte_pitch / 8 */
-            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
+            svga->rowoffset <<= 1;
             break;
 
         case NV3_PIXEL_MODE_16BPP:
             svga->bpp    = 16;
             svga->lowres = 0;
             svga->render = svga_render_16bpp_highres;
-            svga->rowoffset <<= 1;
-            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
+            svga->rowoffset <<= 2;
             break;
 
         case NV3_PIXEL_MODE_32BPP:
             svga->bpp    = 32;
             svga->lowres = 0;
             svga->render = svga_render_32bpp_highres;
-            svga->rowoffset <<= 2;
-            svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
+            svga->rowoffset <<= 3;
             break;
 
         default:
@@ -1843,6 +1852,10 @@ nv3_recalctimings(svga_t *svga)
     /* Enable linear framebuffer addressing for the write path */
     svga->fb_only = 1;
 
+    /* Recalculate bank offsets for packed linear addressing (64KB granularity) */
+    svga->write_bank = (uint32_t) nv3->cio_write_bank << 16;
+    svga->read_bank  = (uint32_t) nv3->cio_read_bank << 16;
+
     /* Disable overscan in extended modes */
     svga->monitor->mon_overscan_y = 0;
     svga->monitor->mon_overscan_x = 0;
@@ -1893,6 +1906,7 @@ nv3_update_mappings(nv3_t *nv3)
 
     /* BAR1: Linear framebuffer + RAMIN */
     if (nv3->bar1_base) {
+        nv3_log("NV3: mapping LFB at 0x%08x size=0x%x\n", nv3->bar1_base, nv3->vram_size);
         mem_mapping_set_addr(&nv3->lfb_mapping, nv3->bar1_base, nv3->vram_size);
     }
 
@@ -2137,6 +2151,8 @@ nv3_pci_write(UNUSED(int func), int addr, UNUSED(int len), uint8_t val, void *pr
         /* BAR1 base address */
         case 0x17:
             nv3->bar1_base = (uint32_t) val << 24;
+            nv3_log("NV3: PCI BAR1 write byte 0x17 val=0x%02x -> bar1_base=0x%08x\n",
+                    val, nv3->bar1_base);
             nv3_update_mappings(nv3);
             return;
 
