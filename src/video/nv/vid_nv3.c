@@ -1346,15 +1346,16 @@ nv3_svga_in(uint16_t addr, void *priv)
     if (addr >= NV3_RMA_ADDR_START && addr <= NV3_RMA_ADDR_END) {
         if (nv3->rma_mode == 0)
             return ret; /* RMA disabled */
-        if (nv3->rma_mode >= 1 && nv3->rma_mode <= 3) {
-            /* Address setup: read back the stored address byte */
-            return nv3->rma_regs[nv3->rma_mode - 1];
-        }
-        /* Data access mode (rma_mode >= 4) */
+        /*
+         * RMA data access: the target MMIO address is assembled from
+         * CRTC registers 0x39 (low), 0x3A (mid), 0x3B (high).
+         * The BIOS sets these via standard CRTC index/data writes
+         * before enabling RMA through CRTC 0x38.
+         */
         {
-            uint32_t rma_addr = nv3->rma_regs[0]
-                              | (nv3->rma_regs[1] << 8)
-                              | (nv3->rma_regs[2] << 16);
+            uint32_t rma_addr = svga->crtc[0x39]
+                              | (svga->crtc[0x3A] << 8)
+                              | (svga->crtc[0x3B] << 16);
             uint32_t rma_val = nv3_mmio_read_internal(nv3, rma_addr & ~3);
             ret = (uint8_t) (rma_val >> ((addr & 3) * 8));
         }
@@ -1436,29 +1437,20 @@ nv3_svga_out(uint16_t addr, uint8_t val, void *priv)
             /* RMA disabled — do not intercept ports */
             return;
         }
-        if (nv3->rma_mode >= 1 && nv3->rma_mode <= 3) {
-            /*
-             * Address setup mode: store address byte indexed by mode.
-             * Mode 1 = addr byte 0, mode 2 = byte 1, mode 3 = byte 2.
-             * No MMIO access occurs during address setup.
-             */
-            nv3->rma_regs[nv3->rma_mode - 1] = val;
-            return;
-        }
         /*
-         * Data access mode (rma_mode >= 4).
-         * Ports 0x3D0-0x3D3 provide byte-granularity access to the
-         * MMIO register at the address assembled from rma_regs[0..2].
-         * The byte position within the register is determined by the
-         * VGA port offset: 0x3D0 = byte 0, 0x3D1 = byte 1, etc.
+         * RMA data access: the target MMIO address is assembled from
+         * CRTC registers 0x39 (low), 0x3A (mid), 0x3B (high).
+         * The BIOS sets these via standard CRTC index/data writes
+         * before enabling RMA through CRTC 0x38.
          *
-         * IMPORTANT: Do NOT modify rma_regs[] here — that would
-         * corrupt the address for subsequent accesses.
+         * Ports 0x3D0-0x3D3 provide byte-granularity access to the
+         * target MMIO register. The byte position is determined by
+         * the VGA port offset: 0x3D0 = byte 0, 0x3D1 = byte 1, etc.
          */
         {
-            uint32_t rma_addr = nv3->rma_regs[0]
-                              | (nv3->rma_regs[1] << 8)
-                              | (nv3->rma_regs[2] << 16);
+            uint32_t rma_addr = svga->crtc[0x39]
+                              | (svga->crtc[0x3A] << 8)
+                              | (svga->crtc[0x3B] << 16);
             uint32_t old = nv3_mmio_read_internal(nv3, rma_addr & ~3);
             int      shift = (addr & 3) * 8;
             uint32_t mask  = 0xFF << shift;
@@ -1658,8 +1650,9 @@ nv3_recalctimings(svga_t *svga)
          */
         if (svga->crtc[NV3_CRTC_HEB] & 0x01)
             svga->hdisp += svga->dots_per_clock * 0x100;
-        svga->fb_only = 0;
-        svga->override = 0;
+        svga->fb_only       = 0;
+        svga->packed_chain4 = 0;
+        svga->override      = 0;
         return;
     }
 
@@ -1674,6 +1667,18 @@ nv3_recalctimings(svga_t *svga)
      * format parameters ourselves.
      */
     svga->override = 0;
+
+    /*
+     * Force packed linear byte addressing in the SVGA renderer.
+     *
+     * Without this, svga_render_8bpp_highres -> svga_render_indexed_gfx
+     * applies VGA address mangling based on CRTC[0x14]/CRTC[0x17]:
+     * if CRTC[0x14] bit 6 is set (dword mode), addresses get shifted
+     * left by 2, causing 4x horizontal compression. Setting packed_chain4
+     * forces incbypow2=0 and incevery=1, giving direct byte addressing.
+     * Banshee uses the same mechanism (vid_voodoo_banshee.c line ~877).
+     */
+    svga->packed_chain4 = 1;
 
     /*
      * Compute horizontal display width in pixels ourselves.
@@ -1710,16 +1715,24 @@ nv3_recalctimings(svga_t *svga)
      * Adjust row offset for extended pixel modes.
      *
      * The SVGA core computes rowoffset = CRTC[0x13] which is in units
-     * of 8 bytes (the scan code shifts by 3: memaddr += rowoffset << 3).
-     * The VGA CRTC 0x13 is programmed for 4bpp planar mode, giving
-     * stride = rowoffset * 8 = half the actual byte stride at 8bpp.
+     * of 8 bytes (vid_svga.c advances memaddr by rowoffset << 3 per
+     * scanline, so byte_stride = rowoffset * 8).
      *
-     * We scale the VGA base rowoffset by the bytes-per-pixel ratio:
-     *   8bpp:  2x (1 byte/pixel vs VGA's 0.5 byte/pixel effective)
-     *   16bpp: 4x
-     *   32bpp: 8x
+     * The NV3 driver programs CRTC[0x13] with the byte pitch already
+     * divided by 8 for the target pixel depth. For example, at
+     * 640x480x8bpp: pitch = 640 bytes, CRTC[0x13] = 80 (= 640/8).
+     * At 640x480x16bpp: pitch = 1280, CRTC[0x13] = 160 (= 1280/8).
      *
-     * Then add REPAINT0 bits 7:5 as bits 10:8 of the extended rowoffset.
+     * So the base rowoffset from CRTC[0x13] is already correct for
+     * 8bpp. For 16bpp and 32bpp, the driver programs proportionally
+     * larger values, but the CRTC[0x13] register is only 8 bits.
+     * We scale by bytes-per-pixel relative to 8bpp:
+     *   8bpp:  no shift (CRTC[0x13] already has pitch/8)
+     *   16bpp: 1 extra shift (pitch is 2x wider per row)
+     *   32bpp: 2 extra shifts (pitch is 4x wider per row)
+     *
+     * REPAINT0 bits 7:5 provide bits 10:8 of the extended rowoffset,
+     * allowing strides larger than 255*8 = 2040 bytes.
      */
     switch (pixel_mode) {
         case NV3_PIXEL_MODE_8BPP:
@@ -1727,7 +1740,7 @@ nv3_recalctimings(svga_t *svga)
             svga->lowres = 0;
             svga->render = svga_render_8bpp_highres;
             svga->map8   = svga->pallook;
-            svga->rowoffset <<= 1;
+            /* No shift: CRTC[0x13] already has byte_pitch / 8 */
             svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
             break;
 
@@ -1735,7 +1748,7 @@ nv3_recalctimings(svga_t *svga)
             svga->bpp    = 16;
             svga->lowres = 0;
             svga->render = svga_render_16bpp_highres;
-            svga->rowoffset <<= 2;
+            svga->rowoffset <<= 1;
             svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
             break;
 
@@ -1743,7 +1756,7 @@ nv3_recalctimings(svga_t *svga)
             svga->bpp    = 32;
             svga->lowres = 0;
             svga->render = svga_render_32bpp_highres;
-            svga->rowoffset <<= 3;
+            svga->rowoffset <<= 2;
             svga->rowoffset += (svga->crtc[NV3_CRTC_REPAINT0] & 0xE0) << 3;
             break;
 
