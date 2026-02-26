@@ -1518,24 +1518,25 @@ nv3_svga_out(uint16_t addr, uint8_t val, void *priv)
                 case NV3_CRTC_READ_BANK:
                     /*
                      * Extended read bank selection.
-                     * fb_only=1 (packed linear): 64KB granularity (val << 16).
-                     * fb_only=0 (VGA planar): 16KB pre-shift (val << 14),
-                     * which becomes 64KB after the planar addr <<= 2 transform.
+                     * Per envytools: 32KB granularity ("32k units").
+                     * fb_only=1 (packed linear): val << 15 = 32KB.
+                     * fb_only=0 (VGA planar): val << 13 = 8KB pre-shift,
+                     * which becomes 32KB after the planar addr <<= 2 transform.
                      */
                     nv3->cio_read_bank = val;
                     if (svga->fb_only)
-                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 16;
+                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 15;
                     else
-                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 14;
+                        svga->read_bank = (uint32_t) nv3->cio_read_bank << 13;
                     break;
 
                 case NV3_CRTC_WRITE_BANK:
                     /* Extended write bank selection (same granularity as read) */
                     nv3->cio_write_bank = val;
                     if (svga->fb_only)
-                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 16;
+                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 15;
                     else
-                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 14;
+                        svga->write_bank = (uint32_t) nv3->cio_write_bank << 13;
                     break;
 
                 case NV3_CRTC_RMA:
@@ -1666,9 +1667,9 @@ nv3_recalctimings(svga_t *svga)
         svga->fb_only       = 0;
         svga->packed_chain4 = 0;
         svga->override      = 0;
-        /* Recalculate bank offsets for VGA planar addressing (16KB pre-shift) */
-        svga->write_bank = (uint32_t) nv3->cio_write_bank << 14;
-        svga->read_bank  = (uint32_t) nv3->cio_read_bank << 14;
+        /* Recalculate bank offsets for VGA planar addressing (8KB pre-shift) */
+        svga->write_bank = (uint32_t) nv3->cio_write_bank << 13;
+        svga->read_bank  = (uint32_t) nv3->cio_read_bank << 13;
         return;
     }
 
@@ -1852,9 +1853,9 @@ nv3_recalctimings(svga_t *svga)
     /* Enable linear framebuffer addressing for the write path */
     svga->fb_only = 1;
 
-    /* Recalculate bank offsets for packed linear addressing (64KB granularity) */
-    svga->write_bank = (uint32_t) nv3->cio_write_bank << 16;
-    svga->read_bank  = (uint32_t) nv3->cio_read_bank << 16;
+    /* Recalculate bank offsets for packed linear addressing (32KB granularity) */
+    svga->write_bank = (uint32_t) nv3->cio_write_bank << 15;
+    svga->read_bank  = (uint32_t) nv3->cio_read_bank << 15;
 
     /* Disable overscan in extended modes */
     svga->monitor->mon_overscan_y = 0;
