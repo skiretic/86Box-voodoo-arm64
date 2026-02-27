@@ -175,21 +175,240 @@ typedef struct nv3_pramdac_s {
 } nv3_pramdac_t;
 
 /*
+ * NV3 2D object class IDs.
+ *
+ * Per envytools graph/nv3-pgraph.html:
+ * These class numbers are stored in the RAMIN instance data and
+ * identify what kind of graphics object is bound to a subchannel.
+ *
+ * NV3 uses NV1-style class numbering for context objects (0x01-0x06)
+ * and NV3-specific numbered classes for rendering objects (0x07+).
+ * The actual class stored in RAMIN uses the "graph class" numbering
+ * which differs from the PGRAPH internal class register.
+ *
+ * For NV1/NV3: the low 8 bits of instance word 0 contain the class.
+ */
+#define NV3_CLASS_BETA          0x0012  /* Beta blending factor */
+#define NV3_CLASS_ROP           0x0043  /* Raster operation (ROP3) */
+#define NV3_CLASS_CHROMA        0x0017  /* Color key / transparency */
+#define NV3_CLASS_PLANE         0x0044  /* Bitplane mask */
+#define NV3_CLASS_CLIP          0x0019  /* Clipping rectangle */
+#define NV3_CLASS_PATTERN       0x0018  /* 8x8 fill pattern */
+#define NV3_CLASS_RECT          0x001E  /* Filled rectangle (color+ROP) */
+#define NV3_CLASS_POINT         0x0046  /* Point rendering */
+#define NV3_CLASS_LINE          0x001C  /* Line rendering */
+#define NV3_CLASS_LIN           0x001D  /* Line without endpoint */
+#define NV3_CLASS_TRI           0x001D  /* 2D triangle rendering - shares with LIN on NV3 */
+#define NV3_CLASS_BLIT          0x001F  /* Screen-to-screen blit */
+#define NV3_CLASS_IMAGE_FROM_CPU 0x0021 /* Image transfer from CPU */
+#define NV3_CLASS_BITMAP        0x0036  /* Monochrome bitmap */
+#define NV3_CLASS_GDI_TEXT      0x004A  /* GDI text rendering (NV3+) */
+#define NV3_CLASS_M2MF          0x0039  /* Memory-to-memory format convert */
+#define NV3_CLASS_SURF_2D       0x0042  /* NV03 combined 2D surfaces (src+dst) */
+#define NV3_CLASS_SURF_DST      0x0058  /* Destination surface (NV3+) */
+#define NV3_CLASS_SURF_SRC      0x0059  /* Source surface for blit (NV3+) */
+#define NV3_CLASS_SURF_COLOR    0x005A  /* Color surface (NV3+, for 3D) */
+#define NV3_CLASS_SURF_ZETA     0x005B  /* Zeta surface (NV3+, for 3D) */
+
+/*
+ * NV4-compatible class aliases.
+ * Some NV3 drivers use NV4 class numbers for backwards compatibility.
+ */
+#define NV4_CLASS_GDI_TEXT      0x004B  /* NV04 variant of GDI text */
+
+/*
+ * NV3 pixel format IDs.
+ *
+ * Per envytools: surface color format is encoded in the surface object.
+ * These values are used in the PGRAPH context and surface methods.
+ */
+#define NV3_SURFACE_FORMAT_Y8        0x01  /* 8bpp indexed */
+#define NV3_SURFACE_FORMAT_X1R5G5B5  0x02  /* 15bpp (1-5-5-5) */
+#define NV3_SURFACE_FORMAT_R5G6B5    0x04  /* 16bpp (5-6-5) */
+#define NV3_SURFACE_FORMAT_X8R8G8B8  0x07  /* 32bpp (8-8-8-8) */
+
+/*
+ * Maximum subchannels and image transfer buffer size.
+ */
+#define NV3_PGRAPH_NUM_SUBCHANNELS  8
+
+/*
+ * ImageFromCPU and GDI text pixel accumulation state.
+ *
+ * When the driver sends pixel data in multiple dword writes,
+ * we need to track the current position within the destination
+ * rectangle so successive COLOR[] writes fill left-to-right,
+ * top-to-bottom.
+ */
+typedef struct nv3_image_state_s {
+    int32_t  dst_x;       /* Destination rectangle origin X */
+    int32_t  dst_y;       /* Destination rectangle origin Y */
+    int32_t  size_in_w;   /* Input image width (pixels) */
+    int32_t  size_in_h;   /* Input image height (pixels) */
+    int32_t  size_out_w;  /* Output (destination) width */
+    int32_t  size_out_h;  /* Output (destination) height */
+    uint32_t color_format; /* Pixel format of incoming data */
+    int32_t  cur_x;       /* Current X within dest rect */
+    int32_t  cur_y;       /* Current Y within dest rect */
+    bool     active;      /* True if a transfer is in progress */
+} nv3_image_state_t;
+
+/*
+ * GDI text rendering state.
+ *
+ * The NV3 GDI text class renders monochrome (1bpp) bitmaps,
+ * expanding each bit to the foreground or background color.
+ * Used for Windows 95/98 text acceleration.
+ *
+ * Per envytools: class 0x004A (NV3 GDI rectangle+text)
+ */
+typedef struct nv3_gdi_text_state_s {
+    uint32_t color_format;  /* Color format for output */
+    uint32_t mono_format;   /* Monochrome data format (LE/CGA6) */
+    uint32_t color0;        /* Background color */
+    uint32_t color1;        /* Foreground color (1 bits) */
+    int32_t  clip_x;        /* Unclipped rect X */
+    int32_t  clip_y;        /* Unclipped rect Y */
+    int32_t  clip_w;        /* Unclipped rect width */
+    int32_t  clip_h;        /* Unclipped rect height */
+    int32_t  rect_x;        /* 1bpp bitmap dest X */
+    int32_t  rect_y;        /* 1bpp bitmap dest Y */
+    int32_t  rect_w;        /* 1bpp bitmap width */
+    int32_t  rect_h;        /* 1bpp bitmap height */
+    int32_t  cur_x;         /* Current X within bitmap */
+    int32_t  cur_y;         /* Current Y within bitmap */
+    bool     active;        /* True if 1bpp transfer active */
+} nv3_gdi_text_state_t;
+
+/*
  * PGRAPH (2D/3D Graphics Engine) state.
- * Stub for Phase 1; will be expanded in Phase 4/5.
  *
  * The regs[] array provides a general register bank for driver readback.
  * PGRAPH spans 0x400000-0x400FFF (4KB = 1024 dwords). Registers handled
  * explicitly in the switch statement (INTR_0, INTR_EN_0) are returned
  * from their dedicated fields; all other registers go through the bank.
+ *
+ * Phase 4 additions: 2D acceleration state for object classes.
+ *
+ * Per envytools graph/nv3-pgraph.html:
+ * PGRAPH maintains per-subchannel object class bindings and a set of
+ * context objects (clip, rop, pattern, beta, surfaces) that affect
+ * all 2D rendering operations.
  */
 typedef struct nv3_pgraph_s {
+    /* Interrupt state */
     uint32_t intr_0;
     uint32_t intr_en_0;
+
+    /* Debug registers (driver programs these during init) */
     uint32_t debug_0;
     uint32_t debug_1;
     uint32_t debug_2;
     uint32_t debug_3;
+
+    /* Context register (PGRAPH_CTX_SWITCH at 0x400180) */
+    uint32_t ctx_switch;
+
+    /*
+     * Per-subchannel class binding.
+     * When SetObject binds an object to subchannel N, we read the
+     * object's class from its RAMIN instance and store it here.
+     * Method dispatch uses this to know which class handler to call.
+     */
+    uint32_t subchan_class[NV3_PGRAPH_NUM_SUBCHANNELS];
+
+    /* ---- Context object state (set by context object methods) ---- */
+
+    /*
+     * Clip rectangle (set by class 0x0019).
+     * Per envytools: clip applies to all rendering operations.
+     * If no clip object is set, the clip covers the entire surface.
+     */
+    int32_t  clip_x;
+    int32_t  clip_y;
+    int32_t  clip_w;
+    int32_t  clip_h;
+    bool     clip_valid;
+
+    /*
+     * Raster operation (set by class 0x0043).
+     * Per envytools: the ROP3 value (0-255) defines how source,
+     * destination, and pattern bits are combined.
+     * Default: 0xCC (SRCCOPY — just use source/fill color).
+     */
+    uint32_t rop3;
+
+    /*
+     * Pattern (set by class 0x0018).
+     * Per envytools: 8x8 mono or color pattern used for fill.
+     */
+    uint32_t pattern_shape;      /* 0=8x8, 1=64x1, 2=1x64 */
+    uint32_t pattern_color0;     /* Color for 0 bits (mono mode) */
+    uint32_t pattern_color1;     /* Color for 1 bits (mono mode) */
+    uint32_t pattern_mono[2];    /* 64-bit monochrome bitmap (2 x 32-bit) */
+    uint32_t pattern_color_format;
+    uint32_t pattern_mono_format;
+
+    /*
+     * Beta factor (set by class 0x0012).
+     * Per envytools: beta is a 31-bit fixed-point value [0, 1].
+     * Bit 31 is the integer part (0 or 1), bits 30:0 are the fraction.
+     * Used as alpha blending factor in certain ROP modes.
+     */
+    uint32_t beta;
+
+    /*
+     * Chroma key (set by class 0x0017).
+     * When chroma key is enabled, pixels matching this color are
+     * not written (transparency).
+     */
+    uint32_t chroma_color;
+    bool     chroma_valid;
+
+    /* ---- Surface state ---- */
+
+    /*
+     * Destination surface (set by class 0x0058).
+     * This is where all 2D rendering writes go.
+     */
+    uint32_t surf_dst_offset;  /* Byte offset in VRAM */
+    uint32_t surf_dst_pitch;   /* Bytes per scanline */
+    uint32_t surf_dst_format;  /* Pixel format (NV3_SURFACE_FORMAT_*) */
+
+    /*
+     * Source surface (set by class 0x0059).
+     * Used by blit operations as the read source.
+     */
+    uint32_t surf_src_offset;
+    uint32_t surf_src_pitch;
+    uint32_t surf_src_format;
+
+    /* ---- Per-class rendering state ---- */
+
+    /*
+     * Rectangle class state (class 0x001E).
+     * Per envytools: the color is latched, then one or more
+     * POINT+SIZE pairs define rectangles to fill.
+     */
+    uint32_t rect_color;
+
+    /*
+     * Blit class state (class 0x001F).
+     * Per envytools: POINT_IN sets source origin, POINT_OUT sets
+     * destination origin, SIZE triggers the copy.
+     */
+    int32_t  blit_src_x;
+    int32_t  blit_src_y;
+    int32_t  blit_dst_x;
+    int32_t  blit_dst_y;
+
+    /* ImageFromCPU state (class 0x0021) */
+    nv3_image_state_t image;
+
+    /* GDI text/rect state (class 0x004A) */
+    nv3_gdi_text_state_t gdi;
+
+    /* General register bank for unhandled PGRAPH offsets */
     uint32_t regs[1024];
 } nv3_pgraph_t;
 

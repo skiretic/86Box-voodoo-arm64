@@ -175,6 +175,10 @@ static void     nv3_pfifo_push_pio(nv3_t *nv3, uint32_t channel,
                                    uint32_t subchan, uint32_t method,
                                    uint32_t data);
 
+/* PGRAPH method dispatch */
+static void     nv3_pgraph_method(nv3_t *nv3, uint32_t subchan,
+                                  uint32_t method, uint32_t data);
+
 /* ========================================================================
  * PMC interrupt aggregation and PCI IRQ routing.
  *
@@ -775,13 +779,27 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
 
         /* ============================================================
          * PGRAPH — Graphics Engine (0x400000-0x400FFF)
-         * Stubs for Phase 2; expanded in Phase 4/5.
          * ============================================================ */
         case NV3_PGRAPH_INTR_0:
             ret = nv3->pgraph.intr_0;
             break;
         case NV3_PGRAPH_INTR_EN_0:
             ret = nv3->pgraph.intr_en_0;
+            break;
+        case NV3_PGRAPH_DEBUG_0:
+            ret = nv3->pgraph.debug_0;
+            break;
+        case NV3_PGRAPH_DEBUG_1:
+            ret = nv3->pgraph.debug_1;
+            break;
+        case NV3_PGRAPH_DEBUG_2:
+            ret = nv3->pgraph.debug_2;
+            break;
+        case NV3_PGRAPH_DEBUG_3:
+            ret = nv3->pgraph.debug_3;
+            break;
+        case NV3_PGRAPH_CTX_SWITCH:
+            ret = nv3->pgraph.ctx_switch;
             break;
 
         /* ============================================================
@@ -1325,20 +1343,39 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             break;
 
         /* ============================================================
-         * PGRAPH — Graphics Engine (stubs)
+         * PGRAPH — Graphics Engine
          * ============================================================ */
         case NV3_PGRAPH_INTR_0:
-            /* Write 1 to clear (Fix 5: W1C RMW corruption note — see PCRTC_INTR) */
+            /* Write-1-to-clear (W1C) */
             nv3->pgraph.intr_0 &= ~val;
-            /* Fix 2: sync to register bank */
             nv3->pgraph.regs[(NV3_PGRAPH_INTR_0 - NV3_PGRAPH_START) >> 2] = nv3->pgraph.intr_0;
             nv3_update_irq(nv3);
             break;
         case NV3_PGRAPH_INTR_EN_0:
             nv3->pgraph.intr_en_0 = val;
-            /* Fix 2: sync to register bank */
             nv3->pgraph.regs[(NV3_PGRAPH_INTR_EN_0 - NV3_PGRAPH_START) >> 2] = val;
             nv3_update_irq(nv3);
+            break;
+        case NV3_PGRAPH_DEBUG_0:
+            nv3->pgraph.debug_0 = val;
+            nv3->pgraph.regs[(NV3_PGRAPH_DEBUG_0 - NV3_PGRAPH_START) >> 2] = val;
+            break;
+        case NV3_PGRAPH_DEBUG_1:
+            nv3->pgraph.debug_1 = val;
+            nv3->pgraph.regs[(NV3_PGRAPH_DEBUG_1 - NV3_PGRAPH_START) >> 2] = val;
+            break;
+        case NV3_PGRAPH_DEBUG_2:
+            nv3->pgraph.debug_2 = val;
+            nv3->pgraph.regs[(NV3_PGRAPH_DEBUG_2 - NV3_PGRAPH_START) >> 2] = val;
+            break;
+        case NV3_PGRAPH_DEBUG_3:
+            nv3->pgraph.debug_3 = val;
+            nv3->pgraph.regs[(NV3_PGRAPH_DEBUG_3 - NV3_PGRAPH_START) >> 2] = val;
+            break;
+        case NV3_PGRAPH_CTX_SWITCH:
+            nv3->pgraph.ctx_switch = val;
+            nv3->pgraph.regs[(NV3_PGRAPH_CTX_SWITCH - NV3_PGRAPH_START) >> 2] = val;
+            nv3_log("NV3: PGRAPH: CTX_SWITCH = 0x%08X\n", val);
             break;
 
         /* ============================================================
@@ -2927,6 +2964,1369 @@ nv3_pramdac_init(nv3_t *nv3)
 }
 
 /* ========================================================================
+ * PGRAPH 2D Acceleration Engine (Phase 4)
+ *
+ * This section implements the NV3 2D rendering pipeline. Object classes
+ * dispatched by the PFIFO puller are handled here.
+ *
+ * Architecture:
+ *   PFIFO puller -> nv3_pgraph_method(subchan, method, data)
+ *     -> dispatch based on subchan_class[subchan]
+ *       -> class-specific handler updates PGRAPH state or renders pixels
+ *
+ * Context objects (clip, rop, pattern, beta, chroma) are global state
+ * that affect all rendering operations. The driver binds them through
+ * SetObject + method writes.
+ *
+ * Rendering objects (rect, blit, image, gdi_text) perform actual pixel
+ * output to VRAM. They read the context object state during rendering.
+ *
+ * All pixel writes go through nv3_pgraph_write_pixel() which handles:
+ *   - VRAM address computation from surface offset + pitch
+ *   - Clip rectangle intersection
+ *   - ROP3 application (source, destination, pattern combination)
+ *   - VRAM dirty marking for display refresh
+ *
+ * Sources:
+ *   - envytools graph/nv1-2d.html (2D pipeline architecture)
+ *   - envytools graph/nv3-pgraph.html (NV3 PGRAPH registers)
+ *   - envytools graph/nv1-2d-rop.html (ROP3 specification)
+ * ======================================================================== */
+
+/* ========================================================================
+ * ROP3 (Raster Operation) lookup table.
+ *
+ * Per Microsoft GDI documentation and envytools graph/nv1-2d-rop.html:
+ * The ROP3 code is an 8-bit value (0-255) that defines how source (S),
+ * destination (D), and pattern (P) bits are combined to produce the
+ * output pixel. Each bit position i in the ROP3 value corresponds to
+ * the output for the input combination:
+ *   bit 0: P=0 S=0 D=0
+ *   bit 1: P=0 S=0 D=1
+ *   bit 2: P=0 S=1 D=0
+ *   bit 3: P=0 S=1 D=1
+ *   bit 4: P=1 S=0 D=0
+ *   bit 5: P=1 S=0 D=1
+ *   bit 6: P=1 S=1 D=0
+ *   bit 7: P=1 S=1 D=1
+ *
+ * Common ROP3 values:
+ *   0x00 = BLACKNESS (all zeros)
+ *   0x55 = DSTINVERT (invert destination)
+ *   0xAA = NOP (destination unchanged)
+ *   0xCC = SRCCOPY (source only)
+ *   0xF0 = PATCOPY (pattern only)
+ *   0xFF = WHITENESS (all ones)
+ *   0x5A = PATINVERT (P XOR D)
+ *   0x66 = SRCINVERT (S XOR D)
+ *   0xBB = MERGEPAINT (NOT S OR D)
+ *
+ * Rather than a lookup table, we implement ROP3 as a bitwise function.
+ * For each bit position in the pixel, we evaluate the 3-input truth
+ * table encoded by the ROP3 value.
+ * ======================================================================== */
+
+/*
+ * Evaluate a ROP3 operation on full 32-bit pixel values.
+ *
+ * This works by evaluating the 8-entry truth table bit-by-bit across
+ * all 32 bits simultaneously using boolean algebra decomposition.
+ *
+ * Per envytools graph/nv1-2d-rop.html:
+ * The ROP3 is decomposed into 8 minterms and evaluated bitwise.
+ */
+static inline uint32_t
+nv3_rop3_eval(uint32_t rop3, uint32_t src, uint32_t dst, uint32_t pat)
+{
+    /*
+     * For each bit position, compute the output from the truth table.
+     *
+     * The truth table has 8 entries indexed by {P, S, D}:
+     *   index = (P_bit << 2) | (S_bit << 1) | D_bit
+     *   output_bit = (rop3 >> index) & 1
+     *
+     * We evaluate all 32 bits at once by computing all 8 minterms
+     * and OR-ing together those whose ROP3 bit is set.
+     */
+    uint32_t result = 0;
+
+    /* Minterm 0: P=0 S=0 D=0 */
+    if (rop3 & 0x01)
+        result |= ~pat & ~src & ~dst;
+
+    /* Minterm 1: P=0 S=0 D=1 */
+    if (rop3 & 0x02)
+        result |= ~pat & ~src & dst;
+
+    /* Minterm 2: P=0 S=1 D=0 */
+    if (rop3 & 0x04)
+        result |= ~pat & src & ~dst;
+
+    /* Minterm 3: P=0 S=1 D=1 */
+    if (rop3 & 0x08)
+        result |= ~pat & src & dst;
+
+    /* Minterm 4: P=1 S=0 D=0 */
+    if (rop3 & 0x10)
+        result |= pat & ~src & ~dst;
+
+    /* Minterm 5: P=1 S=0 D=1 */
+    if (rop3 & 0x20)
+        result |= pat & ~src & dst;
+
+    /* Minterm 6: P=1 S=1 D=0 */
+    if (rop3 & 0x40)
+        result |= pat & src & ~dst;
+
+    /* Minterm 7: P=1 S=1 D=1 */
+    if (rop3 & 0x80)
+        result |= pat & src & dst;
+
+    return result;
+}
+
+/*
+ * Get the number of bytes per pixel for a given surface format.
+ */
+static inline int
+nv3_surface_format_bpp(uint32_t format)
+{
+    switch (format) {
+        case NV3_SURFACE_FORMAT_Y8:       return 1;  /* 0x01 */
+        case NV3_SURFACE_FORMAT_X1R5G5B5: return 2;  /* 0x02 */
+        case NV3_SURFACE_FORMAT_R5G6B5:   return 2;  /* 0x04 */
+        case 0x06:                        return 4;  /* X8R8G8B8 (NV3 encoding) */
+        case NV3_SURFACE_FORMAT_X8R8G8B8: return 4;  /* 0x07 (NV4 encoding) */
+        default:                          return 2;  /* Safe default: 16bpp */
+    }
+}
+
+/*
+ * Extract the pattern bit for a given (x, y) coordinate.
+ *
+ * Per envytools graph/nv1-2d.html:
+ * The 8x8 mono pattern is indexed by (x % 8, y % 8).
+ * The pattern is stored as two 32-bit words (64 bits total),
+ * with each row being 8 bits. Row 0 is in the LSB of mono[0].
+ *
+ * Pattern shapes:
+ *   0 = 8x8: standard 8x8 pattern
+ *   1 = 64x1: single row, 64 pixels wide
+ *   2 = 1x64: single column, 64 pixels tall
+ */
+static inline uint32_t
+nv3_pattern_pixel(nv3_pgraph_t *pg, int x, int y)
+{
+    int bit;
+
+    switch (pg->pattern_shape) {
+        case 0: /* 8x8 */
+        default: {
+            int px = x & 7;
+            int py = y & 7;
+            /* Row py is at bit offset py*8 + px in the 64-bit pattern */
+            int bitpos = py * 8 + px;
+            if (bitpos < 32)
+                bit = (pg->pattern_mono[0] >> bitpos) & 1;
+            else
+                bit = (pg->pattern_mono[1] >> (bitpos - 32)) & 1;
+            break;
+        }
+        case 1: /* 64x1 */
+            bit = x & 63;
+            if (bit < 32)
+                bit = (pg->pattern_mono[0] >> bit) & 1;
+            else
+                bit = (pg->pattern_mono[1] >> (bit - 32)) & 1;
+            break;
+        case 2: /* 1x64 */
+            bit = y & 63;
+            if (bit < 32)
+                bit = (pg->pattern_mono[0] >> bit) & 1;
+            else
+                bit = (pg->pattern_mono[1] >> (bit - 32)) & 1;
+            break;
+    }
+
+    return bit ? pg->pattern_color1 : pg->pattern_color0;
+}
+
+/*
+ * Check if a point is within the clip rectangle.
+ */
+static inline bool
+nv3_clip_test(nv3_pgraph_t *pg, int x, int y)
+{
+    if (!pg->clip_valid)
+        return true;
+
+    return (x >= pg->clip_x && x < pg->clip_x + pg->clip_w
+         && y >= pg->clip_y && y < pg->clip_y + pg->clip_h);
+}
+
+/*
+ * Read a pixel from a surface at (x, y).
+ *
+ * Returns the pixel value as a 32-bit value regardless of surface format.
+ * For 8bpp and 16bpp, the value is zero-extended.
+ */
+static inline uint32_t
+nv3_surface_read_pixel(nv3_t *nv3, uint32_t offset, uint32_t pitch,
+                       uint32_t format, int x, int y)
+{
+    int bpp = nv3_surface_format_bpp(format);
+    uint32_t addr = offset + y * pitch + x * bpp;
+
+    addr &= nv3->svga.vram_mask;
+
+    switch (bpp) {
+        case 1:
+            return nv3->svga.vram[addr];
+        case 2:
+            return *(uint16_t *) &nv3->svga.vram[addr];
+        case 4:
+            return *(uint32_t *) &nv3->svga.vram[addr];
+        default:
+            return 0;
+    }
+}
+
+/*
+ * Write a pixel to the destination surface at (x, y).
+ *
+ * Applies the current ROP3 to combine source, destination, and pattern.
+ * Handles clip rectangle testing.
+ * Marks VRAM as dirty for display refresh.
+ *
+ * Parameters:
+ *   nv3     - device state
+ *   x, y    - destination pixel coordinates
+ *   src_val - source pixel value (fill color, blit source, or CPU data)
+ *
+ * The ROP3 controls how src, dst, and pattern combine:
+ *   0xCC (SRCCOPY): result = src (ignores dst and pattern)
+ *   0xF0 (PATCOPY): result = pattern (ignores src and dst)
+ *   0x00 (BLACKNESS): result = 0
+ *   0xAA (NOP): result = dst (no change)
+ */
+static inline void
+nv3_pgraph_write_pixel(nv3_t *nv3, int x, int y, uint32_t src_val)
+{
+    nv3_pgraph_t *pg   = &nv3->pgraph;
+    svga_t       *svga = &nv3->svga;
+
+    /* Clip test */
+    if (!nv3_clip_test(pg, x, y))
+        return;
+
+    int      bpp    = nv3_surface_format_bpp(pg->surf_dst_format);
+    uint32_t addr   = pg->surf_dst_offset + y * pg->surf_dst_pitch + x * bpp;
+
+    addr &= svga->vram_mask;
+
+    /* Read destination pixel for ROP3 */
+    uint32_t dst_val;
+    switch (bpp) {
+        case 1:  dst_val = svga->vram[addr]; break;
+        case 2:  dst_val = *(uint16_t *) &svga->vram[addr]; break;
+        case 4:  dst_val = *(uint32_t *) &svga->vram[addr]; break;
+        default: dst_val = 0; break;
+    }
+
+    /* Get pattern pixel for ROP3 */
+    uint32_t pat_val = nv3_pattern_pixel(pg, x, y);
+
+    /* Apply ROP3 */
+    uint32_t result = nv3_rop3_eval(pg->rop3, src_val, dst_val, pat_val);
+
+    /* Write result to VRAM */
+    switch (bpp) {
+        case 1:
+            svga->vram[addr] = (uint8_t) result;
+            break;
+        case 2:
+            *(uint16_t *) &svga->vram[addr] = (uint16_t) result;
+            break;
+        case 4:
+            *(uint32_t *) &svga->vram[addr] = result;
+            break;
+    }
+
+    /* Mark VRAM page as dirty for display refresh */
+    svga->changedvram[addr >> 12] = changeframecount;
+}
+
+/*
+ * Optimized pixel write for SRCCOPY (ROP3 = 0xCC).
+ * This is the most common ROP — just write the source directly.
+ * Skips the expensive ROP3 evaluation and destination read.
+ */
+static inline void
+nv3_pgraph_write_pixel_srccopy(nv3_t *nv3, int x, int y, uint32_t src_val)
+{
+    nv3_pgraph_t *pg   = &nv3->pgraph;
+    svga_t       *svga = &nv3->svga;
+
+    if (!nv3_clip_test(pg, x, y))
+        return;
+
+    int      bpp  = nv3_surface_format_bpp(pg->surf_dst_format);
+    uint32_t addr = pg->surf_dst_offset + y * pg->surf_dst_pitch + x * bpp;
+
+    addr &= svga->vram_mask;
+
+    switch (bpp) {
+        case 1:
+            svga->vram[addr] = (uint8_t) src_val;
+            break;
+        case 2:
+            *(uint16_t *) &svga->vram[addr] = (uint16_t) src_val;
+            break;
+        case 4:
+            *(uint32_t *) &svga->vram[addr] = src_val;
+            break;
+    }
+
+    svga->changedvram[addr >> 12] = changeframecount;
+}
+
+/* ========================================================================
+ * Context object class handlers.
+ *
+ * These handle methods for the "context" object classes that set global
+ * rendering state (clip, rop, pattern, beta, chroma, surfaces).
+ * ======================================================================== */
+
+/*
+ * Clip rectangle (class 0x0019).
+ * Per envytools: sets the hardware clip rectangle.
+ */
+static void
+nv3_pgraph_class_clip(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    switch (method) {
+        case NV3_CLIP_POINT:
+            /*
+             * Per envytools class 0x0019:
+             *   bits [15:0]  = X (signed 16-bit)
+             *   bits [31:16] = Y (signed 16-bit)
+             */
+            pg->clip_x = (int16_t) (data & 0xFFFF);
+            pg->clip_y = (int16_t) ((data >> 16) & 0xFFFF);
+            nv3_log("NV3: PGRAPH: Clip POINT x=%d y=%d\n",
+                    pg->clip_x, pg->clip_y);
+            break;
+
+        case NV3_CLIP_SIZE:
+            /*
+             * Per envytools class 0x0019:
+             *   bits [15:0]  = width
+             *   bits [31:16] = height
+             * Writing SIZE also validates the clip rectangle.
+             */
+            pg->clip_w = (int16_t) (data & 0xFFFF);
+            pg->clip_h = (int16_t) ((data >> 16) & 0xFFFF);
+            pg->clip_valid = true;
+            nv3_log("NV3: PGRAPH: Clip SIZE w=%d h=%d\n",
+                    pg->clip_w, pg->clip_h);
+            break;
+
+        default:
+            nv3_log("NV3: PGRAPH: Clip unknown method 0x%04X data=0x%08X\n",
+                    method, data);
+            break;
+    }
+}
+
+/*
+ * ROP (class 0x0043).
+ * Per envytools: sets the ROP3 value for all rendering operations.
+ */
+static void
+nv3_pgraph_class_rop(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    if (method == NV3_ROP_SET) {
+        nv3->pgraph.rop3 = data & 0xFF;
+        nv3_log("NV3: PGRAPH: ROP set to 0x%02X\n", nv3->pgraph.rop3);
+    } else {
+        nv3_log("NV3: PGRAPH: ROP unknown method 0x%04X data=0x%08X\n",
+                method, data);
+    }
+}
+
+/*
+ * Pattern (class 0x0018).
+ * Per envytools: sets the 8x8 mono/color fill pattern.
+ */
+static void
+nv3_pgraph_class_pattern(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    switch (method) {
+        case NV3_PATTERN_COLOR_FORMAT:
+            pg->pattern_color_format = data;
+            nv3_log("NV3: PGRAPH: Pattern COLOR_FORMAT = 0x%08X\n", data);
+            break;
+        case NV3_PATTERN_MONO_FORMAT:
+            pg->pattern_mono_format = data;
+            nv3_log("NV3: PGRAPH: Pattern MONO_FORMAT = %d\n", data);
+            break;
+        case NV3_PATTERN_SHAPE:
+            pg->pattern_shape = data & 0x3;
+            nv3_log("NV3: PGRAPH: Pattern SHAPE = %d\n", pg->pattern_shape);
+            break;
+        case NV3_PATTERN_COLOR_0:
+            pg->pattern_color0 = data;
+            nv3_log("NV3: PGRAPH: Pattern COLOR_0 = 0x%08X\n", data);
+            break;
+        case NV3_PATTERN_COLOR_1:
+            pg->pattern_color1 = data;
+            nv3_log("NV3: PGRAPH: Pattern COLOR_1 = 0x%08X\n", data);
+            break;
+        case NV3_PATTERN_MONO_0:
+            pg->pattern_mono[0] = data;
+            nv3_log("NV3: PGRAPH: Pattern MONO_0 = 0x%08X\n", data);
+            break;
+        case NV3_PATTERN_MONO_1:
+            pg->pattern_mono[1] = data;
+            nv3_log("NV3: PGRAPH: Pattern MONO_1 = 0x%08X\n", data);
+            break;
+        default:
+            nv3_log("NV3: PGRAPH: Pattern unknown method 0x%04X data=0x%08X\n",
+                    method, data);
+            break;
+    }
+}
+
+/*
+ * Beta (class 0x0012).
+ * Per envytools: sets the beta blending factor.
+ */
+static void
+nv3_pgraph_class_beta(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    if (method == NV3_BETA_SET) {
+        nv3->pgraph.beta = data;
+        nv3_log("NV3: PGRAPH: Beta = 0x%08X\n", data);
+    } else {
+        nv3_log("NV3: PGRAPH: Beta unknown method 0x%04X data=0x%08X\n",
+                method, data);
+    }
+}
+
+/*
+ * Chroma key (class 0x0017).
+ * Per envytools: sets the chroma key transparency color.
+ */
+static void
+nv3_pgraph_class_chroma(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    if (method == NV3_CHROMA_COLOR) {
+        nv3->pgraph.chroma_color = data;
+        nv3->pgraph.chroma_valid = true;
+        nv3_log("NV3: PGRAPH: Chroma color = 0x%08X\n", data);
+    } else {
+        nv3_log("NV3: PGRAPH: Chroma unknown method 0x%04X data=0x%08X\n",
+                method, data);
+    }
+}
+
+/* ========================================================================
+ * Surface class handlers.
+ *
+ * Per envytools: NV3 has separate source and destination surfaces.
+ * The destination surface is where all 2D rendering writes go.
+ * The source surface is the read source for blit operations.
+ * ======================================================================== */
+
+/*
+ * Destination surface (class 0x0058).
+ * Per envytools class 0x0058 NV3_SURFACE_DST:
+ *   Sets the destination surface's VRAM offset, pitch, and pixel format.
+ */
+static void
+nv3_pgraph_class_surf_dst(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    switch (method) {
+        case NV3_SURF_DST_OFFSET:
+            pg->surf_dst_offset = data & nv3->svga.vram_mask;
+            nv3_log("NV3: PGRAPH: SurfDst OFFSET = 0x%08X\n",
+                    pg->surf_dst_offset);
+            break;
+        case NV3_SURF_DST_PITCH:
+            pg->surf_dst_pitch = data & 0xFFFF;
+            nv3_log("NV3: PGRAPH: SurfDst PITCH = %d\n",
+                    pg->surf_dst_pitch);
+            break;
+        case NV3_SURF_DST_FORMAT:
+            pg->surf_dst_format = data & 0xFF;
+            nv3_log("NV3: PGRAPH: SurfDst FORMAT = 0x%02X (%d bpp)\n",
+                    pg->surf_dst_format,
+                    nv3_surface_format_bpp(pg->surf_dst_format) * 8);
+            break;
+        default:
+            nv3_log("NV3: PGRAPH: SurfDst unknown method 0x%04X data=0x%08X\n",
+                    method, data);
+            break;
+    }
+}
+
+/*
+ * Source surface (class 0x0059).
+ * Per envytools class 0x0059 NV3_SURFACE_SRC:
+ *   Sets the source surface's VRAM offset, pitch, and pixel format.
+ */
+static void
+nv3_pgraph_class_surf_src(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    switch (method) {
+        case NV3_SURF_SRC_OFFSET:
+            pg->surf_src_offset = data & nv3->svga.vram_mask;
+            nv3_log("NV3: PGRAPH: SurfSrc OFFSET = 0x%08X\n",
+                    pg->surf_src_offset);
+            break;
+        case NV3_SURF_SRC_PITCH:
+            pg->surf_src_pitch = data & 0xFFFF;
+            nv3_log("NV3: PGRAPH: SurfSrc PITCH = %d\n",
+                    pg->surf_src_pitch);
+            break;
+        case NV3_SURF_SRC_FORMAT:
+            pg->surf_src_format = data & 0xFF;
+            nv3_log("NV3: PGRAPH: SurfSrc FORMAT = 0x%02X\n",
+                    pg->surf_src_format);
+            break;
+        default:
+            nv3_log("NV3: PGRAPH: SurfSrc unknown method 0x%04X data=0x%08X\n",
+                    method, data);
+            break;
+    }
+}
+
+/*
+ * Combined 2D surfaces (class 0x0042).
+ *
+ * Per envytools class 0x0042 NV03_CONTEXT_SURFACES_2D:
+ * This is the NV3-native combined surface class that sets both source
+ * and destination surfaces in a single object. The Win98 NV3 driver
+ * typically uses this class rather than separate 0x0058/0x0059 objects.
+ *
+ * Methods:
+ *   0x0300 = FORMAT — pixel format for both surfaces
+ *   0x0304 = PITCH — bits 15:0 = src pitch, bits 31:16 = dst pitch
+ *   0x0308 = OFFSET_SRC — source surface byte offset in VRAM
+ *   0x030C = OFFSET_DST — destination surface byte offset in VRAM
+ */
+static void
+nv3_pgraph_class_surf_2d(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    switch (method) {
+        case NV3_SURF2D_FORMAT:
+            /*
+             * Pixel format for both surfaces.
+             * Per envytools: bits [3:0] = format enum.
+             *   1 = Y8 (8bpp indexed)
+             *   2 = X1R5G5B5 (15bpp)
+             *   4 = R5G6B5 (16bpp)
+             *   6 = X8R8G8B8 (32bpp)
+             */
+            pg->surf_dst_format = data & 0xFF;
+            pg->surf_src_format = data & 0xFF;
+            nv3_log("NV3: PGRAPH: Surf2D FORMAT = 0x%02X (%d bpp)\n",
+                    pg->surf_dst_format,
+                    nv3_surface_format_bpp(pg->surf_dst_format) * 8);
+            break;
+
+        case NV3_SURF2D_PITCH:
+            /*
+             * Packed pitch: low 16 bits = source, high 16 bits = destination.
+             * Both are in bytes.
+             */
+            pg->surf_src_pitch = data & 0xFFFF;
+            pg->surf_dst_pitch = (data >> 16) & 0xFFFF;
+            nv3_log("NV3: PGRAPH: Surf2D PITCH src=%d dst=%d\n",
+                    pg->surf_src_pitch, pg->surf_dst_pitch);
+            break;
+
+        case NV3_SURF2D_OFFSET_SRC:
+            pg->surf_src_offset = data & nv3->svga.vram_mask;
+            nv3_log("NV3: PGRAPH: Surf2D OFFSET_SRC = 0x%08X\n",
+                    pg->surf_src_offset);
+            break;
+
+        case NV3_SURF2D_OFFSET_DST:
+            pg->surf_dst_offset = data & nv3->svga.vram_mask;
+            nv3_log("NV3: PGRAPH: Surf2D OFFSET_DST = 0x%08X\n",
+                    pg->surf_dst_offset);
+            break;
+
+        default:
+            nv3_log("NV3: PGRAPH: Surf2D unknown method 0x%04X data=0x%08X\n",
+                    method, data);
+            break;
+    }
+}
+
+/* ========================================================================
+ * Rendering class handlers.
+ *
+ * These perform actual pixel output to VRAM.
+ * ======================================================================== */
+
+/*
+ * Filled rectangle (class 0x001E).
+ *
+ * Per envytools class 0x001E NV1_GDI_RECT and class 0x005E NV4_GDI_RECT:
+ * The rectangle class fills an axis-aligned rectangle with a solid color.
+ * The color is latched first, then one or more rectangles are submitted
+ * as (POINT, SIZE) pairs.
+ *
+ * The Win98 NV3 driver uses this extensively for desktop background fill,
+ * window clearing, and other solid-fill operations.
+ */
+static void
+nv3_pgraph_class_rect(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    if (method == NV3_RECT_COLOR) {
+        pg->rect_color = data;
+        return;
+    }
+
+    /*
+     * Check if this is a rectangle POINT+SIZE pair.
+     * Per envytools: UNCLIPPED_RECT[i] starts at 0x0400 with stride 8.
+     *   POINT at even offsets (0x0400, 0x0408, 0x0410, ...)
+     *   SIZE at odd offsets (0x0404, 0x040C, 0x0414, ...)
+     */
+    if (method >= NV3_RECT_ARRAY_START && method < NV3_RECT_ARRAY_START + 32 * NV3_RECT_ARRAY_STRIDE) {
+        uint32_t rect_off = (method - NV3_RECT_ARRAY_START) % NV3_RECT_ARRAY_STRIDE;
+
+        if (rect_off == 0) {
+            /* POINT: bits 15:0 = X, bits 31:16 = Y — just latch for next SIZE */
+            pg->blit_dst_x = (int16_t) (data & 0xFFFF);
+            pg->blit_dst_y = (int16_t) ((data >> 16) & 0xFFFF);
+            return;
+        }
+
+        if (rect_off == 4) {
+            /* SIZE: bits 15:0 = W, bits 31:16 = H — trigger rendering */
+            int32_t w = (int16_t) (data & 0xFFFF);
+            int32_t h = (int16_t) ((data >> 16) & 0xFFFF);
+            int32_t x = pg->blit_dst_x;
+            int32_t y = pg->blit_dst_y;
+            uint32_t color = pg->rect_color;
+
+            if (w <= 0 || h <= 0)
+                return;
+
+            nv3_log("NV3: PGRAPH: Rect fill x=%d y=%d w=%d h=%d color=0x%08X rop=0x%02X\n",
+                    x, y, w, h, color, pg->rop3);
+
+            /*
+             * Fast path: SRCCOPY (0xCC) is the most common ROP.
+             * Skip ROP evaluation, destination read, and pattern lookup.
+             */
+            if (pg->rop3 == 0xCC) {
+                for (int32_t row = 0; row < h; row++) {
+                    for (int32_t col = 0; col < w; col++) {
+                        nv3_pgraph_write_pixel_srccopy(nv3, x + col, y + row, color);
+                    }
+                }
+            } else {
+                for (int32_t row = 0; row < h; row++) {
+                    for (int32_t col = 0; col < w; col++) {
+                        nv3_pgraph_write_pixel(nv3, x + col, y + row, color);
+                    }
+                }
+            }
+
+            /* Signal display refresh */
+            nv3->svga.fullchange = changeframecount;
+            return;
+        }
+    }
+
+    nv3_log("NV3: PGRAPH: Rect unknown method 0x%04X data=0x%08X\n",
+            method, data);
+}
+
+/*
+ * Screen-to-screen blit (class 0x001F).
+ *
+ * Per envytools class 0x001F NV1_BLIT:
+ * Copies a rectangular region from the source surface to the destination
+ * surface. POINT_IN sets the source origin, POINT_OUT sets the destination
+ * origin, and SIZE triggers the copy.
+ *
+ * The source surface offset/pitch/format is used for reading.
+ * The destination surface offset/pitch/format is used for writing.
+ *
+ * When source and destination overlap, the copy direction is adjusted
+ * to avoid corruption (copy from far end first for positive offsets).
+ */
+static void
+nv3_pgraph_class_blit(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    switch (method) {
+        case NV3_BLIT_POINT_IN:
+            /* Source origin: bits 15:0 = X, bits 31:16 = Y */
+            pg->blit_src_x = (int16_t) (data & 0xFFFF);
+            pg->blit_src_y = (int16_t) ((data >> 16) & 0xFFFF);
+            nv3_log("NV3: PGRAPH: Blit POINT_IN x=%d y=%d\n",
+                    pg->blit_src_x, pg->blit_src_y);
+            break;
+
+        case NV3_BLIT_POINT_OUT:
+            /* Destination origin: bits 15:0 = X, bits 31:16 = Y */
+            pg->blit_dst_x = (int16_t) (data & 0xFFFF);
+            pg->blit_dst_y = (int16_t) ((data >> 16) & 0xFFFF);
+            nv3_log("NV3: PGRAPH: Blit POINT_OUT x=%d y=%d\n",
+                    pg->blit_dst_x, pg->blit_dst_y);
+            break;
+
+        case NV3_BLIT_SIZE: {
+            /* Size: bits 15:0 = W, bits 31:16 = H — triggers the blit */
+            int32_t w = (int16_t) (data & 0xFFFF);
+            int32_t h = (int16_t) ((data >> 16) & 0xFFFF);
+            int32_t sx = pg->blit_src_x;
+            int32_t sy = pg->blit_src_y;
+            int32_t dx = pg->blit_dst_x;
+            int32_t dy = pg->blit_dst_y;
+
+            if (w <= 0 || h <= 0)
+                break;
+
+            nv3_log("NV3: PGRAPH: Blit src=(%d,%d) dst=(%d,%d) size=%dx%d rop=0x%02X\n",
+                    sx, sy, dx, dy, w, h, pg->rop3);
+
+            /*
+             * Handle overlapping regions by choosing copy direction.
+             * If destination is below/right of source, copy bottom-to-top
+             * and/or right-to-left to avoid overwriting source pixels
+             * before they are read.
+             */
+            int y_start, y_end, y_step;
+            int x_start, x_end, x_step;
+
+            if (dy > sy) {
+                y_start = h - 1; y_end = -1; y_step = -1;
+            } else {
+                y_start = 0; y_end = h; y_step = 1;
+            }
+
+            if (dx > sx) {
+                x_start = w - 1; x_end = -1; x_step = -1;
+            } else {
+                x_start = 0; x_end = w; x_step = 1;
+            }
+
+            if (pg->rop3 == 0xCC) {
+                /* SRCCOPY fast path — just copy pixels */
+                for (int32_t row = y_start; row != y_end; row += y_step) {
+                    for (int32_t col = x_start; col != x_end; col += x_step) {
+                        uint32_t pixel = nv3_surface_read_pixel(
+                            nv3,
+                            pg->surf_src_offset, pg->surf_src_pitch,
+                            pg->surf_src_format,
+                            sx + col, sy + row);
+                        nv3_pgraph_write_pixel_srccopy(nv3, dx + col, dy + row, pixel);
+                    }
+                }
+            } else {
+                /* General ROP3 path */
+                for (int32_t row = y_start; row != y_end; row += y_step) {
+                    for (int32_t col = x_start; col != x_end; col += x_step) {
+                        uint32_t pixel = nv3_surface_read_pixel(
+                            nv3,
+                            pg->surf_src_offset, pg->surf_src_pitch,
+                            pg->surf_src_format,
+                            sx + col, sy + row);
+                        nv3_pgraph_write_pixel(nv3, dx + col, dy + row, pixel);
+                    }
+                }
+            }
+
+            nv3->svga.fullchange = changeframecount;
+            break;
+        }
+
+        default:
+            nv3_log("NV3: PGRAPH: Blit unknown method 0x%04X data=0x%08X\n",
+                    method, data);
+            break;
+    }
+}
+
+/*
+ * Image from CPU (class 0x0021).
+ *
+ * Per envytools class 0x0021 NV1_IMAGE_FROM_CPU:
+ * Transfers pixel data from the CPU to the destination surface.
+ * The driver first sets the destination point, input size, output size,
+ * and color format, then sends packed pixel data via COLOR[] methods.
+ *
+ * Each COLOR[] write contains one or more pixels depending on the format:
+ *   32bpp: 1 pixel per dword
+ *   16bpp: 2 pixels per dword
+ *   8bpp:  4 pixels per dword
+ *
+ * The driver sends enough COLOR[] writes to fill the entire rectangle.
+ */
+static void
+nv3_pgraph_class_image_from_cpu(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t     *pg  = &nv3->pgraph;
+    nv3_image_state_t *im = &pg->image;
+
+    switch (method) {
+        case NV3_IFC_COLOR_FORMAT:
+            im->color_format = data;
+            nv3_log("NV3: PGRAPH: IFC COLOR_FORMAT = 0x%08X\n", data);
+            break;
+
+        case NV3_IFC_POINT:
+            /* Destination point: bits 15:0 = X, bits 31:16 = Y */
+            im->dst_x = (int16_t) (data & 0xFFFF);
+            im->dst_y = (int16_t) ((data >> 16) & 0xFFFF);
+            nv3_log("NV3: PGRAPH: IFC POINT x=%d y=%d\n",
+                    im->dst_x, im->dst_y);
+            break;
+
+        case NV3_IFC_SIZE_IN:
+            /* Input size: bits 15:0 = W, bits 31:16 = H */
+            im->size_in_w = (int16_t) (data & 0xFFFF);
+            im->size_in_h = (int16_t) ((data >> 16) & 0xFFFF);
+            nv3_log("NV3: PGRAPH: IFC SIZE_IN w=%d h=%d\n",
+                    im->size_in_w, im->size_in_h);
+            break;
+
+        case NV3_IFC_SIZE_OUT:
+            /*
+             * Output size: triggers the start of data transfer.
+             * Reset current pixel position to beginning of rectangle.
+             */
+            im->size_out_w = (int16_t) (data & 0xFFFF);
+            im->size_out_h = (int16_t) ((data >> 16) & 0xFFFF);
+            im->cur_x = 0;
+            im->cur_y = 0;
+            im->active = true;
+            nv3_log("NV3: PGRAPH: IFC SIZE_OUT w=%d h=%d (transfer started)\n",
+                    im->size_out_w, im->size_out_h);
+            break;
+
+        default:
+            /*
+             * COLOR[] data: method addresses 0x0400-0x07FC.
+             * Each write contains packed pixel data.
+             */
+            if (method >= NV3_IFC_COLOR_START && method < 0x0800 && im->active) {
+                int bpp = nv3_surface_format_bpp(pg->surf_dst_format);
+
+                /*
+                 * Extract pixels from the dword based on destination format.
+                 * 32bpp: 1 pixel per dword
+                 * 16bpp: 2 pixels per dword (low word first)
+                 * 8bpp:  4 pixels per dword (low byte first)
+                 */
+                int pixels_per_dword;
+                switch (bpp) {
+                    case 1:  pixels_per_dword = 4; break;
+                    case 2:  pixels_per_dword = 2; break;
+                    case 4:  pixels_per_dword = 1; break;
+                    default: pixels_per_dword = 2; break;
+                }
+
+                for (int p = 0; p < pixels_per_dword; p++) {
+                    if (!im->active)
+                        break;
+
+                    uint32_t pixel;
+                    switch (bpp) {
+                        case 1:
+                            pixel = (data >> (p * 8)) & 0xFF;
+                            break;
+                        case 2:
+                            pixel = (data >> (p * 16)) & 0xFFFF;
+                            break;
+                        case 4:
+                        default:
+                            pixel = data;
+                            break;
+                    }
+
+                    int dx = im->dst_x + im->cur_x;
+                    int dy = im->dst_y + im->cur_y;
+
+                    if (pg->rop3 == 0xCC)
+                        nv3_pgraph_write_pixel_srccopy(nv3, dx, dy, pixel);
+                    else
+                        nv3_pgraph_write_pixel(nv3, dx, dy, pixel);
+
+                    /* Advance to next pixel position (left-to-right, top-to-bottom) */
+                    im->cur_x++;
+                    if (im->cur_x >= im->size_in_w) {
+                        im->cur_x = 0;
+                        im->cur_y++;
+                        if (im->cur_y >= im->size_in_h) {
+                            /* Transfer complete */
+                            im->active = false;
+                            nv3->svga.fullchange = changeframecount;
+                        }
+                    }
+                }
+            } else {
+                nv3_log("NV3: PGRAPH: IFC unknown method 0x%04X data=0x%08X\n",
+                        method, data);
+            }
+            break;
+    }
+}
+
+/*
+ * GDI rectangle+text (class 0x004A).
+ *
+ * Per envytools class 0x004A NV3_GDI_TEXT:
+ * This class has three rendering paths:
+ *
+ * Path A: Unclipped solid rectangles (fast window fill)
+ *   - Write COLOR1_A (0x03FC) to set fill color
+ *   - Write UNCLIPPED_RECT[i].POINT (0x0400+i*8) and SIZE (0x0404+i*8)
+ *
+ * Path B: Clipped solid rectangles
+ *   - Write CLIP_B_POINT0/POINT1 to set clip region
+ *   - Write COLOR1_B to set color
+ *   - (Similar rect path but with clipping)
+ *
+ * Path C: Monochrome bitmap text rendering
+ *   - Write COLOR1_C (0x0BEC) to set foreground color
+ *   - Write SIZE_C (0x0BF0) for bitmap dimensions
+ *   - Write POINT_C (0x0BF4) for destination position
+ *   - Write MONO_COLOR1_C[i] (0x0C00+i*4) for 1bpp bitmap data
+ *
+ * The Win98 driver uses all three paths:
+ *   Path A for desktop fill and window background clearing
+ *   Path C for text rendering (GDI DrawText, TextOut)
+ */
+static void
+nv3_pgraph_class_gdi_text(nv3_t *nv3, uint32_t method, uint32_t data)
+{
+    nv3_pgraph_t         *pg  = &nv3->pgraph;
+    nv3_gdi_text_state_t *gdi = &pg->gdi;
+
+    /* ---- Common setup methods ---- */
+    if (method == NV3_GDI_COLOR_FORMAT) {
+        gdi->color_format = data;
+        nv3_log("NV3: PGRAPH: GDI COLOR_FORMAT = 0x%08X\n", data);
+        return;
+    }
+    if (method == NV3_GDI_MONO_FORMAT) {
+        gdi->mono_format = data;
+        nv3_log("NV3: PGRAPH: GDI MONO_FORMAT = %d\n", data);
+        return;
+    }
+
+    /* ---- Path A: Unclipped solid rectangles ---- */
+    if (method == NV3_GDI_COLOR1_A) {
+        gdi->color1 = data;
+        return;
+    }
+
+    if (method >= NV3_GDI_URECT_START && method < NV3_GDI_URECT_START + 32 * NV3_GDI_URECT_STRIDE) {
+        uint32_t rect_off = (method - NV3_GDI_URECT_START) % NV3_GDI_URECT_STRIDE;
+        if (rect_off == 0) {
+            /* POINT: x, y */
+            gdi->rect_x = (int16_t) (data & 0xFFFF);
+            gdi->rect_y = (int16_t) ((data >> 16) & 0xFFFF);
+            return;
+        }
+        if (rect_off == 4) {
+            /* SIZE: w, h — trigger solid rect fill */
+            int32_t w = (int16_t) (data & 0xFFFF);
+            int32_t h = (int16_t) ((data >> 16) & 0xFFFF);
+            int32_t x = gdi->rect_x;
+            int32_t y = gdi->rect_y;
+            uint32_t color = gdi->color1;
+
+            if (w <= 0 || h <= 0)
+                return;
+
+            nv3_log("NV3: PGRAPH: GDI rect fill x=%d y=%d w=%d h=%d "
+                    "color=0x%08X rop=0x%02X\n",
+                    x, y, w, h, color, pg->rop3);
+
+            if (pg->rop3 == 0xCC) {
+                for (int32_t row = 0; row < h; row++)
+                    for (int32_t col = 0; col < w; col++)
+                        nv3_pgraph_write_pixel_srccopy(nv3, x + col, y + row, color);
+            } else {
+                for (int32_t row = 0; row < h; row++)
+                    for (int32_t col = 0; col < w; col++)
+                        nv3_pgraph_write_pixel(nv3, x + col, y + row, color);
+            }
+
+            nv3->svga.fullchange = changeframecount;
+            return;
+        }
+    }
+
+    /* ---- Path B: Clip rect + color for clipped rects ---- */
+    if (method == NV3_GDI_CLIP_B_POINT0) {
+        gdi->clip_x = (int16_t) (data & 0xFFFF);
+        gdi->clip_y = (int16_t) ((data >> 16) & 0xFFFF);
+        return;
+    }
+    if (method == NV3_GDI_CLIP_B_POINT1) {
+        /*
+         * POINT1 defines the bottom-right corner (exclusive).
+         * Width = point1.x - point0.x, Height = point1.y - point0.y.
+         */
+        int32_t x1 = (int16_t) (data & 0xFFFF);
+        int32_t y1 = (int16_t) ((data >> 16) & 0xFFFF);
+        gdi->clip_w = x1 - gdi->clip_x;
+        gdi->clip_h = y1 - gdi->clip_y;
+        return;
+    }
+    if (method == NV3_GDI_COLOR1_B) {
+        gdi->color1 = data;
+        return;
+    }
+
+    /* ---- Path C clip rects ---- */
+    if (method >= NV3_GDI_CLIP_C_RECT_START
+        && method < NV3_GDI_CLIP_C_RECT_START + 32 * NV3_GDI_CLIP_C_RECT_STRIDE) {
+        /* These set per-text-operation clip rects — store but don't render */
+        uint32_t rect_off = (method - NV3_GDI_CLIP_C_RECT_START) % NV3_GDI_CLIP_C_RECT_STRIDE;
+        if (rect_off == 0) {
+            gdi->clip_x = (int16_t) (data & 0xFFFF);
+            gdi->clip_y = (int16_t) ((data >> 16) & 0xFFFF);
+        } else if (rect_off == 4) {
+            int32_t x1 = (int16_t) (data & 0xFFFF);
+            int32_t y1 = (int16_t) ((data >> 16) & 0xFFFF);
+            gdi->clip_w = x1 - gdi->clip_x;
+            gdi->clip_h = y1 - gdi->clip_y;
+        }
+        return;
+    }
+
+    /* ---- Path C: Monochrome text rendering ---- */
+    if (method == NV3_GDI_COLOR1_C) {
+        gdi->color1 = data;
+        nv3_log("NV3: PGRAPH: GDI COLOR1_C = 0x%08X\n", data);
+        return;
+    }
+
+    if (method == NV3_GDI_SIZE_C) {
+        gdi->rect_w = (int16_t) (data & 0xFFFF);
+        gdi->rect_h = (int16_t) ((data >> 16) & 0xFFFF);
+        nv3_log("NV3: PGRAPH: GDI SIZE_C w=%d h=%d\n",
+                gdi->rect_w, gdi->rect_h);
+        return;
+    }
+
+    if (method == NV3_GDI_POINT_C) {
+        /*
+         * POINT_C triggers the start of mono bitmap data transfer.
+         * Reset accumulation position.
+         */
+        gdi->rect_x = (int16_t) (data & 0xFFFF);
+        gdi->rect_y = (int16_t) ((data >> 16) & 0xFFFF);
+        gdi->cur_x = 0;
+        gdi->cur_y = 0;
+        gdi->active = true;
+        nv3_log("NV3: PGRAPH: GDI POINT_C x=%d y=%d (mono transfer started)\n",
+                gdi->rect_x, gdi->rect_y);
+        return;
+    }
+
+    /* MONO_COLOR1_C[i]: 1bpp bitmap data, 32 bits at a time */
+    if (method >= NV3_GDI_MONO_C_START && method < 0x1000 && gdi->active) {
+        /*
+         * Each dword contains 32 monochrome pixels.
+         * Per envytools: bit 0 of each dword is the first (leftmost) pixel
+         * when MONO_FORMAT is LE (little-endian).
+         *
+         * For CGA6 format (mono_format == 0), the bit order is reversed
+         * within each byte: bit 7 of byte 0 is the first pixel.
+         */
+        for (int bit = 0; bit < 32; bit++) {
+            if (!gdi->active)
+                break;
+
+            int px_bit;
+            if (gdi->mono_format == 1) {
+                /* LE: bit 0 = leftmost pixel */
+                px_bit = (data >> bit) & 1;
+            } else {
+                /*
+                 * CGA6: bit order is reversed within each byte.
+                 * Byte 0 bits 7..0 = pixels 0..7
+                 * Byte 1 bits 7..0 = pixels 8..15
+                 * etc.
+                 */
+                int byte_idx = bit / 8;
+                int bit_in_byte = 7 - (bit % 8);
+                px_bit = (data >> (byte_idx * 8 + bit_in_byte)) & 1;
+            }
+
+            int dx = gdi->rect_x + gdi->cur_x;
+            int dy = gdi->rect_y + gdi->cur_y;
+
+            /*
+             * Apply per-text clip rectangle.
+             * The clip rect from Path C clip rects limits where text
+             * pixels are actually drawn.
+             */
+            bool in_clip = (dx >= gdi->clip_x
+                         && dx < gdi->clip_x + gdi->clip_w
+                         && dy >= gdi->clip_y
+                         && dy < gdi->clip_y + gdi->clip_h);
+
+            if (px_bit && in_clip) {
+                /*
+                 * Foreground pixel (1 bit) — draw in color1.
+                 * Background pixels (0 bits) are transparent by
+                 * default for GDI text on NV3. Only foreground
+                 * pixels are written unless a specific ROP requires
+                 * the background.
+                 */
+                if (pg->rop3 == 0xCC)
+                    nv3_pgraph_write_pixel_srccopy(nv3, dx, dy, gdi->color1);
+                else
+                    nv3_pgraph_write_pixel(nv3, dx, dy, gdi->color1);
+            }
+
+            /* Advance pixel position */
+            gdi->cur_x++;
+            if (gdi->cur_x >= gdi->rect_w) {
+                gdi->cur_x = 0;
+                gdi->cur_y++;
+                if (gdi->cur_y >= gdi->rect_h) {
+                    gdi->active = false;
+                    nv3->svga.fullchange = changeframecount;
+                }
+            }
+        }
+        return;
+    }
+
+    nv3_log("NV3: PGRAPH: GDI unknown method 0x%04X data=0x%08X\n",
+            method, data);
+}
+
+/* ========================================================================
+ * PGRAPH method dispatch.
+ *
+ * Called by the PFIFO puller for every method submitted to a subchannel
+ * bound to a PGRAPH engine object.
+ *
+ * Per envytools graph/nv1-pgraph.html:
+ * The subchannel determines which object (and thus which class) the
+ * method is for. We look up the class from subchan_class[] (set during
+ * SetObject) and dispatch to the appropriate handler.
+ *
+ * Common methods (0x0100 = NOP, 0x0104 = NOTIFY) are handled for all
+ * classes before the class-specific dispatch.
+ * ======================================================================== */
+static void
+nv3_pgraph_method(nv3_t *nv3, uint32_t subchan, uint32_t method, uint32_t data)
+{
+    uint32_t obj_class = nv3->pgraph.subchan_class[subchan];
+
+    /* ---- Common methods ---- */
+    if (method == NV3_METHOD_NOP) {
+        /* NOP — do nothing */
+        return;
+    }
+
+    if (method == NV3_METHOD_NOTIFY) {
+        /*
+         * NOTIFY — signal completion. The driver checks the notifier
+         * in RAMIN to know when an operation completes.
+         * For now, this is a stub; full notifier DMA support deferred.
+         */
+        nv3_log("NV3: PGRAPH: NOTIFY on subchan %d class=0x%04X data=0x%08X\n",
+                subchan, obj_class, data);
+        return;
+    }
+
+    /*
+     * Context object binding methods (0x0180-0x01FC).
+     * Per envytools: these methods bind context objects (rop, clip,
+     * pattern, beta, surface, etc.) to the current rendering object.
+     * The data is the handle of the context object.
+     *
+     * On real NV3 hardware, this triggers RAMHT lookup and stores
+     * the context object's properties. For our emulation, the context
+     * objects are programmed directly through their own subchannel
+     * bindings, so we log and acknowledge these.
+     */
+    if (method >= 0x0180 && method <= 0x01FC) {
+        nv3_log("NV3: PGRAPH: Context bind method 0x%04X handle=0x%08X "
+                "(class=0x%04X subchan=%d)\n",
+                method, data, obj_class, subchan);
+        return;
+    }
+
+    /* ---- Class-specific dispatch ---- */
+    switch (obj_class) {
+        /* Context objects */
+        case NV3_CLASS_CLIP:
+            nv3_pgraph_class_clip(nv3, method, data);
+            break;
+
+        case NV3_CLASS_ROP:
+            nv3_pgraph_class_rop(nv3, method, data);
+            break;
+
+        case NV3_CLASS_PATTERN:
+            nv3_pgraph_class_pattern(nv3, method, data);
+            break;
+
+        case NV3_CLASS_BETA:
+            nv3_pgraph_class_beta(nv3, method, data);
+            break;
+
+        case NV3_CLASS_CHROMA:
+            nv3_pgraph_class_chroma(nv3, method, data);
+            break;
+
+        /* Surface objects */
+        case NV3_CLASS_SURF_2D:
+            nv3_pgraph_class_surf_2d(nv3, method, data);
+            break;
+
+        case NV3_CLASS_SURF_DST:
+            nv3_pgraph_class_surf_dst(nv3, method, data);
+            break;
+
+        case NV3_CLASS_SURF_SRC:
+            nv3_pgraph_class_surf_src(nv3, method, data);
+            break;
+
+        /* Rendering objects */
+        case NV3_CLASS_RECT:
+            nv3_pgraph_class_rect(nv3, method, data);
+            break;
+
+        case NV3_CLASS_BLIT:
+            nv3_pgraph_class_blit(nv3, method, data);
+            break;
+
+        case NV3_CLASS_IMAGE_FROM_CPU:
+            nv3_pgraph_class_image_from_cpu(nv3, method, data);
+            break;
+
+        case NV3_CLASS_GDI_TEXT:
+        case NV4_CLASS_GDI_TEXT:
+            nv3_pgraph_class_gdi_text(nv3, method, data);
+            break;
+
+        default:
+            /*
+             * Unknown class — log and consume silently.
+             * This handles classes we haven't implemented yet (Line,
+             * Point, Triangle, M2MF, etc.) as well as any driver
+             * objects with class IDs we don't recognize.
+             */
+            nv3_log("NV3: PGRAPH: unhandled class 0x%04X method 0x%04X "
+                    "data=0x%08X subchan=%d\n",
+                    obj_class, method, data, subchan);
+            break;
+    }
+}
+
+/*
+ * Initialize PGRAPH 2D engine default state.
+ *
+ * Called during device init and reset. Sets conservative defaults
+ * so that rendering works even before the driver programs all context
+ * objects (e.g., clip defaults to "no clipping").
+ */
+static void
+nv3_pgraph_init(nv3_t *nv3)
+{
+    nv3_pgraph_t *pg = &nv3->pgraph;
+
+    /* Clear interrupt state */
+    pg->intr_0    = 0;
+    pg->intr_en_0 = 0;
+    pg->debug_0   = 0;
+    pg->debug_1   = 0;
+    pg->debug_2   = 0;
+    pg->debug_3   = 0;
+    pg->ctx_switch = 0;
+
+    /* Clear subchannel bindings */
+    memset(pg->subchan_class, 0, sizeof(pg->subchan_class));
+
+    /*
+     * Default clip: entire addressable space (no clipping).
+     * Rendering objects check clip_valid before clipping.
+     */
+    pg->clip_x = 0;
+    pg->clip_y = 0;
+    pg->clip_w = 0x7FFF;
+    pg->clip_h = 0x7FFF;
+    pg->clip_valid = false;
+
+    /* Default ROP: SRCCOPY (0xCC) — most common, just use source */
+    pg->rop3 = 0xCC;
+
+    /* Default pattern: solid white fill */
+    pg->pattern_shape = 0;
+    pg->pattern_color0 = 0xFFFFFFFF;
+    pg->pattern_color1 = 0xFFFFFFFF;
+    pg->pattern_mono[0] = 0xFFFFFFFF;
+    pg->pattern_mono[1] = 0xFFFFFFFF;
+    pg->pattern_color_format = 0;
+    pg->pattern_mono_format = 1; /* LE */
+
+    /* Default beta: fully opaque */
+    pg->beta = 0x7FFFFFFF;
+
+    /* No chroma key */
+    pg->chroma_color = 0;
+    pg->chroma_valid = false;
+
+    /* Surfaces: zero offset, zero pitch — driver must set these */
+    pg->surf_dst_offset = 0;
+    pg->surf_dst_pitch  = 0;
+    pg->surf_dst_format = NV3_SURFACE_FORMAT_R5G6B5;
+
+    pg->surf_src_offset = 0;
+    pg->surf_src_pitch  = 0;
+    pg->surf_src_format = NV3_SURFACE_FORMAT_R5G6B5;
+
+    /* Clear rendering class state */
+    pg->rect_color = 0;
+    pg->blit_src_x = 0;
+    pg->blit_src_y = 0;
+    pg->blit_dst_x = 0;
+    pg->blit_dst_y = 0;
+
+    /* Clear image transfer state */
+    memset(&pg->image, 0, sizeof(pg->image));
+
+    /* Clear GDI text state */
+    memset(&pg->gdi, 0, sizeof(pg->gdi));
+
+    /* Clear register bank */
+    memset(pg->regs, 0, sizeof(pg->regs));
+}
+
+/* ========================================================================
  * PFIFO helper: compute RAMHT hash.
  *
  * Per envytools fifo/nv1-pfifo.html:
@@ -3154,9 +4554,33 @@ nv3_pfifo_puller_run(nv3_t *nv3)
             if (nv3_ramht_lookup(nv3, data, channel, &eng, &inst)) {
                 nv3->pfifo.subchan_object[subchan] = data;
                 nv3->pfifo.cache1.pull_engine = eng;
+
+                /*
+                 * Read the object's class from its RAMIN instance data.
+                 *
+                 * Per envytools fifo/nv1-pfifo.html and graph/nv1-pgraph.html:
+                 * The RAMIN instance address points to a 16-byte object
+                 * descriptor. Word 0 contains the graphics class in bits
+                 * [11:0] on NV3 (bits [7:0] on NV1).
+                 *
+                 * We translate the PRAMIN-relative instance offset to a
+                 * VRAM address (PRAMIN maps to top 1MB of VRAM).
+                 */
+                uint32_t pramin_vram_base = nv3->vram_size - NV3_PRAMIN_VRAM_SIZE;
+                uint32_t inst_vram_addr = pramin_vram_base + inst;
+                uint32_t obj_class = 0;
+
+                if (inst_vram_addr + 3 < nv3->vram_size) {
+                    uint32_t inst_word0 = *(uint32_t *) &nv3->svga.vram[inst_vram_addr];
+                    obj_class = inst_word0 & 0xFFF;
+                }
+
+                nv3->pgraph.subchan_class[subchan] = obj_class;
+                nv3->pgraph.ctx_switch = obj_class;
+
                 nv3_log("NV3: PFIFO puller: SetObject subchan=%d handle=0x%08X "
-                        "engine=%d instance=0x%04X\n",
-                        subchan, data, eng, inst);
+                        "engine=%d instance=0x%04X class=0x%04X\n",
+                        subchan, data, eng, inst, obj_class);
             } else {
                 /*
                  * Object not found in RAMHT — this is a CACHE_ERROR.
@@ -3174,20 +4598,25 @@ nv3_pfifo_puller_run(nv3_t *nv3)
             /*
              * Engine method dispatch.
              *
-             * Phase 3 stub: for now, log the method and silently consume it.
-             * In Phase 4, this will dispatch to PGRAPH for 2D methods.
-             * In Phase 5, this will dispatch to PGRAPH for 3D methods.
-             *
-             * The method address is: (method_number << 2) + 0x100
-             * within the subchannel's address space.
+             * The method address is method_number << 2 within the
+             * subchannel. Dispatch to the appropriate engine based
+             * on pull_engine (set during SetObject).
              */
             uint32_t method_addr = method << 2;
-            (void) method_addr;
-            (void) data;
+            uint32_t engine = nv3->pfifo.cache1.pull_engine;
 
-            nv3_log("NV3: PFIFO puller: dispatch ch=%d sub=%d method=0x%04X "
-                    "data=0x%08X (engine stub)\n",
-                    channel, subchan, method << 2, data);
+            if (engine == NV3_ENGINE_PGRAPH) {
+                nv3_pgraph_method(nv3, subchan, method_addr, data);
+            } else {
+                /*
+                 * SW engine or PDMA — silently consume for now.
+                 * Software methods are handled by the driver's
+                 * interrupt handler, not the hardware.
+                 */
+                nv3_log("NV3: PFIFO puller: engine %d method=0x%04X "
+                        "data=0x%08X (not PGRAPH, ignored)\n",
+                        engine, method_addr, data);
+            }
         }
 
         /* Advance GET pointer (ring buffer wrap) */
@@ -3522,6 +4951,9 @@ nv3_init(const device_t *info)
 
     /* PRAMDAC - PLL clocks and DAC */
     nv3_pramdac_init(nv3);
+
+    /* PGRAPH - 2D/3D Graphics Engine */
+    nv3_pgraph_init(nv3);
 
     /* PFIFO - Command FIFO */
     nv3_pfifo_init(nv3);

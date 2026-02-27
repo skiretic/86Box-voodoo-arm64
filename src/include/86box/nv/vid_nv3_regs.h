@@ -411,7 +411,209 @@
 #define NV3_PGRAPH_START          0x400000
 #define NV3_PGRAPH_INTR_0         0x400100
 #define NV3_PGRAPH_INTR_EN_0      0x400140
+#define NV3_PGRAPH_DEBUG_0        0x400080
+#define NV3_PGRAPH_DEBUG_1        0x400084
+#define NV3_PGRAPH_DEBUG_2        0x400088
+#define NV3_PGRAPH_DEBUG_3        0x40008C
+#define NV3_PGRAPH_CTX_SWITCH     0x400180
+#define NV3_PGRAPH_CTX_CONTROL    0x400190
 #define NV3_PGRAPH_END            0x400FFF
+
+/* ========================================================================
+ * PGRAPH 2D object method offsets.
+ *
+ * Per envytools graph/nv1-2d.html and nv3-gdi.html:
+ * Methods 0x0000-0x00FF are common to all classes.
+ * Methods 0x0100-0x01FF typically hold context object bindings.
+ * Methods 0x0200+ are class-specific.
+ *
+ * These offsets are the byte addresses within the subchannel space.
+ * The PFIFO pusher strips the channel/subchannel prefix; these are
+ * the "method" value as seen by PGRAPH.
+ * ======================================================================== */
+
+/* Common methods for all classes */
+#define NV3_METHOD_SET_OBJECT     0x0000  /* Handled by puller, not PGRAPH */
+#define NV3_METHOD_NOP            0x0100  /* No operation */
+#define NV3_METHOD_NOTIFY         0x0104  /* Trigger DMA notifier */
+
+/*
+ * Context object binding methods (0x0180-0x01FC).
+ * Per envytools: these bind context objects (clip, rop, pattern, etc.)
+ * to the current rendering object. The data is the object handle;
+ * the puller resolves it through RAMHT.
+ * On NV3, context binding is done implicitly through the PGRAPH context.
+ * The driver sets up RAMIN with the proper context object references.
+ */
+
+/*
+ * Combined 2D surfaces (class 0x0042) methods.
+ * Per envytools class 0x0042 NV03_CONTEXT_SURFACES_2D:
+ *   0x0300 = FORMAT (pixel format for both surfaces)
+ *   0x0304 = PITCH  (bits 15:0 = src pitch, bits 31:16 = dst pitch)
+ *   0x0308 = OFFSET_SRC (source byte offset)
+ *   0x030C = OFFSET_DST (destination byte offset)
+ */
+#define NV3_SURF2D_FORMAT        0x0300
+#define NV3_SURF2D_PITCH         0x0304
+#define NV3_SURF2D_OFFSET_SRC    0x0308
+#define NV3_SURF2D_OFFSET_DST    0x030C
+
+/*
+ * Surface destination (class 0x0058) methods.
+ * Per envytools class 0x0058 NV3_SURFACE_DST:
+ *   0x0300 = OFFSET (byte offset in VRAM)
+ *   0x0308 = PITCH  (bytes per scanline)
+ *   0x030C = FORMAT (pixel format)
+ */
+#define NV3_SURF_DST_OFFSET       0x0300
+#define NV3_SURF_DST_PITCH        0x0308
+#define NV3_SURF_DST_FORMAT       0x030C
+
+/*
+ * Surface source (class 0x0059) methods.
+ * Per envytools class 0x0059 NV3_SURFACE_SRC:
+ *   0x0300 = OFFSET
+ *   0x0308 = PITCH
+ *   0x030C = FORMAT
+ */
+#define NV3_SURF_SRC_OFFSET       0x0300
+#define NV3_SURF_SRC_PITCH        0x0308
+#define NV3_SURF_SRC_FORMAT       0x030C
+
+/*
+ * Clip rectangle (class 0x0019) methods.
+ * Per envytools class 0x0019 NV1_CLIP:
+ *   0x0300 = POINT (bits 15:0 = X, bits 31:16 = Y)
+ *   0x0304 = SIZE  (bits 15:0 = W, bits 31:16 = H)
+ */
+#define NV3_CLIP_POINT            0x0300
+#define NV3_CLIP_SIZE             0x0304
+
+/*
+ * ROP (class 0x0043) methods.
+ * Per envytools class 0x0043 NV1_ROP:
+ *   0x0300 = ROP (bits 7:0 = ROP3 value, 0-255)
+ */
+#define NV3_ROP_SET               0x0300
+
+/*
+ * Pattern (class 0x0018) methods.
+ * Per envytools class 0x0018 NV1_PATTERN:
+ *   0x0300 = COLOR_FORMAT
+ *   0x0304 = MONO_FORMAT (0=CGA6, 1=LE)
+ *   0x0308 = SHAPE (0=8x8, 1=64x1, 2=1x64)
+ *   0x030C = COLOR_0 (background)
+ *   0x0310 = COLOR_1 (foreground)
+ *   0x0318 = MONO_0 (low 32 bits of 64-bit pattern)
+ *   0x031C = MONO_1 (high 32 bits)
+ */
+#define NV3_PATTERN_COLOR_FORMAT  0x0300
+#define NV3_PATTERN_MONO_FORMAT   0x0304
+#define NV3_PATTERN_SHAPE         0x0308
+#define NV3_PATTERN_COLOR_0       0x030C
+#define NV3_PATTERN_COLOR_1       0x0310
+#define NV3_PATTERN_MONO_0        0x0318
+#define NV3_PATTERN_MONO_1        0x031C
+
+/*
+ * Beta (class 0x0012) methods.
+ * Per envytools class 0x0012 NV1_BETA:
+ *   0x0300 = BETA_1D31 (31-bit fixed-point beta factor)
+ */
+#define NV3_BETA_SET              0x0300
+
+/*
+ * Chroma (class 0x0017) methods.
+ * Per envytools class 0x0017 NV1_CHROMA:
+ *   0x0304 = COLOR (chroma key color)
+ */
+#define NV3_CHROMA_COLOR          0x0304
+
+/*
+ * Filled rectangle (class 0x001E) methods.
+ * Per envytools class 0x001E NV01_RENDER_SOLID_RECTANGLE:
+ *   0x0300 = COLOR (fill color)
+ *   0x0400 + i*8 = RECTANGLE[i].POINT (bits 15:0=X, 31:16=Y)
+ *   0x0404 + i*8 = RECTANGLE[i].SIZE (bits 15:0=W, 31:16=H)
+ */
+#define NV3_RECT_COLOR            0x0300
+#define NV3_RECT_ARRAY_START      0x0400
+#define NV3_RECT_ARRAY_STRIDE     8
+
+/*
+ * Screen-to-screen blit (class 0x001F) methods.
+ * Per envytools class 0x001F NV1_BLIT:
+ *   0x0300 = POINT_IN  (bits 15:0 = X, bits 31:16 = Y)
+ *   0x0304 = POINT_OUT (bits 15:0 = X, bits 31:16 = Y)
+ *   0x0308 = SIZE      (bits 15:0 = W, bits 31:16 = H)
+ */
+#define NV3_BLIT_POINT_IN         0x0300
+#define NV3_BLIT_POINT_OUT        0x0304
+#define NV3_BLIT_SIZE             0x0308
+
+/*
+ * Image from CPU (class 0x0021) methods.
+ * Per envytools class 0x0021 NV1_IMAGE_FROM_CPU:
+ *   0x0300 = POINT (bits 15:0 = X, bits 31:16 = Y)
+ *   0x0304 = SIZE_IN  (bits 15:0 = W, bits 31:16 = H)
+ *   0x0308 = SIZE_OUT (bits 15:0 = W, bits 31:16 = H)
+ *   0x030C = COLOR_FORMAT
+ *   0x0400 + i*4 = COLOR[i] (packed pixel data)
+ */
+#define NV3_IFC_POINT             0x0300
+#define NV3_IFC_SIZE_IN           0x0304
+#define NV3_IFC_SIZE_OUT          0x0308
+#define NV3_IFC_COLOR_FORMAT      0x030C
+#define NV3_IFC_COLOR_START       0x0400
+
+/*
+ * GDI rectangle+text (class 0x004A) methods.
+ * Per envytools class 0x004A NV3_GDI_TEXT:
+ *   0x0300 = COLOR_FORMAT
+ *   0x0304 = MONO_FORMAT
+ *   0x03FC = COLOR1_A (for solid rect fill)
+ *   0x0400 + i*8 = UNCLIPPED_RECT[i].POINT (x, y)
+ *   0x0404 + i*8 = UNCLIPPED_RECT[i].SIZE (w, h)
+ *   0x07F4 = CLIP_B_POINT0 (clip rect origin)
+ *   0x07F8 = CLIP_B_POINT1 (clip rect corner)
+ *   0x07FC = COLOR1_B (foreground for text)
+ *   0x0800 + i*8 = CLIP_C_POINT0[i] (text rect origin)
+ *   0x0804 + i*8 = CLIP_C_POINT1[i] (text rect corner)
+ *   0x0BEC = COLOR1_C (foreground for text)
+ *   0x0BF0 = SIZE_C (w, h of mono bitmap)
+ *   0x0BF4 = POINT_C (x, y of mono bitmap)
+ *   0x0C00 + i*4 = MONO_COLOR1_C[i] (mono bitmap data)
+ *
+ * Also includes a solid rectangle fill path via:
+ *   0x03FC = COLOR1_A
+ *   0x0400 = UNCLIPPED_RECT[0].POINT
+ *   ...
+ */
+#define NV3_GDI_COLOR_FORMAT      0x0300
+#define NV3_GDI_MONO_FORMAT       0x0304
+#define NV3_GDI_COLOR1_A          0x03FC
+#define NV3_GDI_URECT_START       0x0400
+#define NV3_GDI_URECT_STRIDE      8
+#define NV3_GDI_CLIP_B_POINT0     0x07F4
+#define NV3_GDI_CLIP_B_POINT1     0x07F8
+#define NV3_GDI_COLOR1_B          0x07FC
+#define NV3_GDI_CLIP_C_RECT_START 0x0800
+#define NV3_GDI_CLIP_C_RECT_STRIDE 8
+#define NV3_GDI_COLOR1_C          0x0BEC
+#define NV3_GDI_SIZE_C            0x0BF0
+#define NV3_GDI_POINT_C           0x0BF4
+#define NV3_GDI_MONO_C_START      0x0C00
+
+/*
+ * PGRAPH interrupt bit definitions.
+ * Per envytools: bit meanings for PGRAPH_INTR_0.
+ */
+#define NV3_PGRAPH_INTR_NOTIFY        (1 << 0)
+#define NV3_PGRAPH_INTR_MISSING_HW    (1 << 4)
+#define NV3_PGRAPH_INTR_TLB_PTE       (1 << 8)
+#define NV3_PGRAPH_INTR_CONTEXT_SWITCH (1 << 12)
+#define NV3_PGRAPH_INTR_BUFFER_NOTIFY (1 << 16)
 
 /* ========================================================================
  * PCRTC - Display Controller (0x600000-0x600FFF)
