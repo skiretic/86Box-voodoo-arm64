@@ -88,6 +88,31 @@ static int nv3_trace_active  = 0;
 static int nv3_trace_count   = 0;
 
 /*
+ * Render diagnostics: one-shot dump triggered on first extended mode entry.
+ * Fires in nv3_vblank_start on the FIRST vblank after mode switch,
+ * capturing the actual values the SVGA core uses for rendering (which
+ * may differ from what nv3_recalctimings sets due to post-processing
+ * in svga_recalctimings).
+ */
+static int nv3_diag_pending   = 0; /* set in recalctimings, consumed in vblank */
+static int nv3_diag_fired     = 0; /* only fire once per session */
+static int nv3_diag_scanlines = 0; /* count scanlines for per-scanline dump */
+
+/*
+ * Delayed render diagnostic: fires after ~30 frames to capture steady-state
+ * values (after driver has had time to paint the desktop via PGRAPH 2D).
+ */
+static int nv3_diag_delayed_pending = 0;
+static int nv3_diag_frame_count     = 0;
+
+/*
+ * Framebuffer write counters — used by LFB/banked write handlers and
+ * the delayed diagnostic to track whether any framebuffer writes occurred.
+ */
+static uint32_t nv3_lfb_write_count    = 0;
+static uint32_t nv3_banked_write_count = 0;
+
+/*
  * Detailed MMIO read/write trace logging (Fix 3).
  * Controlled by ENABLE_NV3_MMIO_TRACE_LOG. Disabled by default.
  * When enabled, every MMIO read and write is logged with address,
@@ -231,6 +256,201 @@ nv3_vblank_start(svga_t *svga)
 
     /* Propagate to PMC and PCI IRQ line */
     nv3_update_irq(nv3);
+
+    /*
+     * Render diagnostic: dump actual render-time state on first vblank
+     * after extended mode entry. These values reflect the SVGA core's
+     * post-processing (hblank_sub, lowres switch, overscan calc) which
+     * runs AFTER nv3_recalctimings returns.
+     */
+    if (nv3_diag_pending && !nv3_diag_fired) {
+        nv3_diag_fired   = 1;
+        nv3_diag_pending = 0;
+
+        nv3_log("NV3: ========== RENDER DIAGNOSTIC (at vblank) ==========\n");
+        nv3_log("NV3: RENDER_DIAG: hdisp=%d hdisp_time=%d dispend=%d "
+                "crtc1=0x%02x crtc13=0x%02x\n",
+                svga->hdisp, svga->hdisp_time, svga->dispend,
+                svga->crtc[1], svga->crtc[0x13]);
+        nv3_log("NV3: RENDER_DIAG: rowoffset=%d (stride=%d) lowres=%d "
+                "bpp=%d\n",
+                svga->rowoffset, svga->rowoffset << 3, svga->lowres,
+                svga->bpp);
+        nv3_log("NV3: RENDER_DIAG: memaddr=0x%x memaddr_backup=0x%x "
+                "memaddr_latch=0x%x hblank_sub=%d\n",
+                svga->memaddr, svga->memaddr_backup,
+                svga->memaddr_latch, svga->hblank_sub);
+        nv3_log("NV3: RENDER_DIAG: packed_chain4=%d fb_only=%d "
+                "chain4=%d force_old_addr=%d\n",
+                svga->packed_chain4, svga->fb_only,
+                svga->chain4, svga->force_old_addr);
+
+        /* Compare render function pointer against known functions */
+        nv3_log("NV3: RENDER_DIAG: render=%p "
+                "8bpp_highres=%p 8bpp_lowres=%p blank=%p\n",
+                (void *) svga->render,
+                (void *) svga_render_8bpp_highres,
+                (void *) svga_render_8bpp_lowres,
+                (void *) svga_render_blank);
+        int is_8hi  = (svga->render == svga_render_8bpp_highres);
+        int is_8lo  = (svga->render == svga_render_8bpp_lowres);
+        int is_blnk = (svga->render == svga_render_blank);
+        nv3_log("NV3: RENDER_DIAG: render_is_8bpp_highres=%d "
+                "render_is_8bpp_lowres=%d render_is_blank=%d\n",
+                is_8hi, is_8lo, is_blnk);
+
+        nv3_log("NV3: RENDER_DIAG: gdcreg5=0x%02x gdcreg6=0x%02x "
+                "seqregs1=0x%02x seqregs4=0x%02x attrregs10=0x%02x\n",
+                svga->gdcreg[5], svga->gdcreg[6],
+                svga->seqregs[1], svga->seqregs[4], svga->attrregs[0x10]);
+        nv3_log("NV3: RENDER_DIAG: override=%d hoverride=%d "
+                "scrblank=%d crtc17=0x%02x attr_pal_en=%d\n",
+                svga->override, svga->hoverride,
+                svga->scrblank, svga->crtc[0x17], svga->attr_palette_enable);
+        nv3_log("NV3: RENDER_DIAG: x_add=%d y_add=%d left_overscan=%d "
+                "scrollcache=%d\n",
+                svga->x_add, svga->y_add, svga->left_overscan,
+                svga->scrollcache);
+        nv3_log("NV3: RENDER_DIAG: dots_per_clock=%d char_width=%d "
+                "linedbl=%d rowcount=%d split=%d\n",
+                svga->dots_per_clock, svga->char_width,
+                svga->linedbl, svga->rowcount, svga->split);
+        nv3_log("NV3: RENDER_DIAG: htotal=%d vtotal=%d vsyncstart=%d "
+                "vblankstart=%d vc=%d\n",
+                svga->htotal, svga->vtotal, svga->vsyncstart,
+                svga->vblankstart, svga->vc);
+        nv3_log("NV3: RENDER_DIAG: write_bank=0x%x read_bank=0x%x "
+                "vram_display_mask=0x%x\n",
+                svga->write_bank, svga->read_bank,
+                svga->vram_display_mask);
+        nv3_log("NV3: RENDER_DIAG: adv_flags=0x%x remap_required=%d "
+                "force_shifter_bypass=%d\n",
+                svga->adv_flags, svga->remap_required,
+                svga->force_shifter_bypass);
+        nv3_log("NV3: RENDER_DIAG: crtc14=0x%02x (dwordshift=%d) "
+                "crtc17=0x%02x (wordshift=%d wordincr=%d)\n",
+                svga->crtc[0x14],
+                (svga->crtc[0x14] & 0x40) ? 1 : 0,
+                svga->crtc[0x17],
+                (svga->crtc[0x17] & 0x40) ? 0 : 1,
+                (svga->crtc[0x17] & 0x08) ? 1 : 0);
+
+        /* Compute what the renderer will actually use */
+        int forcepacked = svga->force_old_addr || svga->packed_chain4;
+        int dwordshift  = (svga->crtc[0x14] & 0x40) ? 1 : 0;
+        int wordshift2  = ((svga->crtc[0x17] & 0x40) == 0 && !dwordshift) ? 1 : 0;
+        int incbypow2   = forcepacked ? 0 : (dwordshift ? 2 : wordshift2 ? 1 : 0);
+        int dwordincr   = (svga->crtc[0x14] & 0x20) ? 1 : 0;
+        int wordincr    = (svga->crtc[0x17] & 0x08) ? 1 : 0;
+        int incevery    = forcepacked ? 1 : (dwordincr && !wordincr ? 4 : wordincr ? 2 : 1);
+        nv3_log("NV3: RENDER_DIAG: COMPUTED: forcepacked=%d incbypow2=%d "
+                "incevery=%d charwidth=%d\n",
+                forcepacked, incbypow2, incevery,
+                1 * 4); /* dotwidth=1, combine8bits charwidth=4 */
+
+        /* Expected per-scanline memaddr advance:
+         * renderer advances memaddr by 4 per character (incevery=1)
+         * for hdisp/charwidth iterations.
+         * Then SVGA core resets to memaddr_backup and adds rowoffset<<3.
+         */
+        int render_advance = (svga->hdisp / 4) * 4; /* 4 bytes per char */
+        int scanline_advance = svga->rowoffset << 3;
+        nv3_log("NV3: RENDER_DIAG: EXPECTED: render_bytes_per_line=%d "
+                "scanline_advance=%d (should both=%d for 640x8bpp)\n",
+                render_advance, scanline_advance, svga->hdisp);
+
+        nv3_log("NV3: ========== END RENDER DIAGNOSTIC ==========\n");
+    }
+
+    /*
+     * Delayed diagnostic: fires after ~30 frames of steady state.
+     * By this time the driver should have painted the desktop (either
+     * via CPU writes or PGRAPH 2D blit operations), so we can see
+     * whether VRAM actually contains desktop data or still holds
+     * stale VGA text mode content.
+     */
+    if (nv3_diag_delayed_pending) {
+        nv3_diag_frame_count++;
+        if (nv3_diag_frame_count >= 30) {
+            nv3_diag_delayed_pending = 0;
+
+            nv3_log("NV3: ========== DELAYED RENDER DIAGNOSTIC "
+                    "(frame %d) ==========\n", nv3_diag_frame_count);
+            nv3_log("NV3: DELAYED_DIAG: memaddr=0x%x memaddr_backup=0x%x "
+                    "memaddr_latch=0x%x\n",
+                    svga->memaddr, svga->memaddr_backup,
+                    svga->memaddr_latch);
+            nv3_log("NV3: DELAYED_DIAG: rowoffset=%d (stride=%d) bpp=%d "
+                    "hdisp=%d dispend=%d\n",
+                    svga->rowoffset, svga->rowoffset << 3, svga->bpp,
+                    svga->hdisp, svga->dispend);
+            nv3_log("NV3: DELAYED_DIAG: scrblank=%d attr_palette_enable=%d "
+                    "crtc17=0x%02x\n",
+                    svga->scrblank, svga->attr_palette_enable,
+                    svga->crtc[0x17]);
+
+            /* Render function pointer comparison */
+            int is_8hi  = (svga->render == svga_render_8bpp_highres);
+            int is_8lo  = (svga->render == svga_render_8bpp_lowres);
+            int is_16hi = (svga->render == svga_render_16bpp_highres);
+            int is_32hi = (svga->render == svga_render_32bpp_highres);
+            int is_blnk = (svga->render == svga_render_blank);
+            nv3_log("NV3: DELAYED_DIAG: render=%p "
+                    "is_8hi=%d is_8lo=%d is_16hi=%d is_32hi=%d "
+                    "is_blank=%d\n",
+                    (void *) svga->render,
+                    is_8hi, is_8lo, is_16hi, is_32hi, is_blnk);
+
+            /* Framebuffer write activity since mode switch */
+            nv3_log("NV3: DELAYED_DIAG: lfb_write_count=%u "
+                    "banked_write_count=%u\n",
+                    nv3_lfb_write_count, nv3_banked_write_count);
+
+            /* VRAM content inspection: check for 80-byte repeat pattern
+             * (VGA text mode artifact: 80 columns * 1 byte = 80-byte period) */
+            nv3_log("NV3: DELAYED_DIAG: VRAM[0..15] = "
+                    "%02x %02x %02x %02x %02x %02x %02x %02x "
+                    "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                    svga->vram[0], svga->vram[1], svga->vram[2],
+                    svga->vram[3], svga->vram[4], svga->vram[5],
+                    svga->vram[6], svga->vram[7], svga->vram[8],
+                    svga->vram[9], svga->vram[10], svga->vram[11],
+                    svga->vram[12], svga->vram[13], svga->vram[14],
+                    svga->vram[15]);
+            nv3_log("NV3: DELAYED_DIAG: VRAM[80..95] = "
+                    "%02x %02x %02x %02x %02x %02x %02x %02x "
+                    "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                    svga->vram[80], svga->vram[81], svga->vram[82],
+                    svga->vram[83], svga->vram[84], svga->vram[85],
+                    svga->vram[86], svga->vram[87], svga->vram[88],
+                    svga->vram[89], svga->vram[90], svga->vram[91],
+                    svga->vram[92], svga->vram[93], svga->vram[94],
+                    svga->vram[95]);
+            nv3_log("NV3: DELAYED_DIAG: VRAM[640..655] = "
+                    "%02x %02x %02x %02x %02x %02x %02x %02x "
+                    "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                    svga->vram[640], svga->vram[641], svga->vram[642],
+                    svga->vram[643], svga->vram[644], svga->vram[645],
+                    svga->vram[646], svga->vram[647], svga->vram[648],
+                    svga->vram[649], svga->vram[650], svga->vram[651],
+                    svga->vram[652], svga->vram[653], svga->vram[654],
+                    svga->vram[655]);
+
+            /* Check if VRAM[0..15] == VRAM[80..95] (80-byte repeat = stale text) */
+            int repeat_80 = 1;
+            for (int i = 0; i < 16; i++) {
+                if (svga->vram[i] != svga->vram[80 + i]) {
+                    repeat_80 = 0;
+                    break;
+                }
+            }
+            nv3_log("NV3: DELAYED_DIAG: 80-byte repeat detected = %s\n",
+                    repeat_80 ? "YES (stale VGA text data!)" : "no");
+
+            nv3_log("NV3: ========== END DELAYED RENDER DIAGNOSTIC "
+                    "==========\n");
+        }
+    }
 }
 
 /* ========================================================================
@@ -1294,11 +1514,34 @@ nv3_lfb_readl(uint32_t addr, void *priv)
     return *(uint32_t *) &svga->vram[addr];
 }
 
+/* Diagnostic: translate_address hook to log VGA banked write addresses */
+static uint32_t
+nv3_translate_address(uint32_t addr, void *priv)
+{
+    if (nv3_banked_write_count < 30
+        || (nv3_banked_write_count >= 100000 && nv3_banked_write_count < 100010)
+        || (nv3_banked_write_count % 500000 == 0)) {
+        nv3_t  *nv3  = (nv3_t *) priv;
+        svga_t *svga = &nv3->svga;
+        nv3_log("NV3: BANKED write #%u final_addr=0x%08x "
+                "write_bank=0x%x fb_only=%d chain4=%d\n",
+                nv3_banked_write_count, addr,
+                svga->write_bank, svga->fb_only, svga->chain4);
+    }
+    nv3_banked_write_count++;
+    return addr; /* passthrough */
+}
+
 static void
 nv3_lfb_write(uint32_t addr, uint8_t val, void *priv)
 {
     nv3_t  *nv3  = (nv3_t *) priv;
     svga_t *svga = &nv3->svga;
+
+    if (nv3_lfb_write_count < 5 || (nv3_lfb_write_count % 100000 == 0))
+        nv3_log("NV3: LFB write #%u addr=0x%08x val=0x%02x\n",
+                nv3_lfb_write_count, addr, val);
+    nv3_lfb_write_count++;
 
     addr &= svga->vram_mask;
     svga->vram[addr]             = val;
@@ -1537,6 +1780,10 @@ nv3_svga_out(uint16_t addr, uint8_t val, void *priv)
                         svga->write_bank = (uint32_t) nv3->cio_write_bank << 15;
                     else
                         svga->write_bank = (uint32_t) nv3->cio_write_bank << 13;
+                    nv3_log("NV3: BANK WRITE reg=0x%02x val=%d fb_only=%d "
+                            "write_bank=0x%x chain4=%d gdcreg6=0x%02x\n",
+                            crtcreg, val, svga->fb_only,
+                            svga->write_bank, svga->chain4, svga->gdcreg[6]);
                     break;
 
                 case NV3_CRTC_RMA:
@@ -1861,11 +2108,101 @@ nv3_recalctimings(svga_t *svga)
     svga->monitor->mon_overscan_y = 0;
     svga->monitor->mon_overscan_x = 0;
 
+    /*
+     * Force screen-on in extended mode.
+     *
+     * On real NV3 hardware, the PCRTC scanout engine operates independently
+     * of the VGA sequencer screen-off bit. The NV3 driver may set SR1 bit 5
+     * during mode switch, but the hardware still scans out normally.
+     *
+     * In our emulation, scrblank prevents the SVGA core from properly
+     * setting up some timing parameters. While we override the critical
+     * ones (render, hdisp, dots_per_clock), clearing scrblank ensures
+     * the post-processing code in svga_recalctimings (overscan, hblank_sub)
+     * also gets correct values.
+     */
+    svga->scrblank = 0;
+    svga->attr_palette_enable = 1;
+
     nv3_log("NV3: recalctimings EXTENDED: bpp=%d hdisp=%d dispend=%d "
             "rowoffset=%d memaddr_latch=0x%x clock=0x%016llx\n",
             svga->bpp, svga->hdisp, svga->dispend,
             svga->rowoffset, svga->memaddr_latch,
             (unsigned long long) svga->clock);
+    nv3_log("NV3: recalctimings EXTENDED STATE: gdcreg6=0x%02x "
+            "gdcreg3=0x%02x gdcreg8=0x%02x gdcreg1=0x%02x "
+            "writemode=%d seqregs2=0x%02x seqregs4=0x%02x\n",
+            svga->gdcreg[6], svga->gdcreg[3], svga->gdcreg[8],
+            svga->gdcreg[1], svga->writemode, svga->seqregs[2],
+            svga->seqregs[4]);
+    nv3_log("NV3: recalctimings EXTENDED BANKS: write_bank=0x%x "
+            "read_bank=0x%x cio_wb=%d cio_rb=%d rowcount=%d "
+            "vram_display_mask=0x%x banked_mask=0x%x\n",
+            svga->write_bank, svga->read_bank,
+            nv3->cio_write_bank, nv3->cio_read_bank,
+            svga->rowcount, svga->vram_display_mask, svga->banked_mask);
+    nv3_log("NV3: recalctimings EXTENDED CRTC: [0x09]=0x%02x [0x13]=0x%02x "
+            "[0x14]=0x%02x [0x17]=0x%02x [0x19]=0x%02x [0x28]=0x%02x\n",
+            svga->crtc[0x09], svga->crtc[0x13], svga->crtc[0x14],
+            svga->crtc[0x17], svga->crtc[NV3_CRTC_REPAINT0],
+            svga->crtc[NV3_CRTC_PIXEL_MODE]);
+
+    /*
+     * Diagnostic: trigger a one-shot render state dump on the next vblank.
+     * This captures values AFTER the SVGA core's post-processing
+     * (hblank_sub subtraction, lowres switching, etc.) which may differ
+     * from what we set here.
+     */
+    if (!nv3_diag_fired) {
+        nv3_diag_pending   = 1;
+        nv3_diag_scanlines = 0;
+
+        /* Also arm the delayed diagnostic (fires after ~30 frames) */
+        nv3_diag_delayed_pending = 1;
+        nv3_diag_frame_count     = 0;
+
+        /* Dump what WE set (pre-SVGA-core post-processing) */
+        nv3_log("NV3: RECALC_DIAG (pre-postprocess): hdisp=%d dispend=%d "
+                "rowoffset=%d memaddr_latch=0x%x\n",
+                svga->hdisp, svga->dispend, svga->rowoffset,
+                svga->memaddr_latch);
+        nv3_log("NV3: RECALC_DIAG: bpp=%d lowres=%d packed_chain4=%d "
+                "fb_only=%d chain4=%d force_old_addr=%d\n",
+                svga->bpp, svga->lowres, svga->packed_chain4,
+                svga->fb_only, svga->chain4, svga->force_old_addr);
+        nv3_log("NV3: RECALC_DIAG: override=%d hoverride=%d "
+                "dots_per_clock=%d char_width=%d linedbl=%d\n",
+                svga->override, svga->hoverride, svga->dots_per_clock,
+                svga->char_width, svga->linedbl);
+        nv3_log("NV3: RECALC_DIAG: adv_flags=0x%x remap_required=%d "
+                "vram_display_mask=0x%x banked_mask=0x%x\n",
+                svga->adv_flags, svga->remap_required,
+                svga->vram_display_mask, svga->banked_mask);
+
+        /* Dump VRAM[0..31] to verify writes landed correctly */
+        nv3_log("NV3: RECALC_DIAG: VRAM[0..15] = "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                svga->vram[0], svga->vram[1], svga->vram[2], svga->vram[3],
+                svga->vram[4], svga->vram[5], svga->vram[6], svga->vram[7],
+                svga->vram[8], svga->vram[9], svga->vram[10], svga->vram[11],
+                svga->vram[12], svga->vram[13], svga->vram[14], svga->vram[15]);
+        nv3_log("NV3: RECALC_DIAG: VRAM[16..31] = "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                svga->vram[16], svga->vram[17], svga->vram[18], svga->vram[19],
+                svga->vram[20], svga->vram[21], svga->vram[22], svga->vram[23],
+                svga->vram[24], svga->vram[25], svga->vram[26], svga->vram[27],
+                svga->vram[28], svga->vram[29], svga->vram[30], svga->vram[31]);
+        /* Also dump VRAM at offset 640 (start of second scanline if pitch=640) */
+        nv3_log("NV3: RECALC_DIAG: VRAM[640..655] = "
+                "%02x %02x %02x %02x %02x %02x %02x %02x "
+                "%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                svga->vram[640], svga->vram[641], svga->vram[642], svga->vram[643],
+                svga->vram[644], svga->vram[645], svga->vram[646], svga->vram[647],
+                svga->vram[648], svga->vram[649], svga->vram[650], svga->vram[651],
+                svga->vram[652], svga->vram[653], svga->vram[654], svga->vram[655]);
+    }
 
     video_force_resize_set_monitor(1, svga->monitor_index);
 }
@@ -2401,6 +2738,9 @@ nv3_init(const device_t *info)
     nv3->svga.decode_mask = nv3->vram_size - 1;
     nv3->svga.bpp         = 8;
     nv3->svga.miscout     = 1;
+
+    /* Diagnostic: hook translate_address to log VGA banked writes */
+    nv3->svga.translate_address = nv3_translate_address;
 
     /* Register VBlank start callback for interrupt generation */
     nv3->svga.vblank_start = nv3_vblank_start;
