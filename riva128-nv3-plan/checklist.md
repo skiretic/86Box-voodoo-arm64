@@ -48,7 +48,7 @@
 - [x] GENERAL_CONTROL (DAC bit depth, cursor mode)
 - [x] CURSOR_START register
 - [ ] Cursor engine rendering (hwcursor_draw callback)
-- [ ] Color LUT (palette passthrough working via SVGA core)
+- [x] Color LUT (palette passthrough working via SVGA core)
 
 ### PROM (0x110000)
 - [x] BIOS ROM read through MMIO window

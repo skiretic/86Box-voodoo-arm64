@@ -167,6 +167,14 @@ static void     nv3_lfb_write(uint32_t addr, uint8_t val, void *priv);
 static void     nv3_lfb_writew(uint32_t addr, uint16_t val, void *priv);
 static void     nv3_lfb_writel(uint32_t addr, uint32_t val, void *priv);
 
+/* PFIFO helpers */
+static uint32_t nv3_cache1_compute_status(nv3_t *nv3);
+static uint32_t nv3_cache1_free_count(nv3_t *nv3);
+static void     nv3_pfifo_puller_run(nv3_t *nv3);
+static void     nv3_pfifo_push_pio(nv3_t *nv3, uint32_t channel,
+                                   uint32_t subchan, uint32_t method,
+                                   uint32_t data);
+
 /* ========================================================================
  * PMC interrupt aggregation and PCI IRQ routing.
  *
@@ -541,12 +549,10 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
          * PFIFO — Command FIFO (0x002000-0x003FFF)
          *
          * Per envytools nv1_pfifo.xml:
-         * INTR_0 (0x002100): write-1-to-clear interrupt status.
-         * INTR_EN_0 (0x002140): interrupt enable mask.
-         * CACHE0_STATUS (0x003014): read-only, computed from PUT/GET.
-         * CACHE1_STATUS (0x003214): read-only, computed from PUT/GET.
-         * All other PFIFO registers go through the register bank
-         * in the default handler below.
+         * Interrupt, config, CACHE0, CACHE1, and RUNOUT registers
+         * are handled from dedicated state fields. All other PFIFO
+         * registers fall through to the register bank in the default
+         * handler.
          * ============================================================ */
         case NV3_PFIFO_INTR_0:
             ret = nv3->pfifo.intr_0;
@@ -555,48 +561,121 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
             ret = nv3->pfifo.intr_en_0;
             break;
 
+        /* PFIFO config registers — return from dedicated state */
+        case NV3_PFIFO_CACHES:
+            ret = nv3->pfifo.caches_enabled;
+            break;
+        case NV3_PFIFO_CONFIG:
+            ret = nv3->pfifo.config;
+            break;
+        case NV3_PFIFO_RAMHT:
+            ret = nv3->pfifo.ramht_config;
+            break;
+        case NV3_PFIFO_RAMFC:
+            ret = nv3->pfifo.ramfc_config;
+            break;
+        case NV3_PFIFO_RAMRO:
+            ret = nv3->pfifo.ramro_config;
+            break;
+
+        /* CACHE0 registers */
+        case NV3_PFIFO_CACHE0_PUSH0:
+            ret = nv3->pfifo.cache0.push_enabled;
+            break;
+        case NV3_PFIFO_CACHE0_PULL0:
+            ret = nv3->pfifo.cache0.pull_enabled;
+            break;
+        case NV3_PFIFO_CACHE0_PUT:
+            ret = nv3->pfifo.cache0.put;
+            break;
+        case NV3_PFIFO_CACHE0_GET:
+            ret = nv3->pfifo.cache0.get;
+            break;
+        case NV3_PFIFO_CACHE0_ADDR:
+            ret = nv3->pfifo.cache0.entry.addr;
+            break;
+        case NV3_PFIFO_CACHE0_DATA:
+            ret = nv3->pfifo.cache0.entry.data;
+            break;
+
         /*
-         * PFIFO CACHE0/CACHE1 STATUS registers.
+         * PFIFO CACHE0_STATUS: read-only, computed from PUT/GET.
          *
-         * Per envytools nv1_pfifo.xml: STATUS is a read-only register
-         * computed from the cache state. Bit 4 (EMPTY) is set when the
-         * cache contains no pending entries (PUT == GET). Bit 8 (FULL)
-         * is set when no free slots remain.
-         *
-         * The NVIDIA Windows driver polls CACHE1_STATUS waiting for the
-         * EMPTY bit after enabling PFIFO. On a freshly initialized cache
-         * PUT and GET are both zero, so EMPTY must be set. Without this,
-         * the driver hangs in an infinite polling loop during init.
+         * Per envytools nv1_pfifo.xml: STATUS is computed dynamically.
+         * Bit 4 (EMPTY) = PUT == GET.
+         * Bit 8 (FULL) = single-entry cache and PUT != GET.
          */
         case NV3_PFIFO_CACHE0_STATUS: {
-            uint32_t c0_put = nv3->pfifo.regs[(NV3_PFIFO_CACHE0_PUT - NV3_PFIFO_START) >> 2];
-            uint32_t c0_get = nv3->pfifo.regs[(NV3_PFIFO_CACHE0_GET - NV3_PFIFO_START) >> 2];
             ret = 0;
-            if (c0_put == c0_get)
+            if (nv3->pfifo.cache0.put == nv3->pfifo.cache0.get)
                 ret |= NV3_PFIFO_CACHE_STATUS_EMPTY;
-            break;
-        }
-        case NV3_PFIFO_CACHE1_STATUS: {
-            uint32_t c1_put = nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PUT - NV3_PFIFO_START) >> 2];
-            uint32_t c1_get = nv3->pfifo.regs[(NV3_PFIFO_CACHE1_GET - NV3_PFIFO_START) >> 2];
-            ret = 0;
-            if (c1_put == c1_get)
-                ret |= NV3_PFIFO_CACHE_STATUS_EMPTY;
+            else
+                ret |= NV3_PFIFO_CACHE_STATUS_FULL;
             break;
         }
 
+        /* CACHE1 registers */
+        case NV3_PFIFO_CACHE1_PUSH0:
+            ret = nv3->pfifo.cache1.push_enabled;
+            break;
+        case NV3_PFIFO_CACHE1_PUSH1:
+            ret = nv3->pfifo.cache1.push_channel;
+            break;
+        case NV3_PFIFO_CACHE1_PUT:
+            ret = nv3->pfifo.cache1.put;
+            break;
+        case NV3_PFIFO_CACHE1_GET:
+            ret = nv3->pfifo.cache1.get;
+            break;
+        case NV3_PFIFO_CACHE1_PULL0:
+            ret = nv3->pfifo.cache1.pull_enabled;
+            break;
+        case NV3_PFIFO_CACHE1_PULL1:
+            ret = nv3->pfifo.cache1.pull_engine;
+            break;
+        case NV3_PFIFO_CACHE1_DMA_PUSH:
+            ret = nv3->pfifo.cache1.dma_push;
+            break;
+        case NV3_PFIFO_CACHE1_DMA_FETCH:
+            ret = nv3->pfifo.cache1.dma_fetch;
+            break;
+        case NV3_PFIFO_CACHE1_HASH:
+            ret = nv3->pfifo.cache1.hash;
+            break;
+        case NV3_PFIFO_CACHE1_ENGINE:
+            ret = nv3->pfifo.cache1.engine;
+            break;
+
         /*
-         * PFIFO RUNOUT STATUS register (0x002400).
+         * PFIFO CACHE1_STATUS: read-only, computed from PUT/GET.
+         *
+         * Per envytools nv1_pfifo.xml: computed dynamically.
+         * The NVIDIA Windows driver polls this waiting for EMPTY bit
+         * after enabling PFIFO. Without this, the driver hangs.
+         */
+        case NV3_PFIFO_CACHE1_STATUS:
+            ret = nv3_cache1_compute_status(nv3);
+            break;
+
+        /*
+         * PFIFO RUNOUT registers.
+         */
+        case NV3_PFIFO_RUNOUT_PUT:
+            ret = nv3->pfifo.runout.put;
+            break;
+        case NV3_PFIFO_RUNOUT_GET:
+            ret = nv3->pfifo.runout.get;
+            break;
+
+        /*
+         * PFIFO RUNOUT STATUS: read-only, computed from PUT/GET.
          *
          * Per envytools nv1_pfifo.xml: same bit layout as CACHE STATUS.
-         * Bit 4 (EMPTY) is set when RUNOUT_PUT == RUNOUT_GET.
-         * The driver polls this after CACHE1_STATUS during PFIFO init.
+         * The driver polls this after CACHE1_STATUS during init.
          */
         case NV3_PFIFO_RUNOUT_STATUS: {
-            uint32_t ro_put = nv3->pfifo.regs[(NV3_PFIFO_RUNOUT_PUT - NV3_PFIFO_START) >> 2];
-            uint32_t ro_get = nv3->pfifo.regs[(NV3_PFIFO_RUNOUT_GET - NV3_PFIFO_START) >> 2];
             ret = 0;
-            if (ro_put == ro_get)
+            if (nv3->pfifo.runout.put == nv3->pfifo.runout.get)
                 ret |= NV3_PFIFO_CACHE_STATUS_EMPTY;
             break;
         }
@@ -794,14 +873,33 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                     ret = nv3->pgraph.regs[pgraph_idx];
             } else if (addr >= NV3_PFIFO_START && addr <= NV3_PFIFO_END) {
                 /*
-                 * PFIFO register bank: store/return values for driver
-                 * init readback. Registers handled in the switch above
-                 * (INTR_0, INTR_EN_0) never reach here.
-                 * Full PFIFO state machine deferred to Phase 3.
+                 * PFIFO register bank.
+                 * Registers explicitly handled in the switch above never
+                 * reach here. This handles:
+                 *   - CACHE1 entry array (0x3800-0x3FFF) — reads from
+                 *     the dedicated entries[] array
+                 *   - Misc debug/config registers that the driver writes
+                 *     and reads back
                  */
-                uint32_t pfifo_idx = (addr - NV3_PFIFO_START) >> 2;
-                if (pfifo_idx < 2048)
-                    ret = nv3->pfifo.regs[pfifo_idx];
+                if (addr >= NV3_PFIFO_CACHE1_ADDR_START
+                    && addr < (NV3_PFIFO_CACHE1_ADDR_START + NV3T_CACHE1_SIZE * NV3_PFIFO_CACHE1_ENTRY_STRIDE)) {
+                    /* CACHE1 entry array: decode index and field */
+                    uint32_t entry_off = addr - NV3_PFIFO_CACHE1_ADDR_START;
+                    uint32_t entry_idx = entry_off / NV3_PFIFO_CACHE1_ENTRY_STRIDE;
+                    uint32_t field     = entry_off % NV3_PFIFO_CACHE1_ENTRY_STRIDE;
+                    uint32_t max_entries = (nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                                           ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE;
+                    if (entry_idx < max_entries) {
+                        if (field == 0)
+                            ret = nv3->pfifo.cache1.entries[entry_idx].addr;
+                        else if (field == 4)
+                            ret = nv3->pfifo.cache1.entries[entry_idx].data;
+                    }
+                } else {
+                    uint32_t pfifo_idx = (addr - NV3_PFIFO_START) >> 2;
+                    if (pfifo_idx < 2048)
+                        ret = nv3->pfifo.regs[pfifo_idx];
+                }
             } else if (addr >= NV3_PRAMIN_START && addr <= NV3_PRAMIN_END) {
                 /*
                  * PRAMIN: 1MB window into the top of VRAM.
@@ -879,20 +977,29 @@ nv3_mmio_read_internal(nv3_t *nv3, uint32_t addr)
                 /*
                  * USER space: PIO channel submission interface.
                  *
-                 * Per rivafb riva_hw.h, each channel has a 64KB window.
-                 * Offset 0x10 within a channel is FifoFree (uint16_t):
-                 * the number of 32-bit entries the PIO FIFO can accept.
+                 * Per rivafb riva_hw.h and envytools fifo/nv1-pfifo.html:
+                 * Each channel has a 64KB window. Offset 0x10 within a
+                 * channel is FifoFree — the number of 32-bit entries
+                 * the FIFO can still accept. The driver polls this before
+                 * submitting methods.
                  *
-                 * The driver polls FifoFree before submitting methods.
-                 * Since we have no real PFIFO engine consuming commands,
-                 * always report the FIFO as having free space.
+                 * We compute FifoFree from the actual CACHE1 free count,
+                 * multiplied by 4 to convert from entries to bytes
+                 * (the rivafb driver expects byte units per riva_hw.h).
                  */
                 uint32_t channel_offset = (addr - NV3_USER_START) % NV3_USER_CHANNEL_STRIDE;
-                uint32_t subchan_offset = channel_offset & 0x1FFF;  /* 8KB subchannel stride */
-                if (subchan_offset == NV3_USER_FREE_OFFSET)
-                    ret = 128;  /* plenty of free entries */
-                else
+                uint32_t subchan_offset = channel_offset & (NV3_USER_SUBCHAN_STRIDE - 1);
+                if (subchan_offset == NV3_USER_FREE_OFFSET) {
+                    /*
+                     * Report CACHE1 free space.
+                     * Since the puller runs synchronously in our emulation,
+                     * the cache is almost always empty. But compute the
+                     * real value for correctness.
+                     */
+                    ret = nv3_cache1_free_count(nv3) * 4;
+                } else {
                     ret = 0;
+                }
             } else {
                 /*
                  * Fix 1: Truly unmapped MMIO space.
@@ -978,39 +1085,153 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             break;
 
         /* ============================================================
-         * PFIFO — Command FIFO interrupt registers
+         * PFIFO — Command FIFO (0x002000-0x003FFF)
          *
          * Per envytools nv1_pfifo.xml:
-         * INTR_0 (0x002100): write-1-to-clear interrupt status.
-         * INTR_EN_0 (0x002140): interrupt enable mask.
-         * CACHE0_STATUS (0x003014) and CACHE1_STATUS (0x003214)
-         * are read-only (handled in read path only).
-         * All other PFIFO registers go through the register bank
-         * in the default handler below.
+         * All PFIFO registers are handled from dedicated state.
+         * STATUS registers are read-only.
          * ============================================================ */
         case NV3_PFIFO_INTR_0:
-            /* Write 1 to clear (Fix 5: W1C RMW corruption note — see PCRTC_INTR) */
+            /* Write 1 to clear */
             nv3->pfifo.intr_0 &= ~val;
-            /* Fix 2: sync to register bank */
             nv3->pfifo.regs[(NV3_PFIFO_INTR_0 - NV3_PFIFO_START) >> 2] = nv3->pfifo.intr_0;
             nv3_update_irq(nv3);
             break;
         case NV3_PFIFO_INTR_EN_0:
             nv3->pfifo.intr_en_0 = val;
-            /* Fix 2: sync to register bank */
             nv3->pfifo.regs[(NV3_PFIFO_INTR_EN_0 - NV3_PFIFO_START) >> 2] = val;
             nv3_update_irq(nv3);
             break;
 
-        /*
-         * CACHE0_STATUS and CACHE1_STATUS are read-only.
-         * Intercept writes here to prevent byte/word RMW from
-         * polluting the register bank with stale computed values.
-         */
+        /* PFIFO config registers */
+        case NV3_PFIFO_CACHES:
+            nv3->pfifo.caches_enabled = val & 1;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHES - NV3_PFIFO_START) >> 2] = nv3->pfifo.caches_enabled;
+            nv3_log("NV3: PFIFO CACHES = %d (master %s)\n",
+                    nv3->pfifo.caches_enabled,
+                    nv3->pfifo.caches_enabled ? "enabled" : "disabled");
+            break;
+        case NV3_PFIFO_CONFIG:
+            nv3->pfifo.config = val & 0xFF; /* bits 7:0 = per-channel DMA/PIO */
+            nv3->pfifo.regs[(NV3_PFIFO_CONFIG - NV3_PFIFO_START) >> 2] = nv3->pfifo.config;
+            break;
+        case NV3_PFIFO_RAMHT:
+            nv3->pfifo.ramht_config = val;
+            nv3->pfifo.regs[(NV3_PFIFO_RAMHT - NV3_PFIFO_START) >> 2] = val;
+            nv3_log("NV3: PFIFO RAMHT config = 0x%08X (base=0x%05X size=%dKB)\n",
+                    val,
+                    (val & NV3_PFIFO_RAMHT_BASE_MASK) << 8,
+                    4 << ((val >> NV3_PFIFO_RAMHT_SIZE_SHIFT) & 0x3));
+            break;
+        case NV3_PFIFO_RAMFC:
+            nv3->pfifo.ramfc_config = val;
+            nv3->pfifo.regs[(NV3_PFIFO_RAMFC - NV3_PFIFO_START) >> 2] = val;
+            nv3_log("NV3: PFIFO RAMFC config = 0x%08X (base=0x%05X)\n",
+                    val, (val & NV3_PFIFO_RAMFC_BASE_MASK) << 8);
+            break;
+        case NV3_PFIFO_RAMRO:
+            nv3->pfifo.ramro_config = val;
+            nv3->pfifo.regs[(NV3_PFIFO_RAMRO - NV3_PFIFO_START) >> 2] = val;
+            nv3_log("NV3: PFIFO RAMRO config = 0x%08X (base=0x%05X size=%s)\n",
+                    val,
+                    (val & NV3_PFIFO_RAMRO_BASE_MASK) << 8,
+                    (val & NV3_PFIFO_RAMRO_SIZE_BIT) ? "8KB" : "512B");
+            break;
+
+        /* CACHE0 registers */
+        case NV3_PFIFO_CACHE0_PUSH0:
+            nv3->pfifo.cache0.push_enabled = val & 1;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE0_PUSH0 - NV3_PFIFO_START) >> 2] = val & 1;
+            break;
+        case NV3_PFIFO_CACHE0_PULL0:
+            nv3->pfifo.cache0.pull_enabled = val & 1;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE0_PULL0 - NV3_PFIFO_START) >> 2] = val & 1;
+            break;
+        case NV3_PFIFO_CACHE0_PUT:
+            nv3->pfifo.cache0.put = val & 1; /* single entry: 1 bit */
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE0_PUT - NV3_PFIFO_START) >> 2] = val & 1;
+            break;
+        case NV3_PFIFO_CACHE0_GET:
+            nv3->pfifo.cache0.get = val & 1;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE0_GET - NV3_PFIFO_START) >> 2] = val & 1;
+            break;
+        case NV3_PFIFO_CACHE0_ADDR:
+            nv3->pfifo.cache0.entry.addr = val;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE0_ADDR - NV3_PFIFO_START) >> 2] = val;
+            break;
+        case NV3_PFIFO_CACHE0_DATA:
+            nv3->pfifo.cache0.entry.data = val;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE0_DATA - NV3_PFIFO_START) >> 2] = val;
+            break;
+
+        /* CACHE1 registers */
+        case NV3_PFIFO_CACHE1_PUSH0:
+            nv3->pfifo.cache1.push_enabled = val & 1;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PUSH0 - NV3_PFIFO_START) >> 2] = val & 1;
+            break;
+        case NV3_PFIFO_CACHE1_PUSH1:
+            nv3->pfifo.cache1.push_channel = val & 0x7; /* 3 bits for 8 channels */
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PUSH1 - NV3_PFIFO_START) >> 2] = val & 0x7;
+            break;
+        case NV3_PFIFO_CACHE1_PUT: {
+            uint32_t mask = ((nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                             ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE) - 1;
+            nv3->pfifo.cache1.put = val & mask;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PUT - NV3_PFIFO_START) >> 2] = val & mask;
+            break;
+        }
+        case NV3_PFIFO_CACHE1_GET: {
+            uint32_t mask = ((nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                             ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE) - 1;
+            nv3->pfifo.cache1.get = val & mask;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_GET - NV3_PFIFO_START) >> 2] = val & mask;
+            break;
+        }
+        case NV3_PFIFO_CACHE1_PULL0:
+            nv3->pfifo.cache1.pull_enabled = val & 1;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PULL0 - NV3_PFIFO_START) >> 2] = val & 1;
+            /*
+             * When the puller is enabled, run it immediately to drain
+             * any pending entries in CACHE1.
+             */
+            if (nv3->pfifo.cache1.pull_enabled)
+                nv3_pfifo_puller_run(nv3);
+            break;
+        case NV3_PFIFO_CACHE1_PULL1:
+            nv3->pfifo.cache1.pull_engine = val;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PULL1 - NV3_PFIFO_START) >> 2] = val;
+            break;
+        case NV3_PFIFO_CACHE1_DMA_PUSH:
+            nv3->pfifo.cache1.dma_push = val & 1;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_DMA_PUSH - NV3_PFIFO_START) >> 2] = val & 1;
+            break;
+        case NV3_PFIFO_CACHE1_DMA_FETCH:
+            nv3->pfifo.cache1.dma_fetch = val;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_DMA_FETCH - NV3_PFIFO_START) >> 2] = val;
+            break;
+        case NV3_PFIFO_CACHE1_HASH:
+            nv3->pfifo.cache1.hash = val;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_HASH - NV3_PFIFO_START) >> 2] = val;
+            break;
+        case NV3_PFIFO_CACHE1_ENGINE:
+            nv3->pfifo.cache1.engine = val;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE1_ENGINE - NV3_PFIFO_START) >> 2] = val;
+            break;
+
+        /* Runout registers */
+        case NV3_PFIFO_RUNOUT_PUT:
+            nv3->pfifo.runout.put = val;
+            nv3->pfifo.regs[(NV3_PFIFO_RUNOUT_PUT - NV3_PFIFO_START) >> 2] = val;
+            break;
+        case NV3_PFIFO_RUNOUT_GET:
+            nv3->pfifo.runout.get = val;
+            nv3->pfifo.regs[(NV3_PFIFO_RUNOUT_GET - NV3_PFIFO_START) >> 2] = val;
+            break;
+
+        /* Read-only STATUS registers: ignore writes */
         case NV3_PFIFO_CACHE0_STATUS:
         case NV3_PFIFO_CACHE1_STATUS:
         case NV3_PFIFO_RUNOUT_STATUS:
-            /* Read-only: ignore writes */
             break;
 
         /* ============================================================
@@ -1254,11 +1475,27 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
                     nv3->pgraph.regs[pgraph_idx] = val;
             } else if (addr >= NV3_PFIFO_START && addr <= NV3_PFIFO_END) {
                 /*
-                 * PFIFO register bank: accept writes for driver init
-                 * readback. Registers handled in the switch above
-                 * (INTR_0, INTR_EN_0) never reach here.
-                 * Full PFIFO state machine deferred to Phase 3.
+                 * PFIFO register bank.
+                 * Registers explicitly handled in the switch above never
+                 * reach here. This handles CACHE1 entry array writes
+                 * and misc debug/config registers.
                  */
+                if (addr >= NV3_PFIFO_CACHE1_ADDR_START
+                    && addr < (NV3_PFIFO_CACHE1_ADDR_START + NV3T_CACHE1_SIZE * NV3_PFIFO_CACHE1_ENTRY_STRIDE)) {
+                    /* CACHE1 entry array write */
+                    uint32_t entry_off = addr - NV3_PFIFO_CACHE1_ADDR_START;
+                    uint32_t entry_idx = entry_off / NV3_PFIFO_CACHE1_ENTRY_STRIDE;
+                    uint32_t field     = entry_off % NV3_PFIFO_CACHE1_ENTRY_STRIDE;
+                    uint32_t max_entries = (nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                                           ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE;
+                    if (entry_idx < max_entries) {
+                        if (field == 0)
+                            nv3->pfifo.cache1.entries[entry_idx].addr = val;
+                        else if (field == 4)
+                            nv3->pfifo.cache1.entries[entry_idx].data = val;
+                    }
+                }
+                /* Always store in register bank too for consistency */
                 uint32_t pfifo_idx = (addr - NV3_PFIFO_START) >> 2;
                 if (pfifo_idx < 2048)
                     nv3->pfifo.regs[pfifo_idx] = val;
@@ -1324,8 +1561,26 @@ nv3_mmio_write_internal(nv3_t *nv3, uint32_t addr, uint32_t val)
             } else if (addr >= NV3_USER_START && addr <= NV3_USER_END) {
                 /*
                  * USER space: PIO channel method submissions.
-                 * Silently accept — full PFIFO dispatch deferred to Phase 3.
+                 *
+                 * Per envytools fifo/nv1-pfifo.html:
+                 * Each channel has a 64KB window. Within each window,
+                 * 8 subchannels at 0x2000 stride. Within each subchannel:
+                 *   0x0000 = SetObject (bind handle)
+                 *   0x0100+ = methods
+                 *
+                 * Only process if CACHES is enabled (PFIFO master enable).
                  */
+                if (nv3->pfifo.caches_enabled) {
+                    uint32_t user_off     = addr - NV3_USER_START;
+                    uint32_t channel      = user_off / NV3_USER_CHANNEL_STRIDE;
+                    uint32_t chan_off      = user_off % NV3_USER_CHANNEL_STRIDE;
+                    uint32_t subchan      = (chan_off / NV3_USER_SUBCHAN_STRIDE) & 0x7;
+                    uint32_t method       = chan_off & (NV3_USER_SUBCHAN_STRIDE - 1);
+
+                    if (channel < NV3_PFIFO_NUM_CHANNELS) {
+                        nv3_pfifo_push_pio(nv3, channel, subchan, method, val);
+                    }
+                }
             } else {
                 /*
                  * Fix 1: Truly unmapped MMIO space -- silently drop writes.
@@ -2672,6 +2927,460 @@ nv3_pramdac_init(nv3_t *nv3)
 }
 
 /* ========================================================================
+ * PFIFO helper: compute RAMHT hash.
+ *
+ * Per envytools fifo/nv1-pfifo.html:
+ * The hash function for NV3 RAMHT is:
+ *   hash = handle ^ (handle >> RAMHT_size_shift) ^ channel_id
+ * The result is then masked to RAMHT size to get an entry index.
+ *
+ * The RAMHT size determines the number of entries:
+ *   4KB  => 512 entries (4096 / 8 bytes per entry), mask = 0x1FF
+ *   8KB  => 1024 entries, mask = 0x3FF
+ *   16KB => 2048 entries, mask = 0x7FF
+ *   32KB => 4096 entries, mask = 0xFFF
+ *
+ * The hash function XORs the handle with shifted versions of itself
+ * to spread the bits across the table.
+ * ======================================================================== */
+static uint32_t
+nv3_ramht_hash(nv3_t *nv3, uint32_t handle, uint32_t channel_id)
+{
+    /*
+     * Determine RAMHT size from config register.
+     * Per envytools: bits [17:16] select size.
+     */
+    uint32_t size_sel = (nv3->pfifo.ramht_config >> NV3_PFIFO_RAMHT_SIZE_SHIFT) & 0x3;
+    uint32_t num_entries;
+
+    switch (size_sel) {
+        case 0:  num_entries = 512;  break;  /* 4KB */
+        case 1:  num_entries = 1024; break;  /* 8KB */
+        case 2:  num_entries = 2048; break;  /* 16KB */
+        case 3:  num_entries = 4096; break;  /* 32KB */
+        default: num_entries = 512;  break;
+    }
+
+    uint32_t mask = num_entries - 1;
+
+    /*
+     * NV3 RAMHT hash algorithm.
+     * Per envytools: XOR handle bits in groups matching the index width,
+     * then XOR with the channel ID.
+     *
+     * For a table of N entries (log2(N) = B bits):
+     *   hash = handle[B-1:0] ^ handle[2B-1:B] ^ ... ^ channel_id
+     *
+     * This distributes handles evenly across the table.
+     */
+    uint32_t bits = 0;
+    uint32_t tmp  = num_entries;
+    while (tmp > 1) {
+        bits++;
+        tmp >>= 1;
+    }
+
+    uint32_t hash = 0;
+    uint32_t h = handle;
+    while (h != 0) {
+        hash ^= (h & mask);
+        h >>= bits;
+    }
+    hash ^= (channel_id & mask);
+
+    return hash & mask;
+}
+
+/* ========================================================================
+ * PFIFO helper: look up an object handle in RAMHT.
+ *
+ * Walks the RAMHT starting at the hash index. If the entry matches
+ * the handle, returns true and fills in *engine and *instance.
+ * Returns false if the handle is not found.
+ *
+ * Per envytools: RAMHT entries are 8 bytes:
+ *   word 0 = object handle
+ *   word 1 = bits [15:0] = instance >> 4, bits [23:16] = engine, bit 31 = valid
+ *
+ * The table uses linear probing: if the hashed slot does not match,
+ * check the next slot, wrapping around. Stop when an empty slot is
+ * found (valid bit not set).
+ * ======================================================================== */
+static bool
+nv3_ramht_lookup(nv3_t *nv3, uint32_t handle, uint32_t channel_id,
+                 uint32_t *engine, uint32_t *instance)
+{
+    /*
+     * Compute RAMHT base offset in PRAMIN.
+     * Per envytools: bits [8:4] of RAMHT config give the base address in
+     * 4KB units within PRAMIN, so base = (config & 0x1F0) << 8.
+     */
+    uint32_t ramht_base = (nv3->pfifo.ramht_config & NV3_PFIFO_RAMHT_BASE_MASK) << 8;
+
+    uint32_t size_sel = (nv3->pfifo.ramht_config >> NV3_PFIFO_RAMHT_SIZE_SHIFT) & 0x3;
+    uint32_t num_entries;
+    switch (size_sel) {
+        case 0:  num_entries = 512;  break;
+        case 1:  num_entries = 1024; break;
+        case 2:  num_entries = 2048; break;
+        case 3:  num_entries = 4096; break;
+        default: num_entries = 512;  break;
+    }
+
+    uint32_t hash = nv3_ramht_hash(nv3, handle, channel_id);
+
+    /*
+     * Translate PRAMIN offset to VRAM address.
+     * PRAMIN maps to the top 1MB of VRAM.
+     */
+    uint32_t pramin_vram_base = nv3->vram_size - NV3_PRAMIN_VRAM_SIZE;
+
+    /*
+     * Linear probe through the RAMHT.
+     * Stop after checking all entries (worst case: full table).
+     */
+    for (uint32_t i = 0; i < num_entries; i++) {
+        uint32_t idx = (hash + i) & (num_entries - 1);
+        uint32_t entry_offset = ramht_base + (idx * NV3_RAMHT_ENTRY_SIZE);
+        uint32_t vram_addr = pramin_vram_base + entry_offset;
+
+        if (vram_addr + 7 >= nv3->vram_size)
+            break;
+
+        uint32_t entry_handle = *(uint32_t *) &nv3->svga.vram[vram_addr];
+        uint32_t entry_ctx    = *(uint32_t *) &nv3->svga.vram[vram_addr + 4];
+
+        /* Check valid bit */
+        if (!(entry_ctx & NV3_RAMHT_ENTRY_VALID)) {
+            /* Empty slot — handle not found */
+            return false;
+        }
+
+        /* Check if handle matches */
+        if (entry_handle == handle) {
+            *engine   = (entry_ctx >> NV3_RAMHT_ENTRY_ENGINE_SHIFT) & 0xFF;
+            *instance = (entry_ctx & NV3_RAMHT_ENTRY_INSTANCE_MASK) << 4;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/* ========================================================================
+ * PFIFO helper: compute CACHE1 STATUS from PUT/GET pointers.
+ *
+ * Per envytools nv1_pfifo.xml:
+ *   EMPTY (bit 4) = PUT == GET
+ *   FULL  (bit 8) = next PUT would collide with GET (ring buffer full)
+ * ======================================================================== */
+static uint32_t
+nv3_cache1_compute_status(nv3_t *nv3)
+{
+    uint32_t put = nv3->pfifo.cache1.put;
+    uint32_t get = nv3->pfifo.cache1.get;
+    uint32_t size = (nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                    ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE;
+    uint32_t status = 0;
+
+    if (put == get)
+        status |= NV3_PFIFO_CACHE_STATUS_EMPTY;
+
+    /* FULL: next write position would equal GET */
+    if (((put + 1) % size) == get)
+        status |= NV3_PFIFO_CACHE_STATUS_FULL;
+
+    return status;
+}
+
+/* ========================================================================
+ * PFIFO helper: compute number of free CACHE1 entries.
+ *
+ * Used by the USER space FifoFree register to report how many more
+ * commands can be submitted before the cache is full.
+ * ======================================================================== */
+static uint32_t
+nv3_cache1_free_count(nv3_t *nv3)
+{
+    uint32_t put = nv3->pfifo.cache1.put;
+    uint32_t get = nv3->pfifo.cache1.get;
+    uint32_t size = (nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                    ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE;
+
+    if (put >= get)
+        return (size - 1) - (put - get);
+    else
+        return (get - put) - 1;
+}
+
+/* ========================================================================
+ * PFIFO puller: process one entry from CACHE1.
+ *
+ * The puller reads the front entry from CACHE1 (at GET pointer),
+ * decodes the subchannel and method, and dispatches to the appropriate
+ * engine (PGRAPH for graphics objects, SW for software objects).
+ *
+ * Per envytools nv1-pfifo.html:
+ * - Method 0x0000 (within a subchannel) = SetObject — binds an object
+ *   handle to the subchannel via RAMHT lookup.
+ * - Methods 0x0100+ = engine-specific method dispatch.
+ * ======================================================================== */
+static void
+nv3_pfifo_puller_run(nv3_t *nv3)
+{
+    uint32_t size = (nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                    ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE;
+
+    /* Only run if puller is enabled and cache has data */
+    if (!nv3->pfifo.cache1.pull_enabled)
+        return;
+
+    while (nv3->pfifo.cache1.get != nv3->pfifo.cache1.put) {
+        uint32_t get = nv3->pfifo.cache1.get;
+        nv3_cache_entry_t *entry = &nv3->pfifo.cache1.entries[get];
+
+        uint32_t method  = (entry->addr & NV3_CACHE_ADDR_METHOD_MASK) >> NV3_CACHE_ADDR_METHOD_SHIFT;
+        uint32_t subchan = (entry->addr & NV3_CACHE_ADDR_SUBCHAN_MASK) >> NV3_CACHE_ADDR_SUBCHAN_SHIFT;
+        uint32_t data    = entry->data;
+        uint32_t channel = nv3->pfifo.cache1.push_channel;
+
+        /*
+         * Method 0x0000 = SetObject (bind object to subchannel).
+         * The data field contains the object handle.
+         * Look it up in RAMHT to find engine and instance.
+         */
+        if (method == 0) {
+            uint32_t eng = 0, inst = 0;
+            if (nv3_ramht_lookup(nv3, data, channel, &eng, &inst)) {
+                nv3->pfifo.subchan_object[subchan] = data;
+                nv3->pfifo.cache1.pull_engine = eng;
+                nv3_log("NV3: PFIFO puller: SetObject subchan=%d handle=0x%08X "
+                        "engine=%d instance=0x%04X\n",
+                        subchan, data, eng, inst);
+            } else {
+                /*
+                 * Object not found in RAMHT — this is a CACHE_ERROR.
+                 * On real hardware this would raise a PFIFO interrupt
+                 * and potentially log to RAMRO.
+                 */
+                nv3_log("NV3: PFIFO puller: RAMHT miss! handle=0x%08X "
+                        "channel=%d subchan=%d\n",
+                        data, channel, subchan);
+                nv3->pfifo.intr_0 |= NV3_PFIFO_INTR_CACHE_ERROR;
+                nv3->pfifo.regs[(NV3_PFIFO_INTR_0 - NV3_PFIFO_START) >> 2] = nv3->pfifo.intr_0;
+                nv3_update_irq(nv3);
+            }
+        } else {
+            /*
+             * Engine method dispatch.
+             *
+             * Phase 3 stub: for now, log the method and silently consume it.
+             * In Phase 4, this will dispatch to PGRAPH for 2D methods.
+             * In Phase 5, this will dispatch to PGRAPH for 3D methods.
+             *
+             * The method address is: (method_number << 2) + 0x100
+             * within the subchannel's address space.
+             */
+            uint32_t method_addr = method << 2;
+            (void) method_addr;
+            (void) data;
+
+            nv3_log("NV3: PFIFO puller: dispatch ch=%d sub=%d method=0x%04X "
+                    "data=0x%08X (engine stub)\n",
+                    channel, subchan, method << 2, data);
+        }
+
+        /* Advance GET pointer (ring buffer wrap) */
+        nv3->pfifo.cache1.get = (get + 1) % size;
+    }
+}
+
+/* ========================================================================
+ * PFIFO pusher: push a USER space PIO write into the appropriate cache.
+ *
+ * Per envytools nv1-pfifo.html:
+ * When CACHES is enabled and a write arrives at the USER space for a
+ * channel, the pusher:
+ *   1. Checks if the channel matches CACHE1's active channel
+ *   2. Encodes the subchannel + method into a CACHE entry ADDR field
+ *   3. Stores the data in the CACHE entry DATA field
+ *   4. Advances the PUT pointer
+ *   5. If the puller is enabled, triggers puller processing
+ *
+ * Channel 0 goes to CACHE0, all other channels go to CACHE1.
+ * If the cache is full, the write goes to RAMRO (runout).
+ * ======================================================================== */
+static void
+nv3_pfifo_push_pio(nv3_t *nv3, uint32_t channel, uint32_t subchan,
+                   uint32_t method, uint32_t data)
+{
+    uint32_t cache_size = (nv3->card_type >= NV3_TYPE_NV3T_PCI)
+                          ? NV3T_CACHE1_SIZE : NV3_CACHE1_SIZE;
+
+    /* Encode the CACHE entry address field */
+    uint32_t addr_field = ((method >> 2) << NV3_CACHE_ADDR_METHOD_SHIFT)
+                        | (subchan << NV3_CACHE_ADDR_SUBCHAN_SHIFT);
+
+    if (channel == 0) {
+        /*
+         * Channel 0 -> CACHE0 (single entry).
+         * Only push if CACHE0 push is enabled.
+         */
+        if (!nv3->pfifo.cache0.push_enabled) {
+            nv3_log("NV3: PFIFO push ch0: CACHE0 push disabled, dropping\n");
+            return;
+        }
+
+        /* CACHE0 is a single entry; if not empty, it's full */
+        if (nv3->pfifo.cache0.put != nv3->pfifo.cache0.get) {
+            nv3_log("NV3: PFIFO push ch0: CACHE0 full, dropping method=0x%04X\n",
+                    method);
+            return;
+        }
+
+        nv3->pfifo.cache0.entry.addr = addr_field;
+        nv3->pfifo.cache0.entry.data = data;
+        nv3->pfifo.cache0.put = (nv3->pfifo.cache0.put + 1) & 1;
+
+        /* Sync to register bank */
+        nv3->pfifo.regs[(NV3_PFIFO_CACHE0_PUT - NV3_PFIFO_START) >> 2] = nv3->pfifo.cache0.put;
+        nv3->pfifo.regs[(NV3_PFIFO_CACHE0_ADDR - NV3_PFIFO_START) >> 2] = addr_field;
+        nv3->pfifo.regs[(NV3_PFIFO_CACHE0_DATA - NV3_PFIFO_START) >> 2] = data;
+
+        /*
+         * CACHE0 puller: process the entry immediately if enabled.
+         * CACHE0 is simple — the puller just consumes the single entry.
+         */
+        if (nv3->pfifo.cache0.pull_enabled) {
+            /* For now, just advance GET to match PUT (consume the entry) */
+            nv3->pfifo.cache0.get = nv3->pfifo.cache0.put;
+            nv3->pfifo.regs[(NV3_PFIFO_CACHE0_GET - NV3_PFIFO_START) >> 2] = nv3->pfifo.cache0.get;
+        }
+    } else {
+        /*
+         * Channels 1-7 -> CACHE1.
+         * Only push if CACHE1 push is enabled.
+         */
+        if (!nv3->pfifo.cache1.push_enabled) {
+            nv3_log("NV3: PFIFO push ch%d: CACHE1 push disabled, dropping\n", channel);
+            return;
+        }
+
+        /*
+         * Check if a channel switch is needed.
+         * Per envytools: if the incoming channel differs from PUSH1,
+         * a context switch should occur. For Phase 3, we simply update
+         * the channel and continue (full context switching via RAMFC
+         * will be added when DMA mode is implemented).
+         */
+        if (channel != nv3->pfifo.cache1.push_channel) {
+            nv3_log("NV3: PFIFO: channel switch %d -> %d (simplified)\n",
+                    nv3->pfifo.cache1.push_channel, channel);
+            nv3->pfifo.cache1.push_channel = channel;
+        }
+
+        /* Check if CACHE1 is full */
+        uint32_t next_put = (nv3->pfifo.cache1.put + 1) % cache_size;
+        if (next_put == nv3->pfifo.cache1.get) {
+            nv3_log("NV3: PFIFO push ch%d: CACHE1 full! method=0x%04X "
+                    "data=0x%08X (dropped to runout)\n",
+                    channel, method, data);
+            /* Would go to RAMRO on real hardware */
+            return;
+        }
+
+        /* Write entry to CACHE1 at PUT position */
+        uint32_t put = nv3->pfifo.cache1.put;
+        nv3->pfifo.cache1.entries[put].addr = addr_field;
+        nv3->pfifo.cache1.entries[put].data = data;
+        nv3->pfifo.cache1.put = next_put;
+
+        /* Sync to register bank */
+        nv3->pfifo.regs[(NV3_PFIFO_CACHE1_PUT - NV3_PFIFO_START) >> 2] = nv3->pfifo.cache1.put;
+        /* Also sync the entry register corresponding to this index */
+        uint32_t entry_addr_reg = NV3_PFIFO_CACHE1_ADDR_START + put * NV3_PFIFO_CACHE1_ENTRY_STRIDE;
+        uint32_t entry_data_reg = NV3_PFIFO_CACHE1_DATA_START + put * NV3_PFIFO_CACHE1_ENTRY_STRIDE;
+        nv3->pfifo.regs[(entry_addr_reg - NV3_PFIFO_START) >> 2] = addr_field;
+        nv3->pfifo.regs[(entry_data_reg - NV3_PFIFO_START) >> 2] = data;
+
+        /* Trigger puller if enabled */
+        if (nv3->pfifo.cache1.pull_enabled)
+            nv3_pfifo_puller_run(nv3);
+    }
+}
+
+/* ========================================================================
+ * Initialize PFIFO subsystem default state.
+ *
+ * Per envytools nv1_pfifo.xml and rivafb riva_tbl.h nv3TablePFIFO:
+ * The driver initializes PFIFO by:
+ *   1. Disabling CACHES (master enable = 0)
+ *   2. Writing RAMHT/RAMFC/RAMRO config
+ *   3. Setting up CACHE0/CACHE1 push/pull enables
+ *   4. Enabling CACHES
+ *
+ * At power-on, caches start empty (PUT == GET == 0), all enables are off.
+ * ======================================================================== */
+static void
+nv3_pfifo_init(nv3_t *nv3)
+{
+    /* All interrupts cleared and disabled */
+    nv3->pfifo.intr_0    = 0;
+    nv3->pfifo.intr_en_0 = 0;
+
+    /* Master FIFO disabled at startup */
+    nv3->pfifo.caches_enabled = 0;
+
+    /* Configuration registers — will be set by driver during init */
+    nv3->pfifo.config       = 0;  /* All channels PIO mode by default */
+    nv3->pfifo.ramht_config = 0;
+    nv3->pfifo.ramfc_config = 0;
+    nv3->pfifo.ramro_config = 0;
+
+    /* CACHE0 starts empty with push/pull disabled */
+    nv3->pfifo.cache0.push_enabled = 0;
+    nv3->pfifo.cache0.pull_enabled = 0;
+    nv3->pfifo.cache0.put          = 0;
+    nv3->pfifo.cache0.get          = 0;
+    nv3->pfifo.cache0.entry.addr   = 0;
+    nv3->pfifo.cache0.entry.data   = 0;
+
+    /* CACHE1 starts empty with push/pull disabled */
+    nv3->pfifo.cache1.push_enabled  = 0;
+    nv3->pfifo.cache1.push_channel  = 0;
+    nv3->pfifo.cache1.pull_enabled  = 0;
+    nv3->pfifo.cache1.pull_engine   = 0;
+    nv3->pfifo.cache1.put           = 0;
+    nv3->pfifo.cache1.get           = 0;
+    nv3->pfifo.cache1.dma_push      = 0;
+    nv3->pfifo.cache1.dma_fetch     = 0;
+    nv3->pfifo.cache1.hash          = 0;
+    nv3->pfifo.cache1.engine        = 0;
+    memset(nv3->pfifo.cache1.entries, 0, sizeof(nv3->pfifo.cache1.entries));
+
+    /* Runout empty */
+    nv3->pfifo.runout.put = 0;
+    nv3->pfifo.runout.get = 0;
+
+    /* No objects bound to subchannels */
+    memset(nv3->pfifo.subchan_object, 0, sizeof(nv3->pfifo.subchan_object));
+
+    /*
+     * Sync key PFIFO registers to the register bank.
+     * The driver reads these back to verify initialization.
+     */
+    nv3->pfifo.regs[(NV3_PFIFO_INTR_0 - NV3_PFIFO_START) >> 2]    = 0;
+    nv3->pfifo.regs[(NV3_PFIFO_INTR_EN_0 - NV3_PFIFO_START) >> 2] = 0;
+    nv3->pfifo.regs[(NV3_PFIFO_CACHES - NV3_PFIFO_START) >> 2]    = 0;
+    nv3->pfifo.regs[(NV3_PFIFO_CONFIG - NV3_PFIFO_START) >> 2]     = 0;
+    nv3->pfifo.regs[(NV3_PFIFO_RAMHT - NV3_PFIFO_START) >> 2]     = 0;
+    nv3->pfifo.regs[(NV3_PFIFO_RAMFC - NV3_PFIFO_START) >> 2]     = 0;
+    nv3->pfifo.regs[(NV3_PFIFO_RAMRO - NV3_PFIFO_START) >> 2]     = 0;
+
+    nv3_log("NV3: PFIFO initialized\n");
+}
+
+/* ========================================================================
  * Device init function.
  *
  * Creates the nv3_t, initializes SVGA, PCI, memory mappings,
@@ -2813,6 +3522,9 @@ nv3_init(const device_t *info)
 
     /* PRAMDAC - PLL clocks and DAC */
     nv3_pramdac_init(nv3);
+
+    /* PFIFO - Command FIFO */
+    nv3_pfifo_init(nv3);
 
     /* PCRTC - Display controller defaults */
     nv3->pcrtc.intr     = 0;

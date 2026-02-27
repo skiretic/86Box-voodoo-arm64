@@ -194,17 +194,94 @@ typedef struct nv3_pgraph_s {
 } nv3_pgraph_t;
 
 /*
+ * PFIFO cache entry.
+ * Per envytools nv1_pfifo.xml: each cache entry stores a pending
+ * method submission as an (address, data) pair.
+ *   addr: bits [12:2] = method, bits [15:13] = subchannel
+ *   data: 32-bit method parameter
+ */
+typedef struct nv3_cache_entry_s {
+    uint32_t addr;
+    uint32_t data;
+} nv3_cache_entry_t;
+
+/*
  * PFIFO (Command FIFO) state.
- * Stub for Phase 1; will be expanded in Phase 3.
+ *
+ * NV3 PFIFO architecture (per envytools nv1-pfifo docs):
+ *
+ * The PFIFO is a command submission engine that sits between the CPU
+ * (or DMA engine) and the graphics/DMA engines. Commands flow through:
+ *   USER space write -> pusher -> CACHE1 -> puller -> PGRAPH/PDMA
+ *
+ * Two caches:
+ *   CACHE0: 1 entry, reserved for channel 0 (low-priority notifier path)
+ *   CACHE1: 32 entries (NV3) / 64 entries (NV3T), handles channels 1-7
+ *
+ * RAMHT: Hash table mapping object handles -> (engine, class, instance)
+ * RAMFC: Per-channel FIFO context (DMA pointers for context switching)
+ * RAMRO: Runout buffer for error logging
  *
  * The regs[] array provides a general register bank for driver readback.
- * PFIFO spans 0x002000-0x003FFF (8KB = 2048 dwords). Registers handled
- * explicitly in the switch statement (INTR_0, INTR_EN_0) are returned
- * from their dedicated fields; all other registers go through the bank.
+ * PFIFO spans 0x002000-0x003FFF (8KB = 2048 dwords).
  */
 typedef struct nv3_pfifo_s {
+    /* Interrupt state */
     uint32_t intr_0;
     uint32_t intr_en_0;
+
+    /* Master FIFO enable (CACHES register, bit 0) */
+    uint32_t caches_enabled;
+
+    /* PFIFO configuration */
+    uint32_t config;          /* Per-channel DMA/PIO mode (bits 7:0) */
+    uint32_t ramht_config;    /* RAMHT base + size config */
+    uint32_t ramfc_config;    /* RAMFC base config */
+    uint32_t ramro_config;    /* RAMRO base + size config */
+
+    /*
+     * CACHE0: single-entry cache for channel 0.
+     * Per envytools: CACHE0 has exactly 1 entry.
+     */
+    struct {
+        uint32_t push_enabled;  /* PUSH0 bit 0: push access enable */
+        uint32_t pull_enabled;  /* PULL0 bit 0: puller access enable */
+        uint32_t put;           /* Write pointer (0 or 1) */
+        uint32_t get;           /* Read pointer (0 or 1) */
+        nv3_cache_entry_t entry; /* The single cache entry */
+    } cache0;
+
+    /*
+     * CACHE1: main command cache.
+     * 32 entries on NV3 (NV3_CACHE1_SIZE).
+     */
+    struct {
+        uint32_t push_enabled;  /* PUSH0 bit 0: push access enable */
+        uint32_t push_channel;  /* PUSH1: channel ID for pusher */
+        uint32_t pull_enabled;  /* PULL0 bit 0: puller access enable */
+        uint32_t pull_engine;   /* PULL1: engine select for puller */
+        uint32_t put;           /* Write pointer (index into entries) */
+        uint32_t get;           /* Read pointer (index into entries) */
+        uint32_t dma_push;      /* DMA_PUSH: bit 0 = DMA pusher enable */
+        uint32_t dma_fetch;     /* DMA fetch config */
+        uint32_t hash;          /* Last RAMHT hash result */
+        uint32_t engine;        /* Engine assignment for current subchannel */
+        nv3_cache_entry_t entries[NV3T_CACHE1_SIZE]; /* Max size for NV3T */
+    } cache1;
+
+    /* RAMRO (Runout) state */
+    struct {
+        uint32_t put;           /* Write pointer */
+        uint32_t get;           /* Read pointer */
+    } runout;
+
+    /*
+     * Per-subchannel state for the puller.
+     * Tracks which object handle is currently bound to each subchannel.
+     */
+    uint32_t subchan_object[NV3_PFIFO_NUM_SUBCHANNELS];
+
+    /* General register bank for unhandled PFIFO offsets */
     uint32_t regs[2048];
 } nv3_pfifo_t;
 

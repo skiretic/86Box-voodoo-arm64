@@ -82,19 +82,90 @@
 #define NV3_PFIFO_INTR_EN_0       0x002140
 
 /*
+ * PFIFO_INTR_0 / INTR_EN_0 bit definitions.
+ *
+ * Per envytools nv1_pfifo.xml:
+ *   bit 0 = CACHE_ERROR  — invalid method/object error
+ *   bit 4 = RUNOUT       — RAMRO runout buffer overflow
+ *   bit 8 = RUNOUT_OVERFLOW — RAMRO overflow (fatal)
+ *   bit 12 = DMA_PUSHER  — DMA pusher error
+ *   bit 16 = DMA_PT      — DMA page table error (NV3+)
+ */
+#define NV3_PFIFO_INTR_CACHE_ERROR    (1 << 0)
+#define NV3_PFIFO_INTR_RUNOUT         (1 << 4)
+#define NV3_PFIFO_INTR_RUNOUT_OVERFLOW (1 << 8)
+#define NV3_PFIFO_INTR_DMA_PUSHER    (1 << 12)
+#define NV3_PFIFO_INTR_DMA_PT        (1 << 16)
+
+/*
  * PFIFO configuration registers.
  * Per envytools nv1_pfifo.xml.
  */
+#define NV3_PFIFO_DELAY_0         0x002040   /* Access delay (debug) */
+#define NV3_PFIFO_DMA_TIMESLICE   0x002044   /* DMA timeslice (debug) */
+#define NV3_PFIFO_CONFIG          0x002200   /* PFIFO mode config */
 #define NV3_PFIFO_RAMHT           0x002210   /* Hash table config */
 #define NV3_PFIFO_RAMFC           0x002214   /* FIFO context config */
 #define NV3_PFIFO_RAMRO           0x002218   /* Runout area config */
+
+/*
+ * PFIFO_CONFIG register bit definitions.
+ *
+ * Per envytools nv1_pfifo.xml (NV3 variant):
+ *   bits [7:0] = per-channel DMA/PIO mode select (1 bit per channel).
+ *                0 = PIO mode, 1 = DMA mode.
+ *   NV3 supports 8 channels (bits 7:0 used).
+ */
+
+/*
+ * PFIFO_RAMHT register bit definitions.
+ *
+ * Per envytools nv1_pfifo.xml:
+ *   bits [3:0] = RAMHT base address in RAMIN (in 4KB units).
+ *                Address = value * 0x1000.
+ *   bits [17:16] = RAMHT size selector:
+ *     0 = 4KB   (1024 entries, 4 bytes per entry)
+ *     1 = 8KB   (2048 entries)
+ *     2 = 16KB  (4096 entries)
+ *     3 = 32KB  (8192 entries)
+ */
+#define NV3_PFIFO_RAMHT_BASE_SHIFT    0
+#define NV3_PFIFO_RAMHT_BASE_MASK     0x1F0
+#define NV3_PFIFO_RAMHT_SIZE_SHIFT    16
+#define NV3_PFIFO_RAMHT_SIZE_MASK     (0x3 << 16)
+
+/*
+ * PFIFO_RAMFC register bit definitions.
+ *
+ * Per envytools nv1_pfifo.xml:
+ *   bits [8:1] = RAMFC base address in RAMIN (in 512-byte units).
+ *                Address = value * 0x200.
+ *   NV3 RAMFC stores 8 channels * 8 bytes = 64 bytes minimum.
+ *   (But typically 1KB is reserved.)
+ */
+#define NV3_PFIFO_RAMFC_BASE_SHIFT    1
+#define NV3_PFIFO_RAMFC_BASE_MASK     0x1FE
+
+/*
+ * PFIFO_RAMRO register bit definitions.
+ *
+ * Per envytools nv1_pfifo.xml:
+ *   bits [8:1] = RAMRO base address in RAMIN (in 512-byte units).
+ *                Address = value * 0x200.
+ *   bit 16 = RAMRO size: 0 = 512 bytes, 1 = 8192 bytes.
+ */
+#define NV3_PFIFO_RAMRO_BASE_SHIFT    1
+#define NV3_PFIFO_RAMRO_BASE_MASK     0x1FE
+#define NV3_PFIFO_RAMRO_SIZE_BIT      (1 << 16)
 
 /* PFIFO CACHE_ERROR (read-only status) */
 #define NV3_PFIFO_CACHE_ERROR     0x002080
 
 /*
  * PFIFO CACHES register.
- * Per envytools: boolean enable for the reassignment engine.
+ * Per envytools: bit 0 = boolean enable for the reassignment engine.
+ * When enabled, PFIFO routes incoming USER writes to the appropriate
+ * cache (CACHE0 for channel 0, CACHE1 for others).
  */
 #define NV3_PFIFO_CACHES          0x002500
 
@@ -110,35 +181,68 @@
  * PFIFO CACHE0 registers.
  * Per envytools nv1_pfifo.xml (NV3 variant):
  *   PUSH0 (0x003000): bit 0 = push access enable
- *   PUT   (0x003010): pusher write pointer
- *   STATUS(0x003014): bit 0=RANOUT, bit 4=EMPTY, bit 8=FULL
  *   PULL0 (0x003040): bit 0 = puller access enable
- *   GET   (0x003070): puller read pointer
+ *   PUT   (0x003010): pusher write pointer (only bit 0 valid — single entry)
+ *   GET   (0x003070): puller read pointer (only bit 0 valid — single entry)
+ *   STATUS(0x003014): bit 0=RANOUT, bit 4=EMPTY, bit 8=FULL
+ *
+ * CACHE0 entry registers (single entry):
+ *   ADDR  (0x003080): method + subchannel address
+ *   DATA  (0x003084): method data
  */
 #define NV3_PFIFO_CACHE0_PUSH0    0x003000
 #define NV3_PFIFO_CACHE0_PUT      0x003010
 #define NV3_PFIFO_CACHE0_STATUS   0x003014
 #define NV3_PFIFO_CACHE0_PULL0    0x003040
 #define NV3_PFIFO_CACHE0_GET      0x003070
+#define NV3_PFIFO_CACHE0_ADDR     0x003080
+#define NV3_PFIFO_CACHE0_DATA     0x003084
 
 /*
  * PFIFO CACHE1 registers (NV3 layout).
  * Per envytools nv1_pfifo.xml (NV3 variant):
  *   PUSH0  (0x003200): bit 0 = push access enable
- *   PUSH1  (0x003204): channel ID for pusher
- *   PUT    (0x003210): pusher write pointer
+ *   PUSH1  (0x003204): channel ID for pusher [bits 3:0 on NV3]
+ *   PUT    (0x003210): pusher write pointer [bits 4:0 for 32 entries]
  *   STATUS (0x003214): bit 0=RANOUT, bit 4=EMPTY, bit 8=FULL
+ *   DMA_PUSH (0x003220): bit 0 = DMA pusher access enable
+ *   DMA_FETCH (0x003224): DMA fetch configuration
+ *   DMA_PUT  (0x003240 [NV4] or via RAMFC on NV3)
+ *   DMA_GET  (0x003244 [NV4] or via RAMFC on NV3)
  *   PULL0  (0x003240): bit 0 = puller access enable
  *   PULL1  (0x003250): puller engine state
- *   GET    (0x003270): puller read pointer
+ *   GET    (0x003270): puller read pointer [bits 4:0 for 32 entries]
+ *
+ * CACHE1 entries: 32 entries (NV3) or 64 (NV3T).
+ *   ADDR[i] (0x003800 + i*8): method address + subchannel
+ *   DATA[i] (0x003804 + i*8): method data
  */
 #define NV3_PFIFO_CACHE1_PUSH0    0x003200
 #define NV3_PFIFO_CACHE1_PUSH1    0x003204
 #define NV3_PFIFO_CACHE1_PUT      0x003210
 #define NV3_PFIFO_CACHE1_STATUS   0x003214
+#define NV3_PFIFO_CACHE1_DMA_PUSH 0x003220
+#define NV3_PFIFO_CACHE1_DMA_FETCH 0x003224
 #define NV3_PFIFO_CACHE1_PULL0    0x003240
 #define NV3_PFIFO_CACHE1_PULL1    0x003250
+#define NV3_PFIFO_CACHE1_HASH     0x003258
 #define NV3_PFIFO_CACHE1_GET      0x003270
+#define NV3_PFIFO_CACHE1_ENGINE   0x003280
+#define NV3_PFIFO_CACHE1_ADDR_START 0x003800
+#define NV3_PFIFO_CACHE1_DATA_START 0x003804
+#define NV3_PFIFO_CACHE1_ENTRY_STRIDE 8
+
+/*
+ * CACHE entry ADDR register bit definitions.
+ *
+ * Per envytools nv1_pfifo.xml:
+ *   bits [12:2]  = method address >> 2 (11 bits, dword-aligned)
+ *   bits [15:13] = subchannel index (0-7)
+ */
+#define NV3_CACHE_ADDR_METHOD_SHIFT  2
+#define NV3_CACHE_ADDR_METHOD_MASK   (0x7FF << 2)
+#define NV3_CACHE_ADDR_SUBCHAN_SHIFT 13
+#define NV3_CACHE_ADDR_SUBCHAN_MASK  (0x7 << 13)
 
 /*
  * CACHE STATUS register bit definitions.
@@ -147,11 +251,72 @@
  *   bit 4 = EMPTY  — cache contains no pending entries (PUT == GET)
  *   bit 8 = FULL   — cache has no free entry slots
  *
- * These apply to both CACHE0_STATUS and CACHE1_STATUS.
+ * These apply to both CACHE0_STATUS, CACHE1_STATUS, and RUNOUT_STATUS.
  */
 #define NV3_PFIFO_CACHE_STATUS_RANOUT  (1 << 0)
 #define NV3_PFIFO_CACHE_STATUS_EMPTY   (1 << 4)
 #define NV3_PFIFO_CACHE_STATUS_FULL    (1 << 8)
+
+/* CACHE1 capacity: 32 entries on NV3, 64 on NV3T */
+#define NV3_CACHE1_SIZE            32
+#define NV3T_CACHE1_SIZE           64
+
+/* Maximum number of PFIFO channels */
+#define NV3_PFIFO_NUM_CHANNELS     8
+#define NV3_PFIFO_NUM_SUBCHANNELS  8
+
+/*
+ * USER space layout.
+ *
+ * Per envytools fifo/nv1-pfifo.html:
+ * Each channel gets a 64KB window at USER_START + chid * 0x10000.
+ * Within a channel window, 8 subchannels at 0x2000 stride:
+ *   subchannel[i] = channel_base + i * 0x2000
+ *
+ * Within each subchannel:
+ *   0x0000 = object handle (write binds object to subchannel)
+ *   0x0100-0x1FFC = methods (offset >> 2 = method number)
+ *
+ * The FREE register at channel_base + 0x10 returns the number
+ * of free 32-bit entries in the cache (for PIO flow control).
+ */
+#define NV3_USER_SUBCHAN_STRIDE   0x2000
+#define NV3_USER_SUBCHAN_OBJECT   0x0000
+#define NV3_USER_SUBCHAN_METHOD_START 0x0100
+
+/*
+ * RAMHT (Hash Table) entry format (4 bytes per entry on NV3).
+ *
+ * Per envytools fifo/nv1-pfifo.html:
+ *   bits [31:0] of the handle are used for hash computation.
+ *   The entry stored in RAMHT is 8 bytes on NV3:
+ *     word 0 = object handle
+ *     word 1:
+ *       bits [15:0]  = RAMIN instance address >> 4
+ *       bits [23:16] = engine (0=SW, 1=PGRAPH, 2=PDMA)
+ *       bit 31       = valid flag
+ */
+#define NV3_RAMHT_ENTRY_SIZE       8
+#define NV3_RAMHT_ENTRY_VALID      (1u << 31)
+#define NV3_RAMHT_ENTRY_ENGINE_SHIFT 16
+#define NV3_RAMHT_ENTRY_ENGINE_MASK  (0xFF << 16)
+#define NV3_RAMHT_ENTRY_INSTANCE_MASK 0xFFFF
+
+/* Engine IDs for RAMHT entries */
+#define NV3_ENGINE_SW              0
+#define NV3_ENGINE_PGRAPH          1
+#define NV3_ENGINE_PDMA            2
+
+/*
+ * RAMFC (FIFO Context) entry format.
+ *
+ * Per envytools fifo/nv1-pfifo.html (NV3 variant):
+ * Each channel has an 8-byte context stored in RAMFC:
+ *   word 0 = DMA_PUT (for DMA mode)
+ *   word 1 = DMA_GET (for DMA mode)
+ * The channel's RAMFC entry is at: RAMFC_base + chid * 8
+ */
+#define NV3_RAMFC_ENTRY_SIZE       8
 
 #define NV3_PFIFO_END             0x003FFF
 
