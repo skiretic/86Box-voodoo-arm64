@@ -94,18 +94,18 @@
 
 ## Phase 4: 2D Acceleration
 ### High Priority Classes
-- [ ] 0x10 Blit (screen-to-screen)
-- [ ] 0x07 Rectangle (filled)
-- [ ] 0x11 Image (from CPU)
-- [ ] 0x0C GDI Text
-- [ ] 0x05 Clip
-- [ ] 0x02 ROP
+- [x] 0x10 Blit (screen-to-screen) — class 0x001F
+- [x] 0x07 Rectangle (filled) — class 0x001E
+- [x] 0x11 Image (from CPU) — class 0x0021
+- [x] 0x0C GDI Text — class 0x004A / 0x004B
+- [x] 0x05 Clip — class 0x0019
+- [x] 0x02 ROP — class 0x0043
 
 ### Medium Priority Classes
 - [ ] 0x12 Bitmap (monochrome)
-- [ ] 0x06 Pattern
-- [ ] 0x01 Beta
-- [ ] 0x03 Chroma
+- [x] 0x06 Pattern — class 0x0018
+- [x] 0x01 Beta — class 0x0012
+- [x] 0x03 Chroma — class 0x0017
 - [ ] 0x0E Scaled image
 - [ ] 0x15 Stretched image
 
@@ -117,14 +117,14 @@
 - [ ] 0x0B Triangle (2D)
 - [ ] 0x0D M2MF
 - [ ] 0x14 Transfer to memory
-- [ ] 0x1C Surface config
+- [x] 0x1C Surface config — classes 0x0042 / 0x0058 / 0x0059
 
 ### Infrastructure
-- [ ] PGRAPH method dispatch
-- [ ] Object binding (context objects)
-- [ ] Surface state management
-- [ ] ROP3 lookup table
-- [ ] Accelerated Windows desktop
+- [x] PGRAPH method dispatch
+- [x] Object binding (context objects)
+- [x] Surface state management
+- [x] ROP3 lookup table
+- [ ] Accelerated Windows desktop (needs testing)
 
 ## Phase 5: 3D Interpreter
 ### Class 0x17 -- D3D5 Triangles
