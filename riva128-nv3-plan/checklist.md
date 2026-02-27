@@ -71,24 +71,24 @@
 - [ ] DMA object parsing
 
 ### RAMHT
-- [ ] Hash table allocation
-- [ ] XOR hash function
-- [ ] Object name -> class lookup
+- [x] Hash table allocation
+- [x] XOR hash function
+- [x] Object name -> class lookup
 
 ### RAMFC
-- [ ] Channel context save/restore
-- [ ] DMA_PUT/DMA_GET per channel
+- [x] Channel context save/restore
+- [x] DMA_PUT/DMA_GET per channel
 
 ### RAMRO
-- [ ] Error runout buffer
+- [x] Error runout buffer
 
 ### PFIFO
-- [ ] Master FIFO enable (CACHES)
-- [ ] CACHE0 (1 entry)
-- [ ] CACHE1 (32/64 entries)
-- [ ] Pusher state machine
-- [ ] Puller state machine
-- [ ] USER space PIO dispatch
+- [x] Master FIFO enable (CACHES)
+- [x] CACHE0 (1 entry)
+- [x] CACHE1 (32/64 entries)
+- [x] Pusher state machine
+- [x] Puller state machine
+- [x] USER space PIO dispatch
 - [ ] DMA mode (NV3)
 - [ ] Command submission validated
 
