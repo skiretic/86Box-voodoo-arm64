@@ -916,15 +916,18 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
 
     /* Check for VGA passthrough frames.
-       Always consume the flag to avoid spin loops.  Only actually
-       present when no 3D render pass is active and the swapchain
-       is ready -- otherwise the frame is simply dropped. */
-    if (atomic_exchange_explicit(&disp->vga_frame_ready, 0,
-                                  memory_order_acquire)) {
+       Only consume the flag when we can actually present -- if the
+       swapchain is not ready yet, leave vga_frame_ready=1 so the
+       next tick can retry instead of silently dropping the frame. */
+    if (atomic_load_explicit(&disp->vga_frame_ready,
+                              memory_order_acquire)) {
         if (!gpu_st->render_pass_active &&
             disp->swapchain != VK_NULL_HANDLE) {
+            atomic_store_explicit(&disp->vga_frame_ready, 0,
+                                   memory_order_relaxed);
             vc_display_present_vga(ctx, gpu_st);
         }
+        /* If swapchain not ready, leave vga_frame_ready=1 for next tick. */
     }
 }
 
@@ -1353,11 +1356,8 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
     vc_display_t *disp = &gpu_st->disp;
 
-    /* Check if a VGA frame is ready. */
-    if (!atomic_exchange_explicit(&disp->vga_frame_ready, 0,
-                                   memory_order_acquire))
-        return -1;
-
+    /* vga_frame_ready is already consumed by vc_display_tick() before
+       calling this function -- do not check/clear it again here. */
     if (disp->swapchain == VK_NULL_HANDLE)
         return -1;
 
@@ -1657,21 +1657,22 @@ vc_display_wait_teardown(vc_ctx_t *ctx)
 /*  VGA passthrough blit -- public opaque API (called from Qt VCRenderer)      */
 /* -------------------------------------------------------------------------- */
 
-void
+int
 vc_display_set_vga_bufs(void *ctx_ptr, void *buf0, void *buf1)
 {
     vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
     if (!ctx)
-        return;
+        return -1;
 
     vc_gpu_state_t *gpu_st = (vc_gpu_state_t *) ctx->render_data;
     if (!gpu_st)
-        return;
+        return -1;
 
     atomic_store_explicit(&gpu_st->disp.vga_buf_ptrs[0],
                           (uintptr_t) buf0, memory_order_release);
     atomic_store_explicit(&gpu_st->disp.vga_buf_ptrs[1],
                           (uintptr_t) buf1, memory_order_release);
+    return 0;
 }
 
 void

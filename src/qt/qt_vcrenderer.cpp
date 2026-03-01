@@ -105,12 +105,14 @@ VCRenderer::initialize()
     vc_display_set_surface_handle(ctx_ptr, m_surface);
 
     /* Register VGA blit buffer pointers with VideoCommon so the GPU
-       thread can read from them for VGA passthrough display. */
+       thread can read from them for VGA passthrough display.
+       May fail if render_data is not yet initialized -- retry in onBlit. */
     if (!m_bufsRegistered) {
-        vc_display_set_vga_bufs(ctx_ptr,
-                                 m_images[0]->bits(),
-                                 m_images[1]->bits());
-        m_bufsRegistered = true;
+        if (vc_display_set_vga_bufs(ctx_ptr,
+                                     m_images[0]->bits(),
+                                     m_images[1]->bits()) == 0) {
+            m_bufsRegistered = true;
+        }
     }
 
     emit initialized();
@@ -166,6 +168,16 @@ VCRenderer::onBlit(int buf_idx, int x, int y, int w, int h)
        and present it via the Vulkan swapchain. */
     void *ctx_ptr = vc_display_get_ctx();
     if (ctx_ptr) {
+        /* Retry buffer registration if it failed during initialize()
+           (render_data may not have been ready yet). */
+        if (!m_bufsRegistered) {
+            if (vc_display_set_vga_bufs(ctx_ptr,
+                                         m_images[0]->bits(),
+                                         m_images[1]->bits()) == 0) {
+                m_bufsRegistered = true;
+            }
+        }
+
         vc_display_notify_vga_frame(ctx_ptr, buf_idx, x, y, w, h);
     }
 
