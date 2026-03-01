@@ -189,10 +189,17 @@ post-processing blit, present, display callback skip.
 - No Vulkan drawing code (GPU thread does everything)
 
 **Display callback skip** (`vid_voodoo_display.c`):
-- In `voodoo_callback()`, add `if (voodoo->use_gpu_renderer) goto skip_scanout;`
-  before the per-scanline pixel output loop
-- `skip_scanout:` label placed before the swap/retrace section
-- svga_doblit call also skipped (GPU thread presents directly)
+- In `voodoo_callback()`, add `!voodoo->use_gpu_renderer` to BOTH `VGA_PASS`
+  conditional blocks. A single `goto skip_scanout` will NOT work because
+  the per-scanline pixel drawing and `svga_doblit` are in separate conditional
+  blocks with swap/retrace code between them (see DESIGN.md section 5.6).
+- Insertion point 1: the per-scanline pixel output block (line < v_disp).
+  Change `if (fbiInit0 & FBIINIT0_VGA_PASS)` to
+  `if ((fbiInit0 & FBIINIT0_VGA_PASS) && !voodoo->use_gpu_renderer)`.
+- Insertion point 2: the `svga_doblit` trigger block (line == v_disp).
+  Same guard: `if ((fbiInit0 & FBIINIT0_VGA_PASS) && !voodoo->use_gpu_renderer)`.
+- Swap completion, retrace timing, swap_pending, and wake_fifo_thread code
+  between these blocks is UNCHANGED and always runs.
 
 ### Test
 
@@ -336,6 +343,7 @@ This is where the rendered output starts looking correct.
 - [ ] Fog fades distant geometry
 - [ ] Scissor clips correctly
 - [ ] 0 Vulkan validation errors
+- [ ] No swap_count regression during full 3DMark99 run with depth/blend/fog enabled
 
 ---
 
@@ -374,6 +382,15 @@ This is where the rendered output starts looking correct.
 - Depth from zaColor (lower 16 bits) when depth_source = 1
 - Push constant: depth bias value, depth source flag
 
+**6.7 Fastfill (VC_CMD_CLEAR)**:
+- Bridge `fastfillCMD` -> `VC_CMD_CLEAR` for Glide games that use hardware
+  clear instead of triangle-based clears (Quake 2, Unreal, etc.)
+- In `vid_voodoo_reg.c`: if `use_gpu_renderer`, push `VC_CMD_CLEAR` with
+  color, depth values, and which-buffers mask after existing fastfill processing
+- GPU thread: `vkCmdClearAttachments` within the active render pass
+- 3DMark99 does NOT use fastfill (clears via triangles), so other Glide
+  games are needed for testing this path
+
 ### Test
 
 1. Run 3DMark99, inspect multi-textured surfaces
@@ -410,15 +427,25 @@ This is where the rendered output starts looking correct.
 
 ### Sub-phases
 
-**7.1 Sync Readback**:
-- vkCmdCopyImageToBuffer from offscreen to staging
-- Fence wait, format conversion (RGBA8 -> RGB565/D16)
-- Voodoo LFB address decode (format, buffer select)
+**7.1 Shadow Buffer Readback**:
+- GPU thread maintains a host-visible shadow buffer, updated via
+  `vkCmdCopyImageToBuffer` at each `VC_CMD_SWAP` (after render, before present)
+- LFB reads (`voodoo_fb_readl`) return directly from the shadow buffer -- NO
+  push to SPSC ring, NO `vc_ring_push_and_sync()`. This avoids violating the
+  SPSC single-producer invariant (only the FIFO thread may produce ring commands)
+  and avoids blocking the CPU thread (which would stall CMDFIFO writes and
+  indirectly freeze the FIFO thread -- the exact v1 failure mode)
+- Shadow buffer is double-buffered (ping-pong): GPU writes to buffer A while
+  CPU reads from buffer B, swap at each frame boundary
+- Format conversion (RGBA8 -> RGB565/D16) happens on the CPU side at read time
+- Voodoo LFB address decode (format, buffer select) unchanged
 
-**7.2 Async Readback**:
-- Ping-pong double-buffered staging
-- Read from previous frame's staging while current frame renders
-- Adaptive: switch to async after 10+ reads/frame
+**7.2 Shadow Buffer Invalidation**:
+- Shadow buffer is invalidated by draw commands and LFB writes
+- Stale reads (between shadow updates) return data from the previous frame,
+  which is acceptable -- games that read LFB mid-frame are rare
+- Adaptive: if reads exceed a threshold per frame, the GPU thread copies
+  more frequently (e.g., at batch breaks) to reduce staleness
 
 **7.3 LFB Write**:
 - Shadow buffer (CPU-writable)
@@ -442,6 +469,7 @@ This is where the rendered output starts looking correct.
 - [ ] LFB write modifies visible output
 - [ ] Dirty tracking limits transfer bandwidth
 - [ ] No stalls beyond acceptable latency (~1 frame for async)
+- [ ] Sync readback does not cause swap_count accumulation or FIFO thread stall
 
 ---
 
@@ -486,6 +514,7 @@ This is where the rendered output starts looking correct.
 - [ ] No performance regression vs SW path
 - [ ] Banshee/V3 basic rendering works
 - [ ] Builds and runs on all 4 target platforms
+- [ ] swap_count never reaches 3 during sustained rendering (verified via diagnostic logging)
 
 ---
 
