@@ -916,12 +916,15 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
 
     /* Check for VGA passthrough frames.
-       Only present VGA frames when no 3D render pass is active and
-       the swapchain is ready. */
-    if (!gpu_st->render_pass_active &&
-        disp->swapchain != VK_NULL_HANDLE &&
-        atomic_load_explicit(&disp->vga_frame_ready, memory_order_relaxed)) {
-        vc_display_present_vga(ctx, gpu_st);
+       Always consume the flag to avoid spin loops.  Only actually
+       present when no 3D render pass is active and the swapchain
+       is ready -- otherwise the frame is simply dropped. */
+    if (atomic_exchange_explicit(&disp->vga_frame_ready, 0,
+                                  memory_order_acquire)) {
+        if (!gpu_st->render_pass_active &&
+            disp->swapchain != VK_NULL_HANDLE) {
+            vc_display_present_vga(ctx, gpu_st);
+        }
     }
 }
 
