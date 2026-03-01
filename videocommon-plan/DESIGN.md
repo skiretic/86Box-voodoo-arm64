@@ -212,14 +212,12 @@ typedef struct vc_ring_cmd_header_t {
 | `VC_CMD_STATE_UPDATE` | fbzMode, alphaMode, fogMode, etc. | Pipeline state that changed since last triangle |
 | `VC_CMD_CLEAR` | color, depth, which buffers | Fastfill / clear operation |
 | `VC_CMD_LFB_WRITE` | offset, dimensions, pixel data | LFB write from shadow buffer |
-| `VC_CMD_READBACK` | buffer select (front/back), region, completion event pointer | Sync readback of framebuffer to staging buffer (LFB read) |
-| `VC_CMD_RESIZE` | width, height | Framebuffer resize (from GUI) |
 | `VC_CMD_SHUTDOWN` | (none) | Terminate GPU thread |
 | `VC_CMD_WRAPAROUND` | (none) | Sentinel: read_pos wraps to 0 |
 
 ### 4.4 Push API (Producer -- FIFO Thread)
 
-Three variants, matching DuckStation:
+Two variants, matching DuckStation:
 
 ```c
 /* Fire-and-forget (most common, for triangles) */
@@ -227,10 +225,13 @@ void vc_ring_push(vc_ring_t *ring, const void *cmd, uint32_t size);
 
 /* Push and wake GPU thread (for swap, shutdown) */
 void vc_ring_push_and_wake(vc_ring_t *ring, const void *cmd, uint32_t size);
-
-/* Push and block until processed (for sync readback) */
-void vc_ring_push_and_sync(vc_ring_t *ring, const void *cmd, uint32_t size);
 ```
+
+Note: DuckStation has a third variant `PushCommandAndSync()` for blocking
+readback. VideoCommon does NOT use this pattern because sync readback from
+the CPU thread would violate the SPSC single-producer invariant (the FIFO
+thread is the sole ring producer). Instead, LFB reads use a shadow buffer
+maintained by the GPU thread -- see section 9.1.
 
 ### 4.5 Wake Mechanism
 
@@ -480,6 +481,8 @@ typedef struct vc_frame_resources_t {
     VkCommandBuffer     cmd_buf;
     VkFence             fence;
     uint64_t            fence_value;        /* monotonic counter */
+    VkSemaphore         image_available_sem; /* signaled by vkAcquireNextImageKHR */
+    VkSemaphore         render_finished_sem; /* waited on by vkQueuePresentKHR */
     VkBuffer            vertex_buffer;      /* per-frame, persistently mapped */
     void               *vertex_data;        /* mapped pointer */
     uint32_t            vertex_offset;      /* current write position */
@@ -633,9 +636,16 @@ Optional extensions (used if available):
   VK_EXT_swapchain_maintenance1 (present fences for safe destroy)
 
 Required features:
-  dualSrcBlend (for ACOLORBEFOREFOG alpha blending)
   fragmentStoresAndAtomics (for LFB write path if needed)
   independentBlend (Voodoo blends color and alpha differently)
+
+Optional features (with runtime fallback):
+  dualSrcBlend -- for ACOLORBEFOREFOG alpha blending. If not supported
+    (e.g., Pi 5 stock Mesa 24.3), fall back to VK_BLEND_FACTOR_SRC_COLOR
+    for the ACOLORBEFOREFOG case. This is a minor accuracy reduction
+    (fog alpha vs pre-fog color alpha) but is visually acceptable for
+    most games. Check VkPhysicalDeviceFeatures.dualSrcBlend at device
+    creation and store the result in vc_ctx_t.has_dual_src_blend.
 
 Physical device selection:
   Prefer discrete GPU > integrated GPU > CPU (software)
@@ -695,9 +705,36 @@ Attachment 1 (depth):
   storeOp: STORE
   initial: DEPTH_STENCIL_ATTACHMENT_OPTIMAL
   final:   DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-
-First frame: use vkCmdClearAttachments after begin (avoids undefined initial contents)
 ```
+
+**First-frame initialization**: Newly created VkImages start in
+`VK_IMAGE_LAYOUT_UNDEFINED`. Using `loadOp: LOAD` with
+`initialLayout: COLOR_ATTACHMENT_OPTIMAL` on an UNDEFINED image violates
+VUID-VkAttachmentDescription-format-06699 and causes undefined behavior.
+
+The implementation tracks a `first_frame` boolean per offscreen framebuffer.
+On the first frame after creation (or resize), use `loadOp: CLEAR` with
+`initialLayout: UNDEFINED` for both color and depth attachments. This is
+valid because CLEAR discards previous contents, so UNDEFINED layout is safe.
+On subsequent frames, switch to `loadOp: LOAD` with the working layouts
+(`COLOR_ATTACHMENT_OPTIMAL`, `DEPTH_STENCIL_ATTACHMENT_OPTIMAL`).
+
+```
+First frame (first_frame == true):
+  Attachment 0 (color):   loadOp: CLEAR, initialLayout: UNDEFINED
+  Attachment 1 (depth):   loadOp: CLEAR, initialLayout: UNDEFINED
+  Clear values: color = {0,0,0,0}, depth = 0.0 (or 1.0 per Voodoo convention)
+  After this frame, first_frame = false
+
+Subsequent frames:
+  Attachment 0 (color):   loadOp: LOAD, initialLayout: COLOR_ATTACHMENT_OPTIMAL
+  Attachment 1 (depth):   loadOp: LOAD, initialLayout: DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+```
+
+This two-render-pass approach (CLEAR for first frame, LOAD thereafter) is
+the standard pattern used by Dolphin and DuckStation. It requires two
+VkRenderPass objects -- one for first frame, one for steady state -- but
+both use the same pipeline and framebuffer.
 
 ### 7.5 Graphics Pipeline (Uber-Shader)
 
@@ -849,16 +886,90 @@ This handles resolution scaling (e.g., 640x480 Voodoo output to 1280x960 window)
 
 ### 8.4 Present Flow
 
+Uses a single command buffer for both the offscreen render pass and the
+post-process blit. This is simpler and more efficient than two separate
+submits, and makes synchronization explicit via pipeline barriers rather
+than relying on implicit submission ordering.
+
+**Synchronization**: Each frame resource set contains two binary semaphores:
+- `image_available_sem` -- signaled by `vkAcquireNextImageKHR`, waited by submit
+- `render_finished_sem` -- signaled by submit, waited by `vkQueuePresentKHR`
+
 ```
 GPU thread processes VC_CMD_SWAP:
-  1. End render pass (offscreen)
-  2. Submit offscreen command buffer (vkQueueSubmit)
-  3. Acquire swapchain image (vkAcquireNextImageKHR)
-  4. Record post-process pass (offscreen -> swapchain image)
-  5. Submit post-process command buffer (vkQueueSubmit)
-  6. Present (vkQueuePresentKHR)
-  7. Advance frame index
+  1. Acquire swapchain image (vkAcquireNextImageKHR -> signals image_available_sem)
+  2. End offscreen render pass
+  3. Pipeline barrier: offscreen image
+       srcStage:  COLOR_ATTACHMENT_OUTPUT
+       dstStage:  FRAGMENT_SHADER
+       srcAccess: COLOR_ATTACHMENT_WRITE
+       dstAccess: SHADER_READ
+       oldLayout: COLOR_ATTACHMENT_OPTIMAL
+       newLayout: SHADER_READ_ONLY_OPTIMAL
+  4. Pipeline barrier: swapchain image
+       srcStage:  TOP_OF_PIPE
+       dstStage:  COLOR_ATTACHMENT_OUTPUT
+       srcAccess: 0
+       dstAccess: COLOR_ATTACHMENT_WRITE
+       oldLayout: UNDEFINED
+       newLayout: COLOR_ATTACHMENT_OPTIMAL
+  5. Begin post-process render pass (swapchain image)
+  6. Draw fullscreen triangle (samples offscreen image)
+  7. End post-process render pass
+       (render pass finalLayout transitions swapchain to PRESENT_SRC_KHR)
+  8. Pipeline barrier: offscreen image back to COLOR_ATTACHMENT_OPTIMAL
+       srcStage:  FRAGMENT_SHADER
+       dstStage:  COLOR_ATTACHMENT_OUTPUT
+       srcAccess: SHADER_READ
+       dstAccess: COLOR_ATTACHMENT_WRITE
+       oldLayout: SHADER_READ_ONLY_OPTIMAL
+       newLayout: COLOR_ATTACHMENT_OPTIMAL
+  9. End recording
+ 10. vkQueueSubmit:
+       waitSemaphore:   image_available_sem
+       waitDstStage:    COLOR_ATTACHMENT_OUTPUT
+       signalSemaphore: render_finished_sem
+       fence:           frame_fence
+ 11. vkQueuePresentKHR:
+       waitSemaphore:   render_finished_sem
+ 12. Advance frame index
 ```
+
+The post-process render pass handles swapchain layout transitions via its
+`initialLayout` (COLOR_ATTACHMENT_OPTIMAL) and `finalLayout` (PRESENT_SRC_KHR)
+fields, eliminating the need for an explicit barrier between step 7 and present.
+The swapchain image's `initialLayout` can be UNDEFINED since we always write
+every pixel (fullscreen triangle).
+
+### 8.4.1 Image Layout Transitions Summary
+
+All layout transitions in the present flow, consolidated for reference:
+
+```
+Offscreen image transitions (per frame):
+  [Render pass] -> COLOR_ATTACHMENT_OPTIMAL (via render pass finalLayout)
+  COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL  (barrier, step 3)
+  SHADER_READ_ONLY_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL  (barrier, step 8)
+
+Swapchain image transitions (per frame):
+  UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL  (barrier, step 4 -- or via
+    post-process render pass initialLayout: UNDEFINED)
+  COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR  (via post-process render
+    pass finalLayout)
+
+Shadow buffer readback (if LFB read active, at VC_CMD_SWAP):
+  COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL  (barrier, before copy)
+  TRANSFER_SRC_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL  (barrier, after copy)
+  Note: these happen BEFORE the offscreen->SHADER_READ_ONLY transition
+```
+
+The offscreen image cycles through three layouts per frame:
+`COLOR_ATTACHMENT_OPTIMAL` (rendering) -> `SHADER_READ_ONLY_OPTIMAL`
+(post-process sampling) -> `COLOR_ATTACHMENT_OPTIMAL` (ready for next frame).
+
+The swapchain image cycles through:
+`UNDEFINED` (after acquire) -> `COLOR_ATTACHMENT_OPTIMAL` (post-process
+rendering) -> `PRESENT_SRC_KHR` (presentation).
 
 ### 8.5 Display Callback VK-Mode Skip
 
@@ -887,39 +998,66 @@ swap lifecycle without doing any pixel work.
 
 ## 9. LFB Access
 
-### 9.1 LFB Read (Sync)
+### 9.1 LFB Read (Shadow Buffer)
 
 When the guest reads from the Voodoo LFB (linear frame buffer), it expects to
 see the current contents of the front or back buffer. With GPU rendering, this
 requires reading back from the Vulkan framebuffer.
 
+**Important**: The CPU thread MUST NOT push commands to the SPSC ring. The ring
+is single-producer (FIFO thread only), single-consumer (GPU thread). Having the
+CPU thread push VC_CMD_READBACK would violate the SPSC invariant, breaking
+lock-free correctness on ARM64 (acquire/release pairs assume single producer).
+
+Instead, the GPU thread maintains a **shadow buffer** -- a host-visible staging
+buffer that is updated automatically after each frame. LFB reads return directly
+from the shadow buffer without any ring interaction.
+
 ```
-Read path:
-  1. Guest reads LFB address (CPU thread)
+Shadow buffer update (GPU thread, at VC_CMD_SWAP):
+  1. End render pass
+  2. Transition offscreen image: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
+  3. vkCmdCopyImageToBuffer(offscreen -> shadow_staging_buffer)
+  4. Transition offscreen image: TRANSFER_SRC_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
+  5. Submit and continue (no stall -- fence tracked for read safety)
+
+LFB read (CPU thread, no ring interaction):
+  1. Guest reads LFB address
   2. voodoo_fb_readl() detects VK mode
-  3. Push VC_CMD_READBACK (sync) to SPSC ring
-  4. GPU thread: vkCmdCopyImageToBuffer (offscreen -> staging)
-  5. GPU thread: submit, wait on fence
-  6. GPU thread: signals completion
-  7. CPU thread reads from staging buffer, converts format
+  3. Wait for shadow buffer fence (ensures last copy completed)
+  4. Read directly from shadow_staging_buffer
+  5. Convert format (RGB565 etc.) and return to guest
 ```
 
-For performance, a shadow buffer caches the last readback. Reads to the same
-region reuse the cache until a draw or swap invalidates it.
+The shadow buffer is a `HOST_VISIBLE | HOST_COHERENT` VkBuffer, sized to hold
+the full Voodoo framebuffer (e.g., 640x480 * 4 bytes = 1.2 MB). It is updated
+on every VC_CMD_SWAP. Reads between swaps return stale-by-one-frame data, which
+is acceptable for nearly all Glide games (the LFB read typically follows a swap).
 
-### 9.2 LFB Read (Async)
+For games that require exact same-frame readback (rare), a future enhancement
+could add a FIFO-thread-routed sync readback path. But the shadow buffer
+approach handles the common case without violating the SPSC invariant.
 
-For games that read LFB frequently (e.g., software post-processing), async
-readback uses ping-pong staging buffers:
+### 9.2 LFB Read Fence Synchronization
 
+The CPU thread must wait for the shadow buffer copy to complete before reading.
+This uses a dedicated `shadow_fence` (separate from the per-frame fences):
+
+```c
+/* GPU thread: after vkCmdCopyImageToBuffer in VC_CMD_SWAP handler */
+atomic_store(&ctx->shadow_fence_value, ctx->submitted_fence_value);
+
+/* CPU thread: in voodoo_fb_readl() */
+uint64_t needed = atomic_load(&ctx->shadow_fence_value);
+if (ctx->completed_fence_value < needed) {
+    /* Poll or wait -- shadow copy is still in flight */
+    vkWaitForFences(device, 1, &shadow_fence, VK_TRUE, TIMEOUT_NS);
+}
+/* Safe to read from shadow_staging_buffer */
 ```
-  Frame N: GPU renders, copies to staging A
-  Frame N+1: CPU reads from staging A, GPU copies to staging B
-  Frame N+2: CPU reads from staging B, GPU copies to staging A
-  ...
-```
 
-Threshold: after 10+ reads per frame, switch from sync to async mode.
+This avoids any ring interaction from the CPU thread. The only cross-thread
+communication is the atomic fence value, which is lock-free and safe.
 
 ### 9.3 LFB Write
 
