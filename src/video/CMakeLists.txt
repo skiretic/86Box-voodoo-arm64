@@ -181,4 +181,25 @@ endif()
 # VideoCommon -- GPU-accelerated rendering (Vulkan)
 if(VIDEOCOMMON)
     add_subdirectory(videocommon)
+
+    # Add vid_voodoo_vk.c (Voodoo-to-VideoCommon bridge) to the voodoo library.
+    target_sources(voodoo PRIVATE vid_voodoo_vk.c)
+
+    # vid_voodoo_vk.c needs access to VideoCommon internal headers.
+    target_include_directories(voodoo PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/videocommon
+        ${CMAKE_SOURCE_DIR}/extra/volk
+        ${CMAKE_SOURCE_DIR}/extra/VMA
+    )
+
+    # vid_voodoo_vk.c needs VK_NO_PROTOTYPES (volk loads dynamically).
+    # USE_VIDEOCOMMON is already set project-wide by src/CMakeLists.txt.
+    target_compile_definitions(voodoo PRIVATE VK_NO_PROTOTYPES)
+    if(APPLE)
+        target_compile_definitions(voodoo PRIVATE VK_USE_PLATFORM_METAL_EXT)
+    elseif(WIN32)
+        target_compile_definitions(voodoo PRIVATE VK_USE_PLATFORM_WIN32_KHR)
+    elseif(UNIX)
+        target_compile_definitions(voodoo PRIVATE VK_USE_PLATFORM_XCB_KHR)
+    endif()
 endif()

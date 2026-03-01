@@ -799,4 +799,10 @@ void voodoo_update_ncc(voodoo_t *voodoo, int tmu);
 void *voodoo_2d3d_card_init(int type);
 void  voodoo_card_close(voodoo_t *voodoo);
 
+/* VideoCommon Vulkan bridge (vid_voodoo_vk.c). */
+#ifdef USE_VIDEOCOMMON
+extern void voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params);
+extern void voodoo_vk_push_swap(voodoo_t *voodoo);
+#endif
+
 #endif /*VIDEO_VOODOO_COMMON_H*/

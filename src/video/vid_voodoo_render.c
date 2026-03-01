@@ -1849,6 +1849,14 @@ voodoo_render_thread_4(void *param)
 void
 voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
 {
+#ifdef USE_VIDEOCOMMON
+    /* GPU-accelerated path: push triangle to SPSC ring for the GPU thread. */
+    if (voodoo->use_gpu_renderer) {
+        voodoo_vk_push_triangle(voodoo, params);
+        return;
+    }
+#endif
+
     voodoo_params_t *params_new = &voodoo->params_buffer[PARAMS_WRITE_IDX(voodoo) & PARAM_MASK];
 
     while (PARAM_FULL(0) || (voodoo->render_threads >= 2 && PARAM_FULL(1)) || (voodoo->render_threads == 4 && (PARAM_FULL(2) || PARAM_FULL(3)))) {

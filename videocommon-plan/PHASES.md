@@ -128,13 +128,27 @@ no depth test. Just colored triangles on a black background.
 - Handle VC_CMD_SWAP: end render pass, submit, present (stub -- no swapchain yet)
 - Frame resource management: triple-buffered cmd pool + fence
 
+### Research
+
+Phase 2 research docs (authoritative, replaces v1 archive):
+- `research/phase2-implementation.md` -- Vulkan architecture for Phase 2
+- `research/phase2-shader-design.md` -- Uber-shader design for Phase 2
+
 ### Test
+
+**Primary test card**: Voodoo 2 (gpu_renderer=1). Once passing, also test on Voodoo 3/Banshee.
+All Voodoo cards (V1, V2, Banshee, V3) are in scope but V2 is the development target.
+
+Test VMs:
+- **Voodoo 2**: "v2 test" (`gpu_renderer=1`, config section `[3Dfx Voodoo Graphics]`)
+- **Voodoo 3**: "Windows 98 Low End copy" (needs `gpu_renderer = 1` added to `[3Dfx Voodoo3]` section in 86box.cfg before Phase 4 testing)
 
 1. Run 3DMark99 on Voodoo 2 (gpu_renderer=1)
 2. Flat-colored triangles should appear (rendered to offscreen FB)
 3. No display output yet (Phase 3 adds swapchain) -- verify via RenderDoc capture
    or Vulkan validation that draws are submitted
 4. Verify SW renderer still works (gpu_renderer=0)
+5. Boot with Voodoo 3 (gpu_renderer=1) -- verify no crash
 
 ### Success Criteria
 
@@ -144,6 +158,7 @@ no depth test. Just colored triangles on a black background.
 - [ ] Render pass begins and ends without errors
 - [ ] No crash, no hang, clean shutdown
 - [ ] swap_count operates correctly (display callback unchanged)
+- [ ] Works on both Voodoo 2 and Voodoo 3 (same code path)
 
 ---
 

@@ -5,6 +5,30 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 
 ---
 
+## [Unreleased] -- Phase 2: Basic Rendering
+
+### Research (vc-arch)
+- `research/phase2-implementation.md` — Comprehensive Vulkan architecture research for Phase 2:
+  offscreen framebuffer, graphics pipeline, vertex extraction, SPIR-V CMake integration, MoltenVK considerations.
+  Cross-referenced v1 archive docs; flagged Y-axis flip removal (OpenGL→Vulkan), D16→D32_SFLOAT upgrade,
+  descriptor set deferral to Phase 4, cull mode NONE.
+- `research/phase2-shader-design.md` — Uber-shader design research for Phase 2:
+  reviewed v1 uniform mapping (still valid), push constant layout (still valid), perspective correction.
+  Studied Dolphin/DuckStation uber-shader patterns. Confirmed Phase 2 `fragColor = v_color` is correct
+  for default color combine. Full GLSL shader templates with all I/O declared, pipeline stages stubbed.
+- Moved stale `push-constant-layout.md` from plan root — v1 archive already has canonical copy.
+- **All v1 archive docs now considered historical reference only. v2 research in `research/` is authoritative.**
+
+### Key Findings
+- v1 uniform mapping and push constant layout (64 bytes, 16 fields) remain fully valid for Vulkan
+- Y-axis: Vulkan Y-down matches Voodoo — NO flip needed (v1 OpenGL code had a flip)
+- Depth format: D32_SFLOAT (v2) vs D16_UNORM (v1) — deliberate upgrade for W-buffer
+- Phase 2 pipeline: no descriptors needed, push constants only, viewport+scissor dynamic state
+- Ring command size per triangle: 288 bytes (header + push constants + 3 vertices)
+- Voodoo setup engine handles face culling — keep VK_CULL_MODE_NONE permanently
+
+---
+
 ## [Unreleased] -- Phase 1: Infrastructure
 
 ### Added (vc-lead)

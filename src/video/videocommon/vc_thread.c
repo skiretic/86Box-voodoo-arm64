@@ -43,6 +43,9 @@
 #include <86box/thread.h>
 
 #include "vc_thread.h"
+#include "vc_render_pass.h"
+#include "vc_batch.h"
+#include "vc_gpu_state.h"
 
 /* -------------------------------------------------------------------------- */
 /*  Platform counting semaphore                                                */
@@ -255,15 +258,6 @@ vc_ring_wait_for_space(vc_ring_t *ring, uint32_t needed)
 void
 vc_ring_wake(vc_ring_t *ring)
 {
-    /*
-     * Increment wake_counter by 2.  If the old value was negative, the GPU
-     * thread is sleeping on the semaphore -- post to wake it.
-     *
-     * Why +2?  The sleep function decrements by 1.  If the GPU thread
-     * decremented from 0 to -1 (sleeping) and we add 1, the counter goes
-     * to 0 which is ambiguous.  Adding 2 ensures the counter goes positive
-     * (>=1), clearly indicating pending work.
-     */
     int32_t old = atomic_fetch_add_explicit(&ring->wake_counter, 2,
                                             memory_order_release);
     if (old < 0)
@@ -273,18 +267,11 @@ vc_ring_wake(vc_ring_t *ring)
 bool
 vc_ring_sleep(vc_ring_t *ring)
 {
-    /*
-     * Decrement wake_counter by 1.  If the old value was > 0, there is
-     * pending work -- return immediately without blocking.  If old was 0,
-     * the counter transitions to -1 (sleeping state) and we block on the
-     * semaphore until a wake posts it.
-     */
     int32_t old = atomic_fetch_sub_explicit(&ring->wake_counter, 1,
                                             memory_order_acq_rel);
     if (old > 0)
         return true; /* More work pending, don't actually sleep. */
 
-    /* old == 0 or old == 1 after a racing wake: sleep on semaphore. */
     vc_sem_wait(ring->wake_sem);
     return true;
 }
@@ -298,57 +285,38 @@ vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
 {
     total_size = vc_ring_align(total_size);
 
-    /*
-     * We may need up to total_size + VC_RING_ALIGN bytes of contiguous
-     * space (the command itself, plus a potential wraparound sentinel).
-     * Reserve enough total space for the worst case.
-     */
     uint32_t needed = total_size + (uint32_t) sizeof(vc_ring_cmd_header_t);
     if (needed < (uint32_t) total_size + VC_RING_ALIGN)
         needed = (uint32_t) total_size + VC_RING_ALIGN;
 
-    /* Backpressure: block until enough space is available. */
     vc_ring_wait_for_space(ring, needed);
 
     uint32_t wp = atomic_load_explicit(&ring->write_pos, memory_order_relaxed);
 
     /* Check if we need a wraparound sentinel. */
     if (wp + total_size > VC_RING_SIZE) {
-        /* Write a wraparound sentinel at the current position.
-           The consumer sees VC_CMD_WRAPAROUND and jumps read_pos to 0
-           without reading the size field. */
         vc_ring_cmd_header_t *wrap = (vc_ring_cmd_header_t *) &ring->buffer[wp];
         wrap->type     = VC_CMD_WRAPAROUND;
-        wrap->size     = 0; /* Size unused for wraparound -- consumer jumps to 0 directly. */
+        wrap->size     = 0;
         wrap->reserved = 0;
 
-        /* Publish the sentinel, then wrap write_pos to 0. */
         atomic_store_explicit(&ring->write_pos, 0, memory_order_release);
         wp = 0;
 
-        /*
-         * After wrapping, re-check space.  The free space calculation may
-         * now see a different geometry (linear from 0 to read_pos).
-         */
         while (vc_ring_free_space(ring) < (uint32_t) total_size) {
             vc_ring_wake(ring);
             vc_yield();
         }
     }
 
-    /* Write the command header at write_pos. */
     vc_ring_cmd_header_t *hdr = (vc_ring_cmd_header_t *) &ring->buffer[wp];
     hdr->type     = cmd_type;
     hdr->size     = total_size;
     hdr->reserved = 0;
 
-    /* Advance write_pos past this command.  Since we checked space and the
-       ring size is a power of two, the new position is always < VC_RING_SIZE
-       when we have no wraparound.  Use mask for safety. */
     uint32_t new_wp = (wp + total_size) & VC_RING_MASK;
     atomic_store_explicit(&ring->write_pos, new_wp, memory_order_release);
 
-    /* Return pointer to payload (immediately after header). */
     return (void *) (hdr + 1);
 }
 
@@ -358,6 +326,338 @@ vc_ring_push_and_wake(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
     void *payload = vc_ring_push(ring, cmd_type, total_size);
     vc_ring_wake(ring);
     return payload;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Frame resource management (command pools, command buffers, fences)          */
+/* -------------------------------------------------------------------------- */
+
+static int
+vc_frame_resources_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    for (uint32_t i = 0; i < VC_NUM_FRAMES; i++) {
+        VkCommandPoolCreateInfo pool_ci;
+        memset(&pool_ci, 0, sizeof(pool_ci));
+        pool_ci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_ci.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pool_ci.queueFamilyIndex = ctx->queue_family;
+
+        VkResult result = vkCreateCommandPool(ctx->device, &pool_ci, NULL,
+                                              &gpu_st->frame[i].cmd_pool);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: vkCreateCommandPool failed (%d) for frame %u\n",
+                   result, i);
+            return -1;
+        }
+
+        VkCommandBufferAllocateInfo alloc_ci;
+        memset(&alloc_ci, 0, sizeof(alloc_ci));
+        alloc_ci.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_ci.commandPool        = gpu_st->frame[i].cmd_pool;
+        alloc_ci.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_ci.commandBufferCount = 1;
+
+        result = vkAllocateCommandBuffers(ctx->device, &alloc_ci,
+                                          &gpu_st->frame[i].cmd_buf);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: vkAllocateCommandBuffers failed (%d) for frame %u\n",
+                   result, i);
+            return -1;
+        }
+
+        VkFenceCreateInfo fence_ci;
+        memset(&fence_ci, 0, sizeof(fence_ci));
+        fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        result = vkCreateFence(ctx->device, &fence_ci, NULL,
+                               &gpu_st->frame[i].fence);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: vkCreateFence failed (%d) for frame %u\n",
+                   result, i);
+            return -1;
+        }
+
+        gpu_st->frame[i].submitted = 0;
+    }
+
+    gpu_st->frame_index = 0;
+    return 0;
+}
+
+static void
+vc_frame_resources_destroy(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    for (uint32_t i = 0; i < VC_NUM_FRAMES; i++) {
+        if (gpu_st->frame[i].fence != VK_NULL_HANDLE) {
+            vkDestroyFence(ctx->device, gpu_st->frame[i].fence, NULL);
+            gpu_st->frame[i].fence = VK_NULL_HANDLE;
+        }
+        if (gpu_st->frame[i].cmd_pool != VK_NULL_HANDLE) {
+            vkDestroyCommandPool(ctx->device, gpu_st->frame[i].cmd_pool, NULL);
+            gpu_st->frame[i].cmd_pool = VK_NULL_HANDLE;
+            gpu_st->frame[i].cmd_buf  = VK_NULL_HANDLE;
+        }
+        gpu_st->frame[i].submitted = 0;
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  GPU thread: begin a new frame                                              */
+/* -------------------------------------------------------------------------- */
+
+static void
+vc_gpu_begin_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
+
+    /* Wait for this frame's previous submission to complete. */
+    if (f->submitted) {
+        vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(ctx->device, 1, &f->fence);
+        f->submitted = 0;
+    }
+
+    vkResetCommandBuffer(f->cmd_buf, 0);
+
+    VkCommandBufferBeginInfo begin_ci;
+    memset(&begin_ci, 0, sizeof(begin_ci));
+    begin_ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_ci.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(f->cmd_buf, &begin_ci);
+
+    /* Begin render pass on the back framebuffer. */
+    int back_idx = gpu_st->rp.back_index;
+    VkRenderPass rp_handle = gpu_st->rp.fb[back_idx].first_frame
+                           ? gpu_st->rp.render_pass_clear
+                           : gpu_st->rp.render_pass_load;
+
+    VkClearValue clear_values[2];
+    memset(clear_values, 0, sizeof(clear_values));
+    clear_values[1].depthStencil.depth = 0.0f;
+
+    VkRenderPassBeginInfo rp_begin;
+    memset(&rp_begin, 0, sizeof(rp_begin));
+    rp_begin.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin.renderPass        = rp_handle;
+    rp_begin.framebuffer       = gpu_st->rp.fb[back_idx].framebuffer;
+    rp_begin.renderArea.extent.width  = gpu_st->rp.fb[back_idx].width;
+    rp_begin.renderArea.extent.height = gpu_st->rp.fb[back_idx].height;
+    rp_begin.clearValueCount   = 2;
+    rp_begin.pClearValues      = clear_values;
+
+    vkCmdBeginRenderPass(f->cmd_buf, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+    /* Dynamic viewport and scissor. */
+    VkViewport viewport;
+    memset(&viewport, 0, sizeof(viewport));
+    viewport.width    = (float) gpu_st->rp.fb[back_idx].width;
+    viewport.height   = (float) gpu_st->rp.fb[back_idx].height;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(f->cmd_buf, 0, 1, &viewport);
+
+    VkRect2D scissor;
+    memset(&scissor, 0, sizeof(scissor));
+    scissor.extent.width  = gpu_st->rp.fb[back_idx].width;
+    scissor.extent.height = gpu_st->rp.fb[back_idx].height;
+    vkCmdSetScissor(f->cmd_buf, 0, 1, &scissor);
+
+    /* Bind pipeline and vertex buffer. */
+    if (gpu_st->pipe.pipeline != VK_NULL_HANDLE)
+        vkCmdBindPipeline(f->cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          gpu_st->pipe.pipeline);
+
+    if (gpu_st->batch.vertex_buffer != VK_NULL_HANDLE) {
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(f->cmd_buf, 0, 1,
+                               &gpu_st->batch.vertex_buffer, &offset);
+    }
+
+    gpu_st->render_pass_active = 1;
+    gpu_st->rp.fb[back_idx].first_frame = 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  GPU thread: end current frame                                              */
+/* -------------------------------------------------------------------------- */
+
+static void
+vc_gpu_end_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    if (!gpu_st->render_pass_active)
+        return;
+
+    vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
+
+    vkCmdEndRenderPass(f->cmd_buf);
+    vkEndCommandBuffer(f->cmd_buf);
+
+    VkSubmitInfo submit;
+    memset(&submit, 0, sizeof(submit));
+    submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers    = &f->cmd_buf;
+
+    VkResult result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: vkQueueSubmit failed (%d)\n", result);
+    }
+
+    f->submitted = 1;
+    gpu_st->render_pass_active = 0;
+
+    gpu_st->frame_index = (gpu_st->frame_index + 1) % VC_NUM_FRAMES;
+    vc_batch_reset(ctx, gpu_st);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  GPU thread: handle VC_CMD_TRIANGLE                                         */
+/* -------------------------------------------------------------------------- */
+
+static void
+vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payload)
+{
+    if (gpu_st->rp.fb[gpu_st->rp.back_index].framebuffer == VK_NULL_HANDLE)
+        return;
+    if (gpu_st->pipe.pipeline == VK_NULL_HANDLE)
+        return;
+
+    if (!gpu_st->render_pass_active)
+        vc_gpu_begin_frame(ctx, gpu_st);
+
+    vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
+
+    /* Extract push constants and vertices from payload. */
+    const vc_push_constants_t *pc = (const vc_push_constants_t *) payload;
+    const vc_vertex_t         *verts = (const vc_vertex_t *)
+        ((const uint8_t *) payload + sizeof(vc_push_constants_t));
+
+    /* Push constants (per-triangle). */
+    vkCmdPushConstants(f->cmd_buf, gpu_st->pipe.layout,
+                       VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(vc_push_constants_t), pc);
+
+    /* Append triangle to batch. */
+    if (vc_batch_append_triangle(ctx, gpu_st, verts) != 0) {
+        /* Batch full -- flush. */
+        VC_LOG("VideoCommon: batch full (%u tris), flushing mid-frame\n",
+               gpu_st->batch.triangle_count);
+        vkCmdDraw(f->cmd_buf, gpu_st->batch.triangle_count * 3, 1, 0, 0);
+        vc_batch_reset(ctx, gpu_st);
+        vc_batch_append_triangle(ctx, gpu_st, verts);
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  GPU thread: handle VC_CMD_SWAP                                             */
+/* -------------------------------------------------------------------------- */
+
+static void
+vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    if (!gpu_st->render_pass_active)
+        return;
+
+    vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
+
+    /* Flush remaining triangles. */
+    if (gpu_st->batch.triangle_count > 0) {
+        vkCmdDraw(f->cmd_buf, gpu_st->batch.triangle_count * 3, 1, 0, 0);
+    }
+
+    vc_gpu_end_frame(ctx, gpu_st);
+
+    /* Swap front/back framebuffers. */
+    vc_render_pass_swap(gpu_st);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  GPU thread init / cleanup                                                  */
+/* -------------------------------------------------------------------------- */
+
+static vc_gpu_state_t *
+vc_gpu_thread_init(vc_ctx_t *ctx)
+{
+    vc_gpu_state_t *gpu_st = (vc_gpu_state_t *) malloc(sizeof(vc_gpu_state_t));
+    if (!gpu_st) {
+        VC_LOG("VideoCommon: failed to allocate gpu_state\n");
+        return NULL;
+    }
+    memset(gpu_st, 0, sizeof(vc_gpu_state_t));
+
+    gpu_st->fb_width  = 640;
+    gpu_st->fb_height = 480;
+
+    /* Frame resources. */
+    if (vc_frame_resources_create(ctx, gpu_st) != 0)
+        goto fail;
+
+    /* Render passes. */
+    if (vc_render_pass_create(ctx, gpu_st) != 0)
+        goto fail;
+
+    /* Framebuffers. */
+    if (vc_render_pass_create_framebuffers(ctx, gpu_st, gpu_st->fb_width, gpu_st->fb_height) != 0)
+        goto fail;
+
+    /* Vertex buffer. */
+    if (vc_batch_create(ctx, gpu_st) != 0)
+        goto fail;
+
+    /* Shaders. */
+    if (vc_shaders_create(ctx, &gpu_st->shaders) != 0)
+        goto fail;
+
+    /* Pipeline. */
+    if (vc_pipeline_create(ctx, &gpu_st->pipe, &gpu_st->shaders,
+                           gpu_st->rp.render_pass_load) != 0)
+        goto fail;
+
+    /* Publish framebuffer dimensions for FIFO thread. */
+    atomic_store_explicit(&ctx->fb_width, gpu_st->fb_width, memory_order_release);
+    atomic_store_explicit(&ctx->fb_height, gpu_st->fb_height, memory_order_release);
+
+    VC_LOG("VideoCommon: GPU thread init complete (%ux%u)\n",
+           gpu_st->fb_width, gpu_st->fb_height);
+    return gpu_st;
+
+fail:
+    VC_LOG("VideoCommon: GPU thread init FAILED\n");
+    /* Partial cleanup -- destroy what was created. */
+    vc_pipeline_destroy(ctx, &gpu_st->pipe);
+    vc_shaders_destroy(ctx, &gpu_st->shaders);
+    vc_batch_destroy(ctx, gpu_st);
+    vc_render_pass_destroy_framebuffers(ctx, gpu_st);
+    vc_render_pass_destroy(ctx, gpu_st);
+    vc_frame_resources_destroy(ctx, gpu_st);
+    free(gpu_st);
+    return NULL;
+}
+
+static void
+vc_gpu_thread_cleanup(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    if (!gpu_st)
+        return;
+
+    /* End any active render pass without submitting. */
+    if (gpu_st->render_pass_active) {
+        vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
+        vkCmdEndRenderPass(f->cmd_buf);
+        vkEndCommandBuffer(f->cmd_buf);
+        gpu_st->render_pass_active = 0;
+    }
+
+    vkDeviceWaitIdle(ctx->device);
+
+    vc_pipeline_destroy(ctx, &gpu_st->pipe);
+    vc_shaders_destroy(ctx, &gpu_st->shaders);
+    vc_batch_destroy(ctx, gpu_st);
+    vc_render_pass_destroy_framebuffers(ctx, gpu_st);
+    vc_render_pass_destroy(ctx, gpu_st);
+    vc_frame_resources_destroy(ctx, gpu_st);
+
+    free(gpu_st);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -372,6 +672,9 @@ vc_gpu_thread_func(void *param)
 
     VC_LOG("VideoCommon: GPU thread started\n");
 
+    vc_gpu_state_t *gpu_st = vc_gpu_thread_init(ctx);
+
+    ctx->render_data = gpu_st;
     atomic_store_explicit(&ctx->running, 1, memory_order_release);
 
     while (atomic_load_explicit(&ctx->running, memory_order_acquire)) {
@@ -379,12 +682,10 @@ vc_gpu_thread_func(void *param)
         uint32_t wp = atomic_load_explicit(&ring->write_pos, memory_order_acquire);
 
         if (rp == wp) {
-            /* Ring is empty -- sleep until woken by producer. */
             vc_ring_sleep(ring);
             continue;
         }
 
-        /* Read the command header at the current read position. */
         vc_ring_cmd_header_t *hdr = (vc_ring_cmd_header_t *) &ring->buffer[rp];
 
         switch (hdr->type) {
@@ -394,24 +695,34 @@ vc_gpu_thread_func(void *param)
                 break;
 
             case VC_CMD_WRAPAROUND:
-                /* Jump read position to start of buffer. */
                 atomic_store_explicit(&ring->read_pos, 0, memory_order_release);
-                continue; /* Re-check without advancing past command. */
+                continue;
+
+            case VC_CMD_TRIANGLE:
+                if (gpu_st)
+                    vc_gpu_handle_triangle(ctx, gpu_st, (const void *) (hdr + 1));
+                break;
+
+            case VC_CMD_SWAP:
+                if (gpu_st)
+                    vc_gpu_handle_swap(ctx, gpu_st);
+                break;
 
             default:
-                /* Future commands will be handled here by later phases. */
                 VC_LOG("VideoCommon: GPU thread skipping cmd %d (size %d)\n",
                        hdr->type, hdr->size);
                 break;
         }
 
-        /* Advance read position past this command. */
         if (hdr->type != VC_CMD_WRAPAROUND) {
             uint16_t aligned_size = vc_ring_align(hdr->size);
             uint32_t new_rp       = (rp + aligned_size) & VC_RING_MASK;
             atomic_store_explicit(&ring->read_pos, new_rp, memory_order_release);
         }
     }
+
+    vc_gpu_thread_cleanup(ctx, gpu_st);
+    ctx->render_data = NULL;
 
     VC_LOG("VideoCommon: GPU thread exited\n");
 }
@@ -445,11 +756,9 @@ vc_stop_gpu_thread(vc_ctx_t *ctx)
     if (!ctx->gpu_thread)
         return;
 
-    /* Push shutdown command and wake the GPU thread. */
     vc_ring_push_and_wake(&ctx->ring, VC_CMD_SHUTDOWN,
                           vc_ring_align(sizeof(vc_ring_cmd_header_t)));
 
-    /* Wait for the GPU thread to exit. */
     thread_wait((thread_t *) ctx->gpu_thread);
     ctx->gpu_thread = NULL;
 

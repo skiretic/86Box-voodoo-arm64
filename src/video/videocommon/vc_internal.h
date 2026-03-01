@@ -106,11 +106,62 @@ typedef struct vc_caps_t {
 } vc_caps_t;
 
 /* -------------------------------------------------------------------------- */
+/*  Per-frame GPU resources                                                    */
+/* -------------------------------------------------------------------------- */
+
+typedef struct vc_frame_t {
+    VkCommandPool   cmd_pool;
+    VkCommandBuffer cmd_buf;
+    VkFence         fence;
+    int             submitted; /* 1 if cmd_buf has been submitted and not yet waited on. */
+} vc_frame_t;
+
+/* -------------------------------------------------------------------------- */
+/*  Render pass state                                                          */
+/* -------------------------------------------------------------------------- */
+
+typedef struct vc_render_pass_state_t {
+    VkRenderPass render_pass_clear; /* First frame: LOAD_OP_CLEAR. */
+    VkRenderPass render_pass_load;  /* Steady state: LOAD_OP_LOAD. */
+
+    struct {
+        VkImage     color_image;
+        VkImageView color_view;
+        void       *color_alloc; /* VmaAllocation (opaque). */
+
+        VkImage     depth_image;
+        VkImageView depth_view;
+        void       *depth_alloc; /* VmaAllocation (opaque). */
+
+        VkFramebuffer framebuffer;
+
+        uint32_t width;
+        uint32_t height;
+        int      first_frame; /* 1 = use clear render pass on next use. */
+    } fb[2];
+    int back_index; /* 0 or 1 -- which fb is the back buffer. */
+} vc_render_pass_state_t;
+
+/* -------------------------------------------------------------------------- */
+/*  Batch state (vertex buffer for triangle accumulation)                      */
+/* -------------------------------------------------------------------------- */
+
+typedef struct vc_batch_state_t {
+    VkBuffer vertex_buffer;
+    void    *vertex_alloc;  /* VmaAllocation (opaque). */
+    void    *vertex_mapped; /* Persistently mapped pointer. */
+
+    uint32_t triangle_count;
+    uint32_t vertex_offset; /* Byte offset of next vertex write. */
+} vc_batch_state_t;
+
+/* -------------------------------------------------------------------------- */
 /*  Main context                                                               */
 /* -------------------------------------------------------------------------- */
 
-/* Forward declaration -- full definition only visible inside videocommon. */
+/* Full definition -- only visible inside videocommon. */
 typedef struct vc_ctx_t {
+    /* Vulkan core handles. */
     VkInstance       instance;
     VkPhysicalDevice physical_device;
     VkDevice         device;
@@ -119,6 +170,7 @@ typedef struct vc_ctx_t {
 
     void            *allocator; /* VmaAllocator (opaque, see vk_mem_alloc.h) */
 
+    /* Thread + ring. */
     vc_ring_t        ring;
     void            *gpu_thread; /* thread_t* */
     _Atomic(int)     running;
@@ -128,6 +180,19 @@ typedef struct vc_ctx_t {
     /* Physical device properties (cached for logging / decisions). */
     char             device_name[256];
     uint32_t         api_version;
+
+    /* Phase 2+ render state (GPU thread owns all of these).
+       The render_data pointer holds GPU-thread-local resources
+       (render pass, pipeline, batch, frame resources).  It is set by
+       vc_gpu_thread_init() and freed by vc_gpu_thread_cleanup().
+       This keeps vc_internal.h free of sub-module type dependencies. */
+    void *render_data;
+
+    /* Framebuffer dimensions (set during GPU thread init, read by FIFO thread
+       for push constant fb_width/fb_height).  Atomic not strictly needed
+       (only written once at init) but provides visibility guarantee. */
+    _Atomic(uint32_t) fb_width;
+    _Atomic(uint32_t) fb_height;
 } vc_ctx_t;
 
 #endif /* VIDEOCOMMON_INTERNAL_H */

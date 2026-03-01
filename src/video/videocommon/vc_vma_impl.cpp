@@ -85,4 +85,78 @@ vc_vma_destroy(void *allocator)
         vmaDestroyAllocator(static_cast<VmaAllocator>(allocator));
 }
 
+/* Create a VMA-allocated VkImage.  Returns VK_SUCCESS on success.
+   *out_alloc receives the VmaAllocation handle (as void*). */
+VkResult
+vc_vma_create_image(void *allocator, const VkImageCreateInfo *image_ci,
+                    VkImage *out_image, void **out_alloc)
+{
+    VmaAllocationCreateInfo alloc_ci = {};
+    alloc_ci.usage = VMA_MEMORY_USAGE_AUTO;
+
+    VmaAllocation alloc = VK_NULL_HANDLE;
+    VkResult      result = vmaCreateImage(static_cast<VmaAllocator>(allocator),
+                                          image_ci, &alloc_ci, out_image,
+                                          &alloc, nullptr);
+    if (result == VK_SUCCESS)
+        *out_alloc = static_cast<void *>(alloc);
+    else
+        *out_alloc = nullptr;
+
+    return result;
+}
+
+/* Destroy a VMA-allocated VkImage. */
+void
+vc_vma_destroy_image(void *allocator, VkImage image, void *alloc)
+{
+    if (allocator && image != VK_NULL_HANDLE)
+        vmaDestroyImage(static_cast<VmaAllocator>(allocator),
+                        image, static_cast<VmaAllocation>(alloc));
+}
+
+/* Create a VMA-allocated VkBuffer with specified flags.
+   *out_alloc receives the VmaAllocation handle (as void*).
+   If mapped is non-zero, the buffer will be HOST_VISIBLE + HOST_COHERENT
+   with persistent mapping, and *out_mapped receives the mapped pointer. */
+VkResult
+vc_vma_create_buffer(void *allocator, const VkBufferCreateInfo *buffer_ci,
+                     int mapped, VkBuffer *out_buffer, void **out_alloc,
+                     void **out_mapped)
+{
+    VmaAllocationCreateInfo alloc_ci = {};
+    alloc_ci.usage = VMA_MEMORY_USAGE_AUTO;
+
+    if (mapped) {
+        alloc_ci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+                       | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    }
+
+    VmaAllocation     alloc = VK_NULL_HANDLE;
+    VmaAllocationInfo info  = {};
+    VkResult          result = vmaCreateBuffer(static_cast<VmaAllocator>(allocator),
+                                               buffer_ci, &alloc_ci, out_buffer,
+                                               &alloc, &info);
+    if (result == VK_SUCCESS) {
+        *out_alloc = static_cast<void *>(alloc);
+        if (out_mapped)
+            *out_mapped = info.pMappedData;
+    } else {
+        *out_alloc = nullptr;
+        if (out_mapped)
+            *out_mapped = nullptr;
+    }
+
+    return result;
+}
+
+/* Destroy a VMA-allocated VkBuffer. */
+void
+vc_vma_destroy_buffer(void *allocator, VkBuffer buffer, void *alloc)
+{
+    if (allocator && buffer != VK_NULL_HANDLE)
+        vmaDestroyBuffer(static_cast<VmaAllocator>(allocator),
+                         buffer, static_cast<VmaAllocation>(alloc));
+}
+
 } /* extern "C" */

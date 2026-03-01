@@ -6,9 +6,11 @@
 
 ---
 
-## Current Status: Phase 1 -- COMPLETE
+## Current Status: Phase 2 Research -- COMPLETE, Awaiting Phase 1 Audit
 
-All Phase 1 tasks done. Vulkan 1.2 init, GPU thread lifecycle, SPSC ring buffer, CMake integration, and Voodoo wiring all verified on macOS ARM64 (Apple M1 Pro, MoltenVK 1.2.323).
+Phase 1 complete. Phase 2 research done — fresh Vulkan-specific research produced (replacing v1 OpenGL-era docs). Phase 1 code audit pending before implementation begins.
+
+**Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
 
 ---
 
@@ -16,7 +18,7 @@ All Phase 1 tasks done. Vulkan 1.2 init, GPU thread lifecycle, SPSC ring buffer,
 
 ```
 Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
-Phase 2: Basic Rendering     [..........] 0%   BLOCKED (Phase 1)
+Phase 2: Basic Rendering     [X.........] 10%  RESEARCH DONE, AUDITING P1
 Phase 3: Display             [..........] 0%   BLOCKED (Phase 2)
 Phase 4: Textures            [..........] 0%   BLOCKED (Phase 3)
 Phase 5: Core Pipeline       [..........] 0%   BLOCKED (Phase 3)

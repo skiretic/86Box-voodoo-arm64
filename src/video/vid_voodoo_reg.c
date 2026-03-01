@@ -124,6 +124,10 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
                 }
 
                 voodoo->cmd_read++;
+#ifdef USE_VIDEOCOMMON
+                if (voodoo->use_gpu_renderer)
+                    voodoo_vk_push_swap(voodoo);
+#endif
                 break;
             }
 
@@ -165,6 +169,10 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
                 voodoo_wait_for_swap_complete(voodoo);
             }
             voodoo->cmd_read++;
+#ifdef USE_VIDEOCOMMON
+            if (voodoo->use_gpu_renderer)
+                voodoo_vk_push_swap(voodoo);
+#endif
             break;
 
         case SST_vertexAx:
