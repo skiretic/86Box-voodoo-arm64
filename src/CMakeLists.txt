@@ -117,6 +117,10 @@ if(INSTRUMENT)
     add_compile_definitions(USE_INSTRUMENT)
 endif()
 
+if(VIDEOCOMMON)
+    add_compile_definitions(USE_VIDEOCOMMON)
+endif()
+
 target_link_libraries(86Box
     cpu
     chipset
@@ -141,6 +145,10 @@ target_link_libraries(86Box
     plat
     ui
 )
+
+if(VIDEOCOMMON)
+    target_link_libraries(86Box videocommon)
+endif()
 
 if(HAIKU)
     target_link_libraries(86Box be)

@@ -760,6 +760,10 @@ typedef struct voodoo_t {
 
     struct voodoo_set_t *set;
 
+    /* VideoCommon GPU-accelerated renderer (Vulkan). */
+    void *vc_ctx;           /* vc_ctx_t* -- opaque to avoid Vulkan header deps. */
+    int   use_gpu_renderer; /* 1 = VK path, 0 = SW fallback. */
+
     uint32_t launch_pending;
 
     uint8_t fifo_thread_run;

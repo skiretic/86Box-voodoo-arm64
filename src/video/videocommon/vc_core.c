@@ -1,0 +1,487 @@
+/*
+ * 86Box    A hypervisor and IBM PC system emulator that specializes in
+ *          running old operating systems and software designed for IBM
+ *          PC systems and compatibles from 1981 through fairly recent
+ *          system designs based on the PCI bus.
+ *
+ *          This file is part of the 86Box distribution.
+ *
+ *          VideoCommon core -- Vulkan instance/device creation,
+ *          capability detection, logging.  VMA allocator creation is
+ *          in vc_vma_impl.cpp (C++ required by VMA).
+ *
+ * Authors: Anthony Campbell
+ *
+ *          Copyright 2026 Anthony Campbell.
+ */
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* volk implementation -- compiled once, here. */
+#define VOLK_IMPLEMENTATION
+#include "vc_internal.h"
+
+#define HAVE_STDARG_H
+#include <86box/86box.h>
+#include <86box/videocommon.h>
+
+#include "vc_core.h"
+#include "vc_thread.h"
+
+/* C-callable VMA wrappers (implemented in vc_vma_impl.cpp). */
+extern void *vc_vma_create(VkInstance instance, VkPhysicalDevice phys_dev,
+                           VkDevice device);
+extern void  vc_vma_destroy(void *allocator);
+
+/* -------------------------------------------------------------------------- */
+/*  Logging                                                                    */
+/* -------------------------------------------------------------------------- */
+
+#ifdef ENABLE_VIDEOCOMMON_LOG
+int vc_do_log = ENABLE_VIDEOCOMMON_LOG;
+
+void
+vc_log_func(const char *fmt, ...)
+{
+    va_list ap;
+
+    if (vc_do_log) {
+        va_start(ap, fmt);
+        pclog_ex(fmt, ap);
+        va_end(ap);
+    }
+}
+#endif
+
+/* -------------------------------------------------------------------------- */
+/*  Validation layer support                                                   */
+/* -------------------------------------------------------------------------- */
+
+static int
+vc_validation_requested(void)
+{
+    const char *env = getenv("VC_VALIDATE");
+    return (env && env[0] == '1');
+}
+
+static int
+vc_has_validation_layer(void)
+{
+    uint32_t count = 0;
+    vkEnumerateInstanceLayerProperties(&count, NULL);
+    if (count == 0)
+        return 0;
+
+    VkLayerProperties *layers = (VkLayerProperties *) malloc(count * sizeof(VkLayerProperties));
+    if (!layers)
+        return 0;
+
+    vkEnumerateInstanceLayerProperties(&count, layers);
+
+    int found = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (strcmp(layers[i].layerName, "VK_LAYER_KHRONOS_validation") == 0) {
+            found = 1;
+            break;
+        }
+    }
+
+    free(layers);
+    return found;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Physical device selection                                                  */
+/* -------------------------------------------------------------------------- */
+
+static int
+vc_score_device(VkPhysicalDevice dev)
+{
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(dev, &props);
+
+    if (props.apiVersion < VK_API_VERSION_1_2)
+        return -1;
+
+    switch (props.deviceType) {
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            return 1000;
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            return 500;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            return 250;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            return 100;
+        default:
+            return 50;
+    }
+}
+
+static int
+vc_find_graphics_queue(VkPhysicalDevice dev)
+{
+    uint32_t count = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, NULL);
+    if (count == 0)
+        return -1;
+
+    VkQueueFamilyProperties *families = (VkQueueFamilyProperties *) malloc(count * sizeof(VkQueueFamilyProperties));
+    if (!families)
+        return -1;
+
+    vkGetPhysicalDeviceQueueFamilyProperties(dev, &count, families);
+
+    int result = -1;
+    for (uint32_t i = 0; i < count; i++) {
+        if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            result = (int) i;
+            break;
+        }
+    }
+
+    free(families);
+    return result;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Extension / feature probing                                                */
+/* -------------------------------------------------------------------------- */
+
+static int
+vc_device_has_extension(VkPhysicalDevice dev, const char *ext_name)
+{
+    uint32_t count = 0;
+    vkEnumerateDeviceExtensionProperties(dev, NULL, &count, NULL);
+    if (count == 0)
+        return 0;
+
+    VkExtensionProperties *exts = (VkExtensionProperties *) malloc(count * sizeof(VkExtensionProperties));
+    if (!exts)
+        return 0;
+
+    vkEnumerateDeviceExtensionProperties(dev, NULL, &count, exts);
+
+    int found = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (strcmp(exts[i].extensionName, ext_name) == 0) {
+            found = 1;
+            break;
+        }
+    }
+
+    free(exts);
+    return found;
+}
+
+static void
+vc_detect_capabilities(vc_ctx_t *ctx)
+{
+    VkPhysicalDevice dev = ctx->physical_device;
+
+    ctx->caps.has_extended_dynamic_state =
+        vc_device_has_extension(dev, "VK_EXT_extended_dynamic_state");
+    ctx->caps.has_extended_dynamic_state2 =
+        vc_device_has_extension(dev, "VK_EXT_extended_dynamic_state2");
+    ctx->caps.has_extended_dynamic_state3 =
+        vc_device_has_extension(dev, "VK_EXT_extended_dynamic_state3");
+    ctx->caps.has_push_descriptor =
+        vc_device_has_extension(dev, "VK_KHR_push_descriptor");
+
+    VkPhysicalDeviceFeatures features;
+    vkGetPhysicalDeviceFeatures(dev, &features);
+    ctx->caps.has_dual_src_blend = features.dualSrcBlend ? 1 : 0;
+
+    VC_LOG("VideoCommon: capabilities: eds=%d eds2=%d eds3=%d push_desc=%d dual_src=%d\n",
+           ctx->caps.has_extended_dynamic_state,
+           ctx->caps.has_extended_dynamic_state2,
+           ctx->caps.has_extended_dynamic_state3,
+           ctx->caps.has_push_descriptor,
+           ctx->caps.has_dual_src_blend);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  vc_init / vc_destroy                                                       */
+/* -------------------------------------------------------------------------- */
+
+vc_ctx_t *
+vc_init(void)
+{
+    VkResult result;
+
+    result = volkInitialize();
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: volkInitialize failed (%d) -- no Vulkan available\n", result);
+        return NULL;
+    }
+
+    vc_ctx_t *ctx = (vc_ctx_t *) malloc(sizeof(vc_ctx_t));
+    if (!ctx)
+        return NULL;
+    memset(ctx, 0, sizeof(vc_ctx_t));
+
+    /* -------------------------------------------------------------------- */
+    /*  VkInstance                                                           */
+    /* -------------------------------------------------------------------- */
+
+    VkApplicationInfo app_info;
+    memset(&app_info, 0, sizeof(app_info));
+    app_info.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    app_info.pApplicationName   = "86Box VideoCommon";
+    app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+    app_info.pEngineName        = "VideoCommon";
+    app_info.engineVersion      = VK_MAKE_VERSION(1, 0, 0);
+    app_info.apiVersion         = VK_API_VERSION_1_2;
+
+    const char *inst_extensions[] = {
+        VK_KHR_SURFACE_EXTENSION_NAME,
+#ifdef __APPLE__
+        VK_EXT_METAL_SURFACE_EXTENSION_NAME,
+        "VK_KHR_portability_enumeration",
+        "VK_KHR_get_physical_device_properties2",
+#endif
+#ifdef _WIN32
+        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+        VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+#endif
+    };
+    uint32_t inst_ext_count = sizeof(inst_extensions) / sizeof(inst_extensions[0]);
+
+    const char *validation_layer = "VK_LAYER_KHRONOS_validation";
+    int         use_validation   = vc_validation_requested() && vc_has_validation_layer();
+
+    VkInstanceCreateInfo instance_ci;
+    memset(&instance_ci, 0, sizeof(instance_ci));
+    instance_ci.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instance_ci.pApplicationInfo        = &app_info;
+    instance_ci.enabledExtensionCount   = inst_ext_count;
+    instance_ci.ppEnabledExtensionNames = inst_extensions;
+#ifdef __APPLE__
+    instance_ci.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+    if (use_validation) {
+        instance_ci.enabledLayerCount   = 1;
+        instance_ci.ppEnabledLayerNames = &validation_layer;
+        VC_LOG("VideoCommon: validation layers enabled\n");
+    }
+
+    result = vkCreateInstance(&instance_ci, NULL, &ctx->instance);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: vkCreateInstance failed (%d)\n", result);
+        free(ctx);
+        return NULL;
+    }
+
+    volkLoadInstance(ctx->instance);
+
+    /* -------------------------------------------------------------------- */
+    /*  Physical device selection                                           */
+    /* -------------------------------------------------------------------- */
+
+    uint32_t dev_count = 0;
+    vkEnumeratePhysicalDevices(ctx->instance, &dev_count, NULL);
+    if (dev_count == 0) {
+        VC_LOG("VideoCommon: no Vulkan physical devices found\n");
+        vkDestroyInstance(ctx->instance, NULL);
+        free(ctx);
+        return NULL;
+    }
+
+    VkPhysicalDevice *devices = (VkPhysicalDevice *) malloc(dev_count * sizeof(VkPhysicalDevice));
+    vkEnumeratePhysicalDevices(ctx->instance, &dev_count, devices);
+
+    int best_score = -1;
+    int best_idx   = -1;
+    for (uint32_t i = 0; i < dev_count; i++) {
+        int score = vc_score_device(devices[i]);
+        if (score > best_score) {
+            if (vc_find_graphics_queue(devices[i]) >= 0) {
+                best_score = score;
+                best_idx   = (int) i;
+            }
+        }
+    }
+
+    if (best_idx < 0) {
+        VC_LOG("VideoCommon: no suitable Vulkan device (need VK 1.2 + graphics queue)\n");
+        free(devices);
+        vkDestroyInstance(ctx->instance, NULL);
+        free(ctx);
+        return NULL;
+    }
+
+    ctx->physical_device = devices[best_idx];
+    free(devices);
+
+    VkPhysicalDeviceProperties dev_props;
+    vkGetPhysicalDeviceProperties(ctx->physical_device, &dev_props);
+    strncpy(ctx->device_name, dev_props.deviceName, sizeof(ctx->device_name) - 1);
+    ctx->device_name[sizeof(ctx->device_name) - 1] = '\0';
+    ctx->api_version = dev_props.apiVersion;
+
+    ctx->queue_family = (uint32_t) vc_find_graphics_queue(ctx->physical_device);
+
+    vc_detect_capabilities(ctx);
+
+    /* -------------------------------------------------------------------- */
+    /*  Logical device                                                      */
+    /* -------------------------------------------------------------------- */
+
+    float queue_priority = 1.0f;
+
+    VkDeviceQueueCreateInfo queue_ci;
+    memset(&queue_ci, 0, sizeof(queue_ci));
+    queue_ci.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queue_ci.queueFamilyIndex = ctx->queue_family;
+    queue_ci.queueCount       = 1;
+    queue_ci.pQueuePriorities = &queue_priority;
+
+    const char *dev_extensions[16];
+    uint32_t    dev_ext_count = 0;
+
+    dev_extensions[dev_ext_count++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+
+#ifdef __APPLE__
+    dev_extensions[dev_ext_count++] = "VK_KHR_portability_subset";
+#endif
+
+    if (ctx->caps.has_extended_dynamic_state)
+        dev_extensions[dev_ext_count++] = "VK_EXT_extended_dynamic_state";
+    if (ctx->caps.has_extended_dynamic_state2)
+        dev_extensions[dev_ext_count++] = "VK_EXT_extended_dynamic_state2";
+    if (ctx->caps.has_extended_dynamic_state3)
+        dev_extensions[dev_ext_count++] = "VK_EXT_extended_dynamic_state3";
+    if (ctx->caps.has_push_descriptor)
+        dev_extensions[dev_ext_count++] = "VK_KHR_push_descriptor";
+
+    VkPhysicalDeviceFeatures enabled_features;
+    memset(&enabled_features, 0, sizeof(enabled_features));
+    if (ctx->caps.has_dual_src_blend)
+        enabled_features.dualSrcBlend = VK_TRUE;
+
+    VkDeviceCreateInfo device_ci;
+    memset(&device_ci, 0, sizeof(device_ci));
+    device_ci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device_ci.queueCreateInfoCount    = 1;
+    device_ci.pQueueCreateInfos       = &queue_ci;
+    device_ci.enabledExtensionCount   = dev_ext_count;
+    device_ci.ppEnabledExtensionNames = dev_extensions;
+    device_ci.pEnabledFeatures        = &enabled_features;
+
+    result = vkCreateDevice(ctx->physical_device, &device_ci, NULL, &ctx->device);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: vkCreateDevice failed (%d)\n", result);
+        vkDestroyInstance(ctx->instance, NULL);
+        free(ctx);
+        return NULL;
+    }
+
+    volkLoadDevice(ctx->device);
+
+    vkGetDeviceQueue(ctx->device, ctx->queue_family, 0, &ctx->queue);
+
+    /* -------------------------------------------------------------------- */
+    /*  VMA allocator (C++ implementation in vc_vma_impl.cpp)               */
+    /* -------------------------------------------------------------------- */
+
+    ctx->allocator = vc_vma_create(ctx->instance, ctx->physical_device, ctx->device);
+    if (!ctx->allocator) {
+        VC_LOG("VideoCommon: VMA allocator creation failed\n");
+        vkDestroyDevice(ctx->device, NULL);
+        vkDestroyInstance(ctx->instance, NULL);
+        free(ctx);
+        return NULL;
+    }
+
+    VC_LOG("VideoCommon: Vulkan 1.2 initialized on '%s' (API %u.%u.%u)\n",
+           ctx->device_name,
+           VK_API_VERSION_MAJOR(ctx->api_version),
+           VK_API_VERSION_MINOR(ctx->api_version),
+           VK_API_VERSION_PATCH(ctx->api_version));
+
+    return ctx;
+}
+
+void
+vc_destroy(vc_ctx_t *ctx)
+{
+    if (!ctx)
+        return;
+
+    if (ctx->allocator) {
+        vc_vma_destroy(ctx->allocator);
+        ctx->allocator = NULL;
+    }
+
+    if (ctx->device != VK_NULL_HANDLE) {
+        vkDestroyDevice(ctx->device, NULL);
+        ctx->device = VK_NULL_HANDLE;
+    }
+
+    if (ctx->instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(ctx->instance, NULL);
+        ctx->instance = VK_NULL_HANDLE;
+    }
+
+    VC_LOG("VideoCommon: destroyed\n");
+    free(ctx);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Voodoo integration hooks                                                   */
+/* -------------------------------------------------------------------------- */
+
+/* Include vid_voodoo_common.h for voodoo_t access in the integration hooks.
+   This requires the same header chain as vid_voodoo.c. */
+#include <86box/device.h>
+#include <86box/mem.h>
+#include <86box/timer.h>
+#include <86box/thread.h>
+#include <86box/video.h>
+#include <86box/vid_svga.h>
+#include <86box/vid_voodoo_common.h>
+
+void
+vc_voodoo_init(void *voodoo_ptr)
+{
+    voodoo_t *voodoo = (voodoo_t *) voodoo_ptr;
+    if (!voodoo || !voodoo->use_gpu_renderer)
+        return;
+
+    VC_LOG("VideoCommon: vc_voodoo_init -- GPU renderer requested\n");
+
+    vc_ctx_t *ctx = vc_init();
+    if (!ctx) {
+        VC_LOG("VideoCommon: Vulkan init failed, falling back to SW renderer\n");
+        voodoo->use_gpu_renderer = 0;
+        return;
+    }
+
+    if (vc_start_gpu_thread(ctx) != 0) {
+        VC_LOG("VideoCommon: GPU thread start failed, falling back to SW renderer\n");
+        vc_destroy(ctx);
+        voodoo->use_gpu_renderer = 0;
+        return;
+    }
+
+    voodoo->vc_ctx = ctx;
+    VC_LOG("VideoCommon: vc_voodoo_init complete -- GPU renderer active\n");
+}
+
+void
+vc_voodoo_close(void *voodoo_ptr)
+{
+    voodoo_t *voodoo = (voodoo_t *) voodoo_ptr;
+    if (!voodoo || !voodoo->vc_ctx)
+        return;
+
+    VC_LOG("VideoCommon: vc_voodoo_close\n");
+
+    vc_ctx_t *ctx = (vc_ctx_t *) voodoo->vc_ctx;
+    vc_stop_gpu_thread(ctx);
+    vc_destroy(ctx);
+    voodoo->vc_ctx = NULL;
+}

@@ -46,6 +46,7 @@
 #include <86box/vid_voodoo_regs.h>
 #include <86box/vid_voodoo_render.h>
 #include <86box/vid_voodoo_texture.h>
+#include <86box/videocommon.h>
 
 rgba8_t rgb332[0x100];
 rgba8_t ai44[0x100];
@@ -1323,6 +1324,11 @@ voodoo_card_init(void)
     voodoo->can_blit         = 0;
     voodoo->force_blit_mutex = thread_create_mutex();
 
+#ifdef USE_VIDEOCOMMON
+    voodoo->use_gpu_renderer = device_get_config_int("gpu_renderer");
+    vc_voodoo_init(voodoo);
+#endif
+
     return voodoo;
 }
 
@@ -1467,6 +1473,11 @@ voodoo_2d3d_card_init(int type)
     voodoo->force_blit_count = 0;
     voodoo->can_blit         = 0;
     voodoo->force_blit_mutex = thread_create_mutex();
+
+#ifdef USE_VIDEOCOMMON
+    voodoo->use_gpu_renderer = device_get_config_int("gpu_renderer");
+    vc_voodoo_init(voodoo);
+#endif
 
     return voodoo;
 }
@@ -1623,6 +1634,10 @@ voodoo_card_close(voodoo_t *voodoo)
         free(voodoo->tex_mem[0]);
     }
 
+#ifdef USE_VIDEOCOMMON
+    vc_voodoo_close(voodoo);
+#endif
+
     thread_close_mutex(voodoo->force_blit_mutex);
 
     free(voodoo);
@@ -1771,6 +1786,19 @@ static const device_config_t voodoo_config[] = {
         .selection      = { { 0 } },
         .bios           = { { 0 } }
     },
+#ifdef USE_VIDEOCOMMON
+    {
+        .name           = "gpu_renderer",
+        .description    = "GPU Renderer (Vulkan)",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 0,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+#endif
     { .name = "", .description = "", .type = CONFIG_END }
   // clang-format on
 };

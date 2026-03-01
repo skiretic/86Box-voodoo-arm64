@@ -177,3 +177,8 @@ add_library(voodoo OBJECT
 if(NOT MSVC AND (ARCH STREQUAL "i386" OR ARCH STREQUAL "x86_64"))
     target_compile_options(voodoo PRIVATE "-msse2")
 endif()
+
+# VideoCommon -- GPU-accelerated rendering (Vulkan)
+if(VIDEOCOMMON)
+    add_subdirectory(videocommon)
+endif()
