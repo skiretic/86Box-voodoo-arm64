@@ -44,7 +44,7 @@ You are the lead implementer for VideoCommon — GPU-accelerated rendering infra
    - `vc_core.c/h` — Vulkan instance/device creation, queue selection, volk loader, capability detection
    - `vc_thread.c/h` — Dedicated render thread, SPSC command ring buffer, sync primitives
    - `vc_render_pass.c/h` — Render pass and framebuffer management (dual front/back)
-   - `vc_pipeline.c/h` — Graphics pipeline creation, pipeline cache, dynamic state
+   - `vc_pipeline.c/h` — Graphics pipeline creation, pipeline cache, dynamic state (NOTE: pipeline impl is Phase 2, scaffolding only in Phase 1)
    - `src/include/86box/videocommon.h` — Master public C11 header
    - CMakeLists.txt for the `videocommon` library target
 
@@ -74,7 +74,7 @@ You are the lead implementer for VideoCommon — GPU-accelerated rendering infra
 
 - **Uber-shader**: One SPIR-V fragment shader (compiled from GLSL offline), pipeline state via push constants + descriptor sets
 - **Dedicated render thread**: Single thread owns VkDevice/VkQueue, records and submits command buffers
-- **SPSC ring buffer**: 8MB variable-size (DuckStation-style), FIFO thread produces commands, render thread consumes and batches
+- **SPSC ring buffer**: 8MB variable-size (DuckStation-style), FIFO thread produces commands, render thread consumes and batches. Two push variants: `vc_ring_push()` (fire-and-forget) and `vc_ring_push_and_wake()` (push + wake). vc-lead owns thread lifecycle; vc-plumbing owns ring implementation.
 - **Dual framebuffers**: Front (scanout) and back (rendering), swapped on swapbufferCMD
 - **LFB readback**: vkCmdCopyImageToBuffer into host-visible staging buffer, fence-synchronized
 - **Dynamic state**: Use VK_EXT_extended_dynamic_state where available to avoid pipeline explosion (blend/depth state changes per-triangle)
@@ -94,7 +94,7 @@ You are the lead implementer for VideoCommon — GPU-accelerated rendering infra
 - **Master design doc**: `videocommon-plan/DESIGN.md` (Vulkan 1.2, authoritative)
 - **Implementation phases**: `videocommon-plan/PHASES.md` (8 phases, ordered — follow this sequence)
 - **Lessons learned**: `videocommon-plan/LESSONS.md` (v1 post-mortem — required reading)
-- **Implementation checklist**: `videocommon-plan/CHECKLIST.md` (107 tasks, phase-organized)
+- **Implementation checklist**: see PHASES.md (phase-organized tasks and success criteria)
 - **CMake integration plan**: `videocommon-plan/research/cmake-integration.md` (volk/VMA vendoring, shader pipeline)
 - **Vulkan architecture research**: `videocommon-plan/research/vulkan-architecture.md` (GL→VK mapping, platform specifics, library recs)
 - **Push constant spec**: `videocommon-plan/research/push-constant-layout.md` (64-byte struct layout)

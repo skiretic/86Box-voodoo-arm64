@@ -81,17 +81,24 @@ Three strategies, selected adaptively based on access patterns:
 - DuckStation-style wake counter + semaphore (no mutexes on hot path)
 - Variable-size commands with `vc_ring_cmd_header_t` (type + size)
 - Wraparound sentinel command when insufficient contiguous space
-- Command types: TRIANGLE, SWAP, TEXTURE_UPLOAD, TEXTURE_BIND, STATE_UPDATE, CLEAR, LFB_WRITE, READBACK, RESIZE, SHUTDOWN, WRAPAROUND
+- Command types: TRIANGLE, STATE_UPDATE, SWAP, CLEAR, TEXTURE_UPLOAD, TEXTURE_INVALIDATE, SHUTDOWN, WRAPAROUND
 - Backpressure: producer spin-yields when ring full (`vc_ring_wait_for_space()`)
 - All communication to GPU thread goes through this ring — **NO side channels**
 
-### Sync Primitives
-- `vc_sync()`: block caller until render thread processes all pending commands
-  - Uses `vc_ring_push_and_sync()` — push SYNC command + block until GPU thread processes it
-  - Called on: LFB read, FIFO idle, register status reads
-- VkFence for CPU↔GPU synchronization (readback completion)
+### Sync Primitives — Shadow Buffer Approach
+- **LFB readback uses the shadow buffer** — GPU thread maintains a double-buffered
+  (ping-pong) shadow of the offscreen framebuffer, updated via `vkCmdCopyImageToBuffer`
+  at each `VC_CMD_SWAP`. CPU thread reads from the shadow buffer gated by atomic
+  `shadow_fence_value` + `vkWaitForFences` on the per-frame fence. **No ring interaction
+  from the CPU thread** — the SPSC ring is strictly single-producer (FIFO thread only).
+- VkFence for CPU↔GPU synchronization (shadow buffer readback completion)
 - SPSC ring wake: atomic counter + semaphore (DuckStation pattern) — no mutexes on hot path
+- Ring push API: two variants only — `vc_ring_push()` (fire-and-forget) and `vc_ring_push_and_wake()` (push + wake GPU thread)
 - Teardown: completion event (one-shot notification from GPU thread to GUI thread)
+
+### Thread Ownership Split
+- **vc-lead** owns the render thread lifecycle: create, join, main loop structure
+- **vc-plumbing** owns the ring buffer implementation: push, pop, wake, space check, wraparound
 
 ### Display Integration — Qt VCRenderer (`qt_vcrenderer.cpp/hpp`)
 - New `VCRenderer` class inheriting `RendererCommon` (~300 lines, surface creation only)
