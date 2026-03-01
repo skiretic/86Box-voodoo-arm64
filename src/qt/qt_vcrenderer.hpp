@@ -10,9 +10,9 @@
  *          passes it to the VideoCommon GPU thread for swapchain
  *          creation and presentation.
  *
- *          This is a thin surface container.  All Vulkan drawing is
- *          done by the GPU thread; VCRenderer does NOT submit any
- *          Vulkan commands.
+ *          Handles both Voodoo 3D (GPU thread renders via Vulkan) and
+ *          VGA passthrough (receives blit signal, uploads pixels to
+ *          Vulkan staging buffer, GPU thread presents via swapchain).
  *
  * Authors: skiretic
  *
@@ -23,9 +23,12 @@
 
 #include "qt_renderercommon.hpp"
 
+#include <QImage>
 #include <QWidget>
+#include <array>
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <tuple>
 #include <vector>
 
@@ -52,15 +55,25 @@ signals:
     void initialized();
     void errorInitializing();
 
+public slots:
+    /* Receives blitToRenderer signal from RendererStack.
+       Notifies the GPU thread that a VGA frame is ready. */
+    void onBlit(int buf_idx, int x, int y, int w, int h);
+
 protected:
     void resizeEvent(QResizeEvent *event) override;
 
     std::vector<std::tuple<uint8_t *, std::atomic_flag *>> getBuffers() override;
-    uint32_t getBytesPerRow() override { return 0; }
+    uint32_t getBytesPerRow() override { return 2048 * 4; }
 
 private:
     uintptr_t m_surface   = 0; /* VkSurfaceKHR cast to uintptr_t. */
     bool      m_finalized = false;
+
+    /* Double-buffered image buffers for VGA passthrough blit.
+       Same pattern as SoftwareRenderer: 2048x2048 BGRA8 images. */
+    std::array<std::unique_ptr<QImage>, 2> m_images;
+    bool m_bufsRegistered = false;
 };
 
 #endif /* QT_VCRENDERER_HPP */

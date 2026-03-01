@@ -94,6 +94,21 @@ uintptr_t vc_create_surface(void *ctx, uintptr_t native_handle);
    `surface` is VkSurfaceKHR as uintptr_t. */
 void vc_destroy_surface(void *ctx, uintptr_t surface);
 
+/* -------------------------------------------------------------------------- */
+/*  VGA passthrough blit -- called from Qt VCRenderer                          */
+/* -------------------------------------------------------------------------- */
+
+/* Register VGA image buffer pointers for the GPU thread to read from.
+   Called once after VCRenderer allocates its image buffers.
+   `buf0` and `buf1` are pointers to the raw BGRA8 pixel data. */
+void vc_display_set_vga_bufs(void *ctx, void *buf0, void *buf1);
+
+/* Notify the GPU thread that a VGA frame is ready for presentation.
+   `buf_idx` is which buffer to read (0 or 1).
+   `x`, `y`, `w`, `h` are the blit rect in pixels. */
+void vc_display_notify_vga_frame(void *ctx, int buf_idx,
+                                  int x, int y, int w, int h);
+
 #else /* !USE_VIDEOCOMMON */
 
 /* No-op stubs when VideoCommon is not compiled in. */
@@ -108,6 +123,8 @@ static inline void vc_display_request_teardown_handle(void *c) { (void) c; }
 static inline void vc_display_wait_teardown_handle(void *c) { (void) c; }
 static inline uintptr_t vc_create_surface(void *c, uintptr_t h) { (void) c; (void) h; return 0; }
 static inline void vc_destroy_surface(void *c, uintptr_t s) { (void) c; (void) s; }
+static inline void vc_display_set_vga_bufs(void *c, void *b0, void *b1) { (void) c; (void) b0; (void) b1; }
+static inline void vc_display_notify_vga_frame(void *c, int bi, int x, int y, int w, int h) { (void) c; (void) bi; (void) x; (void) y; (void) w; (void) h; }
 
 #endif /* USE_VIDEOCOMMON */
 

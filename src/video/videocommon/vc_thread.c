@@ -728,6 +728,17 @@ vc_gpu_thread_func(void *param)
         uint32_t wp = atomic_load_explicit(&ring->write_pos, memory_order_acquire);
 
         if (rp == wp) {
+            /* Ring is empty.  Before sleeping, check if a VGA frame is
+               pending -- during VGA passthrough no ring commands are sent,
+               so the display_tick above is the only opportunity to present.
+               If a VGA frame was just presented we loop back to re-check
+               without blocking. */
+            if (gpu_st &&
+                atomic_load_explicit(&gpu_st->disp.vga_frame_ready,
+                                      memory_order_relaxed)) {
+                vc_display_tick(ctx, gpu_st);
+                continue;
+            }
             vc_ring_sleep(ring);
             continue;
         }

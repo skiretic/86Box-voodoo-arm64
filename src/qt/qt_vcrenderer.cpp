@@ -11,11 +11,13 @@
  *
  *          This widget is a thin surface container.  It does NOT do
  *          any Vulkan drawing -- the GPU thread owns the swapchain
- *          and all rendering.  VCRenderer's only jobs:
+ *          and all rendering.  VCRenderer's jobs:
  *            1. Create a platform VkSurfaceKHR from its native window
  *            2. Pass the surface handle to VideoCommon via atomic
  *            3. Handle resize events (signal GPU thread)
  *            4. Handle teardown (handshake with GPU thread)
+ *            5. Provide image buffers for VGA passthrough blit
+ *            6. Receive blitToRenderer signal and notify GPU thread
  *
  *          IMPORTANT: This file does NOT include any Vulkan headers.
  *          All Vulkan interaction goes through the opaque API in
@@ -33,6 +35,8 @@
 #include <QWindow>
 
 extern "C" {
+#include <86box/86box.h>
+#include <86box/video.h>
 #include <86box/videocommon.h>
 }
 
@@ -47,6 +51,17 @@ VCRenderer::VCRenderer(QWidget *parent)
     setAttribute(Qt::WA_NativeWindow, true);
     setAttribute(Qt::WA_PaintOnScreen, true);
     setAttribute(Qt::WA_NoSystemBackground, true);
+
+    RendererCommon::parentWidget = parent;
+
+    /* Allocate double-buffered image buffers for VGA passthrough.
+       Same format as SoftwareRenderer: 2048x2048 Format_RGB32 (BGRA8). */
+    m_images[0] = std::make_unique<QImage>(QSize(2048, 2048), QImage::Format_RGB32);
+    m_images[1] = std::make_unique<QImage>(QSize(2048, 2048), QImage::Format_RGB32);
+
+    buf_usage = std::vector<std::atomic_flag>(2);
+    buf_usage[0].clear();
+    buf_usage[1].clear();
 }
 
 VCRenderer::~VCRenderer()
@@ -89,6 +104,15 @@ VCRenderer::initialize()
        on its next vc_display_tick() iteration and create the swapchain. */
     vc_display_set_surface_handle(ctx_ptr, m_surface);
 
+    /* Register VGA blit buffer pointers with VideoCommon so the GPU
+       thread can read from them for VGA passthrough display. */
+    if (!m_bufsRegistered) {
+        vc_display_set_vga_bufs(ctx_ptr,
+                                 m_images[0]->bits(),
+                                 m_images[1]->bits());
+        m_bufsRegistered = true;
+    }
+
     emit initialized();
 }
 
@@ -122,6 +146,31 @@ VCRenderer::finalize()
 }
 
 /* -------------------------------------------------------------------------- */
+/*  VGA passthrough blit                                                       */
+/* -------------------------------------------------------------------------- */
+
+void
+VCRenderer::onBlit(int buf_idx, int x, int y, int w, int h)
+{
+    /* Release the previous buffer for the blit thread to reuse. */
+    buf_usage[buf_idx ^ 1].clear();
+
+    /* Update source rect for RendererCommon coordinate mapping. */
+    auto origSource = source;
+    source.setRect(x, y, w, h);
+    if (source != origSource)
+        onResize(this->width(), this->height());
+
+    /* Notify the GPU thread that a VGA frame is ready.
+       The GPU thread will read the pixel data from the image buffer
+       and present it via the Vulkan swapchain. */
+    void *ctx_ptr = vc_display_get_ctx();
+    if (ctx_ptr) {
+        vc_display_notify_vga_frame(ctx_ptr, buf_idx, x, y, w, h);
+    }
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Resize                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -147,6 +196,10 @@ VCRenderer::resizeEvent(QResizeEvent *event)
 std::vector<std::tuple<uint8_t *, std::atomic_flag *>>
 VCRenderer::getBuffers()
 {
-    /* VCRenderer does not use the blit path.  Return empty. */
-    return {};
+    std::vector<std::tuple<uint8_t *, std::atomic_flag *>> buffers;
+
+    buffers.push_back(std::make_tuple(m_images[0]->bits(), &buf_usage[0]));
+    buffers.push_back(std::make_tuple(m_images[1]->bits(), &buf_usage[1]));
+
+    return buffers;
 }

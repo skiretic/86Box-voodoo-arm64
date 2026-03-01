@@ -42,10 +42,24 @@
 
 #include "vc_display.h"
 #include "vc_gpu_state.h"
+#include "vc_thread.h"
 
 /* Embedded SPIR-V for the post-process shaders. */
 #include "postprocess_vert.h"
 #include "postprocess_frag.h"
+
+/* C-callable VMA wrappers (implemented in vc_vma_impl.cpp). */
+extern VkResult vc_vma_create_image(void *allocator,
+                                    const VkImageCreateInfo *image_ci,
+                                    VkImage *out_image, void **out_alloc);
+extern void     vc_vma_destroy_image(void *allocator, VkImage image,
+                                     void *alloc);
+extern VkResult vc_vma_create_buffer(void *allocator,
+                                     const VkBufferCreateInfo *buffer_ci,
+                                     int mapped, VkBuffer *out_buffer,
+                                     void **out_alloc, void **out_mapped);
+extern void     vc_vma_destroy_buffer(void *allocator, VkBuffer buffer,
+                                      void *alloc);
 
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                    */
@@ -82,6 +96,16 @@ vc_display_state_init(vc_display_t *disp)
     atomic_store_explicit(&disp->resize_requested, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->teardown_requested, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->teardown_complete, 0, memory_order_relaxed);
+
+    /* VGA passthrough blit state. */
+    atomic_store_explicit(&disp->vga_frame_ready, 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_buf_idx, 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_blit_x, 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_blit_y, 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_blit_w, 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_blit_h, 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_buf_ptrs[0], 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_buf_ptrs[1], 0, memory_order_relaxed);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -221,16 +245,16 @@ vc_pp_descriptors_create(vc_ctx_t *ctx, vc_display_t *disp)
         return -1;
     }
 
-    /* Descriptor pool: 2 sets (one per offscreen FB). */
+    /* Descriptor pool: 3 sets (2 offscreen FB + 1 VGA blit). */
     VkDescriptorPoolSize pool_size;
     memset(&pool_size, 0, sizeof(pool_size));
     pool_size.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = 2;
+    pool_size.descriptorCount = 3;
 
     VkDescriptorPoolCreateInfo pool_ci;
     memset(&pool_ci, 0, sizeof(pool_ci));
     pool_ci.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_ci.maxSets       = 2;
+    pool_ci.maxSets       = 3;
     pool_ci.poolSizeCount = 1;
     pool_ci.pPoolSizes    = &pool_size;
 
@@ -241,25 +265,29 @@ vc_pp_descriptors_create(vc_ctx_t *ctx, vc_display_t *disp)
         return -1;
     }
 
-    /* Allocate 2 descriptor sets. */
-    VkDescriptorSetLayout layouts[2] = {
-        disp->pp_desc_layout, disp->pp_desc_layout
+    /* Allocate 3 descriptor sets (2 offscreen FB + 1 VGA blit). */
+    VkDescriptorSetLayout layouts[3] = {
+        disp->pp_desc_layout, disp->pp_desc_layout, disp->pp_desc_layout
     };
+    VkDescriptorSet all_sets[3];
 
     VkDescriptorSetAllocateInfo alloc_ci;
     memset(&alloc_ci, 0, sizeof(alloc_ci));
     alloc_ci.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     alloc_ci.descriptorPool     = disp->pp_desc_pool;
-    alloc_ci.descriptorSetCount = 2;
+    alloc_ci.descriptorSetCount = 3;
     alloc_ci.pSetLayouts        = layouts;
 
-    result = vkAllocateDescriptorSets(ctx->device, &alloc_ci,
-                                       disp->pp_desc_sets);
+    result = vkAllocateDescriptorSets(ctx->device, &alloc_ci, all_sets);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: post-process descriptor set allocation failed (%d)\n",
                result);
         return -1;
     }
+
+    disp->pp_desc_sets[0] = all_sets[0];
+    disp->pp_desc_sets[1] = all_sets[1];
+    disp->vga_desc_set    = all_sets[2];
 
     return 0;
 }
@@ -738,11 +766,14 @@ vc_display_destroy(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         disp->pp_pipeline_layout = VK_NULL_HANDLE;
     }
 
+    vc_display_destroy_vga_resources(ctx, gpu_st);
+
     if (disp->pp_desc_pool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(ctx->device, disp->pp_desc_pool, NULL);
         disp->pp_desc_pool = VK_NULL_HANDLE;
         disp->pp_desc_sets[0] = VK_NULL_HANDLE;
         disp->pp_desc_sets[1] = VK_NULL_HANDLE;
+        disp->vga_desc_set    = VK_NULL_HANDLE;
     }
 
     if (disp->pp_desc_layout != VK_NULL_HANDLE) {
@@ -882,6 +913,15 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         if (disp->swapchain != VK_NULL_HANDLE) {
             vc_display_recreate_swapchain(ctx, gpu_st);
         }
+    }
+
+    /* Check for VGA passthrough frames.
+       Only present VGA frames when no 3D render pass is active and
+       the swapchain is ready. */
+    if (!gpu_st->render_pass_active &&
+        disp->swapchain != VK_NULL_HANDLE &&
+        atomic_load_explicit(&disp->vga_frame_ready, memory_order_relaxed)) {
+        vc_display_present_vga(ctx, gpu_st);
     }
 }
 
@@ -1037,6 +1077,507 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
 }
 
 /* -------------------------------------------------------------------------- */
+/*  VGA passthrough blit resources                                             */
+/* -------------------------------------------------------------------------- */
+
+/* VGA blit staging buffer size: 2048*2048 pixels * 4 bytes (BGRA8). */
+#define VC_VGA_STAGING_SIZE (2048 * 2048 * 4)
+
+int
+vc_display_create_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    vc_display_t *disp = &gpu_st->disp;
+    VkResult      result;
+
+    if (disp->vga_resources_created)
+        return 0;
+
+    /* Create a VGA blit VkImage (B8G8R8A8 to match Qt QImage::Format_RGB32).
+       Start at 2048x2048 (max resolution the blit chain supports). */
+    disp->vga_tex_width  = 2048;
+    disp->vga_tex_height = 2048;
+
+    VkImageCreateInfo image_ci;
+    memset(&image_ci, 0, sizeof(image_ci));
+    image_ci.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_ci.imageType     = VK_IMAGE_TYPE_2D;
+    image_ci.format        = VK_FORMAT_B8G8R8A8_UNORM;
+    image_ci.extent.width  = disp->vga_tex_width;
+    image_ci.extent.height = disp->vga_tex_height;
+    image_ci.extent.depth  = 1;
+    image_ci.mipLevels     = 1;
+    image_ci.arrayLayers   = 1;
+    image_ci.samples       = VK_SAMPLE_COUNT_1_BIT;
+    image_ci.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    image_ci.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                           | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    result = vc_vma_create_image(ctx->allocator, &image_ci,
+                                 &disp->vga_image, &disp->vga_image_alloc);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA blit image creation failed (%d)\n", result);
+        return -1;
+    }
+
+    /* Image view. */
+    VkImageViewCreateInfo view_ci;
+    memset(&view_ci, 0, sizeof(view_ci));
+    view_ci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_ci.image                           = disp->vga_image;
+    view_ci.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+    view_ci.format                          = VK_FORMAT_B8G8R8A8_UNORM;
+    view_ci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_ci.subresourceRange.levelCount     = 1;
+    view_ci.subresourceRange.layerCount     = 1;
+
+    result = vkCreateImageView(ctx->device, &view_ci, NULL,
+                                &disp->vga_image_view);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA blit image view creation failed (%d)\n", result);
+        return -1;
+    }
+
+    /* Staging buffer (host-visible, persistently mapped). */
+    VkBufferCreateInfo buf_ci;
+    memset(&buf_ci, 0, sizeof(buf_ci));
+    buf_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buf_ci.size  = VC_VGA_STAGING_SIZE;
+    buf_ci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    result = vc_vma_create_buffer(ctx->allocator, &buf_ci, 1,
+                                  &disp->vga_staging_buf,
+                                  &disp->vga_staging_alloc,
+                                  &disp->vga_staging_mapped);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA blit staging buffer creation failed (%d)\n", result);
+        return -1;
+    }
+
+    /* Command pool and buffer for VGA blit uploads. */
+    VkCommandPoolCreateInfo pool_ci;
+    memset(&pool_ci, 0, sizeof(pool_ci));
+    pool_ci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_ci.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    pool_ci.queueFamilyIndex = ctx->queue_family;
+
+    result = vkCreateCommandPool(ctx->device, &pool_ci, NULL,
+                                  &disp->vga_cmd_pool);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA blit command pool creation failed (%d)\n", result);
+        return -1;
+    }
+
+    VkCommandBufferAllocateInfo alloc_ci;
+    memset(&alloc_ci, 0, sizeof(alloc_ci));
+    alloc_ci.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_ci.commandPool        = disp->vga_cmd_pool;
+    alloc_ci.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_ci.commandBufferCount = 1;
+
+    result = vkAllocateCommandBuffers(ctx->device, &alloc_ci,
+                                       &disp->vga_cmd_buf);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA blit command buffer alloc failed (%d)\n", result);
+        return -1;
+    }
+
+    /* Update the VGA descriptor set. */
+    if (disp->vga_desc_set != VK_NULL_HANDLE && disp->pp_sampler != VK_NULL_HANDLE) {
+        VkDescriptorImageInfo img_info;
+        memset(&img_info, 0, sizeof(img_info));
+        img_info.sampler     = disp->pp_sampler;
+        img_info.imageView   = disp->vga_image_view;
+        img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet write;
+        memset(&write, 0, sizeof(write));
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = disp->vga_desc_set;
+        write.dstBinding      = 0;
+        write.descriptorCount = 1;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo      = &img_info;
+
+        vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+    }
+
+    disp->vga_resources_created = 1;
+    VC_LOG("VideoCommon: VGA blit resources created (%ux%u)\n",
+           disp->vga_tex_width, disp->vga_tex_height);
+    return 0;
+}
+
+void
+vc_display_destroy_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    vc_display_t *disp = &gpu_st->disp;
+
+    if (!disp->vga_resources_created)
+        return;
+
+    if (disp->vga_cmd_pool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(ctx->device, disp->vga_cmd_pool, NULL);
+        disp->vga_cmd_pool = VK_NULL_HANDLE;
+        disp->vga_cmd_buf  = VK_NULL_HANDLE;
+    }
+
+    if (disp->vga_staging_buf != VK_NULL_HANDLE) {
+        vc_vma_destroy_buffer(ctx->allocator, disp->vga_staging_buf,
+                              disp->vga_staging_alloc);
+        disp->vga_staging_buf    = VK_NULL_HANDLE;
+        disp->vga_staging_alloc  = NULL;
+        disp->vga_staging_mapped = NULL;
+    }
+
+    if (disp->vga_image_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(ctx->device, disp->vga_image_view, NULL);
+        disp->vga_image_view = VK_NULL_HANDLE;
+    }
+
+    if (disp->vga_image != VK_NULL_HANDLE) {
+        vc_vma_destroy_image(ctx->allocator, disp->vga_image,
+                             disp->vga_image_alloc);
+        disp->vga_image       = VK_NULL_HANDLE;
+        disp->vga_image_alloc = NULL;
+    }
+
+    /* vga_desc_set is freed with the pool -- just NULL the pointer. */
+    disp->vga_desc_set          = VK_NULL_HANDLE;
+    disp->vga_resources_created = 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  VGA passthrough present                                                    */
+/* -------------------------------------------------------------------------- */
+
+/* Helper: recreate the VGA VkImage + view + descriptor when
+   the blit dimensions change.  Called from vc_display_present_vga(). */
+static int
+vc_vga_ensure_image_size(vc_ctx_t *ctx, vc_display_t *disp,
+                          uint32_t w, uint32_t h)
+{
+    if (disp->vga_tex_width == w && disp->vga_tex_height == h
+        && disp->vga_image != VK_NULL_HANDLE)
+        return 0;
+
+    /* Need to resize -- destroy old image + view. */
+    vkDeviceWaitIdle(ctx->device);
+
+    if (disp->vga_image_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(ctx->device, disp->vga_image_view, NULL);
+        disp->vga_image_view = VK_NULL_HANDLE;
+    }
+    if (disp->vga_image != VK_NULL_HANDLE) {
+        vc_vma_destroy_image(ctx->allocator, disp->vga_image,
+                             disp->vga_image_alloc);
+        disp->vga_image       = VK_NULL_HANDLE;
+        disp->vga_image_alloc = NULL;
+    }
+
+    disp->vga_tex_width  = w;
+    disp->vga_tex_height = h;
+
+    VkImageCreateInfo image_ci;
+    memset(&image_ci, 0, sizeof(image_ci));
+    image_ci.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_ci.imageType     = VK_IMAGE_TYPE_2D;
+    image_ci.format        = VK_FORMAT_B8G8R8A8_UNORM;
+    image_ci.extent.width  = w;
+    image_ci.extent.height = h;
+    image_ci.extent.depth  = 1;
+    image_ci.mipLevels     = 1;
+    image_ci.arrayLayers   = 1;
+    image_ci.samples       = VK_SAMPLE_COUNT_1_BIT;
+    image_ci.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    image_ci.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                           | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkResult result = vc_vma_create_image(ctx->allocator, &image_ci,
+                                          &disp->vga_image,
+                                          &disp->vga_image_alloc);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA image resize to %ux%u failed (%d)\n",
+               w, h, result);
+        return -1;
+    }
+
+    VkImageViewCreateInfo view_ci;
+    memset(&view_ci, 0, sizeof(view_ci));
+    view_ci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_ci.image                           = disp->vga_image;
+    view_ci.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+    view_ci.format                          = VK_FORMAT_B8G8R8A8_UNORM;
+    view_ci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_ci.subresourceRange.levelCount     = 1;
+    view_ci.subresourceRange.layerCount     = 1;
+
+    result = vkCreateImageView(ctx->device, &view_ci, NULL,
+                                &disp->vga_image_view);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA image view resize failed (%d)\n", result);
+        return -1;
+    }
+
+    /* Update the VGA descriptor set. */
+    if (disp->vga_desc_set != VK_NULL_HANDLE &&
+        disp->pp_sampler != VK_NULL_HANDLE) {
+        VkDescriptorImageInfo img_info;
+        memset(&img_info, 0, sizeof(img_info));
+        img_info.sampler     = disp->pp_sampler;
+        img_info.imageView   = disp->vga_image_view;
+        img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet write;
+        memset(&write, 0, sizeof(write));
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = disp->vga_desc_set;
+        write.dstBinding      = 0;
+        write.descriptorCount = 1;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo      = &img_info;
+
+        vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+    }
+
+    VC_LOG("VideoCommon: VGA image resized to %ux%u\n", w, h);
+    return 0;
+}
+
+int
+vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
+{
+    vc_display_t *disp = &gpu_st->disp;
+
+    /* Check if a VGA frame is ready. */
+    if (!atomic_exchange_explicit(&disp->vga_frame_ready, 0,
+                                   memory_order_acquire))
+        return -1;
+
+    if (disp->swapchain == VK_NULL_HANDLE)
+        return -1;
+
+    /* Read the blit parameters. */
+    int buf_idx = atomic_load_explicit(&disp->vga_buf_idx, memory_order_relaxed);
+    int bx      = atomic_load_explicit(&disp->vga_blit_x, memory_order_relaxed);
+    int by      = atomic_load_explicit(&disp->vga_blit_y, memory_order_relaxed);
+    int bw      = atomic_load_explicit(&disp->vga_blit_w, memory_order_relaxed);
+    int bh      = atomic_load_explicit(&disp->vga_blit_h, memory_order_relaxed);
+
+    if (bw <= 0 || bh <= 0 || bw > 2048 || bh > 2048)
+        return -1;
+
+    /* Get the source buffer pointer. */
+    uintptr_t buf_ptr = atomic_load_explicit(&disp->vga_buf_ptrs[buf_idx],
+                                              memory_order_acquire);
+    if (buf_ptr == 0)
+        return -1;
+
+    /* Create VGA resources if not yet done. */
+    if (!disp->vga_resources_created) {
+        if (vc_display_create_vga_resources(ctx, gpu_st) != 0)
+            return -1;
+    }
+
+    /* Resize VGA VkImage to match the blit dimensions if needed.
+       This ensures the fullscreen triangle shader's UV (0,1) range
+       maps correctly across the valid pixel data. */
+    if (vc_vga_ensure_image_size(ctx, disp, (uint32_t) bw, (uint32_t) bh) != 0)
+        return -1;
+
+    /* Copy the blit region from the image buffer to the staging buffer.
+       The source is Format_RGB32 (BGRA8), row pitch = 2048 * 4.
+       We pack into the staging buffer with tight row pitch (bw * 4). */
+    const uint8_t *src = (const uint8_t *) buf_ptr;
+    uint8_t       *dst = (uint8_t *) disp->vga_staging_mapped;
+    int src_pitch = 2048 * 4;
+    int dst_pitch = bw * 4;
+
+    for (int y = by; y < by + bh; y++) {
+        memcpy(dst + (y - by) * dst_pitch,
+               src + y * src_pitch + bx * 4,
+               (size_t) dst_pitch);
+    }
+
+    /* Use the per-frame resources for VGA blit. */
+    uint32_t   frame_index = gpu_st->frame_index;
+    vc_frame_t *f = &gpu_st->frame[frame_index];
+
+    /* Wait for this frame's fence if needed. */
+    if (f->submitted) {
+        vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(ctx->device, 1, &f->fence);
+        f->submitted = 0;
+    }
+
+    VkCommandBuffer cmd_buf = disp->vga_cmd_buf;
+    vkResetCommandBuffer(cmd_buf, 0);
+
+    VkCommandBufferBeginInfo begin_ci;
+    memset(&begin_ci, 0, sizeof(begin_ci));
+    begin_ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_ci.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd_buf, &begin_ci);
+
+    /* Barrier: VGA image UNDEFINED -> TRANSFER_DST. */
+    VkImageMemoryBarrier barrier;
+    memset(&barrier, 0, sizeof(barrier));
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask       = 0;
+    barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image               = disp->vga_image;
+    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount     = 1;
+    barrier.subresourceRange.layerCount     = 1;
+
+    vkCmdPipelineBarrier(cmd_buf,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, NULL, 0, NULL, 1, &barrier);
+
+    /* Copy staging buffer -> VGA image at (0,0).
+       The staging buffer contains the blit region packed tightly. */
+    VkBufferImageCopy copy_region;
+    memset(&copy_region, 0, sizeof(copy_region));
+    copy_region.bufferOffset                    = 0;
+    copy_region.bufferRowLength                 = (uint32_t) bw;
+    copy_region.bufferImageHeight               = (uint32_t) bh;
+    copy_region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.imageSubresource.layerCount     = 1;
+    copy_region.imageOffset.x                   = 0;
+    copy_region.imageOffset.y                   = 0;
+    copy_region.imageExtent.width               = (uint32_t) bw;
+    copy_region.imageExtent.height              = (uint32_t) bh;
+    copy_region.imageExtent.depth               = 1;
+
+    vkCmdCopyBufferToImage(cmd_buf, disp->vga_staging_buf, disp->vga_image,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            1, &copy_region);
+
+    /* Barrier: VGA image TRANSFER_DST -> SHADER_READ_ONLY. */
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    vkCmdPipelineBarrier(cmd_buf,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, NULL, 0, NULL, 1, &barrier);
+
+    /* Acquire swapchain image. */
+    uint32_t image_idx;
+    VkResult acq = vkAcquireNextImageKHR(
+        ctx->device, disp->swapchain, UINT64_MAX,
+        disp->image_available_sem[frame_index],
+        VK_NULL_HANDLE, &image_idx);
+
+    if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
+        vkEndCommandBuffer(cmd_buf);
+        vc_display_recreate_swapchain(ctx, gpu_st);
+        return 0;
+    }
+    if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
+        vkEndCommandBuffer(cmd_buf);
+        VC_LOG("VideoCommon: VGA blit vkAcquireNextImageKHR failed (%d)\n", acq);
+        return -1;
+    }
+
+    /* Begin post-process render pass (same pipeline, VGA descriptor set). */
+    VkClearValue clear_value;
+    memset(&clear_value, 0, sizeof(clear_value));
+
+    VkRenderPassBeginInfo rp_begin;
+    memset(&rp_begin, 0, sizeof(rp_begin));
+    rp_begin.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin.renderPass        = disp->pp_render_pass;
+    rp_begin.framebuffer       = disp->pp_framebuffers[image_idx];
+    rp_begin.renderArea.extent = disp->extent;
+    rp_begin.clearValueCount   = 1;
+    rp_begin.pClearValues      = &clear_value;
+
+    vkCmdBeginRenderPass(cmd_buf, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+    /* Viewport + scissor. */
+    VkViewport viewport;
+    memset(&viewport, 0, sizeof(viewport));
+    viewport.width    = (float) disp->extent.width;
+    viewport.height   = (float) disp->extent.height;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(cmd_buf, 0, 1, &viewport);
+
+    VkRect2D scissor;
+    memset(&scissor, 0, sizeof(scissor));
+    scissor.extent = disp->extent;
+    vkCmdSetScissor(cmd_buf, 0, 1, &scissor);
+
+    /* Bind pipeline and VGA descriptor set. */
+    vkCmdBindPipeline(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      disp->pp_pipeline);
+    vkCmdBindDescriptorSets(cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            disp->pp_pipeline_layout, 0, 1,
+                            &disp->vga_desc_set, 0, NULL);
+
+    /* Draw fullscreen triangle. */
+    vkCmdDraw(cmd_buf, 3, 1, 0, 0);
+
+    /* End render pass. */
+    vkCmdEndRenderPass(cmd_buf);
+
+    /* End command buffer. */
+    vkEndCommandBuffer(cmd_buf);
+
+    /* Submit with semaphore sync. */
+    VkPipelineStageFlags wait_stage =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSubmitInfo submit;
+    memset(&submit, 0, sizeof(submit));
+    submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.waitSemaphoreCount   = 1;
+    submit.pWaitSemaphores      = &disp->image_available_sem[frame_index];
+    submit.pWaitDstStageMask    = &wait_stage;
+    submit.commandBufferCount   = 1;
+    submit.pCommandBuffers      = &cmd_buf;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores    = &disp->render_finished_sem[frame_index];
+
+    VkResult sub_result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
+    if (sub_result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA blit vkQueueSubmit failed (%d)\n", sub_result);
+        return -1;
+    }
+    f->submitted = 1;
+
+    /* Present. */
+    VkPresentInfoKHR present;
+    memset(&present, 0, sizeof(present));
+    present.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores    = &disp->render_finished_sem[frame_index];
+    present.swapchainCount     = 1;
+    present.pSwapchains        = &disp->swapchain;
+    present.pImageIndices      = &image_idx;
+
+    VkResult pres = vkQueuePresentKHR(ctx->queue, &present);
+    if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
+        vc_display_recreate_swapchain(ctx, gpu_st);
+    } else if (pres != VK_SUCCESS) {
+        VC_LOG("VideoCommon: VGA blit vkQueuePresentKHR failed (%d)\n", pres);
+    }
+
+    /* Advance frame index. */
+    gpu_st->frame_index = (gpu_st->frame_index + 1) % VC_NUM_FRAMES;
+
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Public API -- called from GUI thread                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -1107,4 +1648,57 @@ vc_display_wait_teardown(vc_ctx_t *ctx)
         sched_yield();
 #endif
     }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  VGA passthrough blit -- public opaque API (called from Qt VCRenderer)      */
+/* -------------------------------------------------------------------------- */
+
+void
+vc_display_set_vga_bufs(void *ctx_ptr, void *buf0, void *buf1)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    if (!ctx)
+        return;
+
+    vc_gpu_state_t *gpu_st = (vc_gpu_state_t *) ctx->render_data;
+    if (!gpu_st)
+        return;
+
+    atomic_store_explicit(&gpu_st->disp.vga_buf_ptrs[0],
+                          (uintptr_t) buf0, memory_order_release);
+    atomic_store_explicit(&gpu_st->disp.vga_buf_ptrs[1],
+                          (uintptr_t) buf1, memory_order_release);
+}
+
+void
+vc_display_notify_vga_frame(void *ctx_ptr, int buf_idx,
+                             int x, int y, int w, int h)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    if (!ctx)
+        return;
+
+    vc_gpu_state_t *gpu_st = (vc_gpu_state_t *) ctx->render_data;
+    if (!gpu_st)
+        return;
+
+    /* Store the blit rect (relaxed is fine -- vga_frame_ready has release). */
+    atomic_store_explicit(&gpu_st->disp.vga_buf_idx, buf_idx,
+                          memory_order_relaxed);
+    atomic_store_explicit(&gpu_st->disp.vga_blit_x, x,
+                          memory_order_relaxed);
+    atomic_store_explicit(&gpu_st->disp.vga_blit_y, y,
+                          memory_order_relaxed);
+    atomic_store_explicit(&gpu_st->disp.vga_blit_w, w,
+                          memory_order_relaxed);
+    atomic_store_explicit(&gpu_st->disp.vga_blit_h, h,
+                          memory_order_relaxed);
+
+    /* Signal that a frame is ready (release to publish the rect). */
+    atomic_store_explicit(&gpu_st->disp.vga_frame_ready, 1,
+                          memory_order_release);
+
+    /* Wake the GPU thread in case it is sleeping on the ring semaphore. */
+    vc_ring_wake(&ctx->ring);
 }

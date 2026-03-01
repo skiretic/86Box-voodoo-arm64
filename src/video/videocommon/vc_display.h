@@ -74,6 +74,35 @@ typedef struct vc_display_t {
     /* Pointer to voodoo_t::vc_display_active for the GPU thread to set.
        NULL until vc_display_init is called. */
     int *display_active_ptr;
+
+    /* --- VGA passthrough blit state --- */
+
+    /* Atomic communication (Qt main thread -> GPU thread). */
+    _Atomic(int)      vga_frame_ready;   /* 1 = new VGA frame data available */
+    _Atomic(int)      vga_buf_idx;       /* which image buffer to read from */
+    _Atomic(int)      vga_blit_x;
+    _Atomic(int)      vga_blit_y;
+    _Atomic(int)      vga_blit_w;
+    _Atomic(int)      vga_blit_h;
+
+    /* Pointer to the image buffer data (set once during init, stable).
+       Two pointers for double-buffered image data (same as SoftwareRenderer).
+       These point to the raw pixel data (BGRA8, 2048*2048*4 bytes each). */
+    _Atomic(uintptr_t) vga_buf_ptrs[2];
+
+    /* GPU-thread-only VGA resources. */
+    VkImage         vga_image;
+    VkImageView     vga_image_view;
+    void           *vga_image_alloc;   /* VmaAllocation */
+    VkBuffer        vga_staging_buf;
+    void           *vga_staging_alloc; /* VmaAllocation */
+    void           *vga_staging_mapped;
+    VkDescriptorSet vga_desc_set;
+    uint32_t        vga_tex_width;
+    uint32_t        vga_tex_height;
+    int             vga_resources_created;
+    VkCommandPool   vga_cmd_pool;
+    VkCommandBuffer vga_cmd_buf;
 } vc_display_t;
 
 /* -------------------------------------------------------------------------- */
@@ -123,6 +152,18 @@ int vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
 /* Update descriptor sets to point to the current offscreen FB.
    Called after offscreen framebuffer (re)creation. */
 void vc_display_update_descriptors(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* VGA passthrough blit: check for pending VGA frame and present it.
+   Called from the GPU thread main loop when no 3D render pass is active.
+   Returns 0 on success, -1 on error/no-op. */
+int vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* Create VGA blit Vulkan resources (VkImage, staging buffer, descriptor set).
+   Called from the GPU thread after the display is created. */
+int vc_display_create_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* Destroy VGA blit Vulkan resources. */
+void vc_display_destroy_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
 
 /* -------------------------------------------------------------------------- */
 /*  macOS surface helper (vc_macos_surface.m)                                  */

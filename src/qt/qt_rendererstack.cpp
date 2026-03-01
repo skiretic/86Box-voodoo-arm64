@@ -392,12 +392,19 @@ RendererStack::createRenderer(Renderer renderer)
     /* When VideoCommon is active (vc_display_get_ctx() returns non-NULL),
        use VCRenderer instead of the normal renderer.  VCRenderer creates
        a VkSurfaceKHR and hands it to the GPU thread for swapchain
-       creation and presentation -- no blit path needed. */
+       creation and presentation.  It also handles VGA passthrough blit
+       by receiving the blitToRenderer signal and notifying the GPU thread
+       to upload and present the pixel data via Vulkan. */
     if (vc_display_get_ctx() != nullptr) {
         auto vcr       = new VCRenderer(this);
         rendererWindow = vcr;
+
+        /* Connect blit signal for VGA passthrough. */
+        connect(this, &RendererStack::blitToRenderer, vcr,
+                &VCRenderer::onBlit, Qt::QueuedConnection);
+
         connect(vcr, &VCRenderer::initialized, [=]() {
-            imagebufs        = {};
+            imagebufs        = rendererWindow->getBuffers();
             switchInProgress = false;
             emit rendererChanged();
         });
