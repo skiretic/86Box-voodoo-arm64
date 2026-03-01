@@ -6,16 +6,16 @@
 
 ---
 
-## Current Status: Phase 1 -- IN PROGRESS (93%)
+## Current Status: Phase 1 -- COMPLETE
 
-Phase 1 infrastructure nearly complete. Vulkan init, GPU thread, SPSC ring, CMake integration, and Voodoo wiring all done and building clean. Remaining: runtime validation with VC_VALIDATE=1.
+All Phase 1 tasks done. Vulkan 1.2 init, GPU thread lifecycle, SPSC ring buffer, CMake integration, and Voodoo wiring all verified on macOS ARM64 (Apple M1 Pro, MoltenVK 1.2.323).
 
 ---
 
 ## Phase Progress
 
 ```
-Phase 1: Infrastructure     [XXXXXXXXX.] 93%  IN PROGRESS
+Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
 Phase 2: Basic Rendering     [..........] 0%   BLOCKED (Phase 1)
 Phase 3: Display             [..........] 0%   BLOCKED (Phase 2)
 Phase 4: Textures            [..........] 0%   BLOCKED (Phase 3)
@@ -47,7 +47,7 @@ Overall                      [X.........] 12%
 | 1.12 | Build clean on macOS ARM64 | X | vc-lead |
 | 1.13 | GPU thread starts + enters idle loop | X | vc-lead |
 | 1.14 | VC_CMD_SHUTDOWN round-trip works | X | vc-plumbing |
-| 1.15 | No Vulkan validation errors | - | vc-debug |
+| 1.15 | No Vulkan validation errors | X | manual |
 
 Legend: `-` not started, `~` in progress, `X` done, `!` blocked
 

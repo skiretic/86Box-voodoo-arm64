@@ -33,6 +33,15 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
   - `vc_ring_free_space()` with proper acquire/release memory ordering
   - Platform yield (`sched_yield` on POSIX, `SwitchToThread` on Windows)
 
+### Validated (manual)
+- Runtime validation on macOS ARM64 (Apple M1 Pro, MoltenVK 1.2.323):
+  - volk loads MoltenVK successfully
+  - VkInstance + VkDevice created with Vulkan 1.2
+  - All optional capabilities detected: eds=1 eds2=1 eds3=1 push_desc=1 dual_src=1
+  - GPU thread starts, enters idle loop, receives VC_CMD_SHUTDOWN, exits cleanly
+  - No Vulkan validation errors, no crashes
+  - SW fallback works when Vulkan unavailable (tested with missing ICD)
+
 ---
 
 ## Planning Phase (2026-03-01)
