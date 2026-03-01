@@ -22,6 +22,9 @@
 #include "qt_openglrenderer.hpp"
 #include "qt_softwarerenderer.hpp"
 #include "qt_vulkanwindowrenderer.hpp"
+#ifdef USE_VIDEOCOMMON
+#    include "qt_vcrenderer.hpp"
+#endif
 
 #include "qt_mainwindow.hpp"
 #include "qt_util.hpp"
@@ -78,6 +81,9 @@ extern "C" {
 #include <86box/plat.h>
 #include <86box/video.h>
 #include <86box/mouse.h>
+#ifdef USE_VIDEOCOMMON
+#include <86box/videocommon.h>
+#endif
 }
 
 struct mouseinputdata {
@@ -381,6 +387,44 @@ void
 RendererStack::createRenderer(Renderer renderer)
 {
     rendererTakesScreenshots = false;
+
+#ifdef USE_VIDEOCOMMON
+    /* When VideoCommon is active (vc_display_get_ctx() returns non-NULL),
+       use VCRenderer instead of the normal renderer.  VCRenderer creates
+       a VkSurfaceKHR and hands it to the GPU thread for swapchain
+       creation and presentation -- no blit path needed. */
+    if (vc_display_get_ctx() != nullptr) {
+        auto vcr       = new VCRenderer(this);
+        rendererWindow = vcr;
+        connect(vcr, &VCRenderer::initialized, [=]() {
+            imagebufs        = {};
+            switchInProgress = false;
+            emit rendererChanged();
+        });
+        connect(vcr, &VCRenderer::errorInitializing, [=]() {
+            /* VCRenderer could not create surface -- fall back to SW. */
+            imagebufs = {};
+            QTimer::singleShot(0, this, [this]() { switchRenderer(Renderer::Software); });
+        });
+        current.reset(vcr);
+
+        /* Common widget setup (same as bottom of createRenderer). */
+        current->setFocusPolicy(Qt::NoFocus);
+        current->setFocusProxy(this);
+        current->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        current->setAttribute(Qt::WA_AlwaysStackOnTop);
+        current->setStyleSheet("background-color: black");
+        this->setStyleSheet("background-color: black");
+        boxLayout->addWidget(current.get());
+        rendererWindow->r_monitor_index = m_monitor_index;
+        currentBuf = 0;
+
+        /* Initialize surface after widget is fully set up. */
+        vcr->initialize();
+        return;
+    }
+#endif /* USE_VIDEOCOMMON */
+
     switch (renderer) {
         default:
         case Renderer::Software:
