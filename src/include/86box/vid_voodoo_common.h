@@ -763,6 +763,7 @@ typedef struct voodoo_t {
     /* VideoCommon GPU-accelerated renderer (Vulkan). */
     void      *vc_ctx;           /* vc_ctx_t* -- opaque to avoid Vulkan header deps. */
     int        use_gpu_renderer; /* 1 = VK path, 0 = SW fallback. */
+    int        vc_display_active; /* 1 = VK display pipeline connected, gates triangle diversion + scanout skip. */
     thread_t  *vc_init_thread;   /* Background thread for deferred Vulkan init. */
 
     uint32_t launch_pending;

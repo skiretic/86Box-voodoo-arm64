@@ -47,11 +47,60 @@ void vc_stop_gpu_thread(vc_ctx_t *ctx);
 void vc_voodoo_init(void *voodoo);
 void vc_voodoo_close(void *voodoo);
 
+/* -------------------------------------------------------------------------- */
+/*  Display integration -- opaque API for Qt VCRenderer                        */
+/*                                                                             */
+/*  These functions use void* / uintptr_t to avoid exposing Vulkan types       */
+/*  in this public header.  The actual Vulkan-typed functions are in           */
+/*  vc_display.h (internal).                                                   */
+/* -------------------------------------------------------------------------- */
+
+#include <stdint.h>
+
+/* Get the active vc_ctx_t pointer (NULL if not initialised).
+   Safe to call from any thread; returns a snapshot. */
+void *vc_display_get_ctx(void);
+
+/* Get the VkInstance handle (as uintptr_t).  Returns 0 if not initialised. */
+uintptr_t vc_display_get_instance(void);
+
+/* Set a VkSurfaceKHR for the GPU thread.  `ctx` is vc_ctx_t*.
+   `surface` is VkSurfaceKHR cast to uintptr_t.  Called from GUI thread. */
+void vc_display_set_surface_handle(void *ctx, uintptr_t surface);
+
+/* Signal the GPU thread to recreate swapchain.  Called from GUI thread.
+   `ctx` is vc_ctx_t*. */
+void vc_display_signal_resize_handle(void *ctx, uint32_t width, uint32_t height);
+
+/* Request teardown of swapchain resources.  Called from GUI thread. */
+void vc_display_request_teardown_handle(void *ctx);
+
+/* Wait for GPU thread to complete teardown.  Blocks. */
+void vc_display_wait_teardown_handle(void *ctx);
+
+/* Create a VkSurfaceKHR from a native window handle.
+   `ctx` is vc_ctx_t*.  `native_handle` is the platform window handle
+   (HWND on Windows, NSView* on macOS, xcb_window_t on Linux).
+   Returns VkSurfaceKHR as uintptr_t, or 0 on failure. */
+uintptr_t vc_create_surface(void *ctx, uintptr_t native_handle);
+
+/* Destroy a VkSurfaceKHR previously created by vc_create_surface().
+   `surface` is VkSurfaceKHR as uintptr_t. */
+void vc_destroy_surface(void *ctx, uintptr_t surface);
+
 #else /* !USE_VIDEOCOMMON */
 
 /* No-op stubs when VideoCommon is not compiled in. */
 static inline void vc_voodoo_init(void *voodoo)  { (void) voodoo; }
 static inline void vc_voodoo_close(void *voodoo) { (void) voodoo; }
+static inline void *vc_display_get_ctx(void) { return (void *) 0; }
+static inline uintptr_t vc_display_get_instance(void) { return 0; }
+static inline void vc_display_set_surface_handle(void *c, uintptr_t s) { (void) c; (void) s; }
+static inline void vc_display_signal_resize_handle(void *c, uint32_t w, uint32_t h) { (void) c; (void) w; (void) h; }
+static inline void vc_display_request_teardown_handle(void *c) { (void) c; }
+static inline void vc_display_wait_teardown_handle(void *c) { (void) c; }
+static inline uintptr_t vc_create_surface(void *c, uintptr_t h) { (void) c; (void) h; return 0; }
+static inline void vc_destroy_surface(void *c, uintptr_t s) { (void) c; (void) s; }
 
 #endif /* USE_VIDEOCOMMON */
 

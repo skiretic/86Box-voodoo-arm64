@@ -148,6 +148,9 @@ target_link_libraries(86Box
 
 if(VIDEOCOMMON)
     target_link_libraries(86Box videocommon)
+    if(APPLE)
+        target_link_libraries(86Box "-framework QuartzCore" "-framework Metal" "-framework IOSurface")
+    endif()
 endif()
 
 if(HAIKU)

@@ -45,6 +45,7 @@
 #include "vc_thread.h"
 #include "vc_render_pass.h"
 #include "vc_batch.h"
+#include "vc_display.h"
 #include "vc_gpu_state.h"
 
 /* -------------------------------------------------------------------------- */
@@ -565,10 +566,46 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         vkCmdDraw(f->cmd_buf, gpu_st->batch.triangle_count * 3, 1, 0, 0);
     }
 
-    vc_gpu_end_frame(ctx, gpu_st);
+    /* End offscreen render pass. */
+    vkCmdEndRenderPass(f->cmd_buf);
+    gpu_st->render_pass_active = 0;
 
-    /* Swap front/back framebuffers. */
+    /* If swapchain is available, do post-process blit + present. */
+    if (gpu_st->disp.swapchain != VK_NULL_HANDLE) {
+        int present_result = vc_display_present(ctx, gpu_st, f->cmd_buf,
+                                                 gpu_st->frame_index);
+        if (present_result == 1) {
+            /* Swapchain needs recreation. */
+            vc_display_recreate_swapchain(ctx, gpu_st);
+        }
+
+        if (present_result == 0 || present_result == 1) {
+            /* Submit was handled by vc_display_present (success or recreation).
+               Skip the standalone submit below. */
+            goto advance;
+        }
+    }
+
+    /* No swapchain (or failed present): submit without present. */
+    vkEndCommandBuffer(f->cmd_buf);
+
+    VkSubmitInfo submit;
+    memset(&submit, 0, sizeof(submit));
+    submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers    = &f->cmd_buf;
+
+    VkResult result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: vkQueueSubmit failed (%d)\n", result);
+    }
+    f->submitted = 1;
+
+advance:
+    /* Swap front/back offscreen framebuffers. */
     vc_render_pass_swap(gpu_st);
+    gpu_st->frame_index = (gpu_st->frame_index + 1) % VC_NUM_FRAMES;
+    vc_batch_reset(ctx, gpu_st);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -587,6 +624,10 @@ vc_gpu_thread_init(vc_ctx_t *ctx)
 
     gpu_st->fb_width  = 640;
     gpu_st->fb_height = 480;
+
+    /* Display state (surface/swapchain/post-process -- populated later
+       when VCRenderer provides a VkSurfaceKHR). */
+    vc_display_state_init(&gpu_st->disp);
 
     /* Frame resources. */
     if (vc_frame_resources_create(ctx, gpu_st) != 0)
@@ -650,6 +691,7 @@ vc_gpu_thread_cleanup(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     vkDeviceWaitIdle(ctx->device);
 
+    vc_display_destroy(ctx, gpu_st);
     vc_pipeline_destroy(ctx, &gpu_st->pipe);
     vc_shaders_destroy(ctx, &gpu_st->shaders);
     vc_batch_destroy(ctx, gpu_st);
@@ -678,6 +720,10 @@ vc_gpu_thread_func(void *param)
     atomic_store_explicit(&ctx->running, 1, memory_order_release);
 
     while (atomic_load_explicit(&ctx->running, memory_order_acquire)) {
+        /* Check for display surface changes (new surface, resize, teardown). */
+        if (gpu_st)
+            vc_display_tick(ctx, gpu_st);
+
         uint32_t rp = atomic_load_explicit(&ring->read_pos, memory_order_acquire);
         uint32_t wp = atomic_load_explicit(&ring->write_pos, memory_order_acquire);
 

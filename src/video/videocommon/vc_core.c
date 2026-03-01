@@ -29,6 +29,11 @@
 
 #include "vc_core.h"
 #include "vc_thread.h"
+#include "vc_display.h"
+
+/* Global pointer to the active vc_ctx_t, set during voodoo init.
+   Used by the Qt VCRenderer to find the context for display integration. */
+static _Atomic(vc_ctx_t *) vc_global_ctx = NULL;
 
 /* C-callable VMA wrappers (implemented in vc_vma_impl.cpp). */
 extern void *vc_vma_create(VkInstance instance, VkPhysicalDevice phys_dev,
@@ -529,6 +534,16 @@ vc_destroy(vc_ctx_t *ctx)
 /*  Voodoo integration hooks                                                   */
 /* -------------------------------------------------------------------------- */
 
+/* Platform yield for spin-wait in init thread. */
+#if defined(_WIN32)
+#    define WIN32_LEAN_AND_MEAN
+#    include <windows.h>
+#else
+#    include <sched.h>
+#endif
+
+#include "vc_gpu_state.h"
+
 /* Include vid_voodoo_common.h for voodoo_t access in the integration hooks.
    This requires the same header chain as vid_voodoo.c. */
 #include <86box/device.h>
@@ -564,6 +579,26 @@ vc_voodoo_init_thread(void *voodoo_ptr)
     }
 
     voodoo->vc_ctx = ctx;
+    atomic_store_explicit(&vc_global_ctx, ctx, memory_order_release);
+
+    /* Wait for the GPU thread to finish init and publish render_data.
+       The GPU thread sets ctx->running = 1 after vc_gpu_thread_init(). */
+    while (!atomic_load_explicit(&ctx->running, memory_order_acquire)) {
+        /* Yield to avoid spinning hard. */
+#if defined(_WIN32)
+        SwitchToThread();
+#else
+        sched_yield();
+#endif
+    }
+
+    /* Wire up the display_active_ptr so the GPU thread can signal
+       voodoo_t when the VK display pipeline is connected. */
+    if (ctx->render_data) {
+        vc_gpu_state_t *gpu_st = (vc_gpu_state_t *) ctx->render_data;
+        gpu_st->disp.display_active_ptr = &voodoo->vc_display_active;
+    }
+
     VC_LOG("VideoCommon: vc_voodoo_init complete -- GPU renderer active\n");
 }
 
@@ -599,8 +634,138 @@ vc_voodoo_close(void *voodoo_ptr)
 
     VC_LOG("VideoCommon: vc_voodoo_close\n");
 
+    atomic_store_explicit(&vc_global_ctx, NULL, memory_order_release);
+
     vc_ctx_t *ctx = (vc_ctx_t *) voodoo->vc_ctx;
     vc_stop_gpu_thread(ctx);
     vc_destroy(ctx);
     voodoo->vc_ctx = NULL;
+    voodoo->vc_display_active = 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Platform surface creation -- called from Qt GUI thread                     */
+/* -------------------------------------------------------------------------- */
+
+#ifdef __APPLE__
+extern void *vc_get_metal_layer(void *ns_view_ptr);
+#endif
+
+uintptr_t
+vc_create_surface(void *ctx_ptr, uintptr_t native_handle)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    if (!ctx || ctx->instance == VK_NULL_HANDLE)
+        return 0;
+
+#if defined(__APPLE__)
+    /* macOS: native_handle is an NSView*. */
+    void *ns_view = (void *) native_handle;
+    void *metal_layer = vc_get_metal_layer(ns_view);
+    if (!metal_layer) {
+        VC_LOG("VideoCommon: vc_get_metal_layer returned NULL\n");
+        return 0;
+    }
+
+    VkMetalSurfaceCreateInfoEXT metal_ci;
+    memset(&metal_ci, 0, sizeof(metal_ci));
+    metal_ci.sType  = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT;
+    metal_ci.pLayer = metal_layer;
+
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    VkResult result = vkCreateMetalSurfaceEXT(ctx->instance, &metal_ci,
+                                               NULL, &surface);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: vkCreateMetalSurfaceEXT failed (%d)\n", result);
+        return 0;
+    }
+    return (uintptr_t) surface;
+
+#elif defined(_WIN32)
+    /* Windows: native_handle is an HWND. */
+    VkWin32SurfaceCreateInfoKHR win32_ci;
+    memset(&win32_ci, 0, sizeof(win32_ci));
+    win32_ci.sType     = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+    win32_ci.hwnd      = (HWND) native_handle;
+    win32_ci.hinstance = GetModuleHandle(NULL);
+
+    VkSurfaceKHR surface = VK_NULL_HANDLE;
+    VkResult result = vkCreateWin32SurfaceKHR(ctx->instance, &win32_ci,
+                                               NULL, &surface);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: vkCreateWin32SurfaceKHR failed (%d)\n", result);
+        return 0;
+    }
+    return (uintptr_t) surface;
+
+#elif defined(__linux__) && !defined(__ANDROID__)
+    /* Linux: native_handle packs xcb_window_t.
+       For XCB, we also need the xcb_connection_t which must be passed
+       separately.  For now, return 0 -- Linux surface creation requires
+       the connection handle which will be set up in a later phase. */
+    (void) native_handle;
+    VC_LOG("VideoCommon: Linux surface creation not yet implemented\n");
+    return 0;
+
+#else
+    (void) native_handle;
+    return 0;
+#endif
+}
+
+void
+vc_destroy_surface(void *ctx_ptr, uintptr_t surface)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    if (!ctx || ctx->instance == VK_NULL_HANDLE || surface == 0)
+        return;
+
+    vkDestroySurfaceKHR(ctx->instance, (VkSurfaceKHR) surface, NULL);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Display integration -- opaque wrappers for Qt VCRenderer                   */
+/* -------------------------------------------------------------------------- */
+
+void *
+vc_display_get_ctx(void)
+{
+    return (void *) atomic_load_explicit(&vc_global_ctx, memory_order_acquire);
+}
+
+uintptr_t
+vc_display_get_instance(void)
+{
+    vc_ctx_t *ctx = atomic_load_explicit(&vc_global_ctx, memory_order_acquire);
+    if (!ctx)
+        return 0;
+    return (uintptr_t) ctx->instance;
+}
+
+void
+vc_display_set_surface_handle(void *ctx_ptr, uintptr_t surface)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    vc_display_set_surface(ctx, (VkSurfaceKHR) surface);
+}
+
+void
+vc_display_signal_resize_handle(void *ctx_ptr, uint32_t width, uint32_t height)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    vc_display_signal_resize(ctx, width, height);
+}
+
+void
+vc_display_request_teardown_handle(void *ctx_ptr)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    vc_display_request_teardown(ctx);
+}
+
+void
+vc_display_wait_teardown_handle(void *ctx_ptr)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
+    vc_display_wait_teardown(ctx);
 }

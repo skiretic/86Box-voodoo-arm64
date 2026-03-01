@@ -512,7 +512,11 @@ voodoo_callback(void *priv)
     int              v_y_add = (monitor->mon_overscan_y >> 1);
     int              v_x_add = (monitor->mon_overscan_x >> 1);
 
-    if (voodoo->fbiInit0 & FBIINIT0_VGA_PASS) {
+    if ((voodoo->fbiInit0 & FBIINIT0_VGA_PASS)
+#ifdef USE_VIDEOCOMMON
+        && !voodoo->vc_display_active
+#endif
+    ) {
         if (voodoo->line < voodoo->v_disp) {
             voodoo_t *draw_voodoo;
             int       draw_line;
@@ -632,7 +636,11 @@ skip_draw:
     }
     voodoo->line++;
 
-    if (voodoo->fbiInit0 & FBIINIT0_VGA_PASS) {
+    if ((voodoo->fbiInit0 & FBIINIT0_VGA_PASS)
+#ifdef USE_VIDEOCOMMON
+        && !voodoo->vc_display_active
+#endif
+    ) {
         if (voodoo->line == voodoo->v_disp) {
             int force_blit = 0;
             thread_wait_mutex(voodoo->force_blit_mutex);

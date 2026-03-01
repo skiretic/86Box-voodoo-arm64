@@ -81,22 +81,46 @@ compile_shader(
     "voodoo_uber_frag_spv"
 )
 
+compile_shader(
+    "${SHADER_DIR}/postprocess.vert"
+    "${VC_GENERATED_DIR}/postprocess_vert.h"
+    "postprocess_vert_spv"
+)
+
+compile_shader(
+    "${SHADER_DIR}/postprocess.frag"
+    "${VC_GENERATED_DIR}/postprocess_frag.h"
+    "postprocess_frag_spv"
+)
+
 # -------------------------------------------------------------------------- #
 #  OBJECT library                                                              #
 # -------------------------------------------------------------------------- #
 
-add_library(videocommon OBJECT
+set(VIDEOCOMMON_SOURCES
     vc_core.c
     vc_thread.c
     vc_render_pass.c
     vc_batch.c
     vc_shader.c
     vc_pipeline.c
+    vc_display.c
     vc_vma_impl.cpp
+)
+
+# macOS: Objective-C surface helper for CAMetalLayer extraction.
+if(APPLE)
+    list(APPEND VIDEOCOMMON_SOURCES vc_macos_surface.m)
+endif()
+
+add_library(videocommon OBJECT
+    ${VIDEOCOMMON_SOURCES}
 
     # Generated SPIR-V headers (ensures they are built before compilation).
     "${VC_GENERATED_DIR}/voodoo_uber_vert.h"
     "${VC_GENERATED_DIR}/voodoo_uber_frag.h"
+    "${VC_GENERATED_DIR}/postprocess_vert.h"
+    "${VC_GENERATED_DIR}/postprocess_frag.h"
 )
 
 # VK_NO_PROTOTYPES: volk loads all Vulkan functions dynamically.

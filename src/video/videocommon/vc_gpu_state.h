@@ -20,6 +20,7 @@
 #include "vc_internal.h"
 #include "vc_pipeline.h" /* vc_pipeline_t, vc_vertex_t, vc_push_constants_t */
 #include "vc_shader.h"   /* vc_shaders_t */
+#include "vc_display.h"  /* vc_display_t */
 
 /* All GPU-thread-local rendering state.  Allocated at thread init,
    freed at thread cleanup.  Accessed ONLY by the GPU thread. */
@@ -28,6 +29,10 @@ typedef struct vc_gpu_state_t {
     vc_batch_state_t       batch;
     vc_shaders_t           shaders;
     vc_pipeline_t          pipe;
+
+    /* Display: swapchain, post-process pipeline, present.
+       Populated when VCRenderer provides a VkSurfaceKHR. */
+    vc_display_t           disp;
 
     /* Per-frame resources (triple-buffered). */
     vc_frame_t frame[VC_NUM_FRAMES];

@@ -9,7 +9,7 @@ with the SW fallback still working.
 
 ---
 
-## Phase 1: Infrastructure
+## Phase 1: Infrastructure ✅ COMPLETE
 
 **Goal**: Vulkan instance/device creation, GPU thread, SPSC ring, CMake integration.
 No rendering -- just proof that the GPU thread starts, communicates, and shuts down.
@@ -79,7 +79,7 @@ No rendering -- just proof that the GPU thread starts, communicates, and shuts d
 
 ---
 
-## Phase 2: Basic Rendering
+## Phase 2: Basic Rendering ✅ COMPLETE
 
 **Goal**: Flat-shaded triangles rendered on the GPU. No textures, no blending,
 no depth test. Just colored triangles on a black background.

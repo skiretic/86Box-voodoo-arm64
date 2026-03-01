@@ -1,0 +1,137 @@
+/*
+ * 86Box    A hypervisor and IBM PC system emulator that specializes in
+ *          running old operating systems and software designed for IBM
+ *          PC systems and compatibles from 1981 through fairly recent
+ *          system designs based on the PCI bus.
+ *
+ *          This file is part of the 86Box distribution.
+ *
+ *          VideoCommon display subsystem -- swapchain management,
+ *          post-process blit pipeline, present.
+ *
+ *          The GPU thread is the sole owner of all display Vulkan
+ *          objects.  The Qt GUI thread creates a VkSurfaceKHR and
+ *          passes it atomically; the GPU thread creates and manages
+ *          the swapchain from that surface.
+ *
+ * Authors: skiretic
+ *
+ *          Copyright 2026 skiretic.
+ */
+#ifndef VIDEOCOMMON_DISPLAY_H
+#define VIDEOCOMMON_DISPLAY_H
+
+#include "vc_internal.h"
+
+/* Forward declarations. */
+typedef struct vc_gpu_state_t vc_gpu_state_t;
+
+/* Maximum number of swapchain images we handle. */
+#define VC_MAX_SWAPCHAIN_IMAGES 8
+
+/* -------------------------------------------------------------------------- */
+/*  Display state                                                              */
+/* -------------------------------------------------------------------------- */
+
+typedef struct vc_display_t {
+    /* --- Atomic communication (GUI thread <-> GPU thread) --- */
+    _Atomic(uintptr_t) surface_pending;   /* GUI -> GPU: new VkSurfaceKHR */
+    _Atomic(uint32_t)  resize_width;      /* GUI -> GPU: new width */
+    _Atomic(uint32_t)  resize_height;     /* GUI -> GPU: new height */
+    _Atomic(int)       resize_requested;  /* GUI -> GPU: flag */
+    _Atomic(int)       teardown_requested; /* GUI -> GPU: flag */
+    _Atomic(int)       teardown_complete;  /* GPU -> GUI: flag */
+
+    /* --- GPU-thread-only state (NOT atomic) --- */
+
+    /* Surface and swapchain. */
+    VkSurfaceKHR   surface;
+    VkSwapchainKHR swapchain;
+    VkImage        images[VC_MAX_SWAPCHAIN_IMAGES];
+    VkImageView    image_views[VC_MAX_SWAPCHAIN_IMAGES];
+    uint32_t       image_count;
+    VkFormat       format;
+    VkExtent2D     extent;
+
+    /* Post-process pipeline. */
+    VkRenderPass         pp_render_pass;
+    VkPipeline           pp_pipeline;
+    VkPipelineLayout     pp_pipeline_layout;
+    VkDescriptorSetLayout pp_desc_layout;
+    VkDescriptorPool     pp_desc_pool;
+    VkDescriptorSet      pp_desc_sets[2]; /* One per offscreen FB (front/back). */
+    VkSampler            pp_sampler;
+    VkFramebuffer        pp_framebuffers[VC_MAX_SWAPCHAIN_IMAGES];
+
+    /* Post-process shader modules. */
+    VkShaderModule       pp_vert_shader;
+    VkShaderModule       pp_frag_shader;
+
+    /* Per-frame sync primitives. */
+    VkSemaphore image_available_sem[VC_NUM_FRAMES];
+    VkSemaphore render_finished_sem[VC_NUM_FRAMES];
+
+    /* Pointer to voodoo_t::vc_display_active for the GPU thread to set.
+       NULL until vc_display_init is called. */
+    int *display_active_ptr;
+} vc_display_t;
+
+/* -------------------------------------------------------------------------- */
+/*  Public API -- called from Qt/GUI thread                                    */
+/* -------------------------------------------------------------------------- */
+
+/* Set a new VkSurfaceKHR for the GPU thread to pick up.
+   Called from the GUI thread after platform surface creation. */
+void vc_display_set_surface(vc_ctx_t *ctx, VkSurfaceKHR surface);
+
+/* Signal the GPU thread that the window has been resized.
+   width/height are in physical pixels (HiDPI-adjusted). */
+void vc_display_signal_resize(vc_ctx_t *ctx, uint32_t width, uint32_t height);
+
+/* Request teardown of swapchain resources.  Called from GUI thread. */
+void vc_display_request_teardown(vc_ctx_t *ctx);
+
+/* Wait for the GPU thread to complete teardown.  Blocks. */
+void vc_display_wait_teardown(vc_ctx_t *ctx);
+
+/* -------------------------------------------------------------------------- */
+/*  GPU-thread-only API                                                        */
+/* -------------------------------------------------------------------------- */
+
+/* Initialise the display state struct (zero everything). */
+void vc_display_state_init(vc_display_t *disp);
+
+/* Called each GPU thread iteration to check for surface/resize/teardown. */
+void vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* Create swapchain and all post-process resources.
+   Returns 0 on success, -1 on failure. */
+int vc_display_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* Destroy swapchain and all post-process resources. */
+void vc_display_destroy(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* Recreate swapchain (e.g., after resize or OUT_OF_DATE). */
+int vc_display_recreate_swapchain(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* Post-process blit and present.  Called from vc_gpu_handle_swap()
+   after the offscreen render pass has ended.
+   Returns 0 on success, 1 if swapchain needs recreation, -1 on error. */
+int vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
+                       VkCommandBuffer cmd_buf, uint32_t frame_index);
+
+/* Update descriptor sets to point to the current offscreen FB.
+   Called after offscreen framebuffer (re)creation. */
+void vc_display_update_descriptors(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
+
+/* -------------------------------------------------------------------------- */
+/*  macOS surface helper (vc_macos_surface.m)                                  */
+/* -------------------------------------------------------------------------- */
+
+#ifdef __APPLE__
+/* Returns a CAMetalLayer* (as void*) from an NSView*.
+   Creates the layer if one does not already exist. */
+void *vc_get_metal_layer(void *ns_view_ptr);
+#endif
+
+#endif /* VIDEOCOMMON_DISPLAY_H */
