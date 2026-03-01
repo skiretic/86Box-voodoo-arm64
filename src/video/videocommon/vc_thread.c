@@ -315,11 +315,11 @@ vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
     /* Check if we need a wraparound sentinel. */
     if (wp + total_size > VC_RING_SIZE) {
         /* Write a wraparound sentinel at the current position.
-           The sentinel's size covers the remainder of the buffer so the
-           consumer skips to position 0. */
+           The consumer sees VC_CMD_WRAPAROUND and jumps read_pos to 0
+           without reading the size field. */
         vc_ring_cmd_header_t *wrap = (vc_ring_cmd_header_t *) &ring->buffer[wp];
         wrap->type     = VC_CMD_WRAPAROUND;
-        wrap->size     = (uint16_t) (VC_RING_SIZE - wp);
+        wrap->size     = 0; /* Size unused for wraparound -- consumer jumps to 0 directly. */
         wrap->reserved = 0;
 
         /* Publish the sentinel, then wrap write_pos to 0. */

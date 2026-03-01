@@ -357,19 +357,109 @@ vc_init(void)
     if (ctx->caps.has_push_descriptor)
         dev_extensions[dev_ext_count++] = "VK_KHR_push_descriptor";
 
-    VkPhysicalDeviceFeatures enabled_features;
-    memset(&enabled_features, 0, sizeof(enabled_features));
+    /*
+     * Use VkPhysicalDeviceFeatures2 with a pNext chain to enable both
+     * core features and extension features (EDS 1/2/3).  When using the
+     * pNext path, pEnabledFeatures must be NULL on VkDeviceCreateInfo.
+     *
+     * Build the pNext chain from the tail up, so each struct's pNext
+     * points to the next struct in the chain.
+     */
+    void *features_pnext = NULL;
+
+    /* EDS 3 -- query and enable if extension is present. */
+    VkPhysicalDeviceExtendedDynamicState3FeaturesEXT eds3_features;
+    if (ctx->caps.has_extended_dynamic_state3) {
+        memset(&eds3_features, 0, sizeof(eds3_features));
+        eds3_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT;
+        eds3_features.pNext = features_pnext;
+
+        /* Query what the device actually supports for EDS3. */
+        VkPhysicalDeviceExtendedDynamicState3FeaturesEXT eds3_query;
+        memset(&eds3_query, 0, sizeof(eds3_query));
+        eds3_query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_3_FEATURES_EXT;
+        VkPhysicalDeviceFeatures2 query2;
+        memset(&query2, 0, sizeof(query2));
+        query2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        query2.pNext = &eds3_query;
+        vkGetPhysicalDeviceFeatures2(ctx->physical_device, &query2);
+
+        /* Enable all supported EDS3 features. */
+        eds3_features.extendedDynamicState3PolygonMode         = eds3_query.extendedDynamicState3PolygonMode;
+        eds3_features.extendedDynamicState3RasterizationSamples = eds3_query.extendedDynamicState3RasterizationSamples;
+        eds3_features.extendedDynamicState3ColorBlendEnable    = eds3_query.extendedDynamicState3ColorBlendEnable;
+        eds3_features.extendedDynamicState3ColorBlendEquation  = eds3_query.extendedDynamicState3ColorBlendEquation;
+        eds3_features.extendedDynamicState3ColorWriteMask      = eds3_query.extendedDynamicState3ColorWriteMask;
+        eds3_features.extendedDynamicState3DepthClampEnable    = eds3_query.extendedDynamicState3DepthClampEnable;
+        eds3_features.extendedDynamicState3AlphaToOneEnable    = eds3_query.extendedDynamicState3AlphaToOneEnable;
+
+        features_pnext = &eds3_features;
+    }
+
+    /* EDS 2 -- query and enable if extension is present. */
+    VkPhysicalDeviceExtendedDynamicState2FeaturesEXT eds2_features;
+    if (ctx->caps.has_extended_dynamic_state2) {
+        memset(&eds2_features, 0, sizeof(eds2_features));
+        eds2_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT;
+        eds2_features.pNext = features_pnext;
+
+        /* Query what the device actually supports for EDS2. */
+        VkPhysicalDeviceExtendedDynamicState2FeaturesEXT eds2_query;
+        memset(&eds2_query, 0, sizeof(eds2_query));
+        eds2_query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_2_FEATURES_EXT;
+        VkPhysicalDeviceFeatures2 query2;
+        memset(&query2, 0, sizeof(query2));
+        query2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        query2.pNext = &eds2_query;
+        vkGetPhysicalDeviceFeatures2(ctx->physical_device, &query2);
+
+        /* Enable all supported EDS2 features. */
+        eds2_features.extendedDynamicState2              = eds2_query.extendedDynamicState2;
+        eds2_features.extendedDynamicState2LogicOp       = eds2_query.extendedDynamicState2LogicOp;
+        eds2_features.extendedDynamicState2PatchControlPoints = eds2_query.extendedDynamicState2PatchControlPoints;
+
+        features_pnext = &eds2_features;
+    }
+
+    /* EDS 1 -- query and enable if extension is present. */
+    VkPhysicalDeviceExtendedDynamicStateFeaturesEXT eds1_features;
+    if (ctx->caps.has_extended_dynamic_state) {
+        memset(&eds1_features, 0, sizeof(eds1_features));
+        eds1_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+        eds1_features.pNext = features_pnext;
+
+        /* Query what the device actually supports for EDS1. */
+        VkPhysicalDeviceExtendedDynamicStateFeaturesEXT eds1_query;
+        memset(&eds1_query, 0, sizeof(eds1_query));
+        eds1_query.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTENDED_DYNAMIC_STATE_FEATURES_EXT;
+        VkPhysicalDeviceFeatures2 query2;
+        memset(&query2, 0, sizeof(query2));
+        query2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        query2.pNext = &eds1_query;
+        vkGetPhysicalDeviceFeatures2(ctx->physical_device, &query2);
+
+        eds1_features.extendedDynamicState = eds1_query.extendedDynamicState;
+
+        features_pnext = &eds1_features;
+    }
+
+    /* Core features via VkPhysicalDeviceFeatures2 (required when using pNext). */
+    VkPhysicalDeviceFeatures2 features2;
+    memset(&features2, 0, sizeof(features2));
+    features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    features2.pNext = features_pnext;
     if (ctx->caps.has_dual_src_blend)
-        enabled_features.dualSrcBlend = VK_TRUE;
+        features2.features.dualSrcBlend = VK_TRUE;
 
     VkDeviceCreateInfo device_ci;
     memset(&device_ci, 0, sizeof(device_ci));
     device_ci.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    device_ci.pNext                   = &features2;
     device_ci.queueCreateInfoCount    = 1;
     device_ci.pQueueCreateInfos       = &queue_ci;
     device_ci.enabledExtensionCount   = dev_ext_count;
     device_ci.ppEnabledExtensionNames = dev_extensions;
-    device_ci.pEnabledFeatures        = &enabled_features;
+    device_ci.pEnabledFeatures        = NULL; /* Must be NULL when using VkPhysicalDeviceFeatures2 in pNext. */
 
     result = vkCreateDevice(ctx->physical_device, &device_ci, NULL, &ctx->device);
     if (result != VK_SUCCESS) {
@@ -410,6 +500,11 @@ vc_destroy(vc_ctx_t *ctx)
 {
     if (!ctx)
         return;
+
+    /* Wait for all GPU work to complete before destroying anything.
+       This is essential once Phase 2+ submits actual GPU commands. */
+    if (ctx->device != VK_NULL_HANDLE)
+        vkDeviceWaitIdle(ctx->device);
 
     if (ctx->allocator) {
         vc_vma_destroy(ctx->allocator);
