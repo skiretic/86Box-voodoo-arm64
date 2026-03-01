@@ -539,12 +539,13 @@ vc_destroy(vc_ctx_t *ctx)
 #include <86box/vid_svga.h>
 #include <86box/vid_voodoo_common.h>
 
-void
-vc_voodoo_init(void *voodoo_ptr)
+/* Background thread function for deferred Vulkan init.
+ * Runs off the emulation path so that Glide's PCI + register probing
+ * isn't disrupted by a long-running Vulkan setup. */
+static void
+vc_voodoo_init_thread(void *voodoo_ptr)
 {
     voodoo_t *voodoo = (voodoo_t *) voodoo_ptr;
-    if (!voodoo || !voodoo->use_gpu_renderer)
-        return;
 
     VC_LOG("VideoCommon: vc_voodoo_init -- GPU renderer requested\n");
 
@@ -567,10 +568,33 @@ vc_voodoo_init(void *voodoo_ptr)
 }
 
 void
+vc_voodoo_init(void *voodoo_ptr)
+{
+    voodoo_t *voodoo = (voodoo_t *) voodoo_ptr;
+    if (!voodoo || !voodoo->use_gpu_renderer)
+        return;
+
+    /* Spawn Vulkan init on a background thread so that device init
+     * returns immediately and guest-side hardware detection isn't
+     * blocked.  The triangle path checks vc_ctx and falls through
+     * to the SW rasterizer until init completes. */
+    voodoo->vc_init_thread = thread_create(vc_voodoo_init_thread, voodoo);
+}
+
+void
 vc_voodoo_close(void *voodoo_ptr)
 {
     voodoo_t *voodoo = (voodoo_t *) voodoo_ptr;
-    if (!voodoo || !voodoo->vc_ctx)
+    if (!voodoo)
+        return;
+
+    /* Wait for the deferred init thread to finish before tearing down. */
+    if (voodoo->vc_init_thread) {
+        thread_wait(voodoo->vc_init_thread);
+        voodoo->vc_init_thread = NULL;
+    }
+
+    if (!voodoo->vc_ctx)
         return;
 
     VC_LOG("VideoCommon: vc_voodoo_close\n");

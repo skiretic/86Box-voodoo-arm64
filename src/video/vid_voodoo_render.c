@@ -40,6 +40,9 @@
 #include <86box/vid_voodoo_regs.h>
 #include <86box/vid_voodoo_render.h>
 #include <86box/vid_voodoo_texture.h>
+#ifdef USE_VIDEOCOMMON
+#include <86box/videocommon.h>
+#endif
 
 /* JIT exec counter moved to per-instance voodoo->jit_exec_count */
 
@@ -1850,11 +1853,13 @@ void
 voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
 {
 #ifdef USE_VIDEOCOMMON
-    /* GPU-accelerated path: push triangle to SPSC ring for the GPU thread. */
-    if (voodoo->use_gpu_renderer && voodoo->vc_ctx) {
-        voodoo_vk_push_triangle(voodoo, params);
-        return;
-    }
+    /* GPU-accelerated path: push triangle to SPSC ring for the GPU thread.
+     * vc_ctx is NULL until the background init thread completes -- until
+     * then, triangles fall through to the SW rasterizer. */
+    /* TODO Phase 3: activate VK triangle path once display readback exists.
+     * Until then, all triangles go through SW so the framebuffer stays
+     * valid for guest-side driver self-tests (e.g. Glide detection). */
+    (void) voodoo->vc_ctx;
 #endif
 
     voodoo_params_t *params_new = &voodoo->params_buffer[PARAMS_WRITE_IDX(voodoo) & PARAM_MASK];
