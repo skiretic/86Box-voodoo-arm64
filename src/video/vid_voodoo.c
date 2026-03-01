@@ -1326,7 +1326,8 @@ voodoo_card_init(void)
 
 #ifdef USE_VIDEOCOMMON
     voodoo->use_gpu_renderer = device_get_config_int("gpu_renderer");
-    vc_voodoo_init(voodoo);
+    if (voodoo->use_gpu_renderer)
+        vc_voodoo_init(voodoo);
 #endif
 
     return voodoo;
@@ -1476,7 +1477,8 @@ voodoo_2d3d_card_init(int type)
 
 #ifdef USE_VIDEOCOMMON
     voodoo->use_gpu_renderer = device_get_config_int("gpu_renderer");
-    vc_voodoo_init(voodoo);
+    if (voodoo->use_gpu_renderer)
+        vc_voodoo_init(voodoo);
 #endif
 
     return voodoo;

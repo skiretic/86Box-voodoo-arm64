@@ -1851,7 +1851,7 @@ voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
 {
 #ifdef USE_VIDEOCOMMON
     /* GPU-accelerated path: push triangle to SPSC ring for the GPU thread. */
-    if (voodoo->use_gpu_renderer) {
+    if (voodoo->use_gpu_renderer && voodoo->vc_ctx) {
         voodoo_vk_push_triangle(voodoo, params);
         return;
     }
