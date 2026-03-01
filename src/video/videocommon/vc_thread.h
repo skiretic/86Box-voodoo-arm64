@@ -8,9 +8,9 @@
  *
  *          VideoCommon GPU thread and SPSC ring buffer declarations.
  *
- * Authors: Anthony Campbell
+ * Authors: skiretic
  *
- *          Copyright 2026 Anthony Campbell.
+ *          Copyright 2026 skiretic.
  */
 #ifndef VIDEOCOMMON_THREAD_H
 #define VIDEOCOMMON_THREAD_H

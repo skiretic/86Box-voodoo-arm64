@@ -14,9 +14,9 @@
  *          will replace these with full DuckStation-style atomic
  *          acquire/release, wake counter, and backpressure.
  *
- * Authors: Anthony Campbell
+ * Authors: skiretic
  *
- *          Copyright 2026 Anthony Campbell.
+ *          Copyright 2026 skiretic.
  */
 #include <stdarg.h>
 #include <stdlib.h>

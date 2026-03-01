@@ -13,9 +13,9 @@
  *          All types are opaque; the implementation lives in
  *          src/video/videocommon/.
  *
- * Authors: Anthony Campbell
+ * Authors: skiretic
  *
- *          Copyright 2026 Anthony Campbell.
+ *          Copyright 2026 skiretic.
  */
 #ifndef VIDEOCOMMON_H
 #define VIDEOCOMMON_H

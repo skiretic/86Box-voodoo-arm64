@@ -9,9 +9,9 @@
 #          VideoCommon -- GPU-accelerated rendering infrastructure.
 #          OBJECT library: Vulkan core, GPU thread, SPSC ring.
 #
-# Authors: Anthony Campbell
+# Authors: skiretic
 #
-#          Copyright 2026 Anthony Campbell.
+#          Copyright 2026 skiretic.
 #
 
 add_library(videocommon OBJECT

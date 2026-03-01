@@ -10,9 +10,9 @@
  *          capability detection, logging.  VMA allocator creation is
  *          in vc_vma_impl.cpp (C++ required by VMA).
  *
- * Authors: Anthony Campbell
+ * Authors: skiretic
  *
- *          Copyright 2026 Anthony Campbell.
+ *          Copyright 2026 skiretic.
  */
 #include <stdarg.h>
 #include <stdio.h>

@@ -11,9 +11,9 @@
  *          translation unit for VMA_IMPLEMENTATION and C-callable
  *          wrapper functions for allocator create/destroy.
  *
- * Authors: Anthony Campbell
+ * Authors: skiretic
  *
- *          Copyright 2026 Anthony Campbell.
+ *          Copyright 2026 skiretic.
  */
 
 /* VK_NO_PROTOTYPES and platform defines are set by CMakeLists.txt. */

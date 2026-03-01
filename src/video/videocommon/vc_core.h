@@ -9,9 +9,9 @@
  *          VideoCommon core -- internal declarations for Vulkan
  *          instance/device creation, VMA init, and capability detection.
  *
- * Authors: Anthony Campbell
+ * Authors: skiretic
  *
- *          Copyright 2026 Anthony Campbell.
+ *          Copyright 2026 skiretic.
  */
 #ifndef VIDEOCOMMON_CORE_H
 #define VIDEOCOMMON_CORE_H

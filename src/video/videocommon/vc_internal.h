@@ -9,9 +9,9 @@
  *          VideoCommon internal header -- shared defines and types for
  *          the GPU-accelerated rendering infrastructure.
  *
- * Authors: Anthony Campbell
+ * Authors: skiretic
  *
- *          Copyright 2026 Anthony Campbell.
+ *          Copyright 2026 skiretic.
  */
 #ifndef VIDEOCOMMON_INTERNAL_H
 #define VIDEOCOMMON_INTERNAL_H
