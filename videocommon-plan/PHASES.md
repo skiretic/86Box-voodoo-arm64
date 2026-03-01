@@ -41,7 +41,7 @@ No rendering -- just proof that the GPU thread starts, communicates, and shuts d
 - 8 MB buffer, `mmap` or `malloc` + page-aligned
 - Atomic `read_pos` / `write_pos` (uint32_t, acquire/release)
 - DuckStation-style wake counter + semaphore
-- `vc_ring_push()`, `vc_ring_push_and_wake()`, `vc_ring_push_and_sync()`
+- `vc_ring_push()`, `vc_ring_push_and_wake()` (only two variants -- no sync push, see DESIGN.md section 4.4)
 - `vc_ring_wait_for_space()` with spin-yield backpressure
 - Wraparound sentinel command
 
@@ -431,8 +431,8 @@ This is where the rendered output starts looking correct.
 - GPU thread maintains a host-visible shadow buffer, updated via
   `vkCmdCopyImageToBuffer` at each `VC_CMD_SWAP` (after render, before present)
 - LFB reads (`voodoo_fb_readl`) return directly from the shadow buffer -- NO
-  push to SPSC ring, NO `vc_ring_push_and_sync()`. This avoids violating the
-  SPSC single-producer invariant (only the FIFO thread may produce ring commands)
+  push to SPSC ring from the CPU thread. This avoids violating the SPSC
+  single-producer invariant (only the FIFO thread may produce ring commands)
   and avoids blocking the CPU thread (which would stall CMDFIFO writes and
   indirectly freeze the FIFO thread -- the exact v1 failure mode)
 - Shadow buffer is double-buffered (ping-pong): GPU writes to buffer A while
@@ -551,7 +551,7 @@ Phase 8 requires all other phases.
 | 3. Display | 4 new, 2 modified | ~1200 | vc-plumbing |
 | 4. Textures | 1 new, 3 modified | ~800 | vc-shader |
 | 5. Core Pipeline | 0 new, 4 modified | ~1000 | vc-shader |
-| 6. Advanced Features | 0 new, 4 modified | ~800 | vc-shader |
+| 6. Advanced Features | 0 new, 4 modified | ~800 | vc-shader (6.1-6.6), vc-lead (6.7 fastfill) |
 | 7. LFB Access | 1 new, 2 modified | ~600 | vc-plumbing |
 | 8. Polish | 0 new, varies | ~500 | vc-debug + all |
 | **Total** | **~20 new** | **~8400** | |

@@ -567,18 +567,6 @@ gpu_thread_main(vc_ctx):
           flush_lfb_writes(cmd.region)
           break
 
-        case VC_CMD_READBACK:
-          end_render_pass()               /* transition image for transfer */
-          vkCmdCopyImageToBuffer(offscreen -> staging)
-          submit_command_buffer()
-          wait_on_fence()                 /* sync: caller is blocked */
-          signal_completion(cmd.event)    /* unblock caller */
-          break
-
-        case VC_CMD_RESIZE:
-          recreate_offscreen_fb(cmd.width, cmd.height)
-          break
-
         case VC_CMD_SHUTDOWN:
           running = false
           break
@@ -906,40 +894,44 @@ GPU thread processes VC_CMD_SWAP:
        dstAccess: SHADER_READ
        oldLayout: COLOR_ATTACHMENT_OPTIMAL
        newLayout: SHADER_READ_ONLY_OPTIMAL
-  4. Pipeline barrier: swapchain image
-       srcStage:  TOP_OF_PIPE
-       dstStage:  COLOR_ATTACHMENT_OUTPUT
-       srcAccess: 0
-       dstAccess: COLOR_ATTACHMENT_WRITE
-       oldLayout: UNDEFINED
-       newLayout: COLOR_ATTACHMENT_OPTIMAL
-  5. Begin post-process render pass (swapchain image)
-  6. Draw fullscreen triangle (samples offscreen image)
-  7. End post-process render pass
+  4. Begin post-process render pass (swapchain image)
+       The post-process render pass handles BOTH swapchain layout transitions:
+       - initialLayout: UNDEFINED (discard old contents -- we write every pixel)
+       - finalLayout: PRESENT_SRC_KHR (ready for presentation)
+       No explicit barrier is needed for the swapchain image. The render pass
+       itself transitions UNDEFINED -> attachment layout on begin and
+       attachment layout -> PRESENT_SRC_KHR on end.
+       The acquire semaphore wait at COLOR_ATTACHMENT_OUTPUT (step 9) ensures
+       the image is available before color writes begin.
+  5. Draw fullscreen triangle (samples offscreen image)
+  6. End post-process render pass
        (render pass finalLayout transitions swapchain to PRESENT_SRC_KHR)
-  8. Pipeline barrier: offscreen image back to COLOR_ATTACHMENT_OPTIMAL
+  7. Pipeline barrier: offscreen image back to COLOR_ATTACHMENT_OPTIMAL
        srcStage:  FRAGMENT_SHADER
        dstStage:  COLOR_ATTACHMENT_OUTPUT
        srcAccess: SHADER_READ
        dstAccess: COLOR_ATTACHMENT_WRITE
        oldLayout: SHADER_READ_ONLY_OPTIMAL
        newLayout: COLOR_ATTACHMENT_OPTIMAL
-  9. End recording
- 10. vkQueueSubmit:
+  8. End recording
+  9. vkQueueSubmit:
        waitSemaphore:   image_available_sem
        waitDstStage:    COLOR_ATTACHMENT_OUTPUT
        signalSemaphore: render_finished_sem
        fence:           frame_fence
- 11. vkQueuePresentKHR:
+ 10. vkQueuePresentKHR:
        waitSemaphore:   render_finished_sem
- 12. Advance frame index
+ 11. Advance frame index
 ```
 
-The post-process render pass handles swapchain layout transitions via its
-`initialLayout` (COLOR_ATTACHMENT_OPTIMAL) and `finalLayout` (PRESENT_SRC_KHR)
-fields, eliminating the need for an explicit barrier between step 7 and present.
-The swapchain image's `initialLayout` can be UNDEFINED since we always write
-every pixel (fullscreen triangle).
+**Semaphore edge case on swapchain recreation**: If `vkAcquireNextImageKHR`
+succeeds (signaling `image_available_sem`) but `vkQueuePresentKHR` fails with
+`VK_ERROR_OUT_OF_DATE_KHR` and the frame's submit is skipped, the
+`image_available_sem` remains signaled. A signaled binary semaphore MUST be
+consumed before it can be signaled again. Handle this by either: (a) submitting
+a dummy command buffer that waits on the semaphore, or (b) destroying and
+recreating the semaphore during swapchain recreation. Option (b) is simpler
+since swapchain recreation already destroys and recreates frame resources.
 
 ### 8.4.1 Image Layout Transitions Summary
 
@@ -949,13 +941,13 @@ All layout transitions in the present flow, consolidated for reference:
 Offscreen image transitions (per frame):
   [Render pass] -> COLOR_ATTACHMENT_OPTIMAL (via render pass finalLayout)
   COLOR_ATTACHMENT_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL  (barrier, step 3)
-  SHADER_READ_ONLY_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL  (barrier, step 8)
+  SHADER_READ_ONLY_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL  (barrier, step 7)
 
 Swapchain image transitions (per frame):
-  UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL  (barrier, step 4 -- or via
-    post-process render pass initialLayout: UNDEFINED)
+  UNDEFINED -> COLOR_ATTACHMENT_OPTIMAL  (via post-process render pass
+    initialLayout: UNDEFINED, step 4)
   COLOR_ATTACHMENT_OPTIMAL -> PRESENT_SRC_KHR  (via post-process render
-    pass finalLayout)
+    pass finalLayout, step 6)
 
 Shadow buffer readback (if LFB read active, at VC_CMD_SWAP):
   COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL  (barrier, before copy)
@@ -1009,30 +1001,45 @@ is single-producer (FIFO thread only), single-consumer (GPU thread). Having the
 CPU thread push VC_CMD_READBACK would violate the SPSC invariant, breaking
 lock-free correctness on ARM64 (acquire/release pairs assume single producer).
 
-Instead, the GPU thread maintains a **shadow buffer** -- a host-visible staging
-buffer that is updated automatically after each frame. LFB reads return directly
-from the shadow buffer without any ring interaction.
+Instead, the GPU thread maintains a **double-buffered shadow buffer** (ping-pong)
+that is updated automatically after each frame. The GPU writes to one buffer
+while the CPU reads from the other, eliminating data races without locks.
 
 ```
+Shadow buffer structure:
+  shadow_buffer[0]  -- HOST_VISIBLE | HOST_COHERENT VkBuffer (1.2 MB each)
+  shadow_buffer[1]  -- HOST_VISIBLE | HOST_COHERENT VkBuffer (1.2 MB each)
+  shadow_write_idx  -- which buffer the GPU writes to next (0 or 1)
+  shadow_read_idx   -- which buffer the CPU reads from (atomic, set by GPU)
+  shadow_frame_idx  -- which per-frame fence guards the readable buffer (atomic)
+  shadow_fence_value -- monotonic counter for the readable copy (atomic)
+
 Shadow buffer update (GPU thread, at VC_CMD_SWAP):
   1. End render pass
   2. Transition offscreen image: COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_SRC_OPTIMAL
-  3. vkCmdCopyImageToBuffer(offscreen -> shadow_staging_buffer)
+  3. vkCmdCopyImageToBuffer(offscreen -> shadow_buffer[shadow_write_idx])
   4. Transition offscreen image: TRANSFER_SRC_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
-  5. Submit and continue (no stall -- fence tracked for read safety)
+  5. Submit command buffer (fence = frames[frame_idx].fence, no stall)
+  6. Publish for CPU reading:
+       atomic_store(&shadow_read_idx, shadow_write_idx)
+       atomic_store(&shadow_frame_idx, frame_idx)
+       atomic_store(&shadow_fence_value, submitted_fence_value)
+  7. Flip: shadow_write_idx = 1 - shadow_write_idx
 
 LFB read (CPU thread, no ring interaction):
   1. Guest reads LFB address
   2. voodoo_fb_readl() detects VK mode
-  3. Wait for shadow buffer fence (ensures last copy completed)
-  4. Read directly from shadow_staging_buffer
+  3. Wait for per-frame fence (ensures last copy completed)
+  4. Read directly from shadow_buffer[shadow_read_idx]
   5. Convert format (RGB565 etc.) and return to guest
 ```
 
-The shadow buffer is a `HOST_VISIBLE | HOST_COHERENT` VkBuffer, sized to hold
-the full Voodoo framebuffer (e.g., 640x480 * 4 bytes = 1.2 MB). It is updated
-on every VC_CMD_SWAP. Reads between swaps return stale-by-one-frame data, which
-is acceptable for nearly all Glide games (the LFB read typically follows a swap).
+Each shadow buffer is a `HOST_VISIBLE | HOST_COHERENT` VkBuffer, sized to hold
+the full Voodoo framebuffer (e.g., 640x480 * 4 bytes = 1.2 MB). The double
+buffering ensures the GPU can write the next frame's copy while the CPU reads
+the previous frame's data. Reads between swaps return stale-by-one-frame data,
+which is acceptable for nearly all Glide games (the LFB read typically follows
+a swap).
 
 For games that require exact same-frame readback (rare), a future enhancement
 could add a FIFO-thread-routed sync readback path. But the shadow buffer
@@ -1041,23 +1048,36 @@ approach handles the common case without violating the SPSC invariant.
 ### 9.2 LFB Read Fence Synchronization
 
 The CPU thread must wait for the shadow buffer copy to complete before reading.
-This uses a dedicated `shadow_fence` (separate from the per-frame fences):
+This uses the **per-frame fence** (not a dedicated separate fence). The GPU
+thread publishes which frame index and fence value correspond to the readable
+shadow buffer. The CPU thread waits on that specific per-frame fence.
 
 ```c
 /* GPU thread: after vkCmdCopyImageToBuffer in VC_CMD_SWAP handler */
-atomic_store(&ctx->shadow_fence_value, ctx->submitted_fence_value);
+/* (shadow_read_idx, shadow_frame_idx, shadow_fence_value set atomically above) */
 
 /* CPU thread: in voodoo_fb_readl() */
+uint32_t fidx = atomic_load(&ctx->shadow_frame_idx);
 uint64_t needed = atomic_load(&ctx->shadow_fence_value);
-if (ctx->completed_fence_value < needed) {
-    /* Poll or wait -- shadow copy is still in flight */
-    vkWaitForFences(device, 1, &shadow_fence, VK_TRUE, TIMEOUT_NS);
+if (ctx->last_waited_fence_value < needed) {
+    vkWaitForFences(device, 1, &ctx->frames[fidx].fence, VK_TRUE, TIMEOUT_NS);
+    ctx->last_waited_fence_value = needed;
 }
-/* Safe to read from shadow_staging_buffer */
+uint32_t ridx = atomic_load(&ctx->shadow_read_idx);
+/* Safe to read from shadow_buffer[ridx] */
 ```
 
+**Why per-frame fences are safe here**: `vkWaitForFences` does NOT require
+external synchronization on the fence parameter (per Vulkan spec). Only
+`vkResetFences` does. The GPU thread resets a per-frame fence at the START
+of each frame (in `wait_for_fence` + `vkResetFences`), which only happens
+AFTER the fence is signaled. Since the CPU thread only calls `vkWaitForFences`
+(never `vkResetFences`), and the GPU thread does not reset the fence until
+the NEXT time that frame resource is reused (which requires the fence to
+already be signaled), there is no race between the CPU wait and GPU reset.
+
 This avoids any ring interaction from the CPU thread. The only cross-thread
-communication is the atomic fence value, which is lock-free and safe.
+communication is the atomic fence/index values, which are lock-free and safe.
 
 ### 9.3 LFB Write
 

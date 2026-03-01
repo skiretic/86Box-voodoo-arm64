@@ -208,10 +208,12 @@ No spin-loops anywhere. The SPSC ring uses a proper semaphore for wake.
 
 ### Bug 4 Prevention (Swapchain Thrashing)
 
-v2's swapchain is owned by the GPU thread. Resize comes through VC_CMD_RESIZE
-in the ring, processed in-order. No concurrent recreation. No race between
-"present in flight" and "recreation in progress" because they happen on the
-same thread.
+v2's swapchain is owned by the GPU thread. Resize is detected via atomic flag
+polling in `vc_display_tick()`, processed in-order on the GPU thread. No
+concurrent recreation. No race between "present in flight" and "recreation in
+progress" because they happen on the same thread. (Resize does NOT use a ring
+command -- the GUI thread sets an atomic flag and the GPU thread checks it at
+the top of each loop iteration, per DESIGN.md section 8.1.)
 
 ### Bug 5 Prevention (swap_count Stuck)
 
