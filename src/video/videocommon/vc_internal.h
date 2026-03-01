@@ -90,7 +90,7 @@ typedef struct vc_ring_t {
     _Atomic(uint32_t) write_pos;
     _Atomic(uint32_t) read_pos;
     _Atomic(int32_t)  wake_counter;
-    void             *wake_event; /* 86Box event_t* used as semaphore */
+    void             *wake_sem;   /* Platform counting semaphore (opaque) */
 } vc_ring_t;
 
 /* -------------------------------------------------------------------------- */
