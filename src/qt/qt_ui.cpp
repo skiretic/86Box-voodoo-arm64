@@ -192,6 +192,15 @@ ui_deinit_monitor(int monitor_index)
         emit main_window->destroyRendererMonitorForNonQtThread(monitor_index);
 }
 
+#ifdef USE_VIDEOCOMMON
+void
+vc_notify_renderer_ready(void)
+{
+    if (main_window)
+        emit main_window->vcRendererReady();
+}
+#endif
+
 int
 ui_msgbox(int flags, void *message)
 {

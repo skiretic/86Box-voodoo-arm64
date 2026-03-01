@@ -600,6 +600,11 @@ vc_voodoo_init_thread(void *voodoo_ptr)
     }
 
     VC_LOG("VideoCommon: vc_voodoo_init complete -- GPU renderer active\n");
+
+    /* Tell the Qt UI to switch to VCRenderer now that we are ready.
+       This is a no-op if vc_notify_renderer_ready() has not been
+       compiled in (non-Qt builds). */
+    vc_notify_renderer_ready();
 }
 
 void

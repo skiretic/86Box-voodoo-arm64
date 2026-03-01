@@ -849,6 +849,15 @@ MainWindow::MainWindow(QWidget *parent)
     connect(this, &MainWindow::destroyRendererMonitor, this, &MainWindow::destroyRendererMonitorSlot);
     connect(this, &MainWindow::destroyRendererMonitorForNonQtThread, this, &MainWindow::destroyRendererMonitorSlot, Qt::BlockingQueuedConnection);
 
+#ifdef USE_VIDEOCOMMON
+    /* When VideoCommon finishes background Vulkan init, it emits
+       vcRendererReady from the init thread.  We handle it on the
+       main thread and switch to VCRenderer. */
+    connect(this, &MainWindow::vcRendererReady, this, [this]() {
+        ui->stackedWidget->switchRenderer(static_cast<RendererStack::Renderer>(vid_api));
+    }, Qt::QueuedConnection);
+#endif
+
 #ifdef Q_OS_MACOS
     QTimer::singleShot(0, this, [this]() {
         for (auto curObj : this->menuBar()->children()) {

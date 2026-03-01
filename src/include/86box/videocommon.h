@@ -47,6 +47,12 @@ void vc_stop_gpu_thread(vc_ctx_t *ctx);
 void vc_voodoo_init(void *voodoo);
 void vc_voodoo_close(void *voodoo);
 
+/* Notify the Qt UI that VideoCommon has finished background init
+   and a VCRenderer can now be created.  Implemented in qt_ui.cpp.
+   Safe to call from any thread -- the actual renderer switch happens
+   asynchronously on the Qt main thread. */
+void vc_notify_renderer_ready(void);
+
 /* -------------------------------------------------------------------------- */
 /*  Display integration -- opaque API for Qt VCRenderer                        */
 /*                                                                             */
@@ -93,6 +99,7 @@ void vc_destroy_surface(void *ctx, uintptr_t surface);
 /* No-op stubs when VideoCommon is not compiled in. */
 static inline void vc_voodoo_init(void *voodoo)  { (void) voodoo; }
 static inline void vc_voodoo_close(void *voodoo) { (void) voodoo; }
+static inline void vc_notify_renderer_ready(void) { }
 static inline void *vc_display_get_ctx(void) { return (void *) 0; }
 static inline uintptr_t vc_display_get_instance(void) { return 0; }
 static inline void vc_display_set_surface_handle(void *c, uintptr_t s) { (void) c; (void) s; }

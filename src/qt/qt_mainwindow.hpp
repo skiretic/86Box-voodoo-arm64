@@ -60,6 +60,7 @@ signals:
     void destroyRendererMonitorForNonQtThread(int monitor_index);
     void forceInterpretationCompleted();
     void hardResetCompleted();
+    void vcRendererReady();
 
     void setTitle(const QString &title);
     void setFullscreen(bool state);
