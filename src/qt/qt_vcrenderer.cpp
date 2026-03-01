@@ -168,6 +168,11 @@ VCRenderer::onBlit(int buf_idx, int x, int y, int w, int h)
     if (ctx_ptr) {
         vc_display_notify_vga_frame(ctx_ptr, buf_idx, x, y, w, h);
     }
+
+    /* Signal blit completion so the video subsystem releases the frame
+       and continues delivering new ones.  Without this the blit pipeline
+       stalls after a single frame, resulting in a gray/frozen screen. */
+    video_blit_complete_monitor(r_monitor_index);
 }
 
 /* -------------------------------------------------------------------------- */
