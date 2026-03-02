@@ -394,7 +394,6 @@ voodoo_vk_push_swap(voodoo_t *voodoo)
     if (!ctx)
         return;
 
-    pclog("VideoCommon: swap pushed to ring\n");
     vc_ring_push_and_wake(&ctx->ring, VC_CMD_SWAP,
                           (uint16_t) sizeof(vc_ring_cmd_header_t));
 }

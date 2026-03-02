@@ -255,6 +255,6 @@ vc_readback_copy_to_sw_fb(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         }
     }
 
-    pclog("VideoCommon: readback copied %ux%u to SW FB (offset 0x%x)\n",
-          w, h, dst_offset);
+    vc_readback_log("VideoCommon: readback copied %ux%u to SW FB (offset 0x%x)\n",
+                    w, h, dst_offset);
 }

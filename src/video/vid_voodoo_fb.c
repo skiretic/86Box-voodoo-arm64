@@ -136,14 +136,6 @@ voodoo_fb_readl(uint32_t addr, void *priv)
     temp = *(uint32_t *) (&voodoo->fb_mem[read_addr & voodoo->fb_mask]);
 
     //        voodoo_fb_log("voodoo_fb_readl : %08X %08x %08X  x=%i y=%i  %08X %08X  %08x:%08x %i ro=%08x rw=%i\n", addr, read_addr, temp, x, y, read_addr, *(uint32_t *)(&voodoo->fb_mem[4]), cs, pc, fb_reads++, voodoo->fb_read_offset, voodoo->row_width);
-    {
-        static int vc_lfb_read_count = 0;
-        if (vc_lfb_read_count < 5) {
-            vc_lfb_read_count++;
-            pclog("VideoCommon: LFB read at addr=0x%x read_addr=0x%x val=0x%x\n",
-                  addr, read_addr, temp);
-        }
-    }
     return temp;
 }
 
