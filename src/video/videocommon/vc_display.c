@@ -952,8 +952,11 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
             atomic_store_explicit(&disp->vga_frame_ready, 0,
                                   memory_order_relaxed);
             vc_display_present_vga(ctx, gpu_st);
+        } else {
+            /* Swapchain not ready yet -- wake GPU thread so the next
+               tick retries instead of sleeping indefinitely. */
+            vc_ring_wake(&ctx->ring);
         }
-        /* If swapchain not ready, leave vga_frame_ready=1 for next tick. */
     }
 }
 
@@ -1442,6 +1445,7 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         if (fence_res == VK_TIMEOUT) {
             atomic_store_explicit(&disp->vga_frame_ready, 1,
                                   memory_order_release);
+            vc_ring_wake(&ctx->ring);
             return 0;
         }
         vkResetFences(ctx->device, 1, &f->fence);
@@ -1523,6 +1527,7 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         vkEndCommandBuffer(cmd_buf);
         atomic_store_explicit(&disp->vga_frame_ready, 1,
                               memory_order_release);
+        vc_ring_wake(&ctx->ring);
         return 0;
     }
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -1641,6 +1646,7 @@ vc_display_set_surface(vc_ctx_t *ctx, VkSurfaceKHR surface)
     VC_LOG("VideoCommon: surface handle set by GUI thread\n");
     atomic_store_explicit(&gpu_st->disp.surface_pending,
                           (uintptr_t) surface, memory_order_release);
+    vc_ring_wake(&ctx->ring);
 }
 
 void
@@ -1659,6 +1665,7 @@ vc_display_signal_resize(vc_ctx_t *ctx, uint32_t width, uint32_t height)
                           memory_order_relaxed);
     atomic_store_explicit(&gpu_st->disp.resize_requested, 1,
                           memory_order_release);
+    vc_ring_wake(&ctx->ring);
 }
 
 void
