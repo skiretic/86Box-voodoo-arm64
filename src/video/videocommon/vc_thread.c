@@ -637,6 +637,8 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     gpu_st->has_rendered     = 1;
     atomic_store_explicit(&gpu_st->disp.vga_frames_since_present, 0,
                           memory_order_relaxed);
+    atomic_store_explicit(&gpu_st->disp.has_presented, 1,
+                          memory_order_relaxed);
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 

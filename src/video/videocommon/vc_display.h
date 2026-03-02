@@ -83,6 +83,11 @@ typedef struct vc_display_t {
        swap commands arrive). */
     _Atomic(int) vga_frames_since_present;
 
+    /* Flag: set to 1 after the first successful Voodoo present.
+       Used by vc_display_tick() to avoid firing the VGA timeout
+       during Glide detection/setup when no presents have happened yet. */
+    _Atomic(int) has_presented;
+
     /* --- VGA passthrough blit state --- */
 
     /* Atomic communication (Qt main thread -> GPU thread). */

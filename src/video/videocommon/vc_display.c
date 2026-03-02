@@ -106,6 +106,7 @@ vc_display_state_init(vc_display_t *disp)
     atomic_store_explicit(&disp->vga_blit_w, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_blit_h, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_buf_ptrs[0], 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->has_presented, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_frames_since_present, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_buf_ptrs[1], 0, memory_order_relaxed);
 }
@@ -956,10 +957,15 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        path in vc_gpu_handle_swap() to trigger.  Clear display_active to
        unblock VGA passthrough. */
     if (voodoo_active) {
+        /* Only run the timeout if at least one real present has happened.
+           During Glide detection/setup, no presents occur -- firing the
+           timeout would clear display_active and route triangles to SW. */
+        int presented = atomic_load_explicit(&disp->has_presented,
+                                             memory_order_relaxed);
         int frames = atomic_load_explicit(&disp->vga_frames_since_present,
                                           memory_order_relaxed);
         frames++;
-        if (frames >= VC_VGA_TIMEOUT_FRAMES) {
+        if (presented && frames >= VC_VGA_TIMEOUT_FRAMES) {
             *disp->display_active_ptr = 0;
             atomic_store_explicit(&disp->vga_frames_since_present, 0,
                                   memory_order_relaxed);
