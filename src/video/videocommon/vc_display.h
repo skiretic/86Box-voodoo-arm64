@@ -35,10 +35,10 @@ typedef struct vc_gpu_state_t vc_gpu_state_t;
 
 typedef struct vc_display_t {
     /* --- Atomic communication (GUI thread <-> GPU thread) --- */
-    _Atomic(uintptr_t) surface_pending;   /* GUI -> GPU: new VkSurfaceKHR */
-    _Atomic(uint32_t)  resize_width;      /* GUI -> GPU: new width */
-    _Atomic(uint32_t)  resize_height;     /* GUI -> GPU: new height */
-    _Atomic(int)       resize_requested;  /* GUI -> GPU: flag */
+    _Atomic(uintptr_t) surface_pending;    /* GUI -> GPU: new VkSurfaceKHR */
+    _Atomic(uint32_t)  resize_width;       /* GUI -> GPU: new width */
+    _Atomic(uint32_t)  resize_height;      /* GUI -> GPU: new height */
+    _Atomic(int)       resize_requested;   /* GUI -> GPU: flag */
     _Atomic(int)       teardown_requested; /* GUI -> GPU: flag */
     _Atomic(int)       teardown_complete;  /* GPU -> GUI: flag */
 
@@ -54,18 +54,18 @@ typedef struct vc_display_t {
     VkExtent2D     extent;
 
     /* Post-process pipeline. */
-    VkRenderPass         pp_render_pass;
-    VkPipeline           pp_pipeline;
-    VkPipelineLayout     pp_pipeline_layout;
+    VkRenderPass          pp_render_pass;
+    VkPipeline            pp_pipeline;
+    VkPipelineLayout      pp_pipeline_layout;
     VkDescriptorSetLayout pp_desc_layout;
-    VkDescriptorPool     pp_desc_pool;
-    VkDescriptorSet      pp_desc_sets[2]; /* One per offscreen FB (front/back). */
-    VkSampler            pp_sampler;
-    VkFramebuffer        pp_framebuffers[VC_MAX_SWAPCHAIN_IMAGES];
+    VkDescriptorPool      pp_desc_pool;
+    VkDescriptorSet       pp_desc_sets[2]; /* One per offscreen FB (front/back). */
+    VkSampler             pp_sampler;
+    VkFramebuffer         pp_framebuffers[VC_MAX_SWAPCHAIN_IMAGES];
 
     /* Post-process shader modules. */
-    VkShaderModule       pp_vert_shader;
-    VkShaderModule       pp_frag_shader;
+    VkShaderModule pp_vert_shader;
+    VkShaderModule pp_frag_shader;
 
     /* Per-frame sync primitives. */
     VkSemaphore image_available_sem[VC_NUM_FRAMES];
@@ -78,12 +78,12 @@ typedef struct vc_display_t {
     /* --- VGA passthrough blit state --- */
 
     /* Atomic communication (Qt main thread -> GPU thread). */
-    _Atomic(int)      vga_frame_ready;   /* 1 = new VGA frame data available */
-    _Atomic(int)      vga_buf_idx;       /* which image buffer to read from */
-    _Atomic(int)      vga_blit_x;
-    _Atomic(int)      vga_blit_y;
-    _Atomic(int)      vga_blit_w;
-    _Atomic(int)      vga_blit_h;
+    _Atomic(int) vga_frame_ready; /* 1 = new VGA frame data available */
+    _Atomic(int) vga_buf_idx;     /* which image buffer to read from */
+    _Atomic(int) vga_blit_x;
+    _Atomic(int) vga_blit_y;
+    _Atomic(int) vga_blit_w;
+    _Atomic(int) vga_blit_h;
 
     /* Pointer to the image buffer data (set once during init, stable).
        Two pointers for double-buffered image data (same as SoftwareRenderer).
@@ -93,7 +93,7 @@ typedef struct vc_display_t {
     /* GPU-thread-only VGA resources. */
     VkImage         vga_image;
     VkImageView     vga_image_view;
-    void           *vga_image_alloc;   /* VmaAllocation */
+    void           *vga_image_alloc; /* VmaAllocation */
     VkBuffer        vga_staging_buf;
     void           *vga_staging_alloc; /* VmaAllocation */
     void           *vga_staging_mapped;
@@ -102,7 +102,7 @@ typedef struct vc_display_t {
     uint32_t        vga_tex_height;
     int             vga_resources_created;
     VkCommandPool   vga_cmd_pool;
-    VkCommandBuffer vga_cmd_buf;
+    VkCommandBuffer vga_cmd_buf[VC_NUM_FRAMES];
 } vc_display_t;
 
 /* -------------------------------------------------------------------------- */

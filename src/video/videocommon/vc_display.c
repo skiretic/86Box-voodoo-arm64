@@ -49,12 +49,12 @@
 #include "postprocess_frag.h"
 
 /* C-callable VMA wrappers (implemented in vc_vma_impl.cpp). */
-extern VkResult vc_vma_create_image(void *allocator,
+extern VkResult vc_vma_create_image(void                    *allocator,
                                     const VkImageCreateInfo *image_ci,
                                     VkImage *out_image, void **out_alloc);
 extern void     vc_vma_destroy_image(void *allocator, VkImage image,
                                      void *alloc);
-extern VkResult vc_vma_create_buffer(void *allocator,
+extern VkResult vc_vma_create_buffer(void                     *allocator,
                                      const VkBufferCreateInfo *buffer_ci,
                                      int mapped, VkBuffer *out_buffer,
                                      void **out_alloc, void **out_mapped);
@@ -127,8 +127,7 @@ vc_select_surface_format(vc_ctx_t *ctx, VkSurfaceKHR surface)
     /* Prefer B8G8R8A8_UNORM + SRGB_NONLINEAR (no gamma correction). */
     VkSurfaceFormatKHR chosen = formats[0];
     for (uint32_t i = 0; i < count; i++) {
-        if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM &&
-            formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM && formats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             chosen = formats[i];
             break;
         }
@@ -187,7 +186,7 @@ vc_pp_render_pass_create(vc_ctx_t *ctx, vc_display_t *disp)
     rp_ci.pDependencies   = &dependency;
 
     VkResult result = vkCreateRenderPass(ctx->device, &rp_ci, NULL,
-                                          &disp->pp_render_pass);
+                                         &disp->pp_render_pass);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: post-process render pass creation failed (%d)\n",
                result);
@@ -209,13 +208,13 @@ vc_pp_descriptors_create(vc_ctx_t *ctx, vc_display_t *disp)
     /* Sampler: nearest-neighbor, clamp-to-edge. */
     VkSamplerCreateInfo sampler_ci;
     memset(&sampler_ci, 0, sizeof(sampler_ci));
-    sampler_ci.sType         = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_ci.magFilter     = VK_FILTER_NEAREST;
-    sampler_ci.minFilter     = VK_FILTER_NEAREST;
-    sampler_ci.addressModeU  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_ci.addressModeV  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_ci.addressModeW  = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_ci.mipmapMode    = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_ci.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_ci.magFilter    = VK_FILTER_NEAREST;
+    sampler_ci.minFilter    = VK_FILTER_NEAREST;
+    sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_ci.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
     result = vkCreateSampler(ctx->device, &sampler_ci, NULL, &disp->pp_sampler);
     if (result != VK_SUCCESS) {
@@ -238,7 +237,7 @@ vc_pp_descriptors_create(vc_ctx_t *ctx, vc_display_t *disp)
     layout_ci.pBindings    = &binding;
 
     result = vkCreateDescriptorSetLayout(ctx->device, &layout_ci, NULL,
-                                          &disp->pp_desc_layout);
+                                         &disp->pp_desc_layout);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: post-process descriptor set layout failed (%d)\n",
                result);
@@ -259,7 +258,7 @@ vc_pp_descriptors_create(vc_ctx_t *ctx, vc_display_t *disp)
     pool_ci.pPoolSizes    = &pool_size;
 
     result = vkCreateDescriptorPool(ctx->device, &pool_ci, NULL,
-                                     &disp->pp_desc_pool);
+                                    &disp->pp_desc_pool);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: post-process descriptor pool failed (%d)\n", result);
         return -1;
@@ -303,14 +302,14 @@ vc_pp_pipeline_create(vc_ctx_t *ctx, vc_display_t *disp)
 
     /* Shader modules. */
     disp->pp_vert_shader = vc_create_shader_module(ctx->device,
-                                                    postprocess_vert_spv,
-                                                    postprocess_vert_spv_size);
+                                                   postprocess_vert_spv,
+                                                   postprocess_vert_spv_size);
     if (disp->pp_vert_shader == VK_NULL_HANDLE)
         return -1;
 
     disp->pp_frag_shader = vc_create_shader_module(ctx->device,
-                                                    postprocess_frag_spv,
-                                                    postprocess_frag_spv_size);
+                                                   postprocess_frag_spv,
+                                                   postprocess_frag_spv_size);
     if (disp->pp_frag_shader == VK_NULL_HANDLE)
         return -1;
 
@@ -322,7 +321,7 @@ vc_pp_pipeline_create(vc_ctx_t *ctx, vc_display_t *disp)
     layout_ci.pSetLayouts    = &disp->pp_desc_layout;
 
     result = vkCreatePipelineLayout(ctx->device, &layout_ci, NULL,
-                                     &disp->pp_pipeline_layout);
+                                    &disp->pp_pipeline_layout);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: post-process pipeline layout failed (%d)\n", result);
         return -1;
@@ -382,9 +381,9 @@ vc_pp_pipeline_create(vc_ctx_t *ctx, vc_display_t *disp)
     VkPipelineColorBlendAttachmentState blend_att;
     memset(&blend_att, 0, sizeof(blend_att));
     blend_att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
-                             | VK_COLOR_COMPONENT_G_BIT
-                             | VK_COLOR_COMPONENT_B_BIT
-                             | VK_COLOR_COMPONENT_A_BIT;
+        | VK_COLOR_COMPONENT_G_BIT
+        | VK_COLOR_COMPONENT_B_BIT
+        | VK_COLOR_COMPONENT_A_BIT;
 
     VkPipelineColorBlendStateCreateInfo color_blend;
     memset(&color_blend, 0, sizeof(color_blend));
@@ -424,8 +423,8 @@ vc_pp_pipeline_create(vc_ctx_t *ctx, vc_display_t *disp)
     pipeline_ci.basePipelineIndex   = -1;
 
     result = vkCreateGraphicsPipelines(ctx->device, VK_NULL_HANDLE, 1,
-                                        &pipeline_ci, NULL,
-                                        &disp->pp_pipeline);
+                                       &pipeline_ci, NULL,
+                                       &disp->pp_pipeline);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: post-process pipeline creation failed (%d)\n",
                result);
@@ -449,9 +448,9 @@ vc_display_create_semaphores(vc_ctx_t *ctx, vc_display_t *disp)
 
     for (uint32_t i = 0; i < VC_NUM_FRAMES; i++) {
         VkResult r1 = vkCreateSemaphore(ctx->device, &sem_ci, NULL,
-                                         &disp->image_available_sem[i]);
+                                        &disp->image_available_sem[i]);
         VkResult r2 = vkCreateSemaphore(ctx->device, &sem_ci, NULL,
-                                         &disp->render_finished_sem[i]);
+                                        &disp->render_finished_sem[i]);
         if (r1 != VK_SUCCESS || r2 != VK_SUCCESS) {
             VC_LOG("VideoCommon: display semaphore creation failed\n");
             return -1;
@@ -496,16 +495,16 @@ vc_display_create_image_views(vc_ctx_t *ctx, vc_display_t *disp)
     for (uint32_t i = 0; i < disp->image_count; i++) {
         VkImageViewCreateInfo view_ci;
         memset(&view_ci, 0, sizeof(view_ci));
-        view_ci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_ci.image                           = disp->images[i];
-        view_ci.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-        view_ci.format                          = disp->format;
-        view_ci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_ci.subresourceRange.levelCount     = 1;
-        view_ci.subresourceRange.layerCount     = 1;
+        view_ci.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image                       = disp->images[i];
+        view_ci.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format                      = disp->format;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.layerCount = 1;
 
         VkResult result = vkCreateImageView(ctx->device, &view_ci, NULL,
-                                             &disp->image_views[i]);
+                                            &disp->image_views[i]);
         if (result != VK_SUCCESS) {
             VC_LOG("VideoCommon: swapchain image view %u failed (%d)\n",
                    i, result);
@@ -545,7 +544,7 @@ vc_display_create_pp_framebuffers(vc_ctx_t *ctx, vc_display_t *disp)
         fb_ci.layers          = 1;
 
         VkResult result = vkCreateFramebuffer(ctx->device, &fb_ci, NULL,
-                                               &disp->pp_framebuffers[i]);
+                                              &disp->pp_framebuffers[i]);
         if (result != VK_SUCCESS) {
             VC_LOG("VideoCommon: post-process framebuffer %u failed (%d)\n",
                    i, result);
@@ -567,9 +566,9 @@ vc_swapchain_create(vc_ctx_t *ctx, vc_display_t *disp)
     /* Verify that our graphics queue supports present. */
     VkBool32 present_supported = VK_FALSE;
     vkGetPhysicalDeviceSurfaceSupportKHR(ctx->physical_device,
-                                          ctx->queue_family,
-                                          disp->surface,
-                                          &present_supported);
+                                         ctx->queue_family,
+                                         disp->surface,
+                                         &present_supported);
     if (!present_supported) {
         VC_LOG("VideoCommon: queue family %u does not support present\n",
                ctx->queue_family);
@@ -579,7 +578,7 @@ vc_swapchain_create(vc_ctx_t *ctx, vc_display_t *disp)
     /* Query surface capabilities. */
     VkSurfaceCapabilitiesKHR caps;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx->physical_device,
-                                               disp->surface, &caps);
+                                              disp->surface, &caps);
 
     /* Image count: prefer 3 (triple buffer). */
     uint32_t image_count = 3;
@@ -592,15 +591,15 @@ vc_swapchain_create(vc_ctx_t *ctx, vc_display_t *disp)
 
     /* Format. */
     VkSurfaceFormatKHR format = vc_select_surface_format(ctx, disp->surface);
-    disp->format = format.format;
+    disp->format              = format.format;
 
     /* Extent. */
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == UINT32_MAX) {
         extent.width  = atomic_load_explicit(&disp->resize_width,
-                                              memory_order_relaxed);
+                                             memory_order_relaxed);
         extent.height = atomic_load_explicit(&disp->resize_height,
-                                              memory_order_relaxed);
+                                             memory_order_relaxed);
         if (extent.width == 0)
             extent.width = 640;
         if (extent.height == 0)
@@ -650,14 +649,14 @@ vc_swapchain_create(vc_ctx_t *ctx, vc_display_t *disp)
 
     /* Retrieve swapchain images. */
     vkGetSwapchainImagesKHR(ctx->device, disp->swapchain,
-                             &disp->image_count, NULL);
+                            &disp->image_count, NULL);
     if (disp->image_count > VC_MAX_SWAPCHAIN_IMAGES) {
         VC_LOG("VideoCommon: swapchain image count %u exceeds max %d\n",
                disp->image_count, VC_MAX_SWAPCHAIN_IMAGES);
         disp->image_count = VC_MAX_SWAPCHAIN_IMAGES;
     }
     vkGetSwapchainImagesKHR(ctx->device, disp->swapchain,
-                             &disp->image_count, disp->images);
+                            &disp->image_count, disp->images);
 
     /* Create image views. */
     if (vc_display_create_image_views(ctx, disp) != 0)
@@ -770,7 +769,7 @@ vc_display_destroy(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     if (disp->pp_desc_pool != VK_NULL_HANDLE) {
         vkDestroyDescriptorPool(ctx->device, disp->pp_desc_pool, NULL);
-        disp->pp_desc_pool = VK_NULL_HANDLE;
+        disp->pp_desc_pool    = VK_NULL_HANDLE;
         disp->pp_desc_sets[0] = VK_NULL_HANDLE;
         disp->pp_desc_sets[1] = VK_NULL_HANDLE;
         disp->vga_desc_set    = VK_NULL_HANDLE;
@@ -909,7 +908,7 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     /* Check for resize. */
     if (atomic_exchange_explicit(&disp->resize_requested, 0,
-                                  memory_order_acquire)) {
+                                 memory_order_acquire)) {
         if (disp->swapchain != VK_NULL_HANDLE) {
             vc_display_recreate_swapchain(ctx, gpu_st);
         }
@@ -920,11 +919,10 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        swapchain is not ready yet, leave vga_frame_ready=1 so the
        next tick can retry instead of silently dropping the frame. */
     if (atomic_load_explicit(&disp->vga_frame_ready,
-                              memory_order_acquire)) {
-        if (!gpu_st->render_pass_active &&
-            disp->swapchain != VK_NULL_HANDLE) {
+                             memory_order_acquire)) {
+        if (!gpu_st->render_pass_active && disp->swapchain != VK_NULL_HANDLE) {
             atomic_store_explicit(&disp->vga_frame_ready, 0,
-                                   memory_order_relaxed);
+                                  memory_order_relaxed);
             vc_display_present_vga(ctx, gpu_st);
         }
         /* If swapchain not ready, leave vga_frame_ready=1 for next tick. */
@@ -960,17 +958,17 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     }
 
     /* Barrier: offscreen color -> SHADER_READ_ONLY_OPTIMAL. */
-    int back_idx = gpu_st->rp.back_index;
+    int                  back_idx = gpu_st->rp.back_index;
     VkImageMemoryBarrier barrier;
     memset(&barrier, 0, sizeof(barrier));
-    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask       = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
-    barrier.oldLayout           = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    barrier.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image               = gpu_st->rp.fb[back_idx].color_image;
+    barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask                   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
+    barrier.oldLayout                       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    barrier.newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image                           = gpu_st->rp.fb[back_idx].color_image;
     barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel   = 0;
     barrier.subresourceRange.levelCount     = 1;
@@ -978,9 +976,9 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     barrier.subresourceRange.layerCount     = 1;
 
     vkCmdPipelineBarrier(cmd_buf,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 0, NULL, 0, NULL, 1, &barrier);
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &barrier);
 
     /* Begin post-process render pass. */
     VkClearValue clear_value;
@@ -1030,16 +1028,15 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     barrier.newLayout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     vkCmdPipelineBarrier(cmd_buf,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        0, 0, NULL, 0, NULL, 1, &barrier);
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         0, 0, NULL, 0, NULL, 1, &barrier);
 
     /* End command buffer. */
     vkEndCommandBuffer(cmd_buf);
 
     /* Submit with semaphore sync. */
-    VkPipelineStageFlags wait_stage =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSubmitInfo submit;
     memset(&submit, 0, sizeof(submit));
@@ -1052,8 +1049,8 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores    = &disp->render_finished_sem[frame_index];
 
-    vc_frame_t *f = &gpu_st->frame[frame_index];
-    VkResult sub_result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
+    vc_frame_t *f          = &gpu_st->frame[frame_index];
+    VkResult    sub_result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
     if (sub_result != VK_SUCCESS) {
         VC_LOG("VideoCommon: display vkQueueSubmit failed (%d)\n", sub_result);
         return -1;
@@ -1116,7 +1113,7 @@ vc_display_create_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     image_ci.samples       = VK_SAMPLE_COUNT_1_BIT;
     image_ci.tiling        = VK_IMAGE_TILING_OPTIMAL;
     image_ci.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                           | VK_IMAGE_USAGE_SAMPLED_BIT;
+        | VK_IMAGE_USAGE_SAMPLED_BIT;
     image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     result = vc_vma_create_image(ctx->allocator, &image_ci,
@@ -1129,16 +1126,16 @@ vc_display_create_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     /* Image view. */
     VkImageViewCreateInfo view_ci;
     memset(&view_ci, 0, sizeof(view_ci));
-    view_ci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_ci.image                           = disp->vga_image;
-    view_ci.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-    view_ci.format                          = VK_FORMAT_B8G8R8A8_UNORM;
-    view_ci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    view_ci.subresourceRange.levelCount     = 1;
-    view_ci.subresourceRange.layerCount     = 1;
+    view_ci.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_ci.image                       = disp->vga_image;
+    view_ci.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
+    view_ci.format                      = VK_FORMAT_B8G8R8A8_UNORM;
+    view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_ci.subresourceRange.levelCount = 1;
+    view_ci.subresourceRange.layerCount = 1;
 
     result = vkCreateImageView(ctx->device, &view_ci, NULL,
-                                &disp->vga_image_view);
+                               &disp->vga_image_view);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: VGA blit image view creation failed (%d)\n", result);
         return -1;
@@ -1168,7 +1165,7 @@ vc_display_create_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     pool_ci.queueFamilyIndex = ctx->queue_family;
 
     result = vkCreateCommandPool(ctx->device, &pool_ci, NULL,
-                                  &disp->vga_cmd_pool);
+                                 &disp->vga_cmd_pool);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: VGA blit command pool creation failed (%d)\n", result);
         return -1;
@@ -1179,10 +1176,10 @@ vc_display_create_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     alloc_ci.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     alloc_ci.commandPool        = disp->vga_cmd_pool;
     alloc_ci.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    alloc_ci.commandBufferCount = 1;
+    alloc_ci.commandBufferCount = VC_NUM_FRAMES;
 
     result = vkAllocateCommandBuffers(ctx->device, &alloc_ci,
-                                       &disp->vga_cmd_buf);
+                                      disp->vga_cmd_buf);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: VGA blit command buffer alloc failed (%d)\n", result);
         return -1;
@@ -1225,7 +1222,8 @@ vc_display_destroy_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     if (disp->vga_cmd_pool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(ctx->device, disp->vga_cmd_pool, NULL);
         disp->vga_cmd_pool = VK_NULL_HANDLE;
-        disp->vga_cmd_buf  = VK_NULL_HANDLE;
+        for (uint32_t i = 0; i < VC_NUM_FRAMES; i++)
+            disp->vga_cmd_buf[i] = VK_NULL_HANDLE;
     }
 
     if (disp->vga_staging_buf != VK_NULL_HANDLE) {
@@ -1261,7 +1259,7 @@ vc_display_destroy_vga_resources(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
    the blit dimensions change.  Called from vc_display_present_vga(). */
 static int
 vc_vga_ensure_image_size(vc_ctx_t *ctx, vc_display_t *disp,
-                          uint32_t w, uint32_t h)
+                         uint32_t w, uint32_t h)
 {
     if (disp->vga_tex_width == w && disp->vga_tex_height == h
         && disp->vga_image != VK_NULL_HANDLE)
@@ -1297,7 +1295,7 @@ vc_vga_ensure_image_size(vc_ctx_t *ctx, vc_display_t *disp,
     image_ci.samples       = VK_SAMPLE_COUNT_1_BIT;
     image_ci.tiling        = VK_IMAGE_TILING_OPTIMAL;
     image_ci.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                           | VK_IMAGE_USAGE_SAMPLED_BIT;
+        | VK_IMAGE_USAGE_SAMPLED_BIT;
     image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkResult result = vc_vma_create_image(ctx->allocator, &image_ci,
@@ -1311,24 +1309,23 @@ vc_vga_ensure_image_size(vc_ctx_t *ctx, vc_display_t *disp,
 
     VkImageViewCreateInfo view_ci;
     memset(&view_ci, 0, sizeof(view_ci));
-    view_ci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_ci.image                           = disp->vga_image;
-    view_ci.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
-    view_ci.format                          = VK_FORMAT_B8G8R8A8_UNORM;
-    view_ci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    view_ci.subresourceRange.levelCount     = 1;
-    view_ci.subresourceRange.layerCount     = 1;
+    view_ci.sType                       = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_ci.image                       = disp->vga_image;
+    view_ci.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
+    view_ci.format                      = VK_FORMAT_B8G8R8A8_UNORM;
+    view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_ci.subresourceRange.levelCount = 1;
+    view_ci.subresourceRange.layerCount = 1;
 
     result = vkCreateImageView(ctx->device, &view_ci, NULL,
-                                &disp->vga_image_view);
+                               &disp->vga_image_view);
     if (result != VK_SUCCESS) {
         VC_LOG("VideoCommon: VGA image view resize failed (%d)\n", result);
         return -1;
     }
 
     /* Update the VGA descriptor set. */
-    if (disp->vga_desc_set != VK_NULL_HANDLE &&
-        disp->pp_sampler != VK_NULL_HANDLE) {
+    if (disp->vga_desc_set != VK_NULL_HANDLE && disp->pp_sampler != VK_NULL_HANDLE) {
         VkDescriptorImageInfo img_info;
         memset(&img_info, 0, sizeof(img_info));
         img_info.sampler     = disp->pp_sampler;
@@ -1373,7 +1370,7 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     /* Get the source buffer pointer. */
     uintptr_t buf_ptr = atomic_load_explicit(&disp->vga_buf_ptrs[buf_idx],
-                                              memory_order_acquire);
+                                             memory_order_acquire);
     if (buf_ptr == 0)
         return -1;
 
@@ -1392,10 +1389,10 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     /* Copy the blit region from the image buffer to the staging buffer.
        The source is Format_RGB32 (BGRA8), row pitch = 2048 * 4.
        We pack into the staging buffer with tight row pitch (bw * 4). */
-    const uint8_t *src = (const uint8_t *) buf_ptr;
-    uint8_t       *dst = (uint8_t *) disp->vga_staging_mapped;
-    int src_pitch = 2048 * 4;
-    int dst_pitch = bw * 4;
+    const uint8_t *src       = (const uint8_t *) buf_ptr;
+    uint8_t       *dst       = (uint8_t *) disp->vga_staging_mapped;
+    int            src_pitch = 2048 * 4;
+    int            dst_pitch = bw * 4;
 
     for (int y = by; y < by + bh; y++) {
         memcpy(dst + (y - by) * dst_pitch,
@@ -1404,17 +1401,17 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
 
     /* Use the per-frame resources for VGA blit. */
-    uint32_t   frame_index = gpu_st->frame_index;
-    vc_frame_t *f = &gpu_st->frame[frame_index];
+    uint32_t    frame_index = gpu_st->frame_index;
+    vc_frame_t *f           = &gpu_st->frame[frame_index];
 
-    /* Wait for this frame's fence if needed. */
+    /* Wait for this frame's fence before reusing its command buffer. */
     if (f->submitted) {
         vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
         vkResetFences(ctx->device, 1, &f->fence);
         f->submitted = 0;
     }
 
-    VkCommandBuffer cmd_buf = disp->vga_cmd_buf;
+    VkCommandBuffer cmd_buf = disp->vga_cmd_buf[frame_index];
     vkResetCommandBuffer(cmd_buf, 0);
 
     VkCommandBufferBeginInfo begin_ci;
@@ -1426,41 +1423,41 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     /* Barrier: VGA image UNDEFINED -> TRANSFER_DST. */
     VkImageMemoryBarrier barrier;
     memset(&barrier, 0, sizeof(barrier));
-    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask       = 0;
-    barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
-    barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
-    barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image               = disp->vga_image;
-    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.levelCount     = 1;
-    barrier.subresourceRange.layerCount     = 1;
+    barrier.sType                       = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcAccessMask               = 0;
+    barrier.dstAccessMask               = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.oldLayout                   = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout                   = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex         = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image                       = disp->vga_image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
 
     vkCmdPipelineBarrier(cmd_buf,
-        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        0, 0, NULL, 0, NULL, 1, &barrier);
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &barrier);
 
     /* Copy staging buffer -> VGA image at (0,0).
        The staging buffer contains the blit region packed tightly. */
     VkBufferImageCopy copy_region;
     memset(&copy_region, 0, sizeof(copy_region));
-    copy_region.bufferOffset                    = 0;
-    copy_region.bufferRowLength                 = (uint32_t) bw;
-    copy_region.bufferImageHeight               = (uint32_t) bh;
-    copy_region.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    copy_region.imageSubresource.layerCount     = 1;
-    copy_region.imageOffset.x                   = 0;
-    copy_region.imageOffset.y                   = 0;
-    copy_region.imageExtent.width               = (uint32_t) bw;
-    copy_region.imageExtent.height              = (uint32_t) bh;
-    copy_region.imageExtent.depth               = 1;
+    copy_region.bufferOffset                = 0;
+    copy_region.bufferRowLength             = (uint32_t) bw;
+    copy_region.bufferImageHeight           = (uint32_t) bh;
+    copy_region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.imageSubresource.layerCount = 1;
+    copy_region.imageOffset.x               = 0;
+    copy_region.imageOffset.y               = 0;
+    copy_region.imageExtent.width           = (uint32_t) bw;
+    copy_region.imageExtent.height          = (uint32_t) bh;
+    copy_region.imageExtent.depth           = 1;
 
     vkCmdCopyBufferToImage(cmd_buf, disp->vga_staging_buf, disp->vga_image,
-                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            1, &copy_region);
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &copy_region);
 
     /* Barrier: VGA image TRANSFER_DST -> SHADER_READ_ONLY. */
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1469,9 +1466,9 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     vkCmdPipelineBarrier(cmd_buf,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 0, NULL, 0, NULL, 1, &barrier);
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &barrier);
 
     /* Acquire swapchain image. */
     uint32_t image_idx;
@@ -1536,8 +1533,7 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     vkEndCommandBuffer(cmd_buf);
 
     /* Submit with semaphore sync. */
-    VkPipelineStageFlags wait_stage =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSubmitInfo submit;
     memset(&submit, 0, sizeof(submit));
@@ -1643,7 +1639,7 @@ vc_display_wait_teardown(vc_ctx_t *ctx)
 
     /* Spin-yield until the GPU thread confirms teardown. */
     while (!atomic_load_explicit(&gpu_st->disp.teardown_complete,
-                                  memory_order_acquire)) {
+                                 memory_order_acquire)) {
         /* Small sleep to avoid burning CPU. */
 #if defined(_WIN32)
         SwitchToThread();
@@ -1677,7 +1673,7 @@ vc_display_set_vga_bufs(void *ctx_ptr, void *buf0, void *buf1)
 
 void
 vc_display_notify_vga_frame(void *ctx_ptr, int buf_idx,
-                             int x, int y, int w, int h)
+                            int x, int y, int w, int h)
 {
     vc_ctx_t *ctx = (vc_ctx_t *) ctx_ptr;
     if (!ctx)
