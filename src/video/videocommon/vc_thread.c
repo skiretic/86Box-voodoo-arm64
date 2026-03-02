@@ -53,12 +53,6 @@
 #include "vc_readback.h"
 
 /* -------------------------------------------------------------------------- */
-/*  Temporary diagnostic logging (stderr -- works in release builds)            */
-/* -------------------------------------------------------------------------- */
-
-static uint64_t diag_tick_count     = 0;
-
-/* -------------------------------------------------------------------------- */
 /*  Platform counting semaphore                                                */
 /*                                                                             */
 /*  86Box's thread API only provides manual-reset events, which are not        */
@@ -568,6 +562,10 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
 static void
 vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
+    /* Mark that a swap arrived this tick -- prevents vc_display_tick
+       from force-ending the render pass during active rendering. */
+    gpu_st->swap_seen = 1;
+
     if (!gpu_st->render_pass_active)
         return;
 

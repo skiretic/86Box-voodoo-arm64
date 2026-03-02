@@ -157,6 +157,9 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
                 if (voodoo->swap_count > 0)
                     voodoo->swap_count--;
                 thread_release_mutex(voodoo->swap_mutex);
+#ifdef USE_VIDEOCOMMON
+
+#endif
             } else if (TRIPLE_BUFFER) {
                 if (voodoo->swap_pending)
                     voodoo_wait_for_swap_complete(voodoo);
@@ -164,6 +167,9 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
                 voodoo->swap_interval = (val >> 1) & 0xff;
                 voodoo->swap_offset   = voodoo->params.front_offset;
                 voodoo->swap_pending  = 1;
+#ifdef USE_VIDEOCOMMON
+
+#endif
             } else {
                 voodoo->swap_interval = (val >> 1) & 0xff;
                 voodoo->swap_offset   = voodoo->params.front_offset;
@@ -179,14 +185,18 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
                 }
 #endif
                 voodoo_wait_for_swap_complete(voodoo);
+#ifdef USE_VIDEOCOMMON
+
+#endif
             }
             voodoo->cmd_read++;
 #ifdef USE_VIDEOCOMMON
             /* For the non-blocking paths (immediate swap and triple-buffer),
                push the VK swap here.  The blocking double-buffer path already
                pushed it before voodoo_wait_for_swap_complete() above. */
-            if (voodoo->use_gpu_renderer && !vk_swap_pushed)
+            if (voodoo->use_gpu_renderer && !vk_swap_pushed) {
                 voodoo_vk_push_swap(voodoo);
+            }
 #endif
             break;
 

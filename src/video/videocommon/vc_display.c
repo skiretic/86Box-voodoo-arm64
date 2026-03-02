@@ -903,9 +903,6 @@ vc_display_update_descriptors(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 /*  GPU thread display tick                                                    */
 /* -------------------------------------------------------------------------- */
 
-/* Temporary diagnostic counter for display tick (works in release builds). */
-
-
 void
 vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
@@ -932,7 +929,6 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         disp->surface = new_surface;
         if (vc_display_create(ctx, gpu_st) != 0) {
             disp->surface = VK_NULL_HANDLE;
-        } else {
         }
     }
 
@@ -944,16 +940,24 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         }
     }
 
+    /* Consume and clear the swap-seen flag.  When Voodoo is actively
+       rendering (regular swaps arriving), we must NOT force-end its
+       render pass -- that causes mid-frame submits and flashing. */
+    int swap_seen = gpu_st->swap_seen;
+    gpu_st->swap_seen = 0;
+
     /* Check for VGA passthrough frames.
        Only consume the flag when we can actually present -- if the
        swapchain is not ready yet, leave vga_frame_ready=1 so the
        next tick can retry instead of silently dropping the frame. */
     if (atomic_load_explicit(&disp->vga_frame_ready,
                              memory_order_acquire)) {
-        if (gpu_st->render_pass_active) {
+        if (gpu_st->render_pass_active && !swap_seen) {
             /* Voodoo sent triangles without a swap command (happens
                during driver self-test).  Force-end the render pass
-               so VGA present can proceed. */
+               so VGA present can proceed.  Only do this when no swap
+               has arrived since the last tick -- otherwise we would
+               interrupt active Voodoo rendering. */
             vc_gpu_end_frame(ctx, gpu_st);
         }
         if (disp->swapchain != VK_NULL_HANDLE) {

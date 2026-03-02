@@ -104,6 +104,9 @@ typedef struct voodoo_vk_tex_track_t {
     uint32_t last_identity;    /* Quick hash of last uploaded texture. */
 } voodoo_vk_tex_track_t;
 
+/* Diagnostic counter for producer-side triangle pushes. */
+
+
 /* Global tracking (could be per-voodoo if needed, but there's only ever one). */
 static voodoo_vk_tex_track_t vk_tex_track[2] = {
     { .addr = ~0u, .tLOD = ~0u, .pal_checksum = ~0u, .slot = -1, .last_upload_slot = -1, .last_identity = 0 },

@@ -43,6 +43,9 @@ typedef struct vc_gpu_state_t {
     /* Render state tracking. */
     int      render_pass_active;
     int      renderer_switch_done; /* 1 after first swap triggers vc_notify_renderer_ready */
+    int      swap_seen;            /* Set by swap handler, cleared by display tick.
+                                      Prevents VGA tick from force-ending an active render pass
+                                      when Voodoo is actively rendering with regular swaps. */
     uint32_t fb_width;
     uint32_t fb_height;
 
