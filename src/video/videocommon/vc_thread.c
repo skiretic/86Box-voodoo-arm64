@@ -439,7 +439,7 @@ vc_gpu_begin_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     VkClearValue clear_values[2];
     memset(clear_values, 0, sizeof(clear_values));
-    clear_values[1].depthStencil.depth = 0.0f;
+    clear_values[1].depthStencil.depth = 1.0f;
 
     VkRenderPassBeginInfo rp_begin;
     memset(&rp_begin, 0, sizeof(rp_begin));
