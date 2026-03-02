@@ -572,9 +572,9 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
          * Direct 1:1 mapping. */
         VkCompareOp depth_func = (VkCompareOp) ((fbz >> 5) & 7u);
 
-        vkCmdSetDepthTestEnable(f->cmd_buf, depth_test);
-        vkCmdSetDepthWriteEnable(f->cmd_buf, depth_write);
-        vkCmdSetDepthCompareOp(f->cmd_buf, depth_func);
+        vkCmdSetDepthTestEnableEXT(f->cmd_buf, depth_test);
+        vkCmdSetDepthWriteEnableEXT(f->cmd_buf, depth_write);
+        vkCmdSetDepthCompareOpEXT(f->cmd_buf, depth_func);
     }
 
     /* Scissor from framebuffer dimensions (full viewport -- clip rect
