@@ -17,6 +17,9 @@
 
 #include "vc_internal.h"
 
+/* Forward declaration (defined in vc_gpu_state.h). */
+typedef struct vc_gpu_state_t vc_gpu_state_t;
+
 /* -------------------------------------------------------------------------- */
 /*  GPU thread lifecycle                                                       */
 /* -------------------------------------------------------------------------- */
@@ -26,6 +29,11 @@ void vc_stop_gpu_thread(vc_ctx_t *ctx);
 
 /* GPU thread main function (passed to thread_create). */
 void vc_gpu_thread_func(void *param);
+
+/* End the current frame: flush remaining triangles, end render pass,
+   submit command buffer, advance frame index.  No-op if no render pass
+   is active.  Called by the GPU thread (and vc_display_tick). */
+void vc_gpu_end_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
 
 /* -------------------------------------------------------------------------- */
 /*  SPSC ring buffer                                                           */

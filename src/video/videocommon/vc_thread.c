@@ -297,9 +297,9 @@ vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
     /* Check if we need a wraparound sentinel. */
     if (wp + total_size > VC_RING_SIZE) {
         vc_ring_cmd_header_t *wrap = (vc_ring_cmd_header_t *) &ring->buffer[wp];
-        wrap->type     = VC_CMD_WRAPAROUND;
-        wrap->size     = 0;
-        wrap->reserved = 0;
+        wrap->type                 = VC_CMD_WRAPAROUND;
+        wrap->size                 = 0;
+        wrap->reserved             = 0;
 
         atomic_store_explicit(&ring->write_pos, 0, memory_order_release);
         wp = 0;
@@ -311,9 +311,9 @@ vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
     }
 
     vc_ring_cmd_header_t *hdr = (vc_ring_cmd_header_t *) &ring->buffer[wp];
-    hdr->type     = cmd_type;
-    hdr->size     = total_size;
-    hdr->reserved = 0;
+    hdr->type                 = cmd_type;
+    hdr->size                 = total_size;
+    hdr->reserved             = 0;
 
     uint32_t new_wp = (wp + total_size) & VC_RING_MASK;
     atomic_store_explicit(&ring->write_pos, new_wp, memory_order_release);
@@ -428,10 +428,10 @@ vc_gpu_begin_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     vkBeginCommandBuffer(f->cmd_buf, &begin_ci);
 
     /* Begin render pass on the back framebuffer. */
-    int back_idx = gpu_st->rp.back_index;
+    int          back_idx  = gpu_st->rp.back_index;
     VkRenderPass rp_handle = gpu_st->rp.fb[back_idx].first_frame
-                           ? gpu_st->rp.render_pass_clear
-                           : gpu_st->rp.render_pass_load;
+        ? gpu_st->rp.render_pass_clear
+        : gpu_st->rp.render_pass_load;
 
     VkClearValue clear_values[2];
     memset(clear_values, 0, sizeof(clear_values));
@@ -439,13 +439,13 @@ vc_gpu_begin_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     VkRenderPassBeginInfo rp_begin;
     memset(&rp_begin, 0, sizeof(rp_begin));
-    rp_begin.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_begin.renderPass        = rp_handle;
-    rp_begin.framebuffer       = gpu_st->rp.fb[back_idx].framebuffer;
+    rp_begin.sType                    = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin.renderPass               = rp_handle;
+    rp_begin.framebuffer              = gpu_st->rp.fb[back_idx].framebuffer;
     rp_begin.renderArea.extent.width  = gpu_st->rp.fb[back_idx].width;
     rp_begin.renderArea.extent.height = gpu_st->rp.fb[back_idx].height;
-    rp_begin.clearValueCount   = 2;
-    rp_begin.pClearValues      = clear_values;
+    rp_begin.clearValueCount          = 2;
+    rp_begin.pClearValues             = clear_values;
 
     vkCmdBeginRenderPass(f->cmd_buf, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -474,7 +474,7 @@ vc_gpu_begin_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
                                &gpu_st->batch.vertex_buffer, &offset);
     }
 
-    gpu_st->render_pass_active = 1;
+    gpu_st->render_pass_active          = 1;
     gpu_st->rp.fb[back_idx].first_frame = 0;
 }
 
@@ -482,7 +482,7 @@ vc_gpu_begin_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 /*  GPU thread: end current frame                                              */
 /* -------------------------------------------------------------------------- */
 
-static void
+void
 vc_gpu_end_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
     if (!gpu_st->render_pass_active)
@@ -504,7 +504,7 @@ vc_gpu_end_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         VC_LOG("VideoCommon: vkQueueSubmit failed (%d)\n", result);
     }
 
-    f->submitted = 1;
+    f->submitted               = 1;
     gpu_st->render_pass_active = 0;
 
     gpu_st->frame_index = (gpu_st->frame_index + 1) % VC_NUM_FRAMES;
@@ -529,9 +529,8 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
     /* Extract push constants and vertices from payload. */
-    const vc_push_constants_t *pc = (const vc_push_constants_t *) payload;
-    const vc_vertex_t         *verts = (const vc_vertex_t *)
-        ((const uint8_t *) payload + sizeof(vc_push_constants_t));
+    const vc_push_constants_t *pc    = (const vc_push_constants_t *) payload;
+    const vc_vertex_t         *verts = (const vc_vertex_t *) ((const uint8_t *) payload + sizeof(vc_push_constants_t));
 
     /* Push constants (per-triangle). */
     vkCmdPushConstants(f->cmd_buf, gpu_st->pipe.layout,
@@ -573,7 +572,7 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     /* If swapchain is available, do post-process blit + present. */
     if (gpu_st->disp.swapchain != VK_NULL_HANDLE) {
         int present_result = vc_display_present(ctx, gpu_st, f->cmd_buf,
-                                                 gpu_st->frame_index);
+                                                gpu_st->frame_index);
         if (present_result == 1) {
             /* Swapchain needs recreation. */
             vc_display_recreate_swapchain(ctx, gpu_st);
@@ -651,7 +650,8 @@ vc_gpu_thread_init(vc_ctx_t *ctx)
 
     /* Pipeline. */
     if (vc_pipeline_create(ctx, &gpu_st->pipe, &gpu_st->shaders,
-                           gpu_st->rp.render_pass_load) != 0)
+                           gpu_st->rp.render_pass_load)
+        != 0)
         goto fail;
 
     /* Publish framebuffer dimensions for FIFO thread. */

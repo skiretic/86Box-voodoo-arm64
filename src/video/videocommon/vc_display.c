@@ -948,7 +948,13 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        next tick can retry instead of silently dropping the frame. */
     if (atomic_load_explicit(&disp->vga_frame_ready,
                              memory_order_acquire)) {
-        if (!gpu_st->render_pass_active && disp->swapchain != VK_NULL_HANDLE) {
+        if (gpu_st->render_pass_active) {
+            /* Voodoo sent triangles without a swap command (happens
+               during driver self-test).  Force-end the render pass
+               so VGA present can proceed. */
+            vc_gpu_end_frame(ctx, gpu_st);
+        }
+        if (disp->swapchain != VK_NULL_HANDLE) {
             atomic_store_explicit(&disp->vga_frame_ready, 0,
                                   memory_order_relaxed);
             vc_display_present_vga(ctx, gpu_st);
