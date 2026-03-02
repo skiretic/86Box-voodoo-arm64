@@ -28,6 +28,7 @@ typedef struct vc_gpu_state_t vc_gpu_state_t;
 
 /* Maximum number of swapchain images we handle. */
 #define VC_MAX_SWAPCHAIN_IMAGES 8
+#define VC_VGA_TIMEOUT_FRAMES   60  /* ~1 second at 60Hz: re-enable VGA passthrough */
 
 /* -------------------------------------------------------------------------- */
 /*  Display state                                                              */
@@ -74,6 +75,13 @@ typedef struct vc_display_t {
     /* Pointer to voodoo_t::vc_display_active for the GPU thread to set.
        Copied from ctx->display_active_ptr during vc_gpu_thread_init(). */
     int *display_active_ptr;
+
+    /* Timeout counter: incremented by vc_display_tick() each VGA frame
+       while Voodoo display is active, reset to 0 by vc_gpu_handle_swap()
+       on every real present.  When this exceeds VC_VGA_TIMEOUT_FRAMES,
+       VGA passthrough is re-enabled (handles Glide app exit when no more
+       swap commands arrive). */
+    _Atomic(int) vga_frames_since_present;
 
     /* --- VGA passthrough blit state --- */
 

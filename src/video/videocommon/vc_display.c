@@ -106,6 +106,7 @@ vc_display_state_init(vc_display_t *disp)
     atomic_store_explicit(&disp->vga_blit_w, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_blit_h, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_buf_ptrs[0], 0, memory_order_relaxed);
+    atomic_store_explicit(&disp->vga_frames_since_present, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_buf_ptrs[1], 0, memory_order_relaxed);
 }
 
@@ -947,6 +948,29 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        BIOS, driver load) or after it deactivates. */
     int voodoo_active = disp->display_active_ptr
         && *disp->display_active_ptr;
+
+    /* Timeout-based VGA passthrough re-enable.  When Voodoo is active,
+       count VGA frames since the last real Voodoo present.  If no present
+       has happened for VC_VGA_TIMEOUT_FRAMES (~1 second), the Glide app
+       has likely exited without sending enough empty swaps for the fast
+       path in vc_gpu_handle_swap() to trigger.  Clear display_active to
+       unblock VGA passthrough. */
+    if (voodoo_active) {
+        int frames = atomic_load_explicit(&disp->vga_frames_since_present,
+                                          memory_order_relaxed);
+        frames++;
+        if (frames >= VC_VGA_TIMEOUT_FRAMES) {
+            *disp->display_active_ptr = 0;
+            atomic_store_explicit(&disp->vga_frames_since_present, 0,
+                                  memory_order_relaxed);
+            fprintf(stderr, "VideoCommon: VGA timeout (%d frames), re-enabling VGA passthrough\n",
+                    frames);
+            voodoo_active = 0; /* Let VGA frame below proceed immediately. */
+        } else {
+            atomic_store_explicit(&disp->vga_frames_since_present, frames,
+                                  memory_order_relaxed);
+        }
+    }
 
     /* Check for VGA passthrough frames. */
     if (atomic_load_explicit(&disp->vga_frame_ready,

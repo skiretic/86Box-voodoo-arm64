@@ -616,7 +616,7 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        must not clear vc_display_active prematurely. */
     if (!gpu_st->render_pass_active) {
         gpu_st->empty_swap_count++;
-        if (gpu_st->has_rendered && gpu_st->empty_swap_count >= 3
+        if (gpu_st->has_rendered && gpu_st->empty_swap_count >= 2
             && gpu_st->disp.display_active_ptr
             && *gpu_st->disp.display_active_ptr) {
             *gpu_st->disp.display_active_ptr = 0;
@@ -630,9 +630,13 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
 
     /* A real swap with triangles -- reset empty swap counter and mark
-       that real rendering has occurred. */
+       that real rendering has occurred.  Also reset the VGA timeout
+       counter so vc_display_tick() doesn't accidentally re-enable
+       VGA passthrough while Voodoo is actively rendering. */
     gpu_st->empty_swap_count = 0;
     gpu_st->has_rendered     = 1;
+    atomic_store_explicit(&gpu_st->disp.vga_frames_since_present, 0,
+                          memory_order_relaxed);
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
