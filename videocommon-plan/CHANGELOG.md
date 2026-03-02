@@ -5,7 +5,86 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 
 ---
 
-## [Unreleased] -- Phase 2: Basic Rendering
+## [In Progress] -- Phase 5: Core Pipeline (2026-03-02)
+
+### In Progress
+- Per-triangle push constants — fix batch/draw system to call `vkCmdPushConstants` before each draw (vc-lead)
+- Uber-shader color/alpha combine — full fbzColorPath cc_mselect/cc_add/cc_sub pipeline (vc-shader)
+- Alpha test — discard fragments below alpha threshold via alpha_mode (vc-shader)
+- Depth/blend dynamic state — map Voodoo depth/blend modes to Vulkan dynamic state (vc-shader)
+- Scissor — dynamic scissor from Voodoo clipLeft/Right/Top/Bottom (vc-shader)
+
+### Context
+- Output is BLACK despite ~2000 tris/frame and successful vkQueuePresentKHR
+- Root cause: all triangles in a batch share the LAST triangle's push constants
+- This is the Phase 2 audit blocker: "Per-triangle push constants not drawn per-triangle"
+
+---
+
+## [Complete] -- Phase 3→4 Bugfixes (2026-03-01 → 2026-03-02)
+
+### Fixed — 4 blockers preventing VK rendering from activating
+
+1. **`voodoo_use_texture()` not called on VK path** (ac4d7b9be)
+   - Texture decode was below the VK diversion point in `voodoo_queue_triangle()`
+   - Moved texture decode to top of function, before VK path branches off
+
+2. **`display_active_ptr` race** (7a3d8cfad)
+   - `ctx->display_active_ptr` was wired after `vc_start_gpu_thread()`, creating a race
+   - Fixed: wire before GPU thread starts with proper happens-before ordering
+
+3. **FIFO/GPU thread deadlock** (483f302e4)
+   - Triangle pushes didn't wake the GPU thread — it could sleep forever
+   - Fix: use `vc_ring_push_and_wake()` for triangles; push VK swap BEFORE
+     `voodoo_wait_for_swap_complete()` in double-buffer path
+
+4. **VGA display tick interrupting active Voodoo rendering** (339fa72c9, 5b70030ff, 6e8c1da85)
+   - `vc_display_tick` was force-ending Voodoo render passes and presenting VGA frames
+     while Voodoo was actively rendering
+   - Fix: gate VGA passthrough on `display_active_ptr` — suppress VGA present while Voodoo active
+   - Replaced swap_seen flag/countdown with direct `display_active_ptr` check
+
+### Key Lesson
+- ALWAYS add diagnostic logging FIRST when debugging — never guess at fixes blindly
+
+---
+
+## [Complete] -- Phase 4: Textures
+
+### Added (vc-shader)
+- TMU0 texture upload and sampling via descriptor sets
+- Vulkan image management, staging upload, invalidation
+- Synchronous readback hack (vkWaitForFences per swap) as interim LFB solution
+
+---
+
+## [Complete] -- Phase 3: Display
+
+### Added
+- VGA passthrough display path via Qt VCRenderer
+- `vc_display_tick` — display callback integration
+- Per-frame VGA command buffers with non-blocking acquire/fence
+- `vc_ring_wake` calls for proper GPU thread signaling
+
+### Fixed
+- **Phase 3 VGA freeze** — Voodoo driver sends test triangles without a swap command,
+  leaving render pass open (`render_pass_active=1` stuck permanently) and blocking VGA present.
+  Fix: force-end render pass via `vc_gpu_end_frame()` when VGA frame is pending.
+- **Glide detection bug** — `vc_notify_renderer_ready()` was called during VK init, switching
+  Qt to VCRenderer too early. VCRenderer's VGA passthrough interfered with `_GlideInitEnvironment`.
+  Fix: defer renderer switch to first VC_CMD_SWAP (in vc_thread.c).
+- **MoltenVK present mode** — MAILBOX not available, FIFO only. Non-blocking acquire (timeout=0)
+  handles this correctly.
+
+### Research (vc-arch)
+- `research/phase3-display.md` — Comprehensive display integration research (1388 lines)
+- `research/phase2-audit-for-phase3.md` — Phase 2 code audit:
+  - Per-triangle push constants not drawn per-triangle (Phase 5 blocker)
+  - fogColor byte order mismatch (Phase 6)
+
+---
+
+## [Complete] -- Phase 2: Basic Rendering
 
 ### Research (vc-arch)
 - `research/phase2-implementation.md` — Comprehensive Vulkan architecture research for Phase 2:

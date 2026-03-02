@@ -600,10 +600,15 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
 static void
 vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
+    fprintf(stderr, "VideoCommon: swap received  rp_active=%d frame_idx=%u back_idx=%d\n",
+            gpu_st->render_pass_active, gpu_st->frame_index, gpu_st->rp.back_index);
+
     /* Mark that a swap arrived this tick -- prevents vc_display_tick
        from force-ending the render pass during active rendering. */
-    if (!gpu_st->render_pass_active)
+    if (!gpu_st->render_pass_active) {
+        fprintf(stderr, "VideoCommon: swap early-return (render pass not active)\n");
         return;
+    }
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
@@ -618,11 +623,15 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        This happens while the image is in COLOR_ATTACHMENT_OPTIMAL layout;
        vc_readback_record_copy transitions to TRANSFER_SRC and back. */
     vc_readback_record_copy(ctx, gpu_st, f->cmd_buf);
+    fprintf(stderr, "VideoCommon: readback copy recorded\n");
 
     /* If swapchain is available, do post-process blit + present. */
     if (gpu_st->disp.swapchain != VK_NULL_HANDLE) {
+        fprintf(stderr, "VideoCommon: about to present (swapchain=%p)\n",
+                (void *) gpu_st->disp.swapchain);
         int present_result = vc_display_present(ctx, gpu_st, f->cmd_buf,
                                                 gpu_st->frame_index);
+        fprintf(stderr, "VideoCommon: present returned %d\n", present_result);
         if (present_result == 1) {
             /* Swapchain needs recreation. */
             vc_display_recreate_swapchain(ctx, gpu_st);
@@ -633,6 +642,8 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
                Skip the standalone submit below. */
             goto advance;
         }
+    } else {
+        fprintf(stderr, "VideoCommon: no swapchain, submit without present\n");
     }
 
     /* No swapchain (or failed present): submit without present. */
@@ -658,6 +669,7 @@ advance:
         vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
         /* Convert RGBA8 staging data to RGB565 and write to SW FB. */
         vc_readback_copy_to_sw_fb(ctx, gpu_st);
+        fprintf(stderr, "VideoCommon: readback to SW FB done\n");
     }
 
     /* Swap front/back offscreen framebuffers. */

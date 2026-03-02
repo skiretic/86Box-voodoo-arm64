@@ -238,7 +238,7 @@ post-processing blit, present, display callback skip.
 
 ---
 
-## Phase 4: Textures
+## Phase 4: Textures ✅ COMPLETE
 
 **Goal**: Textured triangles. TMU0 texture upload, sampling, descriptor sets.
 
@@ -301,7 +301,7 @@ post-processing blit, present, display callback skip.
 
 ---
 
-## Phase 5: Core Pipeline Features
+## Phase 5: Core Pipeline Features ⏳ IN PROGRESS
 
 **Goal**: Alpha test, alpha blending, depth test (Z and W buffer), fog, scissor.
 This is where the rendered output starts looking correct.
