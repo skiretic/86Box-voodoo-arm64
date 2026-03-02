@@ -551,11 +551,45 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
         vc_batch_append_triangle(ctx, gpu_st, verts);
     }
 
-    /* Push constants and draw THIS triangle immediately. */
+    /* Push constants. */
     vkCmdPushConstants(f->cmd_buf, gpu_st->pipe.layout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(vc_push_constants_t), pc);
 
+    /* Dynamic depth state (EDS1).
+     * fbzMode bit  4: depth test enable
+     * fbzMode bit 10: depth write enable
+     * fbzMode bits [7:5]: depth function (maps 1:1 to VkCompareOp) */
+    if (ctx->caps.has_extended_dynamic_state) {
+        uint32_t fbz = pc->fbzMode;
+
+        VkBool32 depth_test  = (fbz & (1u << 4)) ? VK_TRUE : VK_FALSE;
+        VkBool32 depth_write = (fbz & (1u << 10)) ? VK_TRUE : VK_FALSE;
+
+        /* Voodoo depth function: bits [7:5], 0=NEVER..7=ALWAYS.
+         * VkCompareOp enum: NEVER=0, LESS=1, EQUAL=2, LESS_OR_EQUAL=3,
+         *   GREATER=4, NOT_EQUAL=5, GREATER_OR_EQUAL=6, ALWAYS=7.
+         * Direct 1:1 mapping. */
+        VkCompareOp depth_func = (VkCompareOp) ((fbz >> 5) & 7u);
+
+        vkCmdSetDepthTestEnable(f->cmd_buf, depth_test);
+        vkCmdSetDepthWriteEnable(f->cmd_buf, depth_write);
+        vkCmdSetDepthCompareOp(f->cmd_buf, depth_func);
+    }
+
+    /* Scissor from framebuffer dimensions (full viewport -- clip rect
+     * support will be added when clipLeftRight/clipLowYHighY registers
+     * are wired through the ring command). */
+    {
+        int back_idx = gpu_st->rp.back_index;
+        VkRect2D scissor;
+        memset(&scissor, 0, sizeof(scissor));
+        scissor.extent.width  = gpu_st->rp.fb[back_idx].width;
+        scissor.extent.height = gpu_st->rp.fb[back_idx].height;
+        vkCmdSetScissor(f->cmd_buf, 0, 1, &scissor);
+    }
+
+    /* Draw this triangle. */
     vkCmdDraw(f->cmd_buf, 3, 1, first_vertex, 0);
 }
 

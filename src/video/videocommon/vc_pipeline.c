@@ -9,8 +9,10 @@
  *          VideoCommon pipeline module -- graphics pipeline creation,
  *          push constant layout, vertex input state, pipeline cache.
  *
- *          Phase 2: single pipeline with no blending, no depth test,
- *          no face culling.  Dynamic state: viewport + scissor.
+ *          Phase 5: single pipeline with dynamic depth state (EDS1),
+ *          no blending, no face culling.  Dynamic state: viewport,
+ *          scissor, depth test enable, depth write enable, depth
+ *          compare op.
  *
  *          Phase 5+ will add pipeline variants keyed on blend state
  *          (MoltenVK does not support EDS3 dynamic blend factors).
@@ -227,14 +229,19 @@ vc_pipeline_create(vc_ctx_t *ctx, vc_pipeline_t *pl,
     multisample.sampleShadingEnable  = VK_FALSE;
 
     /* -------------------------------------------------------------------- */
-    /*  Depth / stencil (disabled for Phase 2)                               */
+    /*  Depth / stencil                                                      */
+    /*                                                                       */
+    /*  These values are defaults -- when EDS1 is available, depth test       */
+    /*  enable, depth write enable, and depth compare op are set             */
+    /*  dynamically per-draw call.  The baked values here serve as           */
+    /*  fallback for drivers without EDS1 (unlikely but safe).               */
     /* -------------------------------------------------------------------- */
 
     VkPipelineDepthStencilStateCreateInfo depth_stencil;
     memset(&depth_stencil, 0, sizeof(depth_stencil));
     depth_stencil.sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depth_stencil.depthTestEnable       = VK_FALSE;
-    depth_stencil.depthWriteEnable      = VK_FALSE;
+    depth_stencil.depthTestEnable       = VK_TRUE;
+    depth_stencil.depthWriteEnable      = VK_TRUE;
     depth_stencil.depthCompareOp        = VK_COMPARE_OP_ALWAYS;
     depth_stencil.depthBoundsTestEnable = VK_FALSE;
     depth_stencil.stencilTestEnable     = VK_FALSE;
@@ -259,18 +266,28 @@ vc_pipeline_create(vc_ctx_t *ctx, vc_pipeline_t *pl,
     color_blend.pAttachments    = &blend_att;
 
     /* -------------------------------------------------------------------- */
-    /*  Dynamic state (viewport + scissor)                                   */
+    /*  Dynamic state                                                        */
+    /*                                                                       */
+    /*  Viewport + scissor are always dynamic.  When EDS1 is available,      */
+    /*  depth test/write/compare are also dynamic (set per-draw call).       */
     /* -------------------------------------------------------------------- */
 
-    VkDynamicState dynamic_states[] = {
-        VK_DYNAMIC_STATE_VIEWPORT,
-        VK_DYNAMIC_STATE_SCISSOR,
-    };
+    VkDynamicState dynamic_states[5];
+    uint32_t       dynamic_count = 0;
+
+    dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_VIEWPORT;
+    dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_SCISSOR;
+
+    if (ctx->caps.has_extended_dynamic_state) {
+        dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE;
+        dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE;
+        dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_DEPTH_COMPARE_OP;
+    }
 
     VkPipelineDynamicStateCreateInfo dynamic_state;
     memset(&dynamic_state, 0, sizeof(dynamic_state));
     dynamic_state.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamic_state.dynamicStateCount = 2;
+    dynamic_state.dynamicStateCount = dynamic_count;
     dynamic_state.pDynamicStates    = dynamic_states;
 
     /* -------------------------------------------------------------------- */

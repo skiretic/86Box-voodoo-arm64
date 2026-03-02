@@ -79,11 +79,16 @@ vec3 unpackRGB(uint c) {
     );
 }
 
+/* ---- Helper: float [0,1] -> 8-bit integer ------------------------------- */
+uint to8(float v) {
+    return uint(clamp(v, 0.0, 1.0) * 255.0 + 0.5);
+}
+
 void main() {
     /* --- STAGE 1: Stipple test (Phase 6) --- */
     /* TODO */
 
-    /* --- STAGE 2-3: Depth (Vulkan fixed-function, Phase 5) --- */
+    /* --- STAGE 2-3: Depth (Vulkan fixed-function via EDS1, Phase 5) --- */
 
     /* ==================================================================
      * STAGE 5: Texture fetch (Phase 4)
@@ -113,67 +118,255 @@ void main() {
     }
 
     /* ==================================================================
-     * STAGE 6-7: Color/alpha source selection (Phase 4 basic)
+     * STAGE 6-7: Color/alpha combine (Phase 5 -- full pipeline)
      *
-     * fbzColorPath bits [1:0] = cc_rgbselect:
-     *   0 = iterated RGB
-     *   1 = texture RGB (TMU0)
-     *   2 = color1 RGB
-     *   3 = LFB (placeholder)
-     *
-     * For Phase 4, we implement basic color source selection plus
-     * a simple texture modulate (multiply iter * tex) when textured
-     * and cc_rgbselect == 0.  Full cc_mselect/cc_add/cc_sub pipeline
-     * comes in Phase 5.
+     * fbzColorPath bit layout for color combine:
+     *   [1:0]   cc_rgbselect            -- other color source
+     *   [3:2]   a_sel                   -- other alpha source
+     *   [4]     cc_localselect          -- local color source
+     *   [6:5]   cca_localselect         -- local alpha source
+     *   [7]     cc_localselect_override -- use texel alpha bit 7
+     *   [8]     cc_zero_other
+     *   [9]     cc_sub_clocal
+     *   [12:10] cc_mselect
+     *   [13]    cc_reverse_blend
+     *   [15:14] cc_add
+     *   [16]    cc_invert_output
+     *   [17]    cca_zero_other
+     *   [18]    cca_sub_clocal
+     *   [21:19] cca_mselect
+     *   [22]    cca_reverse_blend
+     *   [24:23] cca_add
+     *   [25]    cca_invert_output
      * ================================================================== */
-    uint cc_rgbsel = pc.fbzColorPath & 3u;
-    vec4 src;
 
-    if (!textured) {
-        /* Not textured: always use iterated color. */
-        src = vColor;
-    } else {
-        switch (cc_rgbsel) {
-            case 0u:
-                /* Iterated * texture (modulate -- most common). */
-                src.rgb = vColor.rgb * texel.rgb;
-                src.a   = vColor.a * texel.a;
-                break;
-            case 1u:
-                /* Texture color directly. */
-                src = texel;
-                break;
-            case 2u:
-                /* color1. */
-                src = unpackColor(pc.color1);
-                break;
-            default:
-                /* LFB placeholder -- use iterated. */
-                src = vColor;
-                break;
-        }
+    vec4 c0 = unpackColor(pc.color0);
+    vec4 c1 = unpackColor(pc.color1);
+
+    /* ---- Color "other" source ---- */
+    uint cc_rgbsel = pc.fbzColorPath & 3u;
+    vec3 c_other;
+    switch (cc_rgbsel) {
+        case 0u:  c_other = vColor.rgb;   break; /* iterated */
+        case 1u:  c_other = texel.rgb;    break; /* texture */
+        case 2u:  c_other = c1.rgb;       break; /* color1 */
+        default:  c_other = vec3(0.0);    break; /* LFB placeholder */
     }
 
-    /* --- STAGE 8: Chroma key test (Phase 5) --- */
-    /* TODO */
+    /* ---- Alpha "other" source ---- */
+    uint a_sel = (pc.fbzColorPath >> 2) & 3u;
+    float a_other;
+    switch (a_sel) {
+        case 0u:  a_other = vColor.a;   break; /* iterated alpha */
+        case 1u:  a_other = texel.a;    break; /* texture alpha */
+        case 2u:  a_other = c1.a;       break; /* color1 alpha */
+        default:  a_other = 0.0;        break; /* LFB placeholder */
+    }
 
-    /* --- STAGE 9-11: Alpha select, alpha mask (Phase 5) --- */
+    /* ---- Chroma key test ----
+     * fbzMode bit 1: enable chroma key.
+     * Compare "other" RGB against chromaKey as 8-bit integers. */
+    if ((pc.fbzMode & (1u << 1)) != 0u) {
+        uint r8 = to8(c_other.r);
+        uint g8 = to8(c_other.g);
+        uint b8 = to8(c_other.b);
+        uint ck_r = (pc.chromaKey >> 16) & 0xFFu;
+        uint ck_g = (pc.chromaKey >>  8) & 0xFFu;
+        uint ck_b =  pc.chromaKey        & 0xFFu;
+        if (r8 == ck_r && g8 == ck_g && b8 == ck_b)
+            discard;
+    }
 
-    /* --- STAGE 12-13: Color/alpha combine (Phase 5) --- */
+    /* ---- Alpha mask test ----
+     * fbzMode bit 13: discard if low bit of aother (8-bit) is 0. */
+    if ((pc.fbzMode & (1u << 13)) != 0u) {
+        uint a8 = to8(a_other);
+        if ((a8 & 1u) == 0u)
+            discard;
+    }
+
+    /* ---- Color local source ---- */
+    uint cc_localselect = (pc.fbzColorPath >> 4) & 1u;
+    bool cc_localselect_override = (pc.fbzColorPath & (1u << 7)) != 0u;
+
+    vec3 c_local;
+    if (cc_localselect_override) {
+        /* Use texel alpha bit 7 to choose: 1 = color0, 0 = iterated. */
+        uint tex_a8 = to8(texel.a);
+        c_local = ((tex_a8 & 0x80u) != 0u) ? c0.rgb : vColor.rgb;
+    } else {
+        c_local = (cc_localselect != 0u) ? c0.rgb : vColor.rgb;
+    }
+
+    /* ---- Alpha local source ---- */
+    uint cca_localselect = (pc.fbzColorPath >> 5) & 3u;
+    float a_local;
+    switch (cca_localselect) {
+        case 0u:  a_local = vColor.a;   break; /* iterated alpha */
+        case 1u:  a_local = c0.a;       break; /* color0 alpha */
+        case 2u:  a_local = vDepth;     break; /* iterated Z (as alpha) */
+        default:  a_local = 0.0;        break;
+    }
+
+    /* ==================================================================
+     * Color combine pipeline:
+     *   src = zero_other ? 0 : other
+     *   if (sub_clocal) src -= local
+     *   src *= mselect_factor (with reverse blend)
+     *   src += add
+     *   clamp [0,1]
+     *   if (invert) src = 1 - src
+     *
+     * SW renderer reverse blend: factor ^= 0xFF; factor++;
+     * In float: if (!reverse) factor = 1.0 - factor.
+     * ================================================================== */
+
+    /* Step 1: zero_other */
+    bool cc_zero_other = (pc.fbzColorPath & (1u << 8)) != 0u;
+    vec3 c_src = cc_zero_other ? vec3(0.0) : c_other;
+
+    /* Step 2: sub_clocal */
+    bool cc_sub_clocal = (pc.fbzColorPath & (1u << 9)) != 0u;
+    if (cc_sub_clocal)
+        c_src -= c_local;
+
+    /* Step 3: mselect factor */
+    uint cc_mselect = (pc.fbzColorPath >> 10) & 7u;
+    vec3 c_factor;
+    switch (cc_mselect) {
+        case 0u:  c_factor = vec3(0.0);               break; /* zero */
+        case 1u:  c_factor = c_local;                  break; /* clocal */
+        case 2u:  c_factor = vec3(a_other);            break; /* aother */
+        case 3u:  c_factor = vec3(a_local);            break; /* alocal */
+        case 4u:  c_factor = vec3(texel.a);            break; /* texture alpha */
+        case 5u:  c_factor = texel.rgb;                break; /* texture RGB */
+        default:  c_factor = vec3(0.0);                break;
+    }
+
+    /* Reverse blend */
+    bool cc_reverse = (pc.fbzColorPath & (1u << 13)) != 0u;
+    if (!cc_reverse)
+        c_factor = vec3(1.0) - c_factor;
+
+    c_src *= c_factor;
+
+    /* Step 4: add */
+    uint cc_add = (pc.fbzColorPath >> 14) & 3u;
+    switch (cc_add) {
+        case 0u:  /* add zero -- nothing */                break;
+        case 1u:  c_src += c_local;                        break;
+        case 2u:  c_src += vec3(a_local);                  break;
+        default:                                           break;
+    }
+
+    /* Step 5: clamp */
+    c_src = clamp(c_src, 0.0, 1.0);
+
+    /* Step 6: invert output */
+    bool cc_invert = (pc.fbzColorPath & (1u << 16)) != 0u;
+    if (cc_invert)
+        c_src = vec3(1.0) - c_src;
+
+    /* ==================================================================
+     * Alpha combine pipeline (same structure, scalar):
+     *   src = zero_other ? 0 : a_other
+     *   if (sub_clocal) src -= a_local
+     *   src *= factor (with reverse blend)
+     *   src += add
+     *   clamp [0,1]
+     *   if (invert) src = 1 - src
+     * ================================================================== */
+
+    /* Step 1: cca_zero_other */
+    bool cca_zero_other = (pc.fbzColorPath & (1u << 17)) != 0u;
+    float a_src = cca_zero_other ? 0.0 : a_other;
+
+    /* Step 2: cca_sub_clocal */
+    bool cca_sub_clocal = (pc.fbzColorPath & (1u << 18)) != 0u;
+    if (cca_sub_clocal)
+        a_src -= a_local;
+
+    /* Step 3: cca_mselect factor */
+    uint cca_mselect = (pc.fbzColorPath >> 19) & 7u;
+    float a_factor;
+    switch (cca_mselect) {
+        case 0u:  a_factor = 0.0;            break; /* zero */
+        case 1u:  a_factor = a_local;        break; /* alocal */
+        case 2u:  a_factor = a_other;        break; /* aother */
+        case 3u:  a_factor = a_local;        break; /* alocal (duplicate) */
+        case 4u:  a_factor = texel.a;        break; /* texture alpha */
+        default:  a_factor = 0.0;            break;
+    }
+
+    /* Reverse blend */
+    bool cca_reverse = (pc.fbzColorPath & (1u << 22)) != 0u;
+    if (!cca_reverse)
+        a_factor = 1.0 - a_factor;
+
+    a_src *= a_factor;
+
+    /* Step 4: cca_add */
+    uint cca_add = (pc.fbzColorPath >> 23) & 3u;
+    switch (cca_add) {
+        case 0u:  /* add zero */                         break;
+        case 1u:  a_src += a_local;                      break;
+        case 2u:  a_src += a_local;                      break; /* same as 1 for alpha */
+        default:                                         break;
+    }
+
+    /* Step 5: clamp */
+    a_src = clamp(a_src, 0.0, 1.0);
+
+    /* Step 6: cca_invert output */
+    bool cca_invert = (pc.fbzColorPath & (1u << 25)) != 0u;
+    if (cca_invert)
+        a_src = 1.0 - a_src;
+
+    /* Assemble final combined color. */
+    vec4 combined = vec4(c_src, a_src);
 
     /* --- STAGE 14: Save color-before-fog (Phase 7) --- */
+    /* TODO */
 
     /* --- STAGE 15: Fog (Phase 6) --- */
     /* TODO */
 
-    /* --- STAGE 16: Alpha test (Phase 5) --- */
-    /* TODO */
+    /* ==================================================================
+     * STAGE 16: Alpha test
+     *
+     * alphaMode bits:
+     *   [0]     enable
+     *   [3:1]   function (0=NEVER..7=ALWAYS)
+     *   [31:24] reference value (8-bit)
+     *
+     * Compare combined alpha (as 8-bit integer) against reference.
+     * ================================================================== */
+    if ((pc.alphaMode & 1u) != 0u) {
+        uint afunc = (pc.alphaMode >> 1) & 7u;
+        uint aref  = (pc.alphaMode >> 24) & 0xFFu;
+        uint aval  = to8(combined.a);
 
-    /* --- STAGE 17-18: Dither sub + alpha blend (Phase 5/6) --- */
+        bool pass = false;
+        switch (afunc) {
+            case 0u:  pass = false;            break; /* NEVER */
+            case 1u:  pass = (aval < aref);    break; /* LESS */
+            case 2u:  pass = (aval == aref);   break; /* EQUAL */
+            case 3u:  pass = (aval <= aref);   break; /* LEQUAL */
+            case 4u:  pass = (aval > aref);    break; /* GREATER */
+            case 5u:  pass = (aval != aref);   break; /* NOTEQUAL */
+            case 6u:  pass = (aval >= aref);   break; /* GEQUAL */
+            case 7u:  pass = true;             break; /* ALWAYS */
+        }
+        if (!pass)
+            discard;
+    }
+
+    /* --- STAGE 17-18: Dither sub + alpha blend (Phase 6) --- */
+    /* TODO */
 
     /* --- STAGE 19: Output dither (Phase 6) --- */
     /* TODO */
 
     /* --- Output --- */
-    fragColor = src;
+    fragColor = combined;
 }
