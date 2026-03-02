@@ -940,37 +940,34 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         }
     }
 
-    /* Consume and clear the swap-seen flag.  When Voodoo is actively
-       rendering (regular swaps arriving), we must NOT force-end its
-       render pass -- that causes mid-frame submits and flashing. */
-    int swap_seen = gpu_st->swap_seen;
-    gpu_st->swap_seen = 0;
+    /* Check whether the Voodoo display pipeline is connected.
+       When active, VGA passthrough is completely suppressed -- the
+       Voodoo swap handler owns all swapchain presents.  VGA frames
+       are only relevant before the Voodoo display activates (boot,
+       BIOS, driver load) or after it deactivates. */
+    int voodoo_active = disp->display_active_ptr
+        && *disp->display_active_ptr;
 
-    /* Check for VGA passthrough frames.
-       Only consume the flag when we can actually present -- if the
-       swapchain is not ready yet, leave vga_frame_ready=1 so the
-       next tick can retry instead of silently dropping the frame. */
+    /* Check for VGA passthrough frames. */
     if (atomic_load_explicit(&disp->vga_frame_ready,
                              memory_order_acquire)) {
-        if (gpu_st->render_pass_active && !swap_seen) {
-            /* Voodoo sent triangles without a swap command (happens
-               during driver self-test).  Force-end the render pass
-               so VGA present can proceed.  Only do this when no swap
-               has arrived since the last tick -- otherwise we would
-               interrupt active Voodoo rendering. */
+        if (voodoo_active) {
+            /* Voodoo owns the swapchain -- discard VGA frames. */
+            atomic_store_explicit(&disp->vga_frame_ready, 0,
+                                  memory_order_relaxed);
+        } else if (gpu_st->render_pass_active) {
+            /* Orphan triangles without a swap (driver self-test).
+               Force-end the render pass so VGA present can proceed. */
             vc_gpu_end_frame(ctx, gpu_st);
-        }
-        if (disp->swapchain != VK_NULL_HANDLE && !swap_seen) {
-            /* Only present VGA when Voodoo is NOT actively rendering.
-               Otherwise VGA scanout frames interleave with 3D frames
-               through the swapchain, causing visible flashing. */
+            if (disp->swapchain != VK_NULL_HANDLE) {
+                atomic_store_explicit(&disp->vga_frame_ready, 0,
+                                      memory_order_relaxed);
+                vc_display_present_vga(ctx, gpu_st);
+            }
+        } else if (disp->swapchain != VK_NULL_HANDLE) {
             atomic_store_explicit(&disp->vga_frame_ready, 0,
                                   memory_order_relaxed);
             vc_display_present_vga(ctx, gpu_st);
-        } else if (swap_seen) {
-            /* Voodoo is active -- discard the VGA frame silently. */
-            atomic_store_explicit(&disp->vga_frame_ready, 0,
-                                  memory_order_relaxed);
         } else {
             /* Swapchain not ready yet -- wake GPU thread so the next
                tick retries instead of sleeping indefinitely. */

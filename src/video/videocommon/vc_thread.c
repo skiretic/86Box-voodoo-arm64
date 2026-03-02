@@ -564,8 +564,6 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
     /* Mark that a swap arrived this tick -- prevents vc_display_tick
        from force-ending the render pass during active rendering. */
-    gpu_st->swap_seen = 1;
-
     if (!gpu_st->render_pass_active)
         return;
 
