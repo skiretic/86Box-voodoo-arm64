@@ -527,6 +527,10 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
     if (gpu_st->pipe.pipeline == VK_NULL_HANDLE)
         return;
 
+    /* A triangle means Voodoo is actively rendering -- reset the empty
+       swap counter so we don't prematurely re-enable VGA passthrough. */
+    gpu_st->empty_swap_count = 0;
+
     if (!gpu_st->render_pass_active)
         vc_gpu_begin_frame(ctx, gpu_st);
 
@@ -603,12 +607,26 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     fprintf(stderr, "VideoCommon: swap received  rp_active=%d frame_idx=%u back_idx=%d\n",
             gpu_st->render_pass_active, gpu_st->frame_index, gpu_st->rp.back_index);
 
-    /* Mark that a swap arrived this tick -- prevents vc_display_tick
-       from force-ending the render pass during active rendering. */
+    /* If no render pass is active, this is an "empty" swap (no triangles
+       were submitted since the last swap).  After several consecutive empty
+       swaps the Glide application has likely exited, so we clear
+       vc_display_active to re-enable VGA passthrough. */
     if (!gpu_st->render_pass_active) {
-        fprintf(stderr, "VideoCommon: swap early-return (render pass not active)\n");
+        gpu_st->empty_swap_count++;
+        if (gpu_st->empty_swap_count >= 3 && gpu_st->disp.display_active_ptr
+            && *gpu_st->disp.display_active_ptr) {
+            *gpu_st->disp.display_active_ptr = 0;
+            fprintf(stderr, "VideoCommon: %d empty swaps, re-enabling VGA passthrough\n",
+                    gpu_st->empty_swap_count);
+        } else {
+            fprintf(stderr, "VideoCommon: swap early-return (render pass not active, empty_swap=%d)\n",
+                    gpu_st->empty_swap_count);
+        }
         return;
     }
+
+    /* A real swap with triangles -- reset empty swap counter. */
+    gpu_st->empty_swap_count = 0;
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
