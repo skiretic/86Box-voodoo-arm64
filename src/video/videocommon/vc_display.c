@@ -960,10 +960,17 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
                interrupt active Voodoo rendering. */
             vc_gpu_end_frame(ctx, gpu_st);
         }
-        if (disp->swapchain != VK_NULL_HANDLE) {
+        if (disp->swapchain != VK_NULL_HANDLE && !swap_seen) {
+            /* Only present VGA when Voodoo is NOT actively rendering.
+               Otherwise VGA scanout frames interleave with 3D frames
+               through the swapchain, causing visible flashing. */
             atomic_store_explicit(&disp->vga_frame_ready, 0,
                                   memory_order_relaxed);
             vc_display_present_vga(ctx, gpu_st);
+        } else if (swap_seen) {
+            /* Voodoo is active -- discard the VGA frame silently. */
+            atomic_store_explicit(&disp->vga_frame_ready, 0,
+                                  memory_order_relaxed);
         } else {
             /* Swapchain not ready yet -- wake GPU thread so the next
                tick retries instead of sleeping indefinitely. */
