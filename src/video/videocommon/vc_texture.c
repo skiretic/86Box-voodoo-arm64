@@ -32,6 +32,7 @@
 #include "vc_texture.h"
 #include "vc_gpu_state.h"
 #include "vc_pipeline.h"
+#include "vc_batch.h"
 
 /* C-callable VMA wrappers (implemented in vc_vma_impl.cpp). */
 extern VkResult vc_vma_create_buffer(void *allocator,
@@ -557,12 +558,9 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     if (gpu_st->render_pass_active) {
         vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
-        /* Flush any pending triangles. */
-        if (gpu_st->batch.triangle_count > 0) {
-            vkCmdDraw(f->cmd_buf, gpu_st->batch.triangle_count * 3, 1, 0, 0);
-            gpu_st->batch.triangle_count = 0;
-            gpu_st->batch.vertex_offset  = 0;
-        }
+        /* All triangles are drawn immediately in vc_gpu_handle_triangle,
+           so no batch flush needed here -- just end the render pass. */
+        vc_batch_reset(ctx, gpu_st);
 
         vkCmdEndRenderPass(f->cmd_buf);
         vkEndCommandBuffer(f->cmd_buf);

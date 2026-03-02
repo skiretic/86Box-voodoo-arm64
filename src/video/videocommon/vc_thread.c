@@ -536,23 +536,27 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
     const vc_push_constants_t *pc    = (const vc_push_constants_t *) payload;
     const vc_vertex_t         *verts = (const vc_vertex_t *) ((const uint8_t *) payload + sizeof(vc_push_constants_t));
 
-    /* Push constants (per-triangle). */
+    /* Bind texture descriptor set. */
+    vc_texture_bind_current(ctx, gpu_st, f->cmd_buf);
+
+    /* Append triangle to batch vertex buffer. */
+    uint32_t first_vertex = gpu_st->batch.triangle_count * 3;
+
+    if (vc_batch_append_triangle(ctx, gpu_st, verts) != 0) {
+        /* Batch full -- reset and start fresh. */
+        VC_LOG("VideoCommon: batch full (%u tris), resetting\n",
+               gpu_st->batch.triangle_count);
+        vc_batch_reset(ctx, gpu_st);
+        first_vertex = 0;
+        vc_batch_append_triangle(ctx, gpu_st, verts);
+    }
+
+    /* Push constants and draw THIS triangle immediately. */
     vkCmdPushConstants(f->cmd_buf, gpu_st->pipe.layout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(vc_push_constants_t), pc);
 
-    /* Bind texture descriptor set. */
-    vc_texture_bind_current(ctx, gpu_st, f->cmd_buf);
-
-    /* Append triangle to batch. */
-    if (vc_batch_append_triangle(ctx, gpu_st, verts) != 0) {
-        /* Batch full -- flush. */
-        VC_LOG("VideoCommon: batch full (%u tris), flushing mid-frame\n",
-               gpu_st->batch.triangle_count);
-        vkCmdDraw(f->cmd_buf, gpu_st->batch.triangle_count * 3, 1, 0, 0);
-        vc_batch_reset(ctx, gpu_st);
-        vc_batch_append_triangle(ctx, gpu_st, verts);
-    }
+    vkCmdDraw(f->cmd_buf, 3, 1, first_vertex, 0);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -569,10 +573,8 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
-    /* Flush remaining triangles. */
-    if (gpu_st->batch.triangle_count > 0) {
-        vkCmdDraw(f->cmd_buf, gpu_st->batch.triangle_count * 3, 1, 0, 0);
-    }
+    /* All triangles were drawn individually in vc_gpu_handle_triangle,
+       so no batch flush needed here. */
 
     /* End offscreen render pass. */
     vkCmdEndRenderPass(f->cmd_buf);
