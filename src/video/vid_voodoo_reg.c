@@ -147,6 +147,9 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
             voodoo->front_offset = params->front_offset;
 #endif
             voodoo_wait_for_render_thread_idle(voodoo);
+#ifdef USE_VIDEOCOMMON
+            int vk_swap_pushed = 0;
+#endif
             if (!(val & 1)) {
                 memset(voodoo->dirty_line, 1, sizeof(voodoo->dirty_line));
                 voodoo->front_offset = voodoo->params.front_offset;
@@ -166,11 +169,23 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
                 voodoo->swap_offset   = voodoo->params.front_offset;
                 voodoo->swap_pending  = 1;
 
+#ifdef USE_VIDEOCOMMON
+                /* Push swap to GPU thread BEFORE blocking on swap_complete.
+                   Otherwise the FIFO thread blocks here and the swap command
+                   never reaches the ring, deadlocking the GPU thread. */
+                if (voodoo->use_gpu_renderer) {
+                    voodoo_vk_push_swap(voodoo);
+                    vk_swap_pushed = 1;
+                }
+#endif
                 voodoo_wait_for_swap_complete(voodoo);
             }
             voodoo->cmd_read++;
 #ifdef USE_VIDEOCOMMON
-            if (voodoo->use_gpu_renderer)
+            /* For the non-blocking paths (immediate swap and triple-buffer),
+               push the VK swap here.  The blocking double-buffer path already
+               pushed it before voodoo_wait_for_swap_complete() above. */
+            if (voodoo->use_gpu_renderer && !vk_swap_pushed)
                 voodoo_vk_push_swap(voodoo);
 #endif
             break;

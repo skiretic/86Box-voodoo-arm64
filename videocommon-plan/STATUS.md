@@ -6,9 +6,9 @@
 
 ---
 
-## Current Status: Phase 2 Research -- COMPLETE, Awaiting Phase 1 Audit
+## Current Status: Phase 4 COMPLETE, Testing Needed
 
-Phase 1 complete. Phase 2 research done — fresh Vulkan-specific research produced (replacing v1 OpenGL-era docs). Phase 1 code audit pending before implementation begins.
+Phases 1-4 implemented. Glide detection fix landed. Readback hack in place. Need to test texture rendering (3DMark99 / Glide app), then proceed to Phase 5.
 
 **Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
 
@@ -18,15 +18,15 @@ Phase 1 complete. Phase 2 research done — fresh Vulkan-specific research produ
 
 ```
 Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
-Phase 2: Basic Rendering     [X.........] 10%  RESEARCH DONE, AUDITING P1
-Phase 3: Display             [..........] 0%   BLOCKED (Phase 2)
-Phase 4: Textures            [..........] 0%   BLOCKED (Phase 3)
-Phase 5: Core Pipeline       [..........] 0%   BLOCKED (Phase 3)
-Phase 6: Advanced Features   [..........] 0%   BLOCKED (Phase 4)
-Phase 7: LFB Access          [..........] 0%   BLOCKED (Phase 3)
+Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
+Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
+Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE (needs testing)
+Phase 5: Core Pipeline       [..........] 0%   NEXT
+Phase 6: Advanced Features   [..........] 0%   BLOCKED (Phase 5)
+Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
 ──────────────────────────────────────────────
-Overall                      [X.........] 12%
+Overall                      [XXXXX.....] 50%
 ```
 
 ---

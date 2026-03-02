@@ -373,9 +373,9 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     vc_push_constants_t pc;
     voodoo_vk_extract_push_constants(params, &pc, fb_w, fb_h);
 
-    /* Push VC_CMD_TRIANGLE to ring (no wake -- batched). */
-    void *payload = vc_ring_push(&ctx->ring, VC_CMD_TRIANGLE,
-                                 VC_CMD_TRIANGLE_SIZE);
+    /* Push VC_CMD_TRIANGLE to ring and wake GPU thread. */
+    void *payload = vc_ring_push_and_wake(&ctx->ring, VC_CMD_TRIANGLE,
+                                          VC_CMD_TRIANGLE_SIZE);
 
     /* Layout: [push_constants] [verts[3]] */
     memcpy(payload, &pc, sizeof(vc_push_constants_t));

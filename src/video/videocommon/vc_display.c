@@ -32,6 +32,7 @@
 #endif
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -763,10 +764,10 @@ vc_display_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
 
     /* Signal that the VK display is active. */
-    if (disp->display_active_ptr)
+    if (disp->display_active_ptr) {
         *disp->display_active_ptr = 1;
+    }
 
-    VC_LOG("VideoCommon: display fully initialised\n");
     return 0;
 }
 
@@ -776,8 +777,9 @@ vc_display_destroy(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     vc_display_t *disp = &gpu_st->disp;
 
     /* Clear display active flag. */
-    if (disp->display_active_ptr)
+    if (disp->display_active_ptr) {
         *disp->display_active_ptr = 0;
+    }
 
     vkDeviceWaitIdle(ctx->device);
 
@@ -901,6 +903,9 @@ vc_display_update_descriptors(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 /*  GPU thread display tick                                                    */
 /* -------------------------------------------------------------------------- */
 
+/* Temporary diagnostic counter for display tick (works in release builds). */
+
+
 void
 vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
@@ -908,7 +913,6 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     /* Check for teardown request. */
     if (atomic_load_explicit(&disp->teardown_requested, memory_order_acquire)) {
-        VC_LOG("VideoCommon: display teardown requested\n");
         vc_display_destroy(ctx, gpu_st);
         atomic_store_explicit(&disp->teardown_complete, 1, memory_order_release);
         return;
@@ -921,16 +925,14 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     VkSurfaceKHR new_surface = (VkSurfaceKHR) new_surface_raw;
 
     if (new_surface != VK_NULL_HANDLE) {
-        VC_LOG("VideoCommon: new surface received, creating display\n");
-
         /* Destroy old display if any. */
         if (disp->swapchain != VK_NULL_HANDLE)
             vc_display_destroy(ctx, gpu_st);
 
         disp->surface = new_surface;
         if (vc_display_create(ctx, gpu_st) != 0) {
-            VC_LOG("VideoCommon: display creation failed\n");
             disp->surface = VK_NULL_HANDLE;
+        } else {
         }
     }
 

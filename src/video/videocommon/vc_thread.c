@@ -32,6 +32,7 @@
 #endif
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,6 +51,12 @@
 #include "vc_texture.h"
 #include "vc_gpu_state.h"
 #include "vc_readback.h"
+
+/* -------------------------------------------------------------------------- */
+/*  Temporary diagnostic logging (stderr -- works in release builds)            */
+/* -------------------------------------------------------------------------- */
+
+static uint64_t diag_tick_count     = 0;
 
 /* -------------------------------------------------------------------------- */
 /*  Platform counting semaphore                                                */
