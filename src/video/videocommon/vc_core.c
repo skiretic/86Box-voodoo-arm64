@@ -607,7 +607,11 @@ vc_voodoo_init_thread(void *voodoo_ptr)
     /* Tell the Qt UI to switch to VCRenderer now that we are ready.
        This is a no-op if vc_notify_renderer_ready() has not been
        compiled in (non-Qt builds). */
-    vc_notify_renderer_ready();
+    /* Renderer switch is deferred to first swap command.
+       Switching here (during init) causes VCRenderer's VGA passthrough
+       to interfere with Glide hardware detection -- the driver probes
+       registers and reads framebuffer before rendering starts.
+       See vc_thread.c VC_CMD_SWAP handler for the deferred call. */
 }
 
 void

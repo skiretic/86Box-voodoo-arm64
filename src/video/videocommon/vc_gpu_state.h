@@ -42,6 +42,7 @@ typedef struct vc_gpu_state_t {
 
     /* Render state tracking. */
     int      render_pass_active;
+    int      renderer_switch_done; /* 1 after first swap triggers vc_notify_renderer_ready */
     uint32_t fb_width;
     uint32_t fb_height;
 

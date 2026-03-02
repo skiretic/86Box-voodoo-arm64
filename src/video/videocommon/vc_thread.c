@@ -41,6 +41,7 @@
 #include <86box/86box.h>
 #include <86box/plat.h>
 #include <86box/thread.h>
+#include <86box/videocommon.h>
 
 #include "vc_thread.h"
 #include "vc_render_pass.h"
@@ -785,8 +786,18 @@ vc_gpu_thread_func(void *param)
                 break;
 
             case VC_CMD_SWAP:
-                if (gpu_st)
+                if (gpu_st) {
+                    /* Deferred renderer switch: first swap means the guest
+                       is actively rendering, safe to switch from SW display
+                       to VCRenderer.  Before this, VGA passthrough stays on
+                       the normal Qt display path so Glide detection isn't
+                       disrupted. */
+                    if (!gpu_st->renderer_switch_done) {
+                        gpu_st->renderer_switch_done = 1;
+                        vc_notify_renderer_ready();
+                    }
                     vc_gpu_handle_swap(ctx, gpu_st);
+                }
                 break;
 
             case VC_CMD_TEXTURE_UPLOAD:
