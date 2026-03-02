@@ -267,28 +267,38 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
 
     texture_t *tc = &voodoo->texture_cache[tmu][tex_entry];
 
-    /* Compute identity hash. */
-    uint32_t identity = tc->base ^ tc->tLOD ^ tc->palette_checksum;
-
-    /* Check if this texture is already uploaded. */
+    /* Check if this texture is already uploaded using direct field comparison
+       (more robust than the previous XOR hash which could collide). */
     voodoo_vk_tex_track_t *trk = &vk_tex_track[tmu];
-    if (trk->slot == tex_entry && trk->last_identity == identity)
+    if (trk->slot == tex_entry
+        && trk->addr == tc->base
+        && trk->tLOD == tc->tLOD
+        && trk->pal_checksum == tc->palette_checksum) {
         return; /* Already uploaded and bound. */
+    }
 
-    /* Determine LOD 0 dimensions. */
-    int lod_min = (params->tLOD[tmu] >> 2) & 15;
+    /* Determine base mip dimensions.  The texture cache stores decoded mips
+       from lod_min through lod_max, where lod_min = the finest (largest) LOD
+       level available.  Use LOD 0 dimensions (full-size texture) when the
+       cache has LOD 0 data (lod_min == 0), otherwise fall back to the largest
+       available mip at lod_min.  The data offset always starts at
+       texture_offset[lod_min] regardless. */
+    int lod_min = (tc->tLOD >> 2) & 15;
     if (lod_min > 8) lod_min = 8;
-    uint32_t width  = params->tex_w_mask[tmu][lod_min] + 1;
-    uint32_t height = params->tex_h_mask[tmu][lod_min] + 1;
+
+    /* Use the base mip that IS available in the cache. */
+    int upload_lod = lod_min;
+    uint32_t width  = params->tex_w_mask[tmu][upload_lod] + 1;
+    uint32_t height = params->tex_h_mask[tmu][upload_lod] + 1;
     if (width == 0 || height == 0 || width > 256 || height > 256) {
-        VC_LOG("VideoCommon: push_texture bail bad dims %ux%u tmu=%d entry=%d\n",
-               width, height, tmu, tex_entry);
+        VC_LOG("VideoCommon: push_texture bail bad dims %ux%u tmu=%d entry=%d lod=%d\n",
+               width, height, tmu, tex_entry, upload_lod);
         return;
     }
 
     /* Copy decoded RGBA8 data from texture cache.
        The data array layout: texture_offset[lod] gives the uint32 offset
-       for each LOD level.  LOD 0 starts at texture_offset[lod_min]. */
+       for each LOD level. */
     uint32_t pixel_count = width * height;
     uint32_t byte_size   = pixel_count * 4;
 
@@ -299,7 +309,7 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
     /* Copy from the texture cache data buffer at the correct LOD offset.
        The cache data is stored as 0xAARRGGBB (makergba format).
        We need to repack to RGBA8 for VK_FORMAT_R8G8B8A8_UNORM. */
-    const uint32_t *src = &tc->data[texture_offset[lod_min]];
+    const uint32_t *src = &tc->data[texture_offset[upload_lod]];
     uint8_t        *dst = data;
     for (uint32_t i = 0; i < pixel_count; i++) {
         uint32_t c = src[i];
@@ -312,6 +322,9 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
         dst[3] = (c >> 24) & 0xFF; /* A */
         dst += 4;
     }
+
+    /* Compute identity from the cache entry fields (used by GPU-side tracking). */
+    uint32_t identity = tc->base ^ tc->tLOD ^ tc->palette_checksum;
 
     /* Push upload command -- GPU thread takes ownership of data pointer. */
     uint16_t cmd_size = (uint16_t) (sizeof(vc_ring_cmd_header_t)
@@ -338,13 +351,16 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
     bp->sampler_key = vc_texture_sampler_key(params->textureMode[tmu]);
     bp->pad         = 0;
 
-    /* Update tracking. */
+    /* Update tracking with actual cache fields (not the XOR hash). */
     trk->addr          = tc->base;
     trk->tLOD          = tc->tLOD;
     trk->pal_checksum  = tc->palette_checksum;
     trk->slot          = tex_entry;
     trk->last_upload_slot = tex_entry;
     trk->last_identity = identity;
+
+    VC_LOG("VideoCommon: tex push tmu=%d slot=%d %ux%u lod_min=%d\n",
+           tmu, tex_entry, width, height, lod_min);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -357,6 +373,7 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     vc_ctx_t *ctx = (vc_ctx_t *) voodoo->vc_ctx;
     if (!ctx)
         return;
+
 
     /* Handle texture if textured. */
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
