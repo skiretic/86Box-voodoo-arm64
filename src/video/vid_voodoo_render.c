@@ -1852,6 +1852,12 @@ voodoo_render_thread_4(void *param)
 void
 voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
 {
+    /* Decode texture data before any rendering path uses it.
+     * Both SW rasterizer and VK GPU thread need decoded textures. */
+    voodoo_use_texture(voodoo, params, 0);
+    if (voodoo->dual_tmus)
+        voodoo_use_texture(voodoo, params, 1);
+
 #ifdef USE_VIDEOCOMMON
     /* GPU-accelerated path: push triangle to SPSC ring for the GPU thread.
      * vc_ctx is NULL until the background init thread completes -- until
@@ -1885,10 +1891,6 @@ voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
         if (voodoo->render_threads == 4 && PARAM_FULL(3))
             thread_wait_event(voodoo->render_not_full_event[3], -1); /*Wait for room in ringbuffer*/
     }
-
-    voodoo_use_texture(voodoo, params, 0);
-    if (voodoo->dual_tmus)
-        voodoo_use_texture(voodoo, params, 1);
 
     memcpy(params_new, params, sizeof(voodoo_params_t));
 
