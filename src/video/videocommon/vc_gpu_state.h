@@ -44,6 +44,13 @@ typedef struct vc_gpu_state_t {
     int      render_pass_active;
     uint32_t fb_width;
     uint32_t fb_height;
+
+    /* Readback hack: staging buffer for GPU->SW FB copy. */
+    VkBuffer   readback_buffer;
+    void      *readback_alloc;   /* VmaAllocation (opaque). */
+    void      *readback_mapped;  /* Persistently mapped pointer. */
+    uint32_t   readback_width;   /* Width of the current readback buffer. */
+    uint32_t   readback_height;  /* Height of the current readback buffer. */
 } vc_gpu_state_t;
 
 #endif /* VIDEOCOMMON_GPU_STATE_H */

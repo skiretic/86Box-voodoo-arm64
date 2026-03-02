@@ -106,6 +106,7 @@ set(VIDEOCOMMON_SOURCES
     vc_pipeline.c
     vc_texture.c
     vc_display.c
+    vc_readback.c
     vc_vma_impl.cpp
 )
 

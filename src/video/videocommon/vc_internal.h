@@ -193,6 +193,10 @@ typedef struct vc_ctx_t {
        (only written once at init) but provides visibility guarantee. */
     _Atomic(uint32_t) fb_width;
     _Atomic(uint32_t) fb_height;
+
+    /* Opaque pointer back to voodoo_t for readback hack (GPU->SW FB copy).
+       Set during vc_voodoo_init, read by GPU thread. */
+    void *voodoo_ptr;
 } vc_ctx_t;
 
 #endif /* VIDEOCOMMON_INTERNAL_H */

@@ -578,6 +578,9 @@ vc_voodoo_init_thread(void *voodoo_ptr)
         return;
     }
 
+    /* Store back-pointer so GPU thread can write readback data to fb_mem. */
+    ctx->voodoo_ptr = voodoo;
+
     voodoo->vc_ctx = ctx;
     atomic_store_explicit(&vc_global_ctx, ctx, memory_order_release);
 

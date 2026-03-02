@@ -48,6 +48,7 @@
 #include "vc_display.h"
 #include "vc_texture.h"
 #include "vc_gpu_state.h"
+#include "vc_readback.h"
 
 /* -------------------------------------------------------------------------- */
 /*  Platform counting semaphore                                                */
@@ -573,6 +574,11 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     vkCmdEndRenderPass(f->cmd_buf);
     gpu_st->render_pass_active = 0;
 
+    /* Record readback copy: offscreen color -> staging buffer.
+       This happens while the image is in COLOR_ATTACHMENT_OPTIMAL layout;
+       vc_readback_record_copy transitions to TRANSFER_SRC and back. */
+    vc_readback_record_copy(ctx, gpu_st, f->cmd_buf);
+
     /* If swapchain is available, do post-process blit + present. */
     if (gpu_st->disp.swapchain != VK_NULL_HANDLE) {
         int present_result = vc_display_present(ctx, gpu_st, f->cmd_buf,
@@ -605,6 +611,15 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     f->submitted = 1;
 
 advance:
+    /* Wait for this frame's submission to complete so readback data is valid.
+       This is a synchronous hack -- acceptable for Glide detection, not for
+       sustained rendering.  The full Phase 7 readback will be async. */
+    if (f->submitted) {
+        vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
+        /* Convert RGBA8 staging data to RGB565 and write to SW FB. */
+        vc_readback_copy_to_sw_fb(ctx, gpu_st);
+    }
+
     /* Swap front/back offscreen framebuffers. */
     vc_render_pass_swap(gpu_st);
     gpu_st->frame_index = (gpu_st->frame_index + 1) % VC_NUM_FRAMES;
@@ -656,6 +671,10 @@ vc_gpu_thread_init(vc_ctx_t *ctx)
     if (vc_texture_create(ctx, &gpu_st->tex) != 0)
         goto fail;
 
+    /* Readback staging buffer (GPU->SW FB copy for LFB reads). */
+    if (vc_readback_create(ctx, gpu_st) != 0)
+        goto fail;
+
     /* Pipeline. */
     if (vc_pipeline_create(ctx, &gpu_st->pipe, &gpu_st->shaders,
                            gpu_st->rp.render_pass_load,
@@ -675,6 +694,7 @@ fail:
     VC_LOG("VideoCommon: GPU thread init FAILED\n");
     /* Partial cleanup -- destroy what was created. */
     vc_pipeline_destroy(ctx, &gpu_st->pipe);
+    vc_readback_destroy(ctx, gpu_st);
     vc_texture_destroy(ctx, &gpu_st->tex);
     vc_shaders_destroy(ctx, &gpu_st->shaders);
     vc_batch_destroy(ctx, gpu_st);
@@ -701,6 +721,7 @@ vc_gpu_thread_cleanup(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     vkDeviceWaitIdle(ctx->device);
 
+    vc_readback_destroy(ctx, gpu_st);
     vc_display_destroy(ctx, gpu_st);
     vc_pipeline_destroy(ctx, &gpu_st->pipe);
     vc_texture_destroy(ctx, &gpu_st->tex);
