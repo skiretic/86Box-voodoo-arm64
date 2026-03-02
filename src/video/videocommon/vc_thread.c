@@ -531,6 +531,11 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
        swap counter so we don't prematurely re-enable VGA passthrough. */
     gpu_st->empty_swap_count = 0;
 
+    /* Re-enable Voodoo display when triangles resume after empty-swap
+       detection had cleared it for VGA passthrough. */
+    if (ctx->display_active_ptr && !*ctx->display_active_ptr)
+        *ctx->display_active_ptr = 1;
+
     if (!gpu_st->render_pass_active)
         vc_gpu_begin_frame(ctx, gpu_st);
 
