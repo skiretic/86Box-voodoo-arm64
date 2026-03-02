@@ -616,6 +616,34 @@ vc_swapchain_create(vc_ctx_t *ctx, vc_display_t *disp)
         extent.height = caps.maxImageExtent.height;
     disp->extent = extent;
 
+    /* Select present mode: prefer MAILBOX (non-blocking acquire, no
+       tearing) over FIFO (always available per Vulkan spec).  MAILBOX
+       keeps vkAcquireNextImageKHR from blocking for vsync, which is
+       critical because the GPU thread must drain the SPSC ring without
+       stalling the guest CPU. */
+    VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
+    {
+        uint32_t mode_count = 0;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physical_device,
+                                                  disp->surface,
+                                                  &mode_count, NULL);
+        if (mode_count > 0 && mode_count <= 16) {
+            VkPresentModeKHR modes[16];
+            vkGetPhysicalDeviceSurfacePresentModesKHR(ctx->physical_device,
+                                                      disp->surface,
+                                                      &mode_count, modes);
+            for (uint32_t i = 0; i < mode_count; i++) {
+                if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+                    present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+                    break;
+                }
+            }
+        }
+    }
+    VC_LOG("VideoCommon: using present mode %d (%s)\n",
+           present_mode,
+           present_mode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" : "FIFO");
+
     /* Create swapchain. */
     VkSwapchainCreateInfoKHR ci;
     memset(&ci, 0, sizeof(ci));
@@ -630,7 +658,7 @@ vc_swapchain_create(vc_ctx_t *ctx, vc_display_t *disp)
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform     = caps.currentTransform;
     ci.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    ci.presentMode      = VK_PRESENT_MODE_FIFO_KHR;
+    ci.presentMode      = present_mode;
     ci.clipped          = VK_TRUE;
     ci.oldSwapchain     = disp->swapchain; /* VK_NULL_HANDLE on first create. */
 
@@ -1404,9 +1432,18 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     uint32_t    frame_index = gpu_st->frame_index;
     vc_frame_t *f           = &gpu_st->frame[frame_index];
 
-    /* Wait for this frame's fence before reusing its command buffer. */
+    /* Wait for this frame's fence before reusing its command buffer.
+       Use a short timeout to avoid blocking the GPU thread (which must
+       drain the SPSC ring).  If the fence isn't ready yet, skip this
+       frame -- the blit thread will deliver another one soon. */
     if (f->submitted) {
-        vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
+        VkResult fence_res = vkWaitForFences(ctx->device, 1, &f->fence,
+                                             VK_TRUE, 5000000 /* 5 ms */);
+        if (fence_res == VK_TIMEOUT) {
+            atomic_store_explicit(&disp->vga_frame_ready, 1,
+                                  memory_order_release);
+            return 0;
+        }
         vkResetFences(ctx->device, 1, &f->fence);
         f->submitted = 0;
     }
@@ -1470,13 +1507,24 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          0, 0, NULL, 0, NULL, 1, &barrier);
 
-    /* Acquire swapchain image. */
+    /* Acquire swapchain image with zero timeout so we never block the
+       GPU thread.  MAILBOX mode normally makes this instant, but even
+       with FIFO this avoids a 16 ms stall that would starve the SPSC
+       ring and freeze the guest. */
     uint32_t image_idx;
     VkResult acq = vkAcquireNextImageKHR(
-        ctx->device, disp->swapchain, UINT64_MAX,
+        ctx->device, disp->swapchain, 0 /* non-blocking */,
         disp->image_available_sem[frame_index],
         VK_NULL_HANDLE, &image_idx);
 
+    if (acq == VK_TIMEOUT || acq == VK_NOT_READY) {
+        /* No swapchain image available right now -- skip this frame
+           and retry on the next tick. */
+        vkEndCommandBuffer(cmd_buf);
+        atomic_store_explicit(&disp->vga_frame_ready, 1,
+                              memory_order_release);
+        return 0;
+    }
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
         vkEndCommandBuffer(cmd_buf);
         vc_display_recreate_swapchain(ctx, gpu_st);
