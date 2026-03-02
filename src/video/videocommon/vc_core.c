@@ -571,15 +571,18 @@ vc_voodoo_init_thread(void *voodoo_ptr)
         return;
     }
 
+    /* Store back-pointer and display_active_ptr BEFORE starting the GPU
+       thread.  Thread creation provides a happens-before edge, so the
+       GPU thread is guaranteed to see these values during its init. */
+    ctx->voodoo_ptr = voodoo;
+    ctx->display_active_ptr = &voodoo->vc_display_active;
+
     if (vc_start_gpu_thread(ctx) != 0) {
         VC_LOG("VideoCommon: GPU thread start failed, falling back to SW renderer\n");
         vc_destroy(ctx);
         voodoo->use_gpu_renderer = 0;
         return;
     }
-
-    /* Store back-pointer so GPU thread can write readback data to fb_mem. */
-    ctx->voodoo_ptr = voodoo;
 
     voodoo->vc_ctx = ctx;
     atomic_store_explicit(&vc_global_ctx, ctx, memory_order_release);
@@ -593,13 +596,6 @@ vc_voodoo_init_thread(void *voodoo_ptr)
 #else
         sched_yield();
 #endif
-    }
-
-    /* Wire up the display_active_ptr so the GPU thread can signal
-       voodoo_t when the VK display pipeline is connected. */
-    if (ctx->render_data) {
-        vc_gpu_state_t *gpu_st = (vc_gpu_state_t *) ctx->render_data;
-        gpu_st->disp.display_active_ptr = &voodoo->vc_display_active;
     }
 
     VC_LOG("VideoCommon: vc_voodoo_init complete -- GPU renderer active\n");

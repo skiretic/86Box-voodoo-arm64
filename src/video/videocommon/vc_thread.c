@@ -648,6 +648,12 @@ vc_gpu_thread_init(vc_ctx_t *ctx)
        when VCRenderer provides a VkSurfaceKHR). */
     vc_display_state_init(&gpu_st->disp);
 
+    /* Copy display_active_ptr from ctx (set before thread creation,
+       so it is guaranteed visible here via the thread-creation
+       happens-before edge).  This pointer lets vc_display_create()
+       signal voodoo_t when the VK display pipeline is connected. */
+    gpu_st->disp.display_active_ptr = ctx->display_active_ptr;
+
     /* Frame resources. */
     if (vc_frame_resources_create(ctx, gpu_st) != 0)
         goto fail;

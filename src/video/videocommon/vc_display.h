@@ -72,7 +72,7 @@ typedef struct vc_display_t {
     VkSemaphore render_finished_sem[VC_NUM_FRAMES];
 
     /* Pointer to voodoo_t::vc_display_active for the GPU thread to set.
-       NULL until vc_display_init is called. */
+       Copied from ctx->display_active_ptr during vc_gpu_thread_init(). */
     int *display_active_ptr;
 
     /* --- VGA passthrough blit state --- */

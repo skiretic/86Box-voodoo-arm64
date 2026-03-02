@@ -197,6 +197,12 @@ typedef struct vc_ctx_t {
     /* Opaque pointer back to voodoo_t for readback hack (GPU->SW FB copy).
        Set during vc_voodoo_init, read by GPU thread. */
     void *voodoo_ptr;
+
+    /* Pointer to voodoo_t::vc_display_active.  Set BEFORE starting the GPU
+       thread so it is visible via the thread-creation happens-before edge.
+       The GPU thread copies this into gpu_st->disp.display_active_ptr
+       during vc_gpu_thread_init(). */
+    int *display_active_ptr;
 } vc_ctx_t;
 
 #endif /* VIDEOCOMMON_INTERNAL_H */
