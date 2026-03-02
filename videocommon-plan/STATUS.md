@@ -2,13 +2,13 @@
 
 **Branch**: `videocommon-voodoo`
 **Target**: GPU-accelerated Voodoo rendering via Vulkan 1.2
-**Last Updated**: 2026-03-01
+**Last Updated**: 2026-03-02
 
 ---
 
-## Current Status: Phase 4 COMPLETE, Testing Needed
+## Current Status: Phase 5 IN PROGRESS — First 3D Output Achieved!
 
-Phases 1-4 implemented. Glide detection fix landed. Readback hack in place. Need to test texture rendering (3DMark99 / Glide app), then proceed to Phase 5.
+Phase 5 core pipeline is partially working. **First ever Voodoo 3D output from Vulkan backend** confirmed in 3DMark99 — geometry renders with correct depth ordering and iterated vertex colors. Two remaining issues before Phase 5 is complete.
 
 **Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
 
@@ -20,14 +20,48 @@ Phases 1-4 implemented. Glide detection fix landed. Readback hack in place. Need
 Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
 Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
 Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
-Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE (needs testing)
-Phase 5: Core Pipeline       [..........] 0%   NEXT
+Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE
+Phase 5: Core Pipeline       [XXXXXX....] 60%  IN PROGRESS
 Phase 6: Advanced Features   [..........] 0%   BLOCKED (Phase 5)
 Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
 ──────────────────────────────────────────────
-Overall                      [XXXXX.....] 50%
+Overall                      [XXXXXX....] 55%
 ```
+
+### Phase 5 Sub-task Status
+
+| # | Task | Status | Commit |
+|---|------|--------|--------|
+| 5.0 | Per-triangle push constants | X | bf0a2ab39 |
+| 5.1 | Depth test (EDS1 dynamic state) | X | 6d7651879, f64248f8a |
+| 5.2 | Alpha test (shader) | X | 6d7651879 |
+| 5.3 | Color/alpha combine (shader) | X | 6d7651879 |
+| 5.4 | Chroma key (shader) | X | 6d7651879 |
+| 5.5 | Depth clear fix (0.0→1.0) | X | 1e3ab6c96 |
+| 5.6 | dirty_line marking for readback | X | 1e3ab6c96 |
+| 5.7 | Texture rendering — flat grey, no textures visible | ! | — |
+| 5.8 | Freeze on benchmark exit (empty swaps) | ! | — |
+| 5.9 | Alpha blending (pipeline variants) | - | — |
+| 5.10 | Scissor (clip rect wiring) | - | — |
+
+Legend: `-` not started, `~` in progress, `X` done, `!` blocked/bug
+
+---
+
+## Known Bugs (Phase 5)
+
+### BUG: No textures visible — flat greyscale output
+- 3DMark99 renders geometry but only iterated vertex colors (grey/black/white)
+- Log shows only 1 texture upload: `tex upload tmu=0 slot=14 1x1` (the dummy texture)
+- The Phase 5 shader rewrite may have broken texture combine path
+- Need to investigate: is texture data reaching the shader? Is the combine selecting texture?
+
+### BUG: Freeze on benchmark exit (empty swaps)
+- When Glide app stops rendering, swap commands continue but `rp_active=0`
+- `vc_gpu_handle_swap()` early-returns without presenting or re-enabling VGA
+- Guest stalls with black screen, all threads sleeping
+- Fix options: (a) present last frame on empty swap, (b) re-enable VGA passthrough on idle
 
 ---
 
@@ -100,9 +134,19 @@ Timer/display cb    swap_pending=1           Record cmd buffers
 |------|---------|
 | `src/video/videocommon/vc_core.c/h` | Vulkan instance, device, VMA, logging |
 | `src/video/videocommon/vc_thread.c/h` | GPU thread, SPSC ring, wake mechanism |
+| `src/video/videocommon/vc_render_pass.c/h` | Render pass, framebuffer management |
+| `src/video/videocommon/vc_pipeline.c/h` | Graphics pipeline, dynamic state |
+| `src/video/videocommon/vc_shader.c/h` | SPIR-V shader loading |
+| `src/video/videocommon/vc_batch.c/h` | Vertex buffer, triangle batching |
+| `src/video/videocommon/vc_texture.c/h` | Texture upload, sampler cache |
+| `src/video/videocommon/vc_display.c/h` | Swapchain, post-process, present |
+| `src/video/videocommon/vc_readback.c/h` | LFB readback (sync hack) |
 | `src/video/videocommon/vc_internal.h` | Internal shared defines |
 | `src/include/86box/videocommon.h` | Public C11 API |
-| `src/video/videocommon/CMakeLists.txt` | Build integration |
+| `src/video/vid_voodoo_vk.c` | Voodoo→VideoCommon bridge |
+| `src/video/videocommon/shaders/voodoo_uber.vert` | Vertex uber-shader |
+| `src/video/videocommon/shaders/voodoo_uber.frag` | Fragment uber-shader (Phase 5) |
+| `src/qt/qt_vcrenderer.cpp/hpp` | Qt VCRenderer display integration |
 | `extra/volk/` | Vendored dynamic Vulkan loader |
 | `extra/VMA/` | Vendored Vulkan Memory Allocator |
 
@@ -133,3 +177,5 @@ Timer/display cb    swap_pending=1           Record cmd buffers
 | swap_count deadlock (v1 repeat) | v2 doesn't touch swap lifecycle AT ALL | Designed |
 | LFB read stall (v1 repeat) | Shadow buffer, no sync push from CPU | Designed |
 | Pi 5 missing dualSrcBlend | Fallback to SRC_COLOR for ACOLORBEFOREFOG | Planned |
+| volk EDS1 function names | Must use EXT suffix on Vulkan 1.2 | FIXED (f64248f8a) |
+| Depth clear convention | Must clear to 1.0 (far), not 0.0 | FIXED (1e3ab6c96) |

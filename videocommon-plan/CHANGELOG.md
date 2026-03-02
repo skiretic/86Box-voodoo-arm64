@@ -7,17 +7,32 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 
 ## [In Progress] -- Phase 5: Core Pipeline (2026-03-02)
 
-### In Progress
-- Per-triangle push constants — fix batch/draw system to call `vkCmdPushConstants` before each draw (vc-lead)
-- Uber-shader color/alpha combine — full fbzColorPath cc_mselect/cc_add/cc_sub pipeline (vc-shader)
-- Alpha test — discard fragments below alpha threshold via alpha_mode (vc-shader)
-- Depth/blend dynamic state — map Voodoo depth/blend modes to Vulkan dynamic state (vc-shader)
-- Scissor — dynamic scissor from Voodoo clipLeft/Right/Top/Bottom (vc-shader)
+### MILESTONE: First 3D Output from Vulkan Backend!
+- 3DMark99 renders geometry with correct depth ordering and iterated vertex colors
+- Display present working at 61 Hz, triple-buffered swapchain cycling
+- Screenshot captured: greyscale 3D scene with perspective geometry visible
 
-### Context
-- Output is BLACK despite ~2000 tris/frame and successful vkQueuePresentKHR
-- Root cause: all triangles in a batch share the LAST triangle's push constants
-- This is the Phase 2 audit blocker: "Per-triangle push constants not drawn per-triangle"
+### Implemented (vc-lead, vc-shader)
+- **Per-triangle push constants** (bf0a2ab39) — each triangle gets its own `vkCmdPushConstants` + `vkCmdDraw`
+- **Full color/alpha combine** (6d7651879) — complete fbzColorPath pipeline in uber-shader:
+  cc_rgbsel, cc_mselect, cc_add, cc_sub, cc_reverse, cc_invert (+ alpha equivalents)
+- **Alpha test** (6d7651879) — 8 compare functions with discard, alphaMode bit extraction
+- **Chroma key** (6d7651879) — 8-bit integer RGB comparison against chromaKey register
+- **Alpha mask** (6d7651879) — fbzMode bit 13, low-bit test
+- **EDS1 dynamic depth state** (6d7651879, f64248f8a) — per-triangle depthTestEnable, depthWriteEnable, depthCompareOp
+- **Depth clear fix** (1e3ab6c96) — changed clear from 0.0 to 1.0 (was rejecting all fragments)
+- **dirty_line marking** (1e3ab6c96) — readback now sets dirty_line[] so SW display callback blits
+
+### Fixed
+- **NULL function pointer crash** (f64248f8a) — EDS1 functions must use `EXT` suffix on Vulkan 1.2 (volk loads extension variants, not 1.3 core names)
+- **Black screen** (1e3ab6c96) — depth clear was 0.0, all fragments failed `depth < 0.0` test
+- **Diagnostic logging added** (0723f3496) — fprintf to swap/present path for debugging
+
+### Known Bugs (next session)
+- **No textures** — only iterated vertex colors visible, log shows single 1x1 dummy texture upload
+- **Freeze on benchmark exit** — empty swaps (rp_active=0) early-return without presenting or re-enabling VGA passthrough; guest stalls with all threads sleeping
+- Alpha blending not yet implemented (pipeline variants needed)
+- Scissor clip rect not wired (full framebuffer used as default)
 
 ---
 
