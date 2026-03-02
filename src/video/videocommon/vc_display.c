@@ -763,10 +763,12 @@ vc_display_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
 
     /* Signal that the VK display is active. */
-    if (disp->display_active_ptr)
+    if (disp->display_active_ptr) {
         *disp->display_active_ptr = 1;
+        pclog("VideoCommon: display_active set to 1\n");
+    }
 
-    VC_LOG("VideoCommon: display fully initialised\n");
+    pclog("VideoCommon: display fully initialised\n");
     return 0;
 }
 

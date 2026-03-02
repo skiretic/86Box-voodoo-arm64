@@ -785,6 +785,7 @@ vc_gpu_thread_func(void *param)
                 break;
 
             case VC_CMD_SWAP:
+                VC_LOG("VideoCommon: GPU thread handling swap\n");
                 if (gpu_st)
                     vc_gpu_handle_swap(ctx, gpu_st);
                 break;

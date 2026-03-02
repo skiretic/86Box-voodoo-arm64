@@ -1860,6 +1860,8 @@ voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
      * connected (swapchain created, GPU thread presenting).  Until then,
      * triangles go through SW so the framebuffer stays valid for guest-side
      * driver self-tests (e.g. Glide detection). */
+    pclog("VideoCommon: triangle dispatch -- vc_display_active=%d vc_ctx=%p\n",
+          voodoo->vc_display_active, voodoo->vc_ctx);
     if (voodoo->vc_display_active && voodoo->vc_ctx) {
         voodoo_vk_push_triangle(voodoo, params);
         return;
