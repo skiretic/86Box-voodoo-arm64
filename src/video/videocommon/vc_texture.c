@@ -401,20 +401,40 @@ vc_texture_create(vc_ctx_t *ctx, vc_texture_state_t *tex)
     if (vc_tex_create_dummy(ctx, tex) != 0)
         return -1;
 
-    /* Allocate dummy descriptor set. */
-    VkDescriptorSetAllocateInfo set_ai;
-    memset(&set_ai, 0, sizeof(set_ai));
-    set_ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    set_ai.descriptorPool     = tex->desc_pool;
-    set_ai.descriptorSetCount = 1;
-    set_ai.pSetLayouts        = &tex->desc_layout;
+    /* Pre-allocate persistent descriptor sets: 1 dummy + 128 per-slot. */
+    {
+        const uint32_t total_sets = 1 + VC_TEX_MAX_TMU * VC_TEX_SLOTS_PER_TMU;
+        VkDescriptorSetLayout layouts[1 + VC_TEX_MAX_TMU * VC_TEX_SLOTS_PER_TMU];
+        VkDescriptorSet       sets[1 + VC_TEX_MAX_TMU * VC_TEX_SLOTS_PER_TMU];
 
-    result = vkAllocateDescriptorSets(ctx->device, &set_ai,
-                                      &tex->dummy_desc_set);
-    if (result != VK_SUCCESS) {
-        VC_LOG("VideoCommon: dummy descriptor set allocation failed (%d)\n",
-               result);
-        return -1;
+        for (uint32_t i = 0; i < total_sets; i++)
+            layouts[i] = tex->desc_layout;
+
+        VkDescriptorSetAllocateInfo set_ai;
+        memset(&set_ai, 0, sizeof(set_ai));
+        set_ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        set_ai.descriptorPool     = tex->desc_pool;
+        set_ai.descriptorSetCount = total_sets;
+        set_ai.pSetLayouts        = layouts;
+
+        result = vkAllocateDescriptorSets(ctx->device, &set_ai, sets);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: descriptor set bulk allocation failed (%d)\n",
+                   result);
+            return -1;
+        }
+
+        /* First set is the dummy. */
+        tex->dummy_desc_set = sets[0];
+
+        /* Remaining sets go to per-slot desc_set fields. */
+        uint32_t idx = 1;
+        for (int tmu = 0; tmu < VC_TEX_MAX_TMU; tmu++) {
+            for (int s = 0; s < VC_TEX_SLOTS_PER_TMU; s++) {
+                tex->slots[tmu][s].desc_set       = sets[idx++];
+                tex->slots[tmu][s].bound_sampler   = VK_NULL_HANDLE;
+            }
+        }
     }
 
     /* Write dummy descriptor. */
@@ -652,6 +672,10 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     s->valid    = 1;
     s->identity = payload->identity;
 
+    /* Invalidate the bound sampler so the next bind re-writes the
+       descriptor with the (potentially new) image view. */
+    s->bound_sampler = VK_NULL_HANDLE;
+
     VC_LOG("VideoCommon: tex upload tmu=%u slot=%u %ux%u\n", tmu, slot, w, h);
 }
 
@@ -673,6 +697,8 @@ vc_texture_handle_bind(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     vc_tex_slot_t *s = &tex->slots[tmu][slot];
     if (!s->valid || s->view == VK_NULL_HANDLE) {
         /* Texture not uploaded yet -- bind dummy. */
+        VC_LOG("VideoCommon: tex bind slot not ready tmu=%u slot=%u\n",
+               tmu, slot);
         tex->current_desc_set = tex->dummy_desc_set;
         return;
     }
@@ -684,42 +710,29 @@ vc_texture_handle_bind(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
         return;
     }
 
-    /* Allocate a new descriptor set from the pool. */
-    VkDescriptorSet desc_set;
-    VkDescriptorSetAllocateInfo set_ai;
-    memset(&set_ai, 0, sizeof(set_ai));
-    set_ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    set_ai.descriptorPool     = tex->desc_pool;
-    set_ai.descriptorSetCount = 1;
-    set_ai.pSetLayouts        = &tex->desc_layout;
+    /* Only update the descriptor if the sampler or view changed. */
+    if (s->bound_sampler != sampler) {
+        VkDescriptorImageInfo img_info;
+        memset(&img_info, 0, sizeof(img_info));
+        img_info.sampler     = sampler;
+        img_info.imageView   = s->view;
+        img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkResult result = vkAllocateDescriptorSets(ctx->device, &set_ai, &desc_set);
-    if (result != VK_SUCCESS) {
-        VC_LOG("VideoCommon: tex bind descriptor alloc failed (%d)\n", result);
-        tex->current_desc_set = tex->dummy_desc_set;
-        return;
+        VkWriteDescriptorSet write;
+        memset(&write, 0, sizeof(write));
+        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet          = s->desc_set;
+        write.dstBinding      = 0;
+        write.descriptorCount = 1;
+        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo      = &img_info;
+
+        vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+        s->bound_sampler = sampler;
     }
 
-    /* Write the descriptor. */
-    VkDescriptorImageInfo img_info;
-    memset(&img_info, 0, sizeof(img_info));
-    img_info.sampler     = sampler;
-    img_info.imageView   = s->view;
-    img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    VkWriteDescriptorSet write;
-    memset(&write, 0, sizeof(write));
-    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet          = desc_set;
-    write.dstBinding      = 0;
-    write.descriptorCount = 1;
-    write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    write.pImageInfo      = &img_info;
-
-    vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
-
-    tex->current_desc_set = desc_set;
-    tex->bound_slot[tmu]  = (int) slot;
+    tex->current_desc_set   = s->desc_set;
+    tex->bound_slot[tmu]    = (int) slot;
     tex->bound_sampler[tmu] = sampler;
 }
 
@@ -749,40 +762,11 @@ vc_texture_bind_current(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
 void
 vc_texture_reset_frame(vc_ctx_t *ctx, vc_texture_state_t *tex)
 {
-    if (tex->desc_pool != VK_NULL_HANDLE) {
-        vkResetDescriptorPool(ctx->device, tex->desc_pool, 0);
-
-        /* Re-allocate the dummy descriptor set since pool was reset. */
-        VkDescriptorSetAllocateInfo set_ai;
-        memset(&set_ai, 0, sizeof(set_ai));
-        set_ai.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        set_ai.descriptorPool     = tex->desc_pool;
-        set_ai.descriptorSetCount = 1;
-        set_ai.pSetLayouts        = &tex->desc_layout;
-
-        VkResult result = vkAllocateDescriptorSets(ctx->device, &set_ai,
-                                                   &tex->dummy_desc_set);
-        if (result == VK_SUCCESS) {
-            VkDescriptorImageInfo img_info;
-            memset(&img_info, 0, sizeof(img_info));
-            img_info.sampler     = tex->dummy_sampler;
-            img_info.imageView   = tex->dummy_view;
-            img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-            VkWriteDescriptorSet write;
-            memset(&write, 0, sizeof(write));
-            write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write.dstSet          = tex->dummy_desc_set;
-            write.dstBinding      = 0;
-            write.descriptorCount = 1;
-            write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            write.pImageInfo      = &img_info;
-
-            vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
-        }
-
-        tex->current_desc_set = tex->dummy_desc_set;
-    }
+    /* Descriptor sets are persistent per-slot -- no pool reset needed.
+       Just reset current binding to dummy so the next draw either binds
+       a real texture or falls back to the 1x1 white dummy. */
+    (void) ctx;
+    tex->current_desc_set = tex->dummy_desc_set;
 }
 
 /* -------------------------------------------------------------------------- */

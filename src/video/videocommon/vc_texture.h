@@ -45,13 +45,15 @@ typedef struct vc_gpu_state_t vc_gpu_state_t;
 /* -------------------------------------------------------------------------- */
 
 typedef struct vc_tex_slot_t {
-    VkImage     image;
-    VkImageView view;
-    void       *alloc;       /* VmaAllocation (opaque) */
-    uint32_t    width;
-    uint32_t    height;
-    int         valid;       /* 1 = has been uploaded */
-    uint32_t    identity;    /* Quick hash for change detection (GPU side). */
+    VkImage         image;
+    VkImageView     view;
+    void           *alloc;       /* VmaAllocation (opaque) */
+    VkDescriptorSet desc_set;    /* Per-slot descriptor set (pre-allocated). */
+    VkSampler       bound_sampler; /* Sampler written into desc_set. */
+    uint32_t        width;
+    uint32_t        height;
+    int             valid;       /* 1 = has been uploaded */
+    uint32_t        identity;    /* Quick hash for change detection (GPU side). */
 } vc_tex_slot_t;
 
 /* -------------------------------------------------------------------------- */

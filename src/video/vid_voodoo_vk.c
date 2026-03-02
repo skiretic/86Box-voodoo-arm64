@@ -260,8 +260,10 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
         return;
 
     int tex_entry = params->tex_entry[tmu];
-    if (tex_entry < 0 || tex_entry >= TEX_CACHE_MAX)
+    if (tex_entry < 0 || tex_entry >= TEX_CACHE_MAX) {
+        VC_LOG("VideoCommon: push_texture bail tex_entry=%d out of range (tmu=%d)\n", tex_entry, tmu);
         return;
+    }
 
     texture_t *tc = &voodoo->texture_cache[tmu][tex_entry];
 
@@ -278,8 +280,11 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
     if (lod_min > 8) lod_min = 8;
     uint32_t width  = params->tex_w_mask[tmu][lod_min] + 1;
     uint32_t height = params->tex_h_mask[tmu][lod_min] + 1;
-    if (width == 0 || height == 0 || width > 256 || height > 256)
+    if (width == 0 || height == 0 || width > 256 || height > 256) {
+        VC_LOG("VideoCommon: push_texture bail bad dims %ux%u tmu=%d entry=%d\n",
+               width, height, tmu, tex_entry);
         return;
+    }
 
     /* Copy decoded RGBA8 data from texture cache.
        The data array layout: texture_offset[lod] gives the uint32 offset
