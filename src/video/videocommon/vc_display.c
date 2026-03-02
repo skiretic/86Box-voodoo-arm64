@@ -969,6 +969,10 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
             *disp->display_active_ptr = 0;
             atomic_store_explicit(&disp->vga_frames_since_present, 0,
                                   memory_order_relaxed);
+            /* Reset has_presented so the timeout doesn't keep firing
+               on every subsequent VGA frame. */
+            atomic_store_explicit(&disp->has_presented, 0,
+                                  memory_order_relaxed);
             fprintf(stderr, "VideoCommon: VGA timeout (%d frames), re-enabling VGA passthrough\n",
                     frames);
             voodoo_active = 0; /* Let VGA frame below proceed immediately. */

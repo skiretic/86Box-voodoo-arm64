@@ -616,16 +616,8 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        must not clear vc_display_active prematurely. */
     if (!gpu_st->render_pass_active) {
         gpu_st->empty_swap_count++;
-        if (gpu_st->has_rendered && gpu_st->empty_swap_count >= 2
-            && gpu_st->disp.display_active_ptr
-            && *gpu_st->disp.display_active_ptr) {
-            *gpu_st->disp.display_active_ptr = 0;
-            fprintf(stderr, "VideoCommon: %d empty swaps, re-enabling VGA passthrough\n",
-                    gpu_st->empty_swap_count);
-        } else {
-            fprintf(stderr, "VideoCommon: swap early-return (render pass not active, empty_swap=%d, has_rendered=%d)\n",
-                    gpu_st->empty_swap_count, gpu_st->has_rendered);
-        }
+        fprintf(stderr, "VideoCommon: swap early-return (render pass not active, empty_swap=%d, has_rendered=%d)\n",
+                gpu_st->empty_swap_count, gpu_st->has_rendered);
         return;
     }
 
@@ -639,6 +631,12 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
                           memory_order_relaxed);
     atomic_store_explicit(&gpu_st->disp.has_presented, 1,
                           memory_order_relaxed);
+
+    /* Re-arm display_active on every real swap so VGA passthrough stays
+       suppressed as long as Voodoo is actively rendering.  The VGA timeout
+       in vc_display_tick() is the ONLY mechanism that clears it. */
+    if (gpu_st->disp.display_active_ptr)
+        *gpu_st->disp.display_active_ptr = 1;
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 

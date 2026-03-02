@@ -28,7 +28,7 @@ typedef struct vc_gpu_state_t vc_gpu_state_t;
 
 /* Maximum number of swapchain images we handle. */
 #define VC_MAX_SWAPCHAIN_IMAGES 8
-#define VC_VGA_TIMEOUT_FRAMES   60  /* ~1 second at 60Hz: re-enable VGA passthrough */
+#define VC_VGA_TIMEOUT_FRAMES   120 /* ~2 seconds at 60Hz: re-enable VGA passthrough */
 
 /* -------------------------------------------------------------------------- */
 /*  Display state                                                              */
