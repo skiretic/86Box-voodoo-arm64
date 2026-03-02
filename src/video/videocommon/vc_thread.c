@@ -531,11 +531,6 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
        swap counter so we don't prematurely re-enable VGA passthrough. */
     gpu_st->empty_swap_count = 0;
 
-    /* Re-enable Voodoo display when triangles resume after empty-swap
-       detection had cleared it for VGA passthrough. */
-    if (ctx->display_active_ptr && !*ctx->display_active_ptr)
-        *ctx->display_active_ptr = 1;
-
     if (!gpu_st->render_pass_active)
         vc_gpu_begin_frame(ctx, gpu_st);
 
@@ -615,23 +610,29 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     /* If no render pass is active, this is an "empty" swap (no triangles
        were submitted since the last swap).  After several consecutive empty
        swaps the Glide application has likely exited, so we clear
-       vc_display_active to re-enable VGA passthrough. */
+       vc_display_active to re-enable VGA passthrough.
+       IMPORTANT: only do this if has_rendered is set -- during Glide
+       detection, test swaps arrive before any real rendering, and we
+       must not clear vc_display_active prematurely. */
     if (!gpu_st->render_pass_active) {
         gpu_st->empty_swap_count++;
-        if (gpu_st->empty_swap_count >= 3 && gpu_st->disp.display_active_ptr
+        if (gpu_st->has_rendered && gpu_st->empty_swap_count >= 3
+            && gpu_st->disp.display_active_ptr
             && *gpu_st->disp.display_active_ptr) {
             *gpu_st->disp.display_active_ptr = 0;
             fprintf(stderr, "VideoCommon: %d empty swaps, re-enabling VGA passthrough\n",
                     gpu_st->empty_swap_count);
         } else {
-            fprintf(stderr, "VideoCommon: swap early-return (render pass not active, empty_swap=%d)\n",
-                    gpu_st->empty_swap_count);
+            fprintf(stderr, "VideoCommon: swap early-return (render pass not active, empty_swap=%d, has_rendered=%d)\n",
+                    gpu_st->empty_swap_count, gpu_st->has_rendered);
         }
         return;
     }
 
-    /* A real swap with triangles -- reset empty swap counter. */
+    /* A real swap with triangles -- reset empty swap counter and mark
+       that real rendering has occurred. */
     gpu_st->empty_swap_count = 0;
+    gpu_st->has_rendered     = 1;
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 

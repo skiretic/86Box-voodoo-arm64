@@ -44,6 +44,7 @@ typedef struct vc_gpu_state_t {
     int      render_pass_active;
     int      renderer_switch_done; /* 1 after first swap triggers vc_notify_renderer_ready */
     int      empty_swap_count;     /* consecutive swaps with no triangles -- detects Glide exit */
+    int      has_rendered;         /* 1 after first real swap (with triangles) -- gates empty swap detection */
     /* swap_seen removed -- VGA suppression now uses display_active_ptr
        directly, which is a reliable indicator of Voodoo activity. */
     uint32_t fb_width;
