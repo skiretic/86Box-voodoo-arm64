@@ -46,6 +46,7 @@
 #include "vc_render_pass.h"
 #include "vc_batch.h"
 #include "vc_display.h"
+#include "vc_texture.h"
 #include "vc_gpu_state.h"
 
 /* -------------------------------------------------------------------------- */
@@ -537,6 +538,9 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(vc_push_constants_t), pc);
 
+    /* Bind texture descriptor set. */
+    vc_texture_bind_current(ctx, gpu_st, f->cmd_buf);
+
     /* Append triangle to batch. */
     if (vc_batch_append_triangle(ctx, gpu_st, verts) != 0) {
         /* Batch full -- flush. */
@@ -648,9 +652,14 @@ vc_gpu_thread_init(vc_ctx_t *ctx)
     if (vc_shaders_create(ctx, &gpu_st->shaders) != 0)
         goto fail;
 
+    /* Textures. */
+    if (vc_texture_create(ctx, &gpu_st->tex) != 0)
+        goto fail;
+
     /* Pipeline. */
     if (vc_pipeline_create(ctx, &gpu_st->pipe, &gpu_st->shaders,
-                           gpu_st->rp.render_pass_load)
+                           gpu_st->rp.render_pass_load,
+                           gpu_st->tex.desc_layout)
         != 0)
         goto fail;
 
@@ -666,6 +675,7 @@ fail:
     VC_LOG("VideoCommon: GPU thread init FAILED\n");
     /* Partial cleanup -- destroy what was created. */
     vc_pipeline_destroy(ctx, &gpu_st->pipe);
+    vc_texture_destroy(ctx, &gpu_st->tex);
     vc_shaders_destroy(ctx, &gpu_st->shaders);
     vc_batch_destroy(ctx, gpu_st);
     vc_render_pass_destroy_framebuffers(ctx, gpu_st);
@@ -693,6 +703,7 @@ vc_gpu_thread_cleanup(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 
     vc_display_destroy(ctx, gpu_st);
     vc_pipeline_destroy(ctx, &gpu_st->pipe);
+    vc_texture_destroy(ctx, &gpu_st->tex);
     vc_shaders_destroy(ctx, &gpu_st->shaders);
     vc_batch_destroy(ctx, gpu_st);
     vc_render_pass_destroy_framebuffers(ctx, gpu_st);
@@ -755,6 +766,18 @@ vc_gpu_thread_func(void *param)
             case VC_CMD_SWAP:
                 if (gpu_st)
                     vc_gpu_handle_swap(ctx, gpu_st);
+                break;
+
+            case VC_CMD_TEXTURE_UPLOAD:
+                if (gpu_st)
+                    vc_texture_handle_upload(ctx, gpu_st,
+                        (const vc_tex_upload_payload_t *) (hdr + 1));
+                break;
+
+            case VC_CMD_TEXTURE_BIND:
+                if (gpu_st)
+                    vc_texture_handle_bind(ctx, gpu_st,
+                        (const vc_tex_bind_payload_t *) (hdr + 1));
                 break;
 
             default:

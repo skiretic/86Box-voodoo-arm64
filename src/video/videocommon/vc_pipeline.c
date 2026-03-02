@@ -31,6 +31,7 @@
 
 #include "vc_pipeline.h"
 #include "vc_shader.h"
+#include "vc_texture.h"
 
 /* -------------------------------------------------------------------------- */
 /*  Vertex input state                                                         */
@@ -98,14 +99,15 @@ vc_fill_vertex_input(VkVertexInputBindingDescription *binding,
 int
 vc_pipeline_create(vc_ctx_t *ctx, vc_pipeline_t *pl,
                    const vc_shaders_t *shaders,
-                   VkRenderPass render_pass)
+                   VkRenderPass render_pass,
+                   VkDescriptorSetLayout desc_layout)
 {
     VkResult result;
 
     memset(pl, 0, sizeof(vc_pipeline_t));
 
     /* -------------------------------------------------------------------- */
-    /*  Pipeline layout (push constants only, no descriptor sets)            */
+    /*  Pipeline layout (push constants + optional descriptor set)           */
     /* -------------------------------------------------------------------- */
 
     VkPushConstantRange push_range;
@@ -118,8 +120,8 @@ vc_pipeline_create(vc_ctx_t *ctx, vc_pipeline_t *pl,
     VkPipelineLayoutCreateInfo layout_ci;
     memset(&layout_ci, 0, sizeof(layout_ci));
     layout_ci.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layout_ci.setLayoutCount         = 0;    /* No descriptor sets in Phase 2. */
-    layout_ci.pSetLayouts            = NULL;
+    layout_ci.setLayoutCount         = (desc_layout != VK_NULL_HANDLE) ? 1 : 0;
+    layout_ci.pSetLayouts            = (desc_layout != VK_NULL_HANDLE) ? &desc_layout : NULL;
     layout_ci.pushConstantRangeCount = 1;
     layout_ci.pPushConstantRanges    = &push_range;
 

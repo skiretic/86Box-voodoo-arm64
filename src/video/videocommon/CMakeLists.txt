@@ -104,6 +104,7 @@ set(VIDEOCOMMON_SOURCES
     vc_batch.c
     vc_shader.c
     vc_pipeline.c
+    vc_texture.c
     vc_display.c
     vc_vma_impl.cpp
 )

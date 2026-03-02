@@ -97,13 +97,15 @@ typedef struct vc_pipeline_t {
     VkPipeline        pipeline;   /* Phase 2: single pipeline (no blend) */
 } vc_pipeline_t;
 
-/* Create the pipeline layout (push constants only, no descriptor sets in
-   Phase 2), pipeline cache, and default graphics pipeline.
+/* Create the pipeline layout, pipeline cache, and default graphics pipeline.
    `render_pass` is the VkRenderPass this pipeline will be used with.
+   `desc_layout` is the descriptor set layout for texture bindings
+   (VK_NULL_HANDLE to use no descriptor sets).
    Returns 0 on success, -1 on failure. */
 int  vc_pipeline_create(vc_ctx_t *ctx, vc_pipeline_t *pl,
                         const vc_shaders_t *shaders,
-                        VkRenderPass render_pass);
+                        VkRenderPass render_pass,
+                        VkDescriptorSetLayout desc_layout);
 
 /* Destroy the pipeline, layout, and cache. */
 void vc_pipeline_destroy(vc_ctx_t *ctx, vc_pipeline_t *pl);

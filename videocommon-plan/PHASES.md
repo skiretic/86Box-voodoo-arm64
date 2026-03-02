@@ -162,7 +162,7 @@ Test VMs:
 
 ---
 
-## Phase 3: Display
+## Phase 3: Display ✅ COMPLETE
 
 **Goal**: Rendered frames visible in the 86Box window. Swapchain creation,
 post-processing blit, present, display callback skip.
