@@ -106,8 +106,8 @@ vc_display_state_init(vc_display_t *disp)
     atomic_store_explicit(&disp->vga_blit_w, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_blit_h, 0, memory_order_relaxed);
     atomic_store_explicit(&disp->vga_buf_ptrs[0], 0, memory_order_relaxed);
-    atomic_store_explicit(&disp->has_presented, 0, memory_order_relaxed);
-    atomic_store_explicit(&disp->vga_frames_since_present, 0, memory_order_relaxed);
+    disp->display_owner = 0;
+    disp->vga_ticks_since_present = 0;
     atomic_store_explicit(&disp->vga_buf_ptrs[1], 0, memory_order_relaxed);
 }
 
@@ -765,9 +765,10 @@ vc_display_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         return -1;
     }
 
-    /* Signal that the VK display is active. */
-    if (disp->display_active_ptr) {
-        *disp->display_active_ptr = 1;
+    /* Enable triangle routing to VK.  This is permanent — never cleared
+       until device close.  Display ownership is tracked separately. */
+    if (disp->divert_to_gpu_ptr) {
+        *disp->divert_to_gpu_ptr = 1;
     }
 
     return 0;
@@ -778,10 +779,11 @@ vc_display_destroy(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
     vc_display_t *disp = &gpu_st->disp;
 
-    /* Clear display active flag. */
-    if (disp->display_active_ptr) {
-        *disp->display_active_ptr = 0;
-    }
+    /* Clear display ownership — VGA passthrough resumes.
+       NOTE: divert_to_gpu is NOT cleared here — triangle routing stays
+       active so Glide can restart without re-detection. */
+    disp->display_owner = 0;
+    disp->vga_ticks_since_present = 0;
 
     vkDeviceWaitIdle(ctx->device);
 
@@ -942,50 +944,29 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         }
     }
 
-    /* Check whether the Voodoo display pipeline is connected.
-       When active, VGA passthrough is completely suppressed -- the
-       Voodoo swap handler owns all swapchain presents.  VGA frames
-       are only relevant before the Voodoo display activates (boot,
-       BIOS, driver load) or after it deactivates. */
-    int voodoo_active = disp->display_active_ptr
-        && *disp->display_active_ptr;
+    /* Display ownership check.  display_owner is GPU-thread-only:
+       1 = Voodoo owns the swapchain (VGA frames discarded),
+       0 = VGA passthrough active (Voodoo not presenting).
+       This is INDEPENDENT of vc_divert_to_gpu (triangle routing),
+       which stays permanently set once the VK surface exists. */
 
-    /* Timeout-based VGA passthrough re-enable.  When Voodoo is active,
-       count VGA frames since the last real Voodoo present.  If no present
-       has happened for VC_VGA_TIMEOUT_FRAMES (~1 second), the Glide app
-       has likely exited without sending enough empty swaps for the fast
-       path in vc_gpu_handle_swap() to trigger.  Clear display_active to
-       unblock VGA passthrough. */
-    if (voodoo_active) {
-        /* Only run the timeout if at least one real present has happened.
-           During Glide detection/setup, no presents occur -- firing the
-           timeout would clear display_active and route triangles to SW. */
-        int presented = atomic_load_explicit(&disp->has_presented,
-                                             memory_order_relaxed);
-        int frames = atomic_load_explicit(&disp->vga_frames_since_present,
-                                          memory_order_relaxed);
-        frames++;
-        if (presented && frames >= VC_VGA_TIMEOUT_FRAMES) {
-            *disp->display_active_ptr = 0;
-            atomic_store_explicit(&disp->vga_frames_since_present, 0,
-                                  memory_order_relaxed);
-            /* Reset has_presented so the timeout doesn't keep firing
-               on every subsequent VGA frame. */
-            atomic_store_explicit(&disp->has_presented, 0,
-                                  memory_order_relaxed);
-            fprintf(stderr, "VideoCommon: VGA timeout (%d frames), re-enabling VGA passthrough\n",
-                    frames);
-            voodoo_active = 0; /* Let VGA frame below proceed immediately. */
-        } else {
-            atomic_store_explicit(&disp->vga_frames_since_present, frames,
-                                  memory_order_relaxed);
+    /* Timeout: if Voodoo owns the display but hasn't presented for
+       VC_VGA_TIMEOUT_FRAMES ticks, the Glide app has likely exited.
+       Hand display back to VGA.  This does NOT affect triangle routing. */
+    if (disp->display_owner) {
+        disp->vga_ticks_since_present++;
+        if (disp->vga_ticks_since_present >= VC_VGA_TIMEOUT_FRAMES) {
+            disp->display_owner = 0;
+            disp->vga_ticks_since_present = 0;
+            fprintf(stderr, "VideoCommon: VGA timeout (%d ticks), re-enabling VGA passthrough\n",
+                    VC_VGA_TIMEOUT_FRAMES);
         }
     }
 
     /* Check for VGA passthrough frames. */
     if (atomic_load_explicit(&disp->vga_frame_ready,
                              memory_order_acquire)) {
-        if (voodoo_active) {
+        if (disp->display_owner) {
             /* Voodoo owns the swapchain -- discard VGA frames. */
             atomic_store_explicit(&disp->vga_frame_ready, 0,
                                   memory_order_relaxed);

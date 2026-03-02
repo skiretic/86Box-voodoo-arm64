@@ -571,11 +571,11 @@ vc_voodoo_init_thread(void *voodoo_ptr)
         return;
     }
 
-    /* Store back-pointer and display_active_ptr BEFORE starting the GPU
+    /* Store back-pointer and divert_to_gpu_ptr BEFORE starting the GPU
        thread.  Thread creation provides a happens-before edge, so the
        GPU thread is guaranteed to see these values during its init. */
     ctx->voodoo_ptr = voodoo;
-    ctx->display_active_ptr = &voodoo->vc_display_active;
+    ctx->divert_to_gpu_ptr = &voodoo->vc_divert_to_gpu;
 
     if (vc_start_gpu_thread(ctx) != 0) {
         VC_LOG("VideoCommon: GPU thread start failed, falling back to SW renderer\n");
@@ -648,7 +648,7 @@ vc_voodoo_close(void *voodoo_ptr)
     vc_stop_gpu_thread(ctx);
     vc_destroy(ctx);
     voodoo->vc_ctx = NULL;
-    voodoo->vc_display_active = 0;
+    voodoo->vc_divert_to_gpu = 0;
 }
 
 /* -------------------------------------------------------------------------- */

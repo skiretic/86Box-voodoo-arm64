@@ -527,9 +527,7 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
     if (gpu_st->pipe.pipeline == VK_NULL_HANDLE)
         return;
 
-    /* A triangle means Voodoo is actively rendering -- reset the empty
-       swap counter so we don't prematurely re-enable VGA passthrough. */
-    gpu_st->empty_swap_count = 0;
+    /* A triangle means Voodoo is actively rendering. */
 
     if (!gpu_st->render_pass_active)
         vc_gpu_begin_frame(ctx, gpu_st);
@@ -608,35 +606,19 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
             gpu_st->render_pass_active, gpu_st->frame_index, gpu_st->rp.back_index);
 
     /* If no render pass is active, this is an "empty" swap (no triangles
-       were submitted since the last swap).  After several consecutive empty
-       swaps the Glide application has likely exited, so we clear
-       vc_display_active to re-enable VGA passthrough.
-       IMPORTANT: only do this if has_rendered is set -- during Glide
-       detection, test swaps arrive before any real rendering, and we
-       must not clear vc_display_active prematurely. */
+       were submitted since the last swap).  Nothing to present. */
     if (!gpu_st->render_pass_active) {
-        gpu_st->empty_swap_count++;
-        fprintf(stderr, "VideoCommon: swap early-return (render pass not active, empty_swap=%d, has_rendered=%d)\n",
-                gpu_st->empty_swap_count, gpu_st->has_rendered);
+        fprintf(stderr, "VideoCommon: swap early-return (render pass not active)\n");
         return;
     }
 
-    /* A real swap with triangles -- reset empty swap counter and mark
-       that real rendering has occurred.  Also reset the VGA timeout
-       counter so vc_display_tick() doesn't accidentally re-enable
-       VGA passthrough while Voodoo is actively rendering. */
-    gpu_st->empty_swap_count = 0;
-    gpu_st->has_rendered     = 1;
-    atomic_store_explicit(&gpu_st->disp.vga_frames_since_present, 0,
-                          memory_order_relaxed);
-    atomic_store_explicit(&gpu_st->disp.has_presented, 1,
-                          memory_order_relaxed);
-
-    /* Re-arm display_active on every real swap so VGA passthrough stays
-       suppressed as long as Voodoo is actively rendering.  The VGA timeout
-       in vc_display_tick() is the ONLY mechanism that clears it. */
-    if (gpu_st->disp.display_active_ptr)
-        *gpu_st->disp.display_active_ptr = 1;
+    /* Real swap with triangles.  Claim display ownership and reset the
+       VGA timeout counter.  This is the ONLY place that sets display_owner
+       to 1 — the timeout in vc_display_tick() is the ONLY place that
+       clears it.  Neither of these affect vc_divert_to_gpu (triangle
+       routing), which stays permanently set. */
+    gpu_st->disp.display_owner = 1;
+    gpu_st->disp.vga_ticks_since_present = 0;
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
@@ -727,11 +709,11 @@ vc_gpu_thread_init(vc_ctx_t *ctx)
        when VCRenderer provides a VkSurfaceKHR). */
     vc_display_state_init(&gpu_st->disp);
 
-    /* Copy display_active_ptr from ctx (set before thread creation,
+    /* Copy divert_to_gpu_ptr from ctx (set before thread creation,
        so it is guaranteed visible here via the thread-creation
-       happens-before edge).  This pointer lets vc_display_create()
-       signal voodoo_t when the VK display pipeline is connected. */
-    gpu_st->disp.display_active_ptr = ctx->display_active_ptr;
+       happens-before edge).  vc_display_create() sets this to 1
+       to permanently enable triangle routing to the VK ring. */
+    gpu_st->disp.divert_to_gpu_ptr = ctx->divert_to_gpu_ptr;
 
     /* Frame resources. */
     if (vc_frame_resources_create(ctx, gpu_st) != 0)

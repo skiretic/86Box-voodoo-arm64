@@ -72,21 +72,21 @@ typedef struct vc_display_t {
     VkSemaphore image_available_sem[VC_NUM_FRAMES];
     VkSemaphore render_finished_sem[VC_NUM_FRAMES];
 
-    /* Pointer to voodoo_t::vc_display_active for the GPU thread to set.
-       Copied from ctx->display_active_ptr during vc_gpu_thread_init(). */
-    int *display_active_ptr;
+    /* Pointer to voodoo_t::vc_divert_to_gpu.  The GPU thread sets this
+       to 1 in vc_display_create() to permanently enable triangle routing
+       to the VK ring.  Cleared only on device close (after thread join). */
+    volatile int *divert_to_gpu_ptr;
 
-    /* Timeout counter: incremented by vc_display_tick() each VGA frame
-       while Voodoo display is active, reset to 0 by vc_gpu_handle_swap()
-       on every real present.  When this exceeds VC_VGA_TIMEOUT_FRAMES,
-       VGA passthrough is re-enabled (handles Glide app exit when no more
-       swap commands arrive). */
-    _Atomic(int) vga_frames_since_present;
+    /* Display ownership: 0 = VGA passthrough, 1 = Voodoo owns display.
+       Set to 1 on first real Voodoo present, cleared by VGA timeout.
+       GPU-thread-only — no atomics needed. */
+    int display_owner;
 
-    /* Flag: set to 1 after the first successful Voodoo present.
-       Used by vc_display_tick() to avoid firing the VGA timeout
-       during Glide detection/setup when no presents have happened yet. */
-    _Atomic(int) has_presented;
+    /* Tick counter: incremented each vc_display_tick() call while
+       display_owner == 1, reset to 0 by each real Voodoo present.
+       When this reaches VC_VGA_TIMEOUT_FRAMES, display_owner is
+       cleared to re-enable VGA passthrough. */
+    int vga_ticks_since_present;
 
     /* --- VGA passthrough blit state --- */
 

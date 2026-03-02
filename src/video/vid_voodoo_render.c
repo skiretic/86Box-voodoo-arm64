@@ -1862,11 +1862,10 @@ voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     /* GPU-accelerated path: push triangle to SPSC ring for the GPU thread.
      * vc_ctx is NULL until the background init thread completes -- until
      * then, triangles fall through to the SW rasterizer.
-     * vc_display_active is only set once the VK display pipeline is fully
-     * connected (swapchain created, GPU thread presenting).  Until then,
-     * triangles go through SW so the framebuffer stays valid for guest-side
-     * driver self-tests (e.g. Glide detection). */
-    if (voodoo->vc_display_active && voodoo->vc_ctx) {
+     * vc_divert_to_gpu is set once when the VK surface is created and
+     * never cleared until device close.  This ensures stable triangle
+     * routing that cannot be disrupted by VGA timeout logic. */
+    if (voodoo->vc_divert_to_gpu && voodoo->vc_ctx) {
         voodoo_vk_push_triangle(voodoo, params);
         return;
     }
