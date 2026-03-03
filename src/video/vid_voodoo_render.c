@@ -1866,14 +1866,6 @@ voodoo_queue_triangle(voodoo_t *voodoo, voodoo_params_t *params)
      * never cleared until device close.  This ensures stable triangle
      * routing that cannot be disrupted by VGA timeout logic. */
     if (voodoo->vc_divert_to_gpu && voodoo->vc_ctx) {
-        static int div_count = 0;
-        if (++div_count % 1000 == 0)
-            fprintf(stderr, "DIVERT #%d: tex_entry=%d texBaseAddr=0x%x tLOD=0x%x tex_w_mask[0][0]=%d\n",
-                    div_count,
-                    params->tex_entry[0],
-                    params->texBaseAddr[0],
-                    params->tLOD[0],
-                    params->tex_w_mask[0][0]);
         voodoo_vk_push_triangle(voodoo, params);
         return;
     }

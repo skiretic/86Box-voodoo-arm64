@@ -21,7 +21,7 @@ Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
 Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
 Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
 Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE
-Phase 5: Core Pipeline       [XXXXXX....] 60%  IN PROGRESS
+Phase 5: Core Pipeline       [XXXXXXX...] 70%  IN PROGRESS
 Phase 6: Advanced Features   [..........] 0%   BLOCKED (Phase 5)
 Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
@@ -41,7 +41,7 @@ Overall                      [XXXXXX....] 55%
 | 5.5 | Depth clear fix (0.0→1.0) | X | 1e3ab6c96 |
 | 5.6 | dirty_line marking for readback | X | 1e3ab6c96 |
 | 5.7 | Texture rendering — flat grey, no textures visible | ! | — |
-| 5.8 | Freeze on benchmark exit (empty swaps) | ! | — |
+| 5.8 | display_active redesign (freeze on exit) | X | e53f7c836, 05ae03693 |
 | 5.9 | Alpha blending (pipeline variants) | - | — |
 | 5.10 | Scissor (clip rect wiring) | - | — |
 
@@ -57,11 +57,11 @@ Legend: `-` not started, `~` in progress, `X` done, `!` blocked/bug
 - The Phase 5 shader rewrite may have broken texture combine path
 - Need to investigate: is texture data reaching the shader? Is the combine selecting texture?
 
-### BUG: Freeze on benchmark exit (empty swaps)
-- When Glide app stops rendering, swap commands continue but `rp_active=0`
-- `vc_gpu_handle_swap()` early-returns without presenting or re-enabling VGA
-- Guest stalls with black screen, all threads sleeping
-- Fix options: (a) present last frame on empty swap, (b) re-enable VGA passthrough on idle
+### FIXED: Freeze on benchmark exit (display_active redesign)
+- Root cause: `vc_display_active` served dual purpose (triangle routing + VGA suppression)
+- Clearing it for VGA re-enable also killed triangle routing → feedback loop
+- Fix (e53f7c836, 05ae03693): split into `vc_divert_to_gpu` (permanent triangle routing) + `display_owner` (VGA timeout)
+- VGA passthrough now returns cleanly after benchmark exits (~2 sec timeout)
 
 ---
 

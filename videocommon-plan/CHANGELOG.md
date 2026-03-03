@@ -28,9 +28,18 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 - **Black screen** (1e3ab6c96) — depth clear was 0.0, all fragments failed `depth < 0.0` test
 - **Diagnostic logging added** (0723f3496) — fprintf to swap/present path for debugging
 
+### Fixed — display_active feedback loop (e53f7c836, 05ae03693)
+- **Root cause**: `vc_display_active` served dual purpose — triangle routing (FIFO thread reads) AND VGA suppression (GPU thread clears on timeout). Clearing for VGA re-enable killed triangle routing → feedback loop. 7 prior commits of bandaids failed to fix it.
+- **Fix**: split into two independent flags:
+  - `vc_divert_to_gpu` (volatile int on `voodoo_t`) — permanent triangle routing, set once on VK surface create, never cleared until device close
+  - `display_owner` (plain int on `vc_display_t`, GPU-thread-only) — VGA vs Voodoo display, toggled by presents and VGA timeout
+- **Also fixed** (05ae03693): VGA timeout counter was incrementing per GPU thread iteration (~hundreds/frame) instead of per VGA frame (~60 Hz). Now only counts when `vga_frame_ready` is set.
+- Removed bandaid state: `has_presented`, `vga_frames_since_present`, `empty_swap_count`, `has_rendered`
+- 8 files changed, net -42 lines
+- **Verified**: 57 presents with 0 spurious timeouts, 1 clean VGA timeout on benchmark exit
+
 ### Known Bugs (next session)
 - **No textures** — only iterated vertex colors visible, log shows single 1x1 dummy texture upload
-- **Freeze on benchmark exit** — empty swaps (rp_active=0) early-return without presenting or re-enabling VGA passthrough; guest stalls with all threads sleeping
 - Alpha blending not yet implemented (pipeline variants needed)
 - Scissor clip rect not wired (full framebuffer used as default)
 
