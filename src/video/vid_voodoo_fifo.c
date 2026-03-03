@@ -336,6 +336,11 @@ cmdfifo_get(voodoo_t *voodoo)
         voodoo->cmdfifo_depth_rd++;
     voodoo->cmdfifo_rp += 4;
 
+    /* Hardware auto-wraps the read pointer when it reaches the end of the ring. */
+    if (!voodoo->cmdfifo_in_sub && !voodoo->cmdfifo_in_agp
+        && voodoo->cmdfifo_rp >= voodoo->cmdfifo_end)
+        voodoo->cmdfifo_rp = voodoo->cmdfifo_base;
+
     //        voodoo_fifo_log("  CMDFIFO get %08x\n", val);
     return val;
 }
@@ -372,6 +377,11 @@ cmdfifo_get_2(voodoo_t *voodoo)
     if (!voodoo->cmdfifo_in_sub_2)
         voodoo->cmdfifo_depth_rd_2++;
     voodoo->cmdfifo_rp_2 += 4;
+
+    /* Hardware auto-wraps the read pointer when it reaches the end of the ring. */
+    if (!voodoo->cmdfifo_in_sub_2 && !voodoo->cmdfifo_in_agp_2
+        && voodoo->cmdfifo_rp_2 >= voodoo->cmdfifo_end_2)
+        voodoo->cmdfifo_rp_2 = voodoo->cmdfifo_base_2;
 
     //        voodoo_fifo_log("  CMDFIFO get %08x\n", val);
     return val;
