@@ -407,14 +407,10 @@ void main() {
 
     a_src *= a_factor;
 
-    /* Step 4: cca_add */
+    /* Step 4: cca_add -- any nonzero value adds a_local (SW: if (cca_add) a += a_local) */
     uint cca_add = (pc.fbzColorPath >> 23) & 3u;
-    switch (cca_add) {
-        case 0u:  /* add zero */                         break;
-        case 1u:  a_src += a_local;                      break;
-        case 2u:  a_src += a_local;                      break; /* same as 1 for alpha */
-        default:                                         break;
-    }
+    if (cca_add != 0u)
+        a_src += a_local;
 
     /* Step 5: clamp */
     a_src = clamp(a_src, 0.0, 1.0);
