@@ -212,6 +212,28 @@ vc_detect_capabilities(vc_ctx_t *ctx)
 /*  vc_init / vc_destroy                                                       */
 /* -------------------------------------------------------------------------- */
 
+
+/* -------------------------------------------------------------------- */
+/*  Vulkan debug messenger callback (VC_VALIDATE=1)                     */
+/* -------------------------------------------------------------------- */
+
+static VKAPI_ATTR VkBool32 VKAPI_CALL
+vc_debug_messenger_cb(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
+                      VkDebugUtilsMessageTypeFlagsEXT type,
+                      const VkDebugUtilsMessengerCallbackDataEXT *data,
+                      void *user_data)
+{
+    (void) user_data;
+    (void) type;
+    const char *sev = "INFO";
+    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+        sev = "ERROR";
+    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+        sev = "WARNING";
+    fprintf(stderr, "VK_VALIDATE [%s]: %s\n", sev, data->pMessage);
+    return VK_FALSE;
+}
+
 vc_ctx_t *
 vc_init(void)
 {
@@ -241,24 +263,26 @@ vc_init(void)
     app_info.engineVersion      = VK_MAKE_VERSION(1, 0, 0);
     app_info.apiVersion         = VK_API_VERSION_1_2;
 
-    const char *inst_extensions[] = {
-        VK_KHR_SURFACE_EXTENSION_NAME,
-#ifdef __APPLE__
-        VK_EXT_METAL_SURFACE_EXTENSION_NAME,
-        "VK_KHR_portability_enumeration",
-        "VK_KHR_get_physical_device_properties2",
-#endif
-#ifdef _WIN32
-        VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
-#endif
-#if defined(__linux__) && !defined(__ANDROID__)
-        VK_KHR_XCB_SURFACE_EXTENSION_NAME,
-#endif
-    };
-    uint32_t inst_ext_count = sizeof(inst_extensions) / sizeof(inst_extensions[0]);
-
     const char *validation_layer = "VK_LAYER_KHRONOS_validation";
     int         use_validation   = vc_validation_requested() && vc_has_validation_layer();
+
+    const char *inst_extensions[8];
+    uint32_t    inst_ext_count = 0;
+
+    inst_extensions[inst_ext_count++] = VK_KHR_SURFACE_EXTENSION_NAME;
+#ifdef __APPLE__
+    inst_extensions[inst_ext_count++] = VK_EXT_METAL_SURFACE_EXTENSION_NAME;
+    inst_extensions[inst_ext_count++] = "VK_KHR_portability_enumeration";
+    inst_extensions[inst_ext_count++] = "VK_KHR_get_physical_device_properties2";
+#endif
+#ifdef _WIN32
+    inst_extensions[inst_ext_count++] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#endif
+#if defined(__linux__) && !defined(__ANDROID__)
+    inst_extensions[inst_ext_count++] = VK_KHR_XCB_SURFACE_EXTENSION_NAME;
+#endif
+    if (use_validation)
+        inst_extensions[inst_ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 
     VkInstanceCreateInfo instance_ci;
     memset(&instance_ci, 0, sizeof(instance_ci));
@@ -283,6 +307,27 @@ vc_init(void)
     }
 
     volkLoadInstance(ctx->instance);
+
+    /* Create debug messenger if validation is enabled. */
+    if (use_validation) {
+        VkDebugUtilsMessengerCreateInfoEXT dbg_ci;
+        memset(&dbg_ci, 0, sizeof(dbg_ci));
+        dbg_ci.sType           = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+        dbg_ci.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+                               | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+        dbg_ci.messageType     = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+                               | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+                               | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        dbg_ci.pfnUserCallback = vc_debug_messenger_cb;
+
+        result = vkCreateDebugUtilsMessengerEXT(ctx->instance, &dbg_ci, NULL, &ctx->debug_messenger);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: failed to create debug messenger (%d)\n", result);
+            ctx->debug_messenger = VK_NULL_HANDLE;
+        } else {
+            VC_LOG("VideoCommon: debug messenger created\n");
+        }
+    }
 
     /* -------------------------------------------------------------------- */
     /*  Physical device selection                                           */
@@ -523,6 +568,11 @@ vc_destroy(vc_ctx_t *ctx)
     if (ctx->device != VK_NULL_HANDLE) {
         vkDestroyDevice(ctx->device, NULL);
         ctx->device = VK_NULL_HANDLE;
+    }
+
+    if (ctx->debug_messenger != VK_NULL_HANDLE) {
+        vkDestroyDebugUtilsMessengerEXT(ctx->instance, ctx->debug_messenger, NULL);
+        ctx->debug_messenger = VK_NULL_HANDLE;
     }
 
     if (ctx->instance != VK_NULL_HANDLE) {

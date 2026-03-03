@@ -218,6 +218,9 @@ typedef struct vc_ctx_t {
        The GPU thread sets *divert_to_gpu_ptr = 1 in vc_display_create()
        and the FIFO thread reads voodoo->vc_divert_to_gpu for routing. */
     volatile int *divert_to_gpu_ptr;
+
+    /* Debug messenger (only created when VC_VALIDATE=1). */
+    VkDebugUtilsMessengerEXT debug_messenger;
 } vc_ctx_t;
 
 #endif /* VIDEOCOMMON_INTERNAL_H */
