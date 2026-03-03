@@ -997,6 +997,8 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
                                   memory_order_relaxed);
             disp->vga_ticks_since_present++;
             if (disp->vga_ticks_since_present >= VC_VGA_TIMEOUT_FRAMES) {
+                fprintf(stderr, "VC_DIAG: display_owner 1->0 (VGA timeout after %d frames)\n",
+                        VC_VGA_TIMEOUT_FRAMES);
                 disp->display_owner = 0;
                 disp->vga_ticks_since_present = 0;
                 VC_LOG("VideoCommon: VGA timeout (%d VGA frames), re-enabling VGA passthrough\n",

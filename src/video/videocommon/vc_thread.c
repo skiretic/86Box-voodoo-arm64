@@ -682,10 +682,25 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
 static void
 vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
+    static int diag_swap_count = 0;
+    static int diag_prev_display_owner = -1;
+    diag_swap_count++;
+
+    int rpa = gpu_st->render_pass_active;
+    int fi  = gpu_st->frame_index;
+    int downer = gpu_st->disp.display_owner;
+
+    /* Periodic status every 60 swaps. */
+    if ((diag_swap_count % 60) == 0)
+        fprintf(stderr, "VC_DIAG: swap #%d rpa=%d fi=%d display_owner=%d\n",
+                diag_swap_count, rpa, fi, downer);
 
     /* If no render pass is active, this is an "empty" swap (no triangles
        were submitted since the last swap).  Nothing to present. */
     if (!gpu_st->render_pass_active) {
+        /* ALWAYS log empty swaps — they signal loading screens. */
+        fprintf(stderr, "VC_DIAG: EMPTY swap #%d (no triangles) fi=%d display_owner=%d\n",
+                diag_swap_count, fi, downer);
         /* Still reset VGA timeout — empty swaps prove the 3D app is
            alive (e.g. loading screens), so don't let the VGA timeout
            reclaim display ownership. */
@@ -698,8 +713,19 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        to 1 — the timeout in vc_display_tick() is the ONLY place that
        clears it.  Neither of these affect vc_divert_to_gpu (triangle
        routing), which stays permanently set. */
+    if (downer != 1) {
+        fprintf(stderr, "VC_DIAG: display_owner 0->1 at swap #%d\n", diag_swap_count);
+    }
     gpu_st->disp.display_owner = 1;
     gpu_st->disp.vga_ticks_since_present = 0;
+
+    /* Track display_owner transitions. */
+    if (diag_prev_display_owner != gpu_st->disp.display_owner) {
+        if (diag_prev_display_owner != -1)
+            fprintf(stderr, "VC_DIAG: display_owner changed %d->%d at swap #%d\n",
+                    diag_prev_display_owner, gpu_st->disp.display_owner, diag_swap_count);
+        diag_prev_display_owner = gpu_st->disp.display_owner;
+    }
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 

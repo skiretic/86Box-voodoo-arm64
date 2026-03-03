@@ -267,11 +267,31 @@ voodoo_wake_fifo_threads(voodoo_set_t *set, voodoo_t *voodoo)
 void
 voodoo_wait_for_swap_complete(voodoo_t *voodoo)
 {
+    int iterations = 0;
+    int initial_swap_pending = voodoo->swap_pending;
+
+    if (initial_swap_pending)
+        fprintf(stderr, "VC_DIAG: wait_for_swap_complete ENTER swap_pending=%d swap_count=%d\n",
+                initial_swap_pending, voodoo->swap_count);
+
     while (voodoo->swap_pending) {
+        iterations++;
+        if (iterations == 1000)
+            fprintf(stderr, "VC_DIAG: WARNING wait_for_swap_complete spinning >1000 iters swap_pending=%d swap_count=%d flush=%d\n",
+                    voodoo->swap_pending, voodoo->swap_count, voodoo->flush);
+        if (iterations == 10000)
+            fprintf(stderr, "VC_DIAG: WARNING wait_for_swap_complete spinning >10000 iters swap_pending=%d swap_count=%d flush=%d\n",
+                    voodoo->swap_pending, voodoo->swap_count, voodoo->flush);
+        if (iterations == 100000)
+            fprintf(stderr, "VC_DIAG: CRITICAL wait_for_swap_complete spinning >100000 iters swap_pending=%d swap_count=%d flush=%d\n",
+                    voodoo->swap_pending, voodoo->swap_count, voodoo->flush);
+
         /* Avoid waiting on wake_fifo_thread here; main thread may be draining the FIFO. */
         thread_wait_mutex(voodoo->swap_mutex);
         if ((voodoo->swap_pending && voodoo->flush) || FIFO_FULL) {
             /*Main thread is waiting for FIFO to empty, so skip vsync wait and just swap*/
+            fprintf(stderr, "VC_DIAG: wait_for_swap_complete FORCE-SWAP (flush=%d FIFO_FULL=%d) after %d iters\n",
+                    voodoo->flush, FIFO_FULL ? 1 : 0, iterations);
             memset(voodoo->dirty_line, 1, sizeof(voodoo->dirty_line));
             voodoo->front_offset = voodoo->params.front_offset;
             if (voodoo->swap_count > 0)
@@ -289,6 +309,10 @@ voodoo_wait_for_swap_complete(voodoo_t *voodoo)
         plat_delay_ms(1);
 #endif
     }
+
+    if (initial_swap_pending)
+        fprintf(stderr, "VC_DIAG: wait_for_swap_complete EXIT after %d iters swap_pending=%d\n",
+                iterations, voodoo->swap_pending);
 }
 
 static uint32_t

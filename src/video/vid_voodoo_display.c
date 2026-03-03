@@ -507,6 +507,9 @@ voodoo_filterline_v2(voodoo_t *voodoo, uint8_t *fil, int column, uint16_t *src, 
 void
 voodoo_callback(void *priv)
 {
+    static int diag_cb_count = 0;
+    static int diag_prev_swap_pending = -1;
+    diag_cb_count++;
     voodoo_t        *voodoo  = (voodoo_t *) priv;
     const monitor_t *monitor = &monitors[voodoo->monitor_index];
     int              v_y_add = (monitor->mon_overscan_y >> 1);
@@ -615,6 +618,9 @@ skip_draw:
         } else {
             thread_wait_mutex(voodoo->swap_mutex);
             if (voodoo->swap_pending && (voodoo->retrace_count > voodoo->swap_interval)) {
+                fprintf(stderr, "VC_DIAG: display_cb swap_pending %d->0 retrace=%d interval=%d swap_count=%d->%d\n",
+                        voodoo->swap_pending, voodoo->retrace_count, voodoo->swap_interval,
+                        voodoo->swap_count, voodoo->swap_count > 0 ? voodoo->swap_count - 1 : 0);
                 voodoo->front_offset = voodoo->swap_offset;
                 if (voodoo->swap_count > 0)
                     voodoo->swap_count--;
@@ -629,6 +635,23 @@ skip_draw:
                 thread_release_mutex(voodoo->swap_mutex);
         }
         voodoo->v_retrace = 1;
+
+        /* Track swap_pending transitions. */
+        if (diag_prev_swap_pending != (int) voodoo->swap_pending) {
+            if (diag_prev_swap_pending > 0 && voodoo->swap_pending == 0)
+                fprintf(stderr, "VC_DIAG: display_cb swap_pending cleared at retrace #%d\n",
+                        voodoo->retrace_count);
+            else if (diag_prev_swap_pending == 0 && voodoo->swap_pending > 0)
+                fprintf(stderr, "VC_DIAG: display_cb swap_pending SET to %d at retrace\n",
+                        voodoo->swap_pending);
+            diag_prev_swap_pending = voodoo->swap_pending;
+        }
+
+        /* Periodic retrace status every 60 vblanks. */
+        if ((diag_cb_count % (voodoo->v_total > 0 ? voodoo->v_total * 60 : 30000)) == 0)
+            fprintf(stderr, "VC_DIAG: display_cb periodic line=%d swap_pending=%d swap_count=%d retrace=%d frame_count=%d\n",
+                    voodoo->line, voodoo->swap_pending, voodoo->swap_count,
+                    voodoo->retrace_count, voodoo->frame_count);
     }
     voodoo->line++;
 
