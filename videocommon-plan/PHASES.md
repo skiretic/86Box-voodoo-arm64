@@ -334,11 +334,12 @@ This is where the rendered output starts looking correct.
 - MoltenVK does NOT support EDS3 — pipeline variants are mandatory (not optional)
 - ACOLORBEFOREFOG (0xF) mapped to VK_BLEND_FACTOR_ONE as interim (dual-source deferred to Phase 6)
 
-**5.4 Fog** (not yet implemented — deferred to Phase 6):
-- Fog table: 64 entries, uploaded as 64x1 R32_SFLOAT sampler
-- Fog modes: table (Z or W indexed), vertex, alpha
+**5.4 Fog** ✅ (implemented in Phase 6, commits 327068f57 + eae24c4a8):
+- Fog table: 64 entries, uploaded as 64x1 R8G8_UNORM sampler (fog + dfog)
+- Fog modes: table (W-depth indexed), FOG_Z, FOG_ALPHA, FOG_W, FOG_CONSTANT
 - Push constant: fogColor, fogMode bits
 - ACOLORBEFOREFOG: dual-source blending (VK_BLEND_FACTOR_SRC1_COLOR)
+- Also added: stipple test, dither (4x4/2x2), depth bias/source, W-buffer
 
 **5.5 Scissor** ✅:
 - Dynamic scissor rect from clipLeftRight/clipLowYHighY registers
@@ -368,7 +369,7 @@ This is where the rendered output starts looking correct.
 - [x] Depth test prevents incorrect overdraw
 - [x] Alpha test culls transparent fragments
 - [x] Alpha blending produces correct transparency
-- [ ] Fog fades distant geometry (deferred to Phase 6)
+- [x] Fog fades distant geometry (implemented in Phase 6, 327068f57)
 - [x] Scissor clips correctly
 - [x] Texture coordinate scrambling resolved (noperspective fix, cff427c79)
 - [x] 0 Vulkan validation errors (verified clean with VC_VALIDATE=1, 2026-03-03)

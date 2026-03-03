@@ -6,9 +6,11 @@
 
 ---
 
-## Current Status: Phase 5 COMPLETE — Vulkan Validation CLEAN!
+## Current Status: Phase 6 IN PROGRESS — Fog Complete, TMU1 Next
 
-Phase 5 core pipeline is complete. **3DMark99 race benchmark renders textured 3D at 60 Hz** — buildings, road, sky, vehicles, HUD transparency all visible. Texture coordinate scrambling FIXED (noperspective interpolation). Alpha blending via pipeline variant cache, scissor clipping, and texture combine stage all implemented. SPSC ring race condition on ARM64 fixed. **Vulkan validation is fully clean** — zero errors during rendering. Fog deferred to Phase 6.
+Phase 6 fog implementation complete (327068f57, eae24c4a8). Full Voodoo fog pipeline: fog table upload (64-entry R8G8_UNORM texture), all fog modes (table W-depth, FOG_Z, FOG_ALPHA, FOG_W, FOG_CONSTANT), FOG_ADD/FOG_MULT modifiers, dual-source blending for ACOLORBEFOREFOG. Stipple test and dither also added. W-depth computation uses pure 32-bit GLSL (no double/int64). Verified working with 3DMark99 — fogMode=0x59 (FOG_W) produces fog_a=0 for near geometry, matching SW renderer.
+
+**Next**: TMU1 multi-texture (6.1), then fastfill (6.7).
 
 **Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
 
@@ -22,11 +24,11 @@ Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
 Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
 Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE
 Phase 5: Core Pipeline       [XXXXXXXXXX] 100% COMPLETE (validation clean)
-Phase 6: Advanced Features   [..........] 0%   READY
+Phase 6: Advanced Features   [XXX.......] 30%  Fog done, TMU1 next
 Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
 ──────────────────────────────────────────────
-Overall                      [XXXXXXX...] 68%
+Overall                      [XXXXXXXX..] 75%
 ```
 
 ### Phase 5 Sub-task Status

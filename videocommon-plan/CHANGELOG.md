@@ -5,6 +5,27 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 
 ---
 
+## [In Progress] -- Phase 6: Advanced Features (2026-03-03)
+
+### Fog — COMPLETE (327068f57, eae24c4a8)
+- Full Voodoo fog pipeline in uber-shader: FOG_ENABLE, FOG_ADD, FOG_MULT, FOG_CONSTANT
+- All fog factor sources: table (W-depth indexed with interpolation), FOG_Z, FOG_ALPHA, FOG_W
+- Fog table: 64-entry R8G8_UNORM texture at descriptor set 0, binding 2, with dirty-check upload via VC_CMD_FOG_UPLOAD
+- W-depth computation in pure 32-bit GLSL (no double/int64 — MoltenVK compatible)
+- Dual-source blending for ACOLORBEFOREFOG: `layout(location=0, index=1) out vec4 fragColorPreFog`, VK_BLEND_FACTOR_SRC1_COLOR pipeline variant
+- Stipple test (pattern + rotating modes): fbzMode bit 2/12
+- Dither (4x4 + 2x2 Bayer matrices): fbzMode bit 8/11, RGB565 quantization
+- Depth bias (zaColor signed int16), depth source override, W-buffer mode
+- vOOW varying added to vertex shader for per-pixel fog/W-depth
+- Verified with 3DMark99: fogMode=0x59 (FOG_W) correctly produces fog_a=0 for near geometry, matching SW renderer behavior
+
+### Remaining Phase 6 Work
+- **TMU1** (6.1): second texture unit, descriptor binding 1, multi-TMU combine
+- **Texture combine multi-TMU** (6.2): c_other from TMU1, DETAIL blend, LOD_FRAC
+- **Fastfill** (6.7): VC_CMD_CLEAR for hardware clears (Quake 2, Unreal)
+
+---
+
 ## [Complete] -- Phase 5: Core Pipeline (2026-03-03)
 
 ### MILESTONE: Textured 3D with Correct Texture Coords, Blending, Scissor, Texture Combine!
