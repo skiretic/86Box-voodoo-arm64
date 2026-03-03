@@ -732,46 +732,81 @@ vc_display_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         return -1;
 
     /* Post-process render pass (uses swapchain format). */
-    if (vc_pp_render_pass_create(ctx, disp) != 0) {
-        vc_swapchain_destroy(ctx, disp);
-        return -1;
-    }
+    if (vc_pp_render_pass_create(ctx, disp) != 0)
+        goto fail_swapchain;
 
     /* Descriptors (sampler, layout, pool, sets). */
-    if (vc_pp_descriptors_create(ctx, disp) != 0) {
-        vc_swapchain_destroy(ctx, disp);
-        return -1;
-    }
+    if (vc_pp_descriptors_create(ctx, disp) != 0)
+        goto fail_render_pass;
 
     /* Pipeline. */
-    if (vc_pp_pipeline_create(ctx, disp) != 0) {
-        vc_swapchain_destroy(ctx, disp);
-        return -1;
-    }
+    if (vc_pp_pipeline_create(ctx, disp) != 0)
+        goto fail_descriptors;
 
     /* Semaphores. */
-    if (vc_display_create_semaphores(ctx, disp) != 0) {
-        vc_swapchain_destroy(ctx, disp);
-        return -1;
-    }
+    if (vc_display_create_semaphores(ctx, disp) != 0)
+        goto fail_pipeline;
 
     /* Update descriptor sets to point to the offscreen images. */
     vc_display_update_descriptors(ctx, gpu_st);
 
     /* Recreate post-process framebuffers (swapchain may have changed). */
     vc_display_destroy_pp_framebuffers(ctx, disp);
-    if (vc_display_create_pp_framebuffers(ctx, disp) != 0) {
-        vc_swapchain_destroy(ctx, disp);
-        return -1;
-    }
+    if (vc_display_create_pp_framebuffers(ctx, disp) != 0)
+        goto fail_semaphores;
 
-    /* Enable triangle routing to VK.  This is permanent — never cleared
+    /* Enable triangle routing to VK.  This is permanent -- never cleared
        until device close.  Display ownership is tracked separately. */
     if (disp->divert_to_gpu_ptr) {
         *disp->divert_to_gpu_ptr = 1;
     }
 
     return 0;
+
+    /* Reverse-order cleanup on failure, mirroring vc_display_destroy(). */
+fail_semaphores:
+    vc_display_destroy_semaphores(ctx, disp);
+fail_pipeline:
+    if (disp->pp_pipeline != VK_NULL_HANDLE) {
+        vkDestroyPipeline(ctx->device, disp->pp_pipeline, NULL);
+        disp->pp_pipeline = VK_NULL_HANDLE;
+    }
+    if (disp->pp_pipeline_layout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(ctx->device, disp->pp_pipeline_layout, NULL);
+        disp->pp_pipeline_layout = VK_NULL_HANDLE;
+    }
+fail_descriptors:
+    if (disp->pp_desc_pool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(ctx->device, disp->pp_desc_pool, NULL);
+        disp->pp_desc_pool    = VK_NULL_HANDLE;
+        disp->pp_desc_sets[0] = VK_NULL_HANDLE;
+        disp->pp_desc_sets[1] = VK_NULL_HANDLE;
+        disp->vga_desc_set    = VK_NULL_HANDLE;
+    }
+    if (disp->pp_desc_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(ctx->device, disp->pp_desc_layout, NULL);
+        disp->pp_desc_layout = VK_NULL_HANDLE;
+    }
+    if (disp->pp_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(ctx->device, disp->pp_sampler, NULL);
+        disp->pp_sampler = VK_NULL_HANDLE;
+    }
+fail_render_pass:
+    if (disp->pp_render_pass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(ctx->device, disp->pp_render_pass, NULL);
+        disp->pp_render_pass = VK_NULL_HANDLE;
+    }
+    if (disp->pp_vert_shader != VK_NULL_HANDLE) {
+        vkDestroyShaderModule(ctx->device, disp->pp_vert_shader, NULL);
+        disp->pp_vert_shader = VK_NULL_HANDLE;
+    }
+    if (disp->pp_frag_shader != VK_NULL_HANDLE) {
+        vkDestroyShaderModule(ctx->device, disp->pp_frag_shader, NULL);
+        disp->pp_frag_shader = VK_NULL_HANDLE;
+    }
+fail_swapchain:
+    vc_swapchain_destroy(ctx, disp);
+    return -1;
 }
 
 void
@@ -1007,15 +1042,25 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     VC_LOG("VideoCommon: present: back_idx=%d extent=%ux%u\n",
            back_idx, disp->extent.width, disp->extent.height);
 
-    /* Acquire swapchain image. */
+    /* Acquire swapchain image with zero timeout so we never block the
+       GPU thread.  On MoltenVK (FIFO only, no MAILBOX), a blocking
+       acquire can stall for up to 16 ms, starving the SPSC ring
+       consumer and freezing the guest. */
     uint32_t image_idx;
     VkResult acq = vkAcquireNextImageKHR(
-        ctx->device, disp->swapchain, UINT64_MAX,
+        ctx->device, disp->swapchain, 0 /* non-blocking */,
         disp->image_available_sem[frame_index],
         VK_NULL_HANDLE, &image_idx);
 
     VC_LOG("VideoCommon: present: acquire result=%d image_idx=%u\n", acq, image_idx);
 
+    if (acq == VK_TIMEOUT || acq == VK_NOT_READY) {
+        /* No swapchain image available right now -- skip this present
+           and retry on the next swap.  The command buffer has NOT been
+           submitted, so the caller can safely reuse it. */
+        VC_LOG("VideoCommon: present: no swapchain image available, skipping\n");
+        return 0;
+    }
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
         VC_LOG("VideoCommon: present: swapchain out of date\n");
         return 1; /* Caller should recreate swapchain. */
