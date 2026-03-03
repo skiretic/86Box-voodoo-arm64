@@ -394,6 +394,54 @@ vc_texture_create(vc_ctx_t *ctx, vc_texture_state_t *tex)
         return -1;
     }
 
+    /* Dedicated command pool + fence for texture uploads.
+     * Using a fence instead of vkQueueWaitIdle allows the GPU to continue
+     * rendering while the staging buffer is in use.  We only wait on the
+     * fence at the START of the next upload (to reclaim the staging buffer). */
+    {
+        VkCommandPoolCreateInfo pool_ci;
+        memset(&pool_ci, 0, sizeof(pool_ci));
+        pool_ci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        pool_ci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT
+                                 | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        pool_ci.queueFamilyIndex = ctx->queue_family;
+
+        result = vkCreateCommandPool(ctx->device, &pool_ci, NULL,
+                                     &tex->upload_cmd_pool);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: tex upload cmd pool failed (%d)\n", result);
+            return -1;
+        }
+
+        VkCommandBufferAllocateInfo alloc_ci;
+        memset(&alloc_ci, 0, sizeof(alloc_ci));
+        alloc_ci.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_ci.commandPool        = tex->upload_cmd_pool;
+        alloc_ci.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_ci.commandBufferCount = 1;
+
+        result = vkAllocateCommandBuffers(ctx->device, &alloc_ci,
+                                          &tex->upload_cmd_buf);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: tex upload cmd buf alloc failed (%d)\n", result);
+            return -1;
+        }
+
+        VkFenceCreateInfo fence_ci;
+        memset(&fence_ci, 0, sizeof(fence_ci));
+        fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        /* Not signaled initially -- upload_pending starts at 0. */
+
+        result = vkCreateFence(ctx->device, &fence_ci, NULL,
+                               &tex->upload_fence);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: tex upload fence failed (%d)\n", result);
+            return -1;
+        }
+
+        tex->upload_pending = 0;
+    }
+
     /* Descriptor layout and pool. */
     if (vc_tex_create_descriptors(ctx, tex) != 0)
         return -1;
@@ -524,6 +572,21 @@ vc_texture_destroy(vc_ctx_t *ctx, vc_texture_state_t *tex)
         tex->desc_layout = VK_NULL_HANDLE;
     }
 
+    /* Upload fence + command pool. */
+    if (tex->upload_fence != VK_NULL_HANDLE) {
+        if (tex->upload_pending)
+            vkWaitForFences(ctx->device, 1, &tex->upload_fence,
+                            VK_TRUE, UINT64_MAX);
+        vkDestroyFence(ctx->device, tex->upload_fence, NULL);
+        tex->upload_fence   = VK_NULL_HANDLE;
+        tex->upload_pending = 0;
+    }
+    if (tex->upload_cmd_pool != VK_NULL_HANDLE) {
+        vkDestroyCommandPool(ctx->device, tex->upload_cmd_pool, NULL);
+        tex->upload_cmd_pool = VK_NULL_HANDLE;
+        tex->upload_cmd_buf  = VK_NULL_HANDLE;
+    }
+
     /* Staging buffer. */
     if (tex->staging_buf != VK_NULL_HANDLE) {
         vc_vma_destroy_buffer(ctx->allocator, tex->staging_buf,
@@ -549,7 +612,6 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     uint32_t h    = payload->height;
     uint8_t *data = (uint8_t *) (uintptr_t) payload->data_ptr;
 
-
     if (tmu >= VC_TEX_MAX_TMU || slot >= VC_TEX_SLOTS_PER_TMU) {
         VC_LOG("VideoCommon: tex upload invalid tmu=%u slot=%u\n", tmu, slot);
         free(data);
@@ -570,18 +632,30 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
         return;
     }
 
-    /* Copy pixel data to staging buffer. */
+    /* Wait for the PREVIOUS upload to finish before reusing the staging
+     * buffer.  This is the key optimization: instead of vkQueueWaitIdle
+     * (which drains the entire pipeline), we only wait on our upload
+     * fence, allowing rendering to overlap with the staging buffer fill. */
+    if (tex->upload_pending) {
+        vkWaitForFences(ctx->device, 1, &tex->upload_fence,
+                        VK_TRUE, UINT64_MAX);
+        vkResetFences(ctx->device, 1, &tex->upload_fence);
+        tex->upload_pending = 0;
+    }
+
+    /* Copy pixel data to staging buffer (safe now -- previous copy finished). */
     uint32_t byte_size = w * h * 4;
     memcpy(tex->staging_mapped, data, byte_size);
     free(data);
 
-    /* If render pass is active, end the frame first so the queue is idle
-       for our transfer.  The next triangle will re-start the render pass. */
+    /* If render pass is active, end the frame first so the queue is clear
+       for our transfer.  The next triangle will re-start the render pass.
+       We must also wait for this submission to complete, because the
+       descriptor sets referenced by the submitted command buffer must not
+       be updated (by a subsequent BIND command) while in flight. */
     if (gpu_st->render_pass_active) {
         vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
-        /* All triangles are drawn immediately in vc_gpu_handle_triangle,
-           so no batch flush needed here -- just end the render pass. */
         vc_batch_reset(ctx, gpu_st);
 
         vkCmdEndRenderPass(f->cmd_buf);
@@ -594,50 +668,25 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
         submit.pCommandBuffers    = &f->cmd_buf;
 
         vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
-        f->submitted               = 1;
+        vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(ctx->device, 1, &f->fence);
+        f->submitted               = 0;
         gpu_st->render_pass_active = 0;
 
         /* Advance frame index so the next begin_frame uses fresh resources. */
         gpu_st->frame_index = (gpu_st->frame_index + 1) % VC_NUM_FRAMES;
     }
 
-    /* Use a transient command pool for the upload.  This avoids touching
-       frame command buffers and the complex state they manage. */
-    VkCommandPoolCreateInfo pool_ci;
-    memset(&pool_ci, 0, sizeof(pool_ci));
-    pool_ci.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    pool_ci.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-    pool_ci.queueFamilyIndex = ctx->queue_family;
-
-    VkCommandPool tmp_pool;
-    VkResult result = vkCreateCommandPool(ctx->device, &pool_ci, NULL, &tmp_pool);
-    if (result != VK_SUCCESS) {
-        VC_LOG("VideoCommon: tex upload cmd pool failed (%d)\n", result);
-        return;
-    }
-
-    VkCommandBufferAllocateInfo alloc_ci;
-    memset(&alloc_ci, 0, sizeof(alloc_ci));
-    alloc_ci.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    alloc_ci.commandPool        = tmp_pool;
-    alloc_ci.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    alloc_ci.commandBufferCount = 1;
-
-    VkCommandBuffer tmp_cmd;
-    result = vkAllocateCommandBuffers(ctx->device, &alloc_ci, &tmp_cmd);
-    if (result != VK_SUCCESS) {
-        vkDestroyCommandPool(ctx->device, tmp_pool, NULL);
-        VC_LOG("VideoCommon: tex upload cmd buf alloc failed (%d)\n", result);
-        return;
-    }
+    /* Record transfer commands into the persistent upload command buffer. */
+    vkResetCommandBuffer(tex->upload_cmd_buf, 0);
 
     VkCommandBufferBeginInfo begin_ci;
     memset(&begin_ci, 0, sizeof(begin_ci));
     begin_ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_ci.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(tmp_cmd, &begin_ci);
+    vkBeginCommandBuffer(tex->upload_cmd_buf, &begin_ci);
 
-    vc_tex_transition_layout(tmp_cmd, s->image,
+    vc_tex_transition_layout(tex->upload_cmd_buf, s->image,
                              s->valid ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                                       : VK_IMAGE_LAYOUT_UNDEFINED,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -650,30 +699,28 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     region.imageExtent.height          = h;
     region.imageExtent.depth           = 1;
 
-    vkCmdCopyBufferToImage(tmp_cmd, tex->staging_buf, s->image,
+    vkCmdCopyBufferToImage(tex->upload_cmd_buf, tex->staging_buf, s->image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                            1, &region);
 
-    vc_tex_transition_layout(tmp_cmd, s->image,
+    vc_tex_transition_layout(tex->upload_cmd_buf, s->image,
                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    vkEndCommandBuffer(tmp_cmd);
+    vkEndCommandBuffer(tex->upload_cmd_buf);
 
+    /* Submit with our upload fence -- no vkQueueWaitIdle needed. */
     VkSubmitInfo submit2;
     memset(&submit2, 0, sizeof(submit2));
     submit2.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit2.commandBufferCount = 1;
-    submit2.pCommandBuffers    = &tmp_cmd;
+    submit2.pCommandBuffers    = &tex->upload_cmd_buf;
 
-    vkQueueSubmit(ctx->queue, 1, &submit2, VK_NULL_HANDLE);
-    vkQueueWaitIdle(ctx->queue);
-
-    vkDestroyCommandPool(ctx->device, tmp_pool, NULL);
+    vkQueueSubmit(ctx->queue, 1, &submit2, tex->upload_fence);
+    tex->upload_pending = 1;
 
     s->valid    = 1;
     s->identity = payload->identity;
-
 
     /* Invalidate the bound sampler so the next bind re-writes the
        descriptor with the (potentially new) image view. */
@@ -723,15 +770,14 @@ vc_texture_handle_bind(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
      * command buffer violates the Vulkan spec.  In practice this is safe here
      * because:
      *   1. bound_sampler is reset to VK_NULL_HANDLE only after a texture
-     *      upload, which calls vkQueueWaitIdle() -- guaranteeing no command
-     *      buffers are in flight when the descriptor is next updated.
+     *      upload.  If a render pass was active, the upload path waits on the
+     *      frame fence (ensuring all in-flight command buffers have completed)
+     *      before returning control to the ring command loop.
      *   2. The bound_sampler check below prevents redundant updates when the
      *      same texture+sampler combination is rebound across draws within
      *      a single frame (the common case).
      *   3. The GPU thread is single-threaded, so descriptor updates and
      *      command buffer recording are serialized.
-     * If async texture uploads are ever added (without QueueWaitIdle), this
-     * must be changed to per-frame descriptor sets or a ring of sets.
      */
     if (s->bound_sampler != sampler) {
         VkDescriptorImageInfo img_info;

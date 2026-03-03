@@ -81,6 +81,12 @@ typedef struct vc_texture_state_t {
     void    *staging_alloc;   /* VmaAllocation */
     void    *staging_mapped;  /* Persistently mapped pointer. */
 
+    /* Dedicated upload resources -- fence-based sync instead of vkQueueWaitIdle. */
+    VkCommandPool upload_cmd_pool;
+    VkCommandBuffer upload_cmd_buf;
+    VkFence upload_fence;
+    int     upload_pending;   /* 1 = upload submitted, fence not yet waited on */
+
     /* Sampler cache. */
     vc_sampler_entry_t sampler_cache[VC_SAMPLER_CACHE_MAX];
     uint32_t           sampler_count;
