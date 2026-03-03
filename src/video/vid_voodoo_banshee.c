@@ -3512,11 +3512,8 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
     banshee->voodoo->cmd_status_2 = (1 << 28);
     voodoo_generate_filter_v1(banshee->voodoo);
 
-#ifdef USE_VIDEOCOMMON
-    banshee->voodoo->use_gpu_renderer = device_get_config_int("gpu_renderer");
-    if (banshee->voodoo->use_gpu_renderer)
-        vc_voodoo_init(banshee->voodoo);
-#endif
+    /* NOTE: gpu_renderer init is handled inside voodoo_2d3d_card_init().
+       Do NOT call vc_voodoo_init() here — it would create a duplicate VK context. */
 
     banshee->vidSerialParallelPort = VIDSERIAL_DDC_DCK_W | VIDSERIAL_DDC_DDA_W;
 
