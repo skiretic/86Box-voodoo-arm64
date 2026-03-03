@@ -537,7 +537,7 @@ vc_display_create_pp_framebuffers(vc_ctx_t *ctx, vc_display_t *disp)
 {
     if (disp->pp_render_pass == VK_NULL_HANDLE) {
         fprintf(stderr, "VC_DIAG: pp_render_pass is NULL in create_pp_framebuffers, skipping\n");
-        return -1;
+        return 0;
     }
 
     for (uint32_t i = 0; i < disp->image_count; i++) {
@@ -885,6 +885,14 @@ int
 vc_display_recreate_swapchain(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
     vc_display_t *disp = &gpu_st->disp;
+
+    /* If the display was never fully initialized (e.g. vc_display_create
+       failed or hasn't run yet), there is nothing to recreate.  The next
+       vc_display_tick iteration will handle it via surface_pending. */
+    if (disp->pp_render_pass == VK_NULL_HANDLE) {
+        fprintf(stderr, "VC_DIAG: recreate_swapchain skipped -- display not fully initialized\n");
+        return 0;
+    }
 
     vkDeviceWaitIdle(ctx->device);
 
