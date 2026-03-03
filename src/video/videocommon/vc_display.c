@@ -1173,13 +1173,12 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     submit.pSignalSemaphores    = &disp->render_finished_sem[frame_index];
 
     vc_frame_t *f          = &gpu_st->frame[frame_index];
-    VkResult    sub_result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
+    VkResult    sub_result = vkQueueSubmit(ctx->queue, 1, &submit, VK_NULL_HANDLE);
     VC_LOG("VideoCommon: present: vkQueueSubmit result=%d\n", sub_result);
     if (sub_result != VK_SUCCESS) {
         VC_LOG("VideoCommon: display vkQueueSubmit failed (%d)\n", sub_result);
         return -1;
     }
-    f->submitted = 1;
 
     /* Present. */
     VkPresentInfoKHR present;
@@ -1193,6 +1192,16 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
 
     VkResult pres = vkQueuePresentKHR(ctx->queue, &present);
     VC_LOG("VideoCommon: present: vkQueuePresentKHR result=%d\n", pres);
+
+    /* Submit an empty batch with the fence AFTER present, so that waiting
+       on the fence guarantees both render AND present are complete.  This
+       prevents semaphore reuse before the previous present finishes. */
+    VkSubmitInfo fence_submit;
+    memset(&fence_submit, 0, sizeof(fence_submit));
+    fence_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    vkQueueSubmit(ctx->queue, 1, &fence_submit, f->fence);
+    f->submitted = 1;
+
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
         return 1; /* Caller should recreate swapchain. */
     }
@@ -1693,12 +1702,11 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores    = &disp->render_finished_sem[frame_index];
 
-    VkResult sub_result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
+    VkResult sub_result = vkQueueSubmit(ctx->queue, 1, &submit, VK_NULL_HANDLE);
     if (sub_result != VK_SUCCESS) {
         VC_LOG("VideoCommon: VGA blit vkQueueSubmit failed (%d)\n", sub_result);
         return -1;
     }
-    f->submitted = 1;
 
     /* Present. */
     VkPresentInfoKHR present;
@@ -1711,6 +1719,15 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     present.pImageIndices      = &image_idx;
 
     VkResult pres = vkQueuePresentKHR(ctx->queue, &present);
+
+    /* Submit an empty batch with the fence AFTER present, so that waiting
+       on the fence guarantees both render AND present are complete. */
+    VkSubmitInfo fence_submit;
+    memset(&fence_submit, 0, sizeof(fence_submit));
+    fence_submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    vkQueueSubmit(ctx->queue, 1, &fence_submit, f->fence);
+    f->submitted = 1;
+
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
         vc_display_recreate_swapchain(ctx, gpu_st);
     } else if (pres != VK_SUCCESS) {

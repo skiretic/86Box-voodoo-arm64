@@ -832,8 +832,9 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
             vc_display_recreate_swapchain(ctx, gpu_st);
         }
 
-        if (present_result == 0 || present_result == 1) {
-            /* Submit was handled by vc_display_present (success or recreation).
+        if (present_result == 0 || present_result == 1 || f->submitted) {
+            /* Submit was handled by vc_display_present (success, recreation,
+               or failed present after successful submit).
                Skip the standalone submit below. */
             goto advance;
         }
@@ -860,6 +861,8 @@ advance:
        sustained rendering.  The full Phase 7 readback will be async. */
     if (f->submitted) {
         vkWaitForFences(ctx->device, 1, &f->fence, VK_TRUE, UINT64_MAX);
+        vkResetFences(ctx->device, 1, &f->fence);
+        f->submitted = 0;
         /* Convert RGBA8 staging data to RGB565 and write to SW FB. */
         vc_readback_copy_to_sw_fb(ctx, gpu_st);
     }
