@@ -964,6 +964,40 @@ vc_gpu_thread_func(void *param)
         }
     }
 
+    /* Drain any remaining ring commands to free resources (e.g. malloc'd
+       data_ptr in VC_CMD_TEXTURE_UPLOAD payloads).  After VC_CMD_SHUTDOWN
+       the producer won't push new commands, so this is safe. */
+    {
+        uint32_t rp = atomic_load_explicit(&ring->read_pos, memory_order_acquire);
+        uint32_t wp = atomic_load_explicit(&ring->write_pos, memory_order_acquire);
+
+        while (rp != wp) {
+            vc_ring_cmd_header_t *hdr = (vc_ring_cmd_header_t *) &ring->buffer[rp];
+
+            if (hdr->type == VC_CMD_WRAPAROUND) {
+                rp = 0;
+                atomic_store_explicit(&ring->read_pos, 0, memory_order_release);
+                wp = atomic_load_explicit(&ring->write_pos, memory_order_acquire);
+                continue;
+            }
+
+            if (hdr->type == VC_CMD_TEXTURE_UPLOAD) {
+                const vc_tex_upload_payload_t *payload =
+                    (const vc_tex_upload_payload_t *) (hdr + 1);
+                uint8_t *data = (uint8_t *) (uintptr_t) payload->data_ptr;
+                if (data) {
+                    free(data);
+                    VC_LOG("VideoCommon: shutdown drain: freed texture upload data_ptr\n");
+                }
+            }
+
+            uint16_t aligned_size = vc_ring_align(hdr->size);
+            rp = (rp + aligned_size) & VC_RING_MASK;
+            atomic_store_explicit(&ring->read_pos, rp, memory_order_release);
+            wp = atomic_load_explicit(&ring->write_pos, memory_order_acquire);
+        }
+    }
+
     vc_gpu_thread_cleanup(ctx, gpu_st);
     ctx->render_data = NULL;
 

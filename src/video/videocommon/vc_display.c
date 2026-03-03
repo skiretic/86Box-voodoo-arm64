@@ -1070,11 +1070,18 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
         return -1;
     }
 
-    /* Barrier: offscreen color -> SHADER_READ_ONLY_OPTIMAL. */
+    /* Barrier: offscreen color -> SHADER_READ_ONLY_OPTIMAL.
+     * Include TRANSFER_READ in srcAccessMask and TRANSFER stage in srcStageMask
+     * because vc_readback_record_copy may have just done a transfer read on
+     * this image (transitioning COLOR_ATTACHMENT -> TRANSFER_SRC -> back to
+     * COLOR_ATTACHMENT).  Without this, the present barrier's access/stage
+     * flags don't account for the readback transfer, leading to a missing
+     * execution dependency on the copy. */
     VkImageMemoryBarrier barrier;
     memset(&barrier, 0, sizeof(barrier));
     barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.srcAccessMask                   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.srcAccessMask                   = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                                            | VK_ACCESS_TRANSFER_READ_BIT;
     barrier.dstAccessMask                   = VK_ACCESS_SHADER_READ_BIT;
     barrier.oldLayout                       = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     barrier.newLayout                       = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -1088,7 +1095,8 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     barrier.subresourceRange.layerCount     = 1;
 
     vkCmdPipelineBarrier(cmd_buf,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+                             | VK_PIPELINE_STAGE_TRANSFER_BIT,
                          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          0, 0, NULL, 0, NULL, 1, &barrier);
 
