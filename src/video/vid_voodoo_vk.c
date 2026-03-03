@@ -678,6 +678,50 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
 /*  Public API: push swap to ring                                              */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/*  Public API: notify resolution change                                       */
+/* -------------------------------------------------------------------------- */
+
+void
+vc_voodoo_set_resolution(void *ctx_opaque, int width, int height)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) ctx_opaque;
+    if (!ctx || width <= 0 || height <= 0)
+        return;
+
+    uint32_t w = (uint32_t) width;
+    uint32_t h = (uint32_t) height;
+
+    /* Skip if dimensions haven't changed. */
+    uint32_t cur_w = atomic_load_explicit(&ctx->fb_width, memory_order_acquire);
+    uint32_t cur_h = atomic_load_explicit(&ctx->fb_height, memory_order_acquire);
+    if (cur_w == w && cur_h == h)
+        return;
+
+    /* Update atomic dimensions so new triangles use correct NDC transform
+       immediately (before the GPU thread processes the resize). */
+    atomic_store_explicit(&ctx->fb_width, w, memory_order_release);
+    atomic_store_explicit(&ctx->fb_height, h, memory_order_release);
+
+    /* Push VC_CMD_RESIZE to the GPU thread ring. */
+    uint16_t cmd_size = (uint16_t) (sizeof(vc_ring_cmd_header_t)
+                                   + sizeof(vc_resize_payload_t));
+    vc_resize_payload_t *rp = (vc_resize_payload_t *)
+        vc_ring_reserve(&ctx->ring, VC_CMD_RESIZE, cmd_size);
+
+    rp->width  = w;
+    rp->height = h;
+
+    vc_ring_commit_and_wake(&ctx->ring);
+
+    fprintf(stderr, "VC_DIAG: vc_voodoo_set_resolution %ux%u -> %ux%u\n",
+            cur_w, cur_h, w, h);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Public API: push swap to ring                                              */
+/* -------------------------------------------------------------------------- */
+
 void
 voodoo_vk_push_swap(voodoo_t *voodoo)
 {

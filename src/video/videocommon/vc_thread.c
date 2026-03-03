@@ -679,6 +679,62 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
 /*  GPU thread: handle VC_CMD_SWAP                                             */
 /* -------------------------------------------------------------------------- */
 
+/* -------------------------------------------------------------------------- */
+/*  GPU thread: handle VC_CMD_RESIZE                                           */
+/* -------------------------------------------------------------------------- */
+
+static void
+vc_gpu_handle_resize(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
+                     const vc_resize_payload_t *payload)
+{
+    uint32_t new_w = payload->width;
+    uint32_t new_h = payload->height;
+
+    /* Skip if dimensions haven't actually changed. */
+    if (new_w == gpu_st->fb_width && new_h == gpu_st->fb_height)
+        return;
+
+    fprintf(stderr, "VC_DIAG: GPU resize %ux%u -> %ux%u\n",
+            gpu_st->fb_width, gpu_st->fb_height, new_w, new_h);
+
+    /* End any active render pass before destroying framebuffers. */
+    if (gpu_st->render_pass_active) {
+        vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
+        vkCmdEndRenderPass(f->cmd_buf);
+        vkEndCommandBuffer(f->cmd_buf);
+        gpu_st->render_pass_active = 0;
+    }
+
+    /* Wait for all GPU work to complete before destroying resources. */
+    vkDeviceWaitIdle(ctx->device);
+
+    /* Destroy old framebuffers (both front and back). */
+    vc_render_pass_destroy_framebuffers(ctx, gpu_st);
+
+    /* Recreate framebuffers at new dimensions. */
+    if (vc_render_pass_create_framebuffers(ctx, gpu_st, new_w, new_h) != 0) {
+        fprintf(stderr, "VC_DIAG: GPU resize FAILED to recreate framebuffers\n");
+        /* Fall back to old dimensions if possible -- but framebuffers are
+           already destroyed, so this is a fatal error for the VK path. */
+        return;
+    }
+
+    /* Update tracked dimensions. */
+    gpu_st->fb_width  = new_w;
+    gpu_st->fb_height = new_h;
+
+    /* Update readback tracked dimensions (buffer is over-allocated). */
+    gpu_st->readback_width  = new_w;
+    gpu_st->readback_height = new_h;
+
+    /* Update postprocess descriptor sets -- they reference the offscreen
+       color image views which were just recreated. */
+    if (gpu_st->disp.swapchain != VK_NULL_HANDLE)
+        vc_display_update_descriptors(ctx, gpu_st);
+
+    fprintf(stderr, "VC_DIAG: GPU resize complete %ux%u\n", new_w, new_h);
+}
+
 static void
 vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {
@@ -803,8 +859,14 @@ vc_gpu_thread_init(vc_ctx_t *ctx)
     }
     memset(gpu_st, 0, sizeof(vc_gpu_state_t));
 
-    gpu_st->fb_width  = 640;
-    gpu_st->fb_height = 480;
+    /* Pick up resolution from ctx atomics (may have been set by
+       vc_voodoo_set_resolution before the GPU thread started). */
+    {
+        uint32_t init_w = atomic_load_explicit(&ctx->fb_width, memory_order_acquire);
+        uint32_t init_h = atomic_load_explicit(&ctx->fb_height, memory_order_acquire);
+        gpu_st->fb_width  = (init_w > 0) ? init_w : 640;
+        gpu_st->fb_height = (init_h > 0) ? init_h : 480;
+    }
 
     /* Display state (surface/swapchain/post-process -- populated later
        when VCRenderer provides a VkSurfaceKHR). */
@@ -978,6 +1040,12 @@ vc_gpu_thread_func(void *param)
                 if (gpu_st)
                     vc_texture_handle_bind(ctx, gpu_st,
                         (const vc_tex_bind_payload_t *) (hdr + 1));
+                break;
+
+            case VC_CMD_RESIZE:
+                if (gpu_st)
+                    vc_gpu_handle_resize(ctx, gpu_st,
+                        (const vc_resize_payload_t *) (hdr + 1));
                 break;
 
             default:

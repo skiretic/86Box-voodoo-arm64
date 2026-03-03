@@ -47,6 +47,11 @@ void vc_stop_gpu_thread(vc_ctx_t *ctx);
 void vc_voodoo_init(void *voodoo);
 void vc_voodoo_close(void *voodoo);
 
+/* Notify VideoCommon of a guest resolution change (SST_videoDimensions).
+   Pushes VC_CMD_RESIZE to the GPU thread ring.  Safe to call from any thread.
+   `ctx` is vc_ctx_t* (from voodoo->vc_ctx). */
+void vc_voodoo_set_resolution(void *ctx, int width, int height);
+
 /* Notify the Qt UI that VideoCommon has finished background init
    and a VCRenderer can now be created.  Implemented in qt_ui.cpp.
    Safe to call from any thread -- the actual renderer switch happens
@@ -115,6 +120,7 @@ void vc_display_notify_vga_frame(void *ctx, int buf_idx,
 /* No-op stubs when VideoCommon is not compiled in. */
 static inline void vc_voodoo_init(void *voodoo)  { (void) voodoo; }
 static inline void vc_voodoo_close(void *voodoo) { (void) voodoo; }
+static inline void vc_voodoo_set_resolution(void *ctx, int w, int h) { (void) ctx; (void) w; (void) h; }
 static inline void vc_notify_renderer_ready(void) { }
 static inline void *vc_display_get_ctx(void) { return (void *) 0; }
 static inline uintptr_t vc_display_get_instance(void) { return 0; }

@@ -65,7 +65,8 @@ enum {
     VC_CMD_CLEAR         = 5,
     VC_CMD_LFB_WRITE     = 6,
     VC_CMD_SHUTDOWN      = 7,
-    VC_CMD_WRAPAROUND    = 8
+    VC_CMD_WRAPAROUND    = 8,
+    VC_CMD_RESIZE        = 9
 };
 
 /* -------------------------------------------------------------------------- */
@@ -80,6 +81,18 @@ typedef struct vc_ring_cmd_header_t {
 
 _Static_assert(sizeof(vc_ring_cmd_header_t) == 8,
                "vc_ring_cmd_header_t must be 8 bytes");
+
+/* -------------------------------------------------------------------------- */
+/*  VC_CMD_RESIZE payload                                                      */
+/* -------------------------------------------------------------------------- */
+
+typedef struct vc_resize_payload_t {
+    uint32_t width;
+    uint32_t height;
+} vc_resize_payload_t;
+
+_Static_assert(sizeof(vc_resize_payload_t) == 8,
+               "vc_resize_payload_t must be 8 bytes");
 
 /* -------------------------------------------------------------------------- */
 /*  SPSC ring buffer                                                           */

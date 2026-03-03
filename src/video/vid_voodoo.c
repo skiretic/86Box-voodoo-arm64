@@ -741,6 +741,10 @@ voodoo_writel(uint32_t addr, uint32_t val, void *priv)
                 if ((voodoo->v_disp == 386) || (voodoo->v_disp == 402) ||
                     (voodoo->v_disp == 482) || (voodoo->v_disp == 602))
                     voodoo->v_disp     -= 2;
+#ifdef USE_VIDEOCOMMON
+                if (voodoo->use_gpu_renderer && voodoo->vc_ctx)
+                    vc_voodoo_set_resolution(voodoo->vc_ctx, voodoo->h_disp, voodoo->v_disp);
+#endif
                 break;
             case SST_fbiInit0:
                 if (voodoo->initEnable & 0x01) {

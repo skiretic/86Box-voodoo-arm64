@@ -974,6 +974,10 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             banshee->vidScreenSize = val;
             voodoo->h_disp         = (val & 0xfff) + 1;
             voodoo->v_disp         = (val >> 12) & 0xfff;
+#ifdef USE_VIDEOCOMMON
+            if (voodoo->use_gpu_renderer && voodoo->vc_ctx)
+                vc_voodoo_set_resolution(voodoo->vc_ctx, voodoo->h_disp, voodoo->v_disp);
+#endif
             break;
         case Video_vidOverlayStartCoords:
             voodoo->overlay.vidOverlayStartCoords = val;
