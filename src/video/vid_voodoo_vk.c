@@ -86,6 +86,11 @@ voodoo_vk_log(const char *fmt, ...)
 /* TMU S/T/W are 18.32 fixed-point (int64_t). */
 #define VC_ST_SCALE (4294967296.0) /* 2^32 */
 
+/* Z is 20.12 fixed-point (uint32_t start, int32_t gradients).
+   After >> 12 the result is a 16-bit depth value (0-65535). */
+#define VC_Z_SCALE (4096.0f)         /* 2^12, to convert 20.12 -> integer */
+#define VC_Z_MAX   (65535.0f)        /* Voodoo depth range */
+
 /* -------------------------------------------------------------------------- */
 /*  Per-Voodoo texture tracking state                                          */
 /* -------------------------------------------------------------------------- */
@@ -112,6 +117,97 @@ static voodoo_vk_tex_track_t vk_tex_track[2] = {
     { .addr = ~0u, .tLOD = ~0u, .pal_checksum = ~0u, .slot = -1, .last_upload_slot = -1, .last_identity = 0 },
     { .addr = ~0u, .tLOD = ~0u, .pal_checksum = ~0u, .slot = -1, .last_upload_slot = -1, .last_identity = 0 },
 };
+
+/* -------------------------------------------------------------------------- */
+/*  Depth helpers                                                              */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * voodoo_w_to_depth -- convert Voodoo W (int64_t, 18.32 fixed-point) to a
+ * 16-bit depth value using the same log-space conversion as the SW renderer
+ * (voodoo_fls).  This is the W-buffer depth encoding.
+ */
+static int
+vk_fls(uint16_t val)
+{
+    int num = 0;
+
+    if (!(val & 0xff00)) {
+        num += 8;
+        val <<= 8;
+    }
+    if (!(val & 0xf000)) {
+        num += 4;
+        val <<= 4;
+    }
+    if (!(val & 0xc000)) {
+        num += 2;
+        val <<= 2;
+    }
+    if (!(val & 0x8000)) {
+        num += 1;
+        val <<= 1;
+    }
+    return num;
+}
+
+static uint16_t
+voodoo_w_to_depth(int64_t w)
+{
+    int w_depth;
+
+    if (w & UINT64_C(0xffff00000000))
+        w_depth = 0;
+    else if (!(w & UINT64_C(0xffff0000)))
+        w_depth = 0xf001;
+    else {
+        int exp  = vk_fls((uint16_t) ((uint32_t) w >> 16));
+        int mant = (~(uint32_t) w >> (19 - exp)) & 0xfff;
+        w_depth  = (exp << 12) + mant + 1;
+        if (w_depth > 0xffff)
+            w_depth = 0xffff;
+    }
+    return (uint16_t) w_depth;
+}
+
+/*
+ * Compute per-vertex Vulkan depth [0,1] from Voodoo Z or W gradients.
+ *
+ * Z-buffer mode: depth iterates linearly (20.12 fixed-point) -> 16-bit.
+ *   Per-vertex linear interpolation on GPU is exact.
+ *
+ * W-buffer mode: depth = log-space conversion of W.
+ *   Per-vertex is an approximation (true W-buffer is per-pixel nonlinear),
+ *   but much better than z=0.5 for everything.
+ *
+ * depth_source override: constant depth from zaColor register.
+ * depth_bias: signed 16-bit offset added before normalization.
+ */
+static float
+voodoo_z_to_float(uint32_t fbzMode, uint32_t zaColor,
+                  int64_t z_or_w, int is_w_buffer)
+{
+    int depth16;
+
+    if (is_w_buffer) {
+        depth16 = voodoo_w_to_depth(z_or_w);
+    } else {
+        /* Z-buffer: 20.12 fixed -> 16-bit integer. */
+        int32_t z_int = (int32_t) (z_or_w >> 12);
+        depth16 = (z_int < 0) ? 0 : ((z_int > 65535) ? 65535 : z_int);
+    }
+
+    /* Depth bias: add signed 16-bit zaColor offset. */
+    if (fbzMode & FBZ_DEPTH_BIAS) {
+        depth16 += (int16_t) zaColor;
+        if (depth16 < 0)
+            depth16 = 0;
+        if (depth16 > 65535)
+            depth16 = 65535;
+    }
+
+    return (float) depth16 / VC_Z_MAX;
+}
 
 /* -------------------------------------------------------------------------- */
 /*  Vertex reconstruction from gradients                                       */
@@ -180,11 +276,44 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
         w0C = w0A + ((double) p->tmu[active_tmu].dWdX * dx_ca + (double) p->tmu[active_tmu].dWdY * dy_ca) / VC_ST_SCALE;
     }
 
+    /* Depth: compute per-vertex Z from Voodoo gradients.
+     *
+     * Z-buffer mode: startZ (uint32_t, 20.12 fixed-point) + dZdX/dZdY (int32_t).
+     * W-buffer mode: startW (int64_t, 18.32) + dWdX/dWdY (int64_t), log-space.
+     * depth_source override: constant depth from zaColor register.
+     */
+    float zA, zB, zC;
+    int is_w_buffer = (p->fbzMode & FBZ_W_BUFFER) ? 1 : 0;
+
+    if (p->fbzMode & FBZ_DEPTH_SOURCE) {
+        /* Depth source override: use zaColor as constant depth for all verts. */
+        float z_const = (float) (p->zaColor & 0xffff) / VC_Z_MAX;
+        zA = zB = zC = z_const;
+    } else if (is_w_buffer) {
+        /* W-buffer mode: compute per-vertex W, then convert via fls. */
+        int64_t wA_fp = p->startW;
+        int64_t wB_fp = wA_fp + (int64_t) ((double) p->dWdX * dx_ba + (double) p->dWdY * dy_ba);
+        int64_t wC_fp = wA_fp + (int64_t) ((double) p->dWdX * dx_ca + (double) p->dWdY * dy_ca);
+
+        zA = voodoo_z_to_float(p->fbzMode, p->zaColor, wA_fp, 1);
+        zB = voodoo_z_to_float(p->fbzMode, p->zaColor, wB_fp, 1);
+        zC = voodoo_z_to_float(p->fbzMode, p->zaColor, wC_fp, 1);
+    } else {
+        /* Z-buffer mode: linear iteration of Z (20.12 fixed-point). */
+        int64_t zA_fp = (int64_t) p->startZ;
+        int64_t zB_fp = zA_fp + (int64_t) ((double) p->dZdX * dx_ba + (double) p->dZdY * dy_ba);
+        int64_t zC_fp = zA_fp + (int64_t) ((double) p->dZdX * dx_ca + (double) p->dZdY * dy_ca);
+
+        zA = voodoo_z_to_float(p->fbzMode, p->zaColor, zA_fp, 0);
+        zB = voodoo_z_to_float(p->fbzMode, p->zaColor, zB_fp, 0);
+        zC = voodoo_z_to_float(p->fbzMode, p->zaColor, zC_fp, 0);
+    }
+
     /* Vertex A. */
     memset(&verts[0], 0, sizeof(vc_vertex_t));
     verts[0].x  = xA;
     verts[0].y  = yA;
-    verts[0].z  = 0.5f;
+    verts[0].z  = zA;
     verts[0].w  = (float) oowA;
     verts[0].r  = rA;
     verts[0].g  = gA;
@@ -198,7 +327,7 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     memset(&verts[1], 0, sizeof(vc_vertex_t));
     verts[1].x  = xB;
     verts[1].y  = yB;
-    verts[1].z  = 0.5f;
+    verts[1].z  = zB;
     verts[1].w  = (float) oowB;
     verts[1].r  = rB;
     verts[1].g  = gB;
@@ -212,7 +341,7 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     memset(&verts[2], 0, sizeof(vc_vertex_t));
     verts[2].x  = xC;
     verts[2].y  = yC;
-    verts[2].z  = 0.5f;
+    verts[2].z  = zC;
     verts[2].w  = (float) oowC;
     verts[2].r  = rC;
     verts[2].g  = gC;
