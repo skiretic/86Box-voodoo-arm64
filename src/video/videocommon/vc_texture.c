@@ -716,8 +716,13 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     submit2.commandBufferCount = 1;
     submit2.pCommandBuffers    = &tex->upload_cmd_buf;
 
-    vkQueueSubmit(ctx->queue, 1, &submit2, tex->upload_fence);
-    tex->upload_pending = 1;
+    VkResult submit_res = vkQueueSubmit(ctx->queue, 1, &submit2, tex->upload_fence);
+    if (submit_res == VK_SUCCESS) {
+        tex->upload_pending = 1;
+    } else {
+        fprintf(stderr, "VideoCommon: vkQueueSubmit failed for texture upload (result=%d), skipping fence wait\n", submit_res);
+        vkResetFences(ctx->device, 1, &tex->upload_fence);
+    }
 
     s->valid    = 1;
     s->identity = payload->identity;
