@@ -7,12 +7,16 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 
 ## [In Progress] -- Phase 5: Core Pipeline (2026-03-02)
 
-### MILESTONE: First 3D Output from Vulkan Backend!
-- 3DMark99 renders geometry with correct depth ordering and iterated vertex colors
-- Display present working at 61 Hz, triple-buffered swapchain cycling
-- Screenshot captured: greyscale 3D scene with perspective geometry visible
+### MILESTONE: Textured 3D with Blending, Scissor, and Texture Combine!
+- 3DMark99 race benchmark renders fully: buildings, road, sky, vehicles, HUD transparency
+- Stable at 60 Hz, no crashes, no blue diagonal streaks (ring race fixed)
+- Alpha blending partially working (speedometer HUD shows transparency)
+- Remaining: texture coordinate scrambling (UV mapping), some LOD/mip issues
 
 ### Implemented (vc-lead, vc-shader)
+- **Scissor clipping** (ec116a7b3) — wired Voodoo clipLeft/clipRight/clipLowY/clipHighY to vkCmdSetScissor per-triangle. Added vc_clip_rect_t to ring command (288->300 bytes). Fixes grey bar on left, corruption on bottom-right.
+- **Alpha blending** (e7e5a9a39) — pipeline variant cache maps Voodoo alphaMode blend factors to VkBlendFactor. 32-entry linear cache, lazy creation. MoltenVK lacks EDS3 so pipeline variants are mandatory. ACOLORBEFOREFOG (0xF) mapped to ONE for now.
+- **Texture combine stage** (5da589dcf) — added textureMode0 bits 12-29 processing to voodoo_uber.frag (~100 lines). Handles tc_zero_other, tc_sub_clocal, tc_mselect (6 cases), tc_reverse_blend, tc_add_clocal/alocal, tc_invert_output. Alpha equivalents (tca_*). Single-TMU only (c_other=0). DETAIL and LOD_FRAC stubbed as 0.
 - **Per-triangle push constants** (bf0a2ab39) — each triangle gets its own `vkCmdPushConstants` + `vkCmdDraw`
 - **Full color/alpha combine** (6d7651879) — complete fbzColorPath pipeline in uber-shader:
   cc_rgbsel, cc_mselect, cc_add, cc_sub, cc_reverse, cc_invert (+ alpha equivalents)
@@ -24,6 +28,7 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 - **dirty_line marking** (1e3ab6c96) — readback now sets dirty_line[] so SW display callback blits
 
 ### Fixed
+- **SPSC ring publish-before-write race** (3fd71c710) — on ARM64 weak memory model, `vc_ring_push` published write_pos before payload was written. GPU thread read garbage (blue diagonal streaks). Fix: split into `vc_ring_reserve()`/`vc_ring_commit()` pattern — reserve writes header but doesn't publish; commit does the release store after payload is filled.
 - **NULL function pointer crash** (f64248f8a) — EDS1 functions must use `EXT` suffix on Vulkan 1.2 (volk loads extension variants, not 1.3 core names)
 - **Black screen** (1e3ab6c96) — depth clear was 0.0, all fragments failed `depth < 0.0` test
 - **Diagnostic logging added** (0723f3496) — fprintf to swap/present path for debugging
@@ -38,10 +43,18 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 - 8 files changed, net -42 lines
 - **Verified**: 57 presents with 0 spurious timeouts, 1 clean VGA timeout on benchmark exit
 
-### Known Bugs (next session)
-- **No textures** — only iterated vertex colors visible, log shows single 1x1 dummy texture upload
-- Alpha blending not yet implemented (pipeline variants needed)
-- Scissor clip rect not wired (full framebuffer used as default)
+### Fixed — TMU index bug (9223a2729, 2fd9b9835)
+- **Root cause**: Voodoo 2 TMU pipeline flows TMU 1 → TMU 0 → color combine. For single-texture rendering, Glide writes all texture state (tLOD, texBaseAddr, S/T/W gradients) to TMU 1 (chip=0x4). The VK path was hardcoded to read TMU 0 everywhere — which only had the init dummy (texBaseAddr=0x0, tLOD=0x820 = 1x1 mip).
+- **Debugging process**: Added fprintf diagnostics at triangle diversion, texture upload, and register write paths. Register write logging confirmed: chip=0x2 (TMU 0) received 1 write, chip=0x4 (TMU 1) received 20,909 tLOD writes with real values.
+- **Fix**: `int active_tmu = (params->textureMode[1] & 1) ? 1 : 0` — detect active TMU, pass to texture upload + vertex extraction. Three locations fixed: push_triangle, push_texture caller, extract_vertices.
+- **Also fixed** (9223a2729): Texture identity tracking replaced XOR hash (collision-prone) with direct 3-field comparison (slot + base + tLOD + palette_checksum).
+- **Result**: First textured 3D output! 3DMark99 race scene shows bridge, sky, HUD with real textures.
+
+### Known Issues (next)
+- Texture coordinate scrambling (UV mapping wrong, mosaic/fragmented textures on some surfaces)
+- Some LOD/mip level selection issues
+- Fog not yet implemented (Phase 5.4 / Phase 6)
+- ACOLORBEFOREFOG uses VK_BLEND_FACTOR_ONE instead of dual-source (Phase 6)
 
 ---
 

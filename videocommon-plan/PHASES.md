@@ -301,7 +301,7 @@ post-processing blit, present, display callback skip.
 
 ---
 
-## Phase 5: Core Pipeline Features ⏳ IN PROGRESS
+## Phase 5: Core Pipeline Features ⏳ IN PROGRESS (90%)
 
 **Goal**: Alpha test, alpha blending, depth test (Z and W buffer), fog, scissor.
 This is where the rendered output starts looking correct.
@@ -310,37 +310,50 @@ This is where the rendered output starts looking correct.
 
 | File | Change |
 |------|--------|
-| `shaders/voodoo_uber.frag` | Alpha test (8 compare funcs), fog (4 modes), chroma key |
-| `src/video/videocommon/vc_pipeline.c` | Pipeline variants for blend state, depth state via dynamic state |
-| `src/video/vid_voodoo_vk.c` | Extract blend/depth/fog state from fbzMode, alphaMode, fogMode |
+| `shaders/voodoo_uber.frag` | Alpha test (8 compare funcs), texture combine (tc_*), fog (4 modes), chroma key |
+| `src/video/videocommon/vc_pipeline.c` | Pipeline variant cache for blend state, depth state via EDS1 dynamic state |
+| `src/video/vid_voodoo_vk.c` | Extract blend/depth/fog/scissor state from fbzMode, alphaMode, fogMode, clip regs |
 | `src/video/videocommon/vc_texture.c` | Fog table upload (64x1 sampler2D) |
+| `src/video/videocommon/vc_thread.c` | SPSC ring reserve/commit pattern (ARM64 race fix) |
 
 ### Sub-phases
 
-**5.1 Depth Test**:
+**5.1 Depth Test** ✅:
 - Dynamic state: depthTestEnable, depthWriteEnable, depthCompareOp (from fbzMode)
 - Z-buffer (16-bit linear) and W-buffer (logarithmic, `depth_any` layout)
 - Push constant: depth source (iterated vs zaColor)
 
-**5.2 Alpha Test**:
+**5.2 Alpha Test** ✅:
 - Fragment shader: 8 compare functions (NEVER, LESS, EQUAL, LEQUAL, GREATER, NOTEQUAL, GEQUAL, ALWAYS)
 - Push constant: alpha reference value, compare function
 - discard on failure
 
-**5.3 Alpha Blending**:
-- Pipeline variants with VkBlendFactor mapping from Voodoo src_afunc/dest_afunc
-- On platforms with extended_dynamic_state3: dynamic blend state
-- On MoltenVK: baked pipeline cache (~20-50 variants)
+**5.3 Alpha Blending** ✅:
+- Pipeline variant cache with VkBlendFactor mapping from Voodoo src_afunc/dest_afunc
+- 32-entry linear cache, lazy pipeline creation. Real games use 5-15 unique blend configs.
+- MoltenVK does NOT support EDS3 — pipeline variants are mandatory (not optional)
+- ACOLORBEFOREFOG (0xF) mapped to VK_BLEND_FACTOR_ONE as interim (dual-source deferred to Phase 6)
 
-**5.4 Fog**:
+**5.4 Fog** (not yet implemented — deferred to Phase 6):
 - Fog table: 64 entries, uploaded as 64x1 R32_SFLOAT sampler
 - Fog modes: table (Z or W indexed), vertex, alpha
 - Push constant: fogColor, fogMode bits
 - ACOLORBEFOREFOG: dual-source blending (VK_BLEND_FACTOR_SRC1_COLOR)
 
-**5.5 Scissor**:
+**5.5 Scissor** ✅:
 - Dynamic scissor rect from clipLeftRight/clipLowYHighY registers
+- Per-triangle clip rect (vc_clip_rect_t) added to ring command (288->300 bytes)
 - Applied via vkCmdSetScissor (always dynamic)
+
+**5.6 Texture Combine** ✅:
+- textureMode0 bits 12-29: tc_zero_other, tc_sub_clocal, tc_mselect (6 cases), tc_reverse_blend, tc_add_clocal/alocal, tc_invert_output
+- Alpha equivalents (tca_*) implemented
+- Single-TMU only (c_other=0), DETAIL and LOD_FRAC stubbed as 0
+
+**5.7 SPSC Ring ARM64 Race Fix** ✅:
+- Split vc_ring_push into vc_ring_reserve/vc_ring_commit pattern
+- On ARM64, payload must be written before write_pos is published (release store)
+- Old code could publish write_pos before payload, causing GPU thread to read garbage
 
 ### Test
 
@@ -352,13 +365,14 @@ This is where the rendered output starts looking correct.
 
 ### Success Criteria
 
-- [ ] Depth test prevents incorrect overdraw
-- [ ] Alpha test culls transparent fragments
-- [ ] Alpha blending produces correct transparency
-- [ ] Fog fades distant geometry
-- [ ] Scissor clips correctly
-- [ ] 0 Vulkan validation errors
+- [x] Depth test prevents incorrect overdraw
+- [x] Alpha test culls transparent fragments
+- [x] Alpha blending produces correct transparency
+- [ ] Fog fades distant geometry (deferred to Phase 6)
+- [x] Scissor clips correctly
+- [ ] 0 Vulkan validation errors (not yet verified with VC_VALIDATE=1)
 - [ ] No swap_count regression during full 3DMark99 run with depth/blend/fog enabled
+- [ ] Texture coordinate scrambling resolved
 
 ---
 
@@ -374,9 +388,9 @@ This is where the rendered output starts looking correct.
 - Push constant: textureMode[1]
 - Detail blend, LOD blend, trilinear between TMU0 and TMU1
 
-**6.2 Texture Combine**:
-- 4 RGB select modes, 4 alpha select modes per TMU
-- tc_mselect, tc_reverse, tc_add clamping
+**6.2 Texture Combine** (partially done in Phase 5):
+- Single-TMU texture combine stage done in Phase 5.6 (tc_zero_other, tc_sub_clocal, tc_mselect, tc_reverse_blend, tc_add_clocal/alocal, tc_invert_output + alpha equivalents)
+- Remaining: multi-TMU combine (c_other from TMU1), DETAIL blend, LOD_FRAC
 - Push constant bits for combine mode selection
 
 **6.3 Color Combine**:

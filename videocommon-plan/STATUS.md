@@ -6,9 +6,9 @@
 
 ---
 
-## Current Status: Phase 5 IN PROGRESS — First 3D Output Achieved!
+## Current Status: Phase 5 NEARLY COMPLETE — Textured 3D with Blending, Scissor, Texture Combine!
 
-Phase 5 core pipeline is partially working. **First ever Voodoo 3D output from Vulkan backend** confirmed in 3DMark99 — geometry renders with correct depth ordering and iterated vertex colors. Two remaining issues before Phase 5 is complete.
+Phase 5 core pipeline is substantially working. **3DMark99 race benchmark renders textured 3D** — buildings, road, sky, vehicles, HUD transparency all visible. Alpha blending via pipeline variant cache, scissor clipping, and texture combine stage all implemented. SPSC ring race condition on ARM64 fixed. Remaining: texture coordinate scrambling (UV mapping issues), some LOD/mip issues.
 
 **Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
 
@@ -21,12 +21,12 @@ Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
 Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
 Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
 Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE
-Phase 5: Core Pipeline       [XXXXXXX...] 70%  IN PROGRESS
+Phase 5: Core Pipeline       [XXXXXXXXX.] 90%  IN PROGRESS
 Phase 6: Advanced Features   [..........] 0%   BLOCKED (Phase 5)
 Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
 ──────────────────────────────────────────────
-Overall                      [XXXXXX....] 55%
+Overall                      [XXXXXXX...] 65%
 ```
 
 ### Phase 5 Sub-task Status
@@ -40,22 +40,48 @@ Overall                      [XXXXXX....] 55%
 | 5.4 | Chroma key (shader) | X | 6d7651879 |
 | 5.5 | Depth clear fix (0.0→1.0) | X | 1e3ab6c96 |
 | 5.6 | dirty_line marking for readback | X | 1e3ab6c96 |
-| 5.7 | Texture rendering — flat grey, no textures visible | ! | — |
+| 5.7 | Texture rendering — TMU index fix | X | 9223a2729, 2fd9b9835 |
 | 5.8 | display_active redesign (freeze on exit) | X | e53f7c836, 05ae03693 |
-| 5.9 | Alpha blending (pipeline variants) | - | — |
-| 5.10 | Scissor (clip rect wiring) | - | — |
+| 5.9 | Alpha blending (pipeline variants) | X | e7e5a9a39 |
+| 5.10 | Scissor (clip rect wiring) | X | ec116a7b3 |
+| 5.11 | Texture combine stage (textureMode bits 12-29) | X | 5da589dcf |
+| 5.12 | SPSC ring ARM64 race fix (reserve/commit) | X | 3fd71c710 |
 
 Legend: `-` not started, `~` in progress, `X` done, `!` blocked/bug
 
 ---
 
-## Known Bugs (Phase 5)
+## Known Bugs / Remaining Work (Phase 5)
 
-### BUG: No textures visible — flat greyscale output
-- 3DMark99 renders geometry but only iterated vertex colors (grey/black/white)
-- Log shows only 1 texture upload: `tex upload tmu=0 slot=14 1x1` (the dummy texture)
-- The Phase 5 shader rewrite may have broken texture combine path
-- Need to investigate: is texture data reaching the shader? Is the combine selecting texture?
+### Remaining rendering artifacts in 3DMark99 race scene
+- **Texture coordinate glitches** — some textures appear scrambled/fragmented (mosaic pattern, UV mapping wrong)
+- **LOD/mip issues** — some textures show incorrect mip level selection
+
+### FIXED: SPSC ring publish-before-write race on ARM64 (3fd71c710)
+- Root cause: `vc_ring_push` published write_pos (release store) before the payload was fully written. On ARM64 weak memory model, the GPU thread could read garbage from the ring (blue diagonal streaks, random corruption).
+- Fix: split into `vc_ring_reserve()` (writes header, returns payload pointer) + `vc_ring_commit()` (release store of write_pos after caller fills payload). Ensures payload is visible before consumer sees the new write_pos.
+
+### FIXED: Alpha blending (e7e5a9a39)
+- Implemented pipeline variant cache: maps Voodoo alphaMode blend factors to VkBlendFactor
+- 32-entry linear cache, lazy pipeline creation. Real games use only 5-15 unique blend configs.
+- MoltenVK does NOT support EDS3 (extendedDynamicState3) — pipeline variants required for blend state.
+- ACOLORBEFOREFOG (0xF) mapped to VK_BLEND_FACTOR_ONE as interim (dual-source blending deferred to Phase 6).
+
+### FIXED: Scissor clipping (ec116a7b3)
+- Wired Voodoo clipLeft/clipRight/clipLowY/clipHighY registers to vkCmdSetScissor per-triangle
+- Added vc_clip_rect_t to ring command (288->300 bytes per triangle command)
+- Fixed grey bar on left edge, corruption in bottom-right corner
+
+### FIXED: Texture combine stage (5da589dcf)
+- Added textureMode0 bits 12-29 processing to voodoo_uber.frag (~100 lines)
+- Handles tc_zero_other, tc_sub_clocal, tc_mselect (6 cases), tc_reverse_blend, tc_add_clocal/alocal, tc_invert_output
+- Alpha equivalents (tca_*) also implemented
+- Single-TMU only (c_other=0), DETAIL and LOD_FRAC stubbed as 0
+
+### FIXED: No textures visible — TMU index bug (9223a2729, 2fd9b9835)
+- Root cause: Voodoo 2 TMU pipeline flows TMU 1 → TMU 0 → color combine. Glide writes texture state (tLOD, texBaseAddr, S/T/W gradients) to TMU 1 (chip=0x4), but VK path hardcoded TMU 0
+- Fix: detect active TMU via `(params->textureMode[1] & 1) ? 1 : 0`, use correct TMU for texture upload, vertex extraction, and refcount
+- Also fixed texture identity tracking — replaced XOR hash with direct 3-field comparison (9223a2729)
 
 ### FIXED: Freeze on benchmark exit (display_active redesign)
 - Root cause: `vc_display_active` served dual purpose (triangle routing + VGA suppression)
@@ -172,7 +198,7 @@ Timer/display cb    swap_pending=1           Record cmd buffers
 
 | Risk | Mitigation | Status |
 |------|-----------|--------|
-| MoltenVK missing extended_dynamic_state3 | Baked pipeline variants (~20-50) | Planned |
+| MoltenVK missing extended_dynamic_state3 | Baked pipeline variant cache (32-slot linear, lazy creation) | FIXED (e7e5a9a39) |
 | SPSC ring full stall | 8MB = ~65K cmds, 6 frames headroom | Designed |
 | swap_count deadlock (v1 repeat) | v2 doesn't touch swap lifecycle AT ALL | Designed |
 | LFB read stall (v1 repeat) | Shadow buffer, no sync push from CPU | Designed |

@@ -335,6 +335,70 @@ universal patterns. Deviating from universal patterns requires explicit justific
 
 ---
 
+## 6. v2 Lessons Learned (Phase 5)
+
+### L1: MoltenVK Does NOT Support EDS3 — Pipeline Variants Are Mandatory
+
+Despite MoltenVK reporting VK_EXT_extended_dynamic_state support, it does NOT
+support VK_EXT_extended_dynamic_state3 (blend state as dynamic state). This means
+blend factors (src/dst color/alpha) must be baked into VkPipeline objects. This is
+not an edge case — it affects all macOS users.
+
+**Solution**: A 32-entry linear cache maps unique Voodoo blend configurations to
+VkPipeline objects. Pipeline creation is lazy (first use). Real Voodoo games use
+only 5-15 unique blend configs, so a small linear cache avoids hash table complexity.
+
+**Lesson**: Always verify dynamic state support at runtime. Do not assume that
+because EDS1 is available, EDS2/EDS3 will be too. MoltenVK's dynamic state
+coverage is incomplete due to Metal API limitations.
+
+### L2: SPSC Ring on ARM64 — Publish-Before-Write Race
+
+On ARM64's weak memory model, a single `vc_ring_push()` that writes the payload
+and then publishes `write_pos` via a release store can still expose stale payload
+data to the consumer. This is because the compiler/CPU may reorder the payload
+writes relative to the release store if they are done in the same function call.
+
+**Symptom**: Blue diagonal streaks, random pixel corruption, garbage triangles —
+all intermittent and timing-dependent.
+
+**Solution**: Split into `vc_ring_reserve()` (writes header, returns payload pointer)
++ `vc_ring_commit()` (release store of write_pos). The caller fills the payload
+between the two calls, creating a natural compiler barrier. The release store in
+`vc_ring_commit()` ensures all prior writes (including payload) are visible before
+the consumer reads write_pos.
+
+**Lesson**: On weakly-ordered architectures, always fill data BEFORE publishing the
+pointer/index that makes it visible to another thread. The reserve/commit pattern
+makes this explicit and hard to get wrong.
+
+### L3: Voodoo Alpha reverse_blend Polarity Inversion
+
+The SW renderer inverts the `tc_reverse_blend` register bit for non-trilinear
+rendering: `c_reverse = !tc_reverse_blend` (when not in trilinear mode). This means
+the shader must match this inversion to produce correct output. The raw register bit
+does NOT directly correspond to the blend direction.
+
+**Lesson**: When reimplementing a pixel pipeline, always compare against the SW
+renderer's actual behavior, not the register documentation. Register bits may be
+inverted, shifted, or combined in non-obvious ways by the existing code.
+
+### L4: Pipeline Variant Cache — Linear Search Is Fine for Voodoo
+
+Voodoo games change blend state infrequently (typically 5-15 unique configurations
+per game). A 32-slot linear cache with direct comparison is faster than a hash table
+for this workload because:
+1. The working set fits in a single cache line (or two)
+2. No hash computation overhead
+3. No collision handling
+4. Iteration is sequential and branch-predictor-friendly
+
+**Lesson**: Choose data structures based on actual workload characteristics, not
+theoretical complexity. O(n) linear search beats O(1) hash lookup when n < 32 and
+access patterns are repetitive.
+
+---
+
 ## Appendix: v1 Timeline
 
 | Date | Event |

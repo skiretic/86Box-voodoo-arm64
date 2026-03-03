@@ -205,7 +205,7 @@ typedef struct vc_ring_cmd_header_t {
 
 | Command | Payload | Description |
 |---------|---------|-------------|
-| `VC_CMD_TRIANGLE` | 3 vertices (pos, color, tex coords) + push constant data | One triangle to rasterize |
+| `VC_CMD_TRIANGLE` | 3 vertices (pos, color, tex coords) + push constants + clip rect | One triangle to rasterize (~300 bytes) |
 | `VC_CMD_SWAP` | swap info (buffer index, frame number) | End of frame, trigger present |
 | `VC_CMD_TEXTURE_UPLOAD` | TMU index, slot, dimensions, format, pixel data pointer | Upload texture to VkImage |
 | `VC_CMD_TEXTURE_BIND` | TMU index, slot, sampler params | Bind texture for subsequent draws |
@@ -217,15 +217,29 @@ typedef struct vc_ring_cmd_header_t {
 
 ### 4.4 Push API (Producer -- FIFO Thread)
 
-Two variants, matching DuckStation:
+**Reserve/commit pattern** (ARM64 correctness fix):
+
+On ARM64's weak memory model, the original `vc_ring_push()` (single-call, fire-and-forget)
+had a publish-before-write race: the release store of `write_pos` could become visible to
+the consumer before the payload was fully written, causing the GPU thread to read garbage.
+
+The fix splits push into two calls:
 
 ```c
-/* Fire-and-forget (most common, for triangles) */
-void vc_ring_push(vc_ring_t *ring, const void *cmd, uint32_t size);
+/* Reserve space in ring, write header, return pointer to payload area.
+   Does NOT publish write_pos yet. */
+void *vc_ring_reserve(vc_ring_t *ring, uint16_t type, uint32_t total_size);
 
-/* Push and wake GPU thread (for swap, shutdown) */
+/* Publish the reserved command (release store of write_pos).
+   Caller must have filled payload BEFORE calling this. */
+void vc_ring_commit(vc_ring_t *ring);
+
+/* Reserve + commit + wake GPU thread (for swap, shutdown) */
 void vc_ring_push_and_wake(vc_ring_t *ring, const void *cmd, uint32_t size);
 ```
+
+The caller fills the payload between reserve and commit, ensuring the data
+is written before the consumer can see the updated write_pos.
 
 Note: DuckStation has a third variant `PushCommandAndSync()` for blocking
 readback. VideoCommon does NOT use this pattern because sync readback from
@@ -752,27 +766,41 @@ No transformation (Voodoo operates in screen space with pre-divided coordinates)
 - Depth test enable, depth write enable, depth compare op (via VK_EXT_extended_dynamic_state)
 - Blend enable, blend factors, blend op (via VK_EXT_extended_dynamic_state3, or baked pipeline variants on MoltenVK)
 
-### 7.6 Pipeline Variants
+### 7.6 Pipeline Variants (Blend State Cache)
 
-Where extended_dynamic_state3 is not available (MoltenVK), blend state must be
-baked into the pipeline. A pipeline cache maps blend state hashes to VkPipeline
-objects. Expected unique combinations: ~20-50 for typical games.
+MoltenVK does NOT support VK_EXT_extended_dynamic_state3, so blend state must
+be baked into pipeline objects. A 32-entry linear cache maps Voodoo alphaMode
+blend factors to VkPipeline objects. Pipeline creation is lazy (create on first
+use). Real Voodoo games use only 5-15 unique blend configurations, so a small
+linear cache is sufficient and avoids hash table overhead.
 
 ```c
-typedef struct vc_pipeline_key_t {
+typedef struct vc_blend_key_t {
     uint8_t  blend_enable;
-    uint8_t  src_rgb_factor;
-    uint8_t  dst_rgb_factor;
-    uint8_t  src_alpha_factor;
-    uint8_t  dst_alpha_factor;
-    uint8_t  color_write_mask;
-    uint8_t  depth_format;      /* z16 vs w-buffer */
-    uint8_t  dual_src_blend;    /* ACOLORBEFOREFOG */
-} vc_pipeline_key_t;
+    uint8_t  src_rgb_factor;     /* VkBlendFactor */
+    uint8_t  dst_rgb_factor;     /* VkBlendFactor */
+    uint8_t  src_alpha_factor;   /* VkBlendFactor */
+    uint8_t  dst_alpha_factor;   /* VkBlendFactor */
+} vc_blend_key_t;
+
+#define VC_MAX_BLEND_PIPELINES  32
+
+typedef struct vc_blend_cache_t {
+    vc_blend_key_t  keys[VC_MAX_BLEND_PIPELINES];
+    VkPipeline      pipelines[VC_MAX_BLEND_PIPELINES];
+    int             count;
+} vc_blend_cache_t;
 ```
 
-Pipeline creation is lazy (create on first use) and cached via VkPipelineCache
-for fast startup on subsequent runs.
+Blend factor mapping from Voodoo alphaMode:
+- 0x0 ZERO, 0x1 SRC_ALPHA, 0x2 DST_COLOR (color) / DST_ALPHA (alpha),
+  0x3 DST_COLOR (color) / DST_ALPHA (alpha), 0x4 ONE,
+  0x5 ONE_MINUS_SRC_ALPHA, 0x6 ONE_MINUS_DST_COLOR / ONE_MINUS_DST_ALPHA,
+  0x7 ONE_MINUS_DST_COLOR / ONE_MINUS_DST_ALPHA,
+  0xF ACOLORBEFOREFOG -> mapped to ONE as interim (dual-source deferred)
+
+Pipeline creation is lazy and cached via VkPipelineCache for fast startup on
+subsequent runs.
 
 ### 7.7 Texture Management
 
