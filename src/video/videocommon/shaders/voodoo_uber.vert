@@ -96,6 +96,11 @@ void main() {
     /* Depth: noperspective (Voodoo Z is linearly interpolated). */
     vDepth = inDepth;
 
-    /* Fog coordinate: noperspective. */
-    vFog = inFog;
+    /* Fog coordinate: noperspective.
+     * Pass through inFog directly.  Also consume inOOW so the compiler
+     * does not optimise away the vertex attribute at location 2 (which
+     * must remain in the pipeline vertex-input state to match
+     * vc_vertex_t).  The multiplication by 1.0 is a no-op that keeps
+     * inOOW alive without changing the result. */
+    vFog = inFog + inOOW * 0.0;
 }

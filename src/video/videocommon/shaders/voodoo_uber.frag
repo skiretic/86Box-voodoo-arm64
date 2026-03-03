@@ -427,7 +427,10 @@ void main() {
     /* TODO */
 
     /* --- STAGE 15: Fog (Phase 6) --- */
-    /* TODO */
+    /* Consume vFog so the compiler keeps the vertex-to-fragment interface
+     * intact and Vulkan validation does not warn about an unconsumed
+     * output at location 4.  The multiply-by-zero is a no-op. */
+    combined.rgb += vFog * 0.0;
 
     /* ==================================================================
      * STAGE 16: Alpha test
