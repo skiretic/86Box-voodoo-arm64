@@ -118,6 +118,108 @@ void main() {
     }
 
     /* ==================================================================
+     * STAGE 5b: Texture combine (Phase 5.11)
+     *
+     * textureMode0 bits 12-29 control a configurable blend formula
+     * that processes the raw texel before color combine consumes it.
+     * For single-TMU, c_other = 0 (no upstream TMU), c_local = texel.
+     *
+     * Passthrough shortcut: if all combine bits are zero, skip entirely.
+     * ================================================================== */
+    if (textured && (pc.textureMode0 & 0x3FFFF000u) != 0u) {
+        vec3 tc_other = vec3(0.0);  /* no upstream TMU yet */
+        float tca_other = 0.0;
+        vec3 tc_local = texel.rgb;
+        float tca_local = texel.a;
+
+        /* ---- Color combine ---- */
+
+        /* Step 1: zero_other */
+        bool tc_zero_other = (pc.textureMode0 & (1u << 12)) != 0u;
+        vec3 tc_src = tc_zero_other ? vec3(0.0) : tc_other;
+
+        /* Step 2: sub_clocal */
+        if ((pc.textureMode0 & (1u << 13)) != 0u)
+            tc_src -= tc_local;
+
+        /* Step 3: mselect factor */
+        uint tc_ms = (pc.textureMode0 >> 14) & 7u;
+        vec3 tc_factor;
+        switch (tc_ms) {
+            case 0u:  tc_factor = vec3(0.0);               break; /* ZERO */
+            case 1u:  tc_factor = tc_local;                 break; /* CLOCAL */
+            case 2u:  tc_factor = vec3(tca_other);          break; /* AOTHER */
+            case 3u:  tc_factor = vec3(tca_local);          break; /* ALOCAL */
+            case 4u:  tc_factor = vec3(0.0);                break; /* DETAIL (TODO) */
+            case 5u:  tc_factor = vec3(0.0);                break; /* LOD_FRAC (TODO) */
+            default:  tc_factor = vec3(0.0);                break;
+        }
+
+        /* Reverse blend: if bit NOT set, invert factor */
+        if ((pc.textureMode0 & (1u << 17)) == 0u)
+            tc_factor = vec3(1.0) - tc_factor;
+
+        tc_src *= tc_factor;
+
+        /* Step 4: add */
+        if ((pc.textureMode0 & (1u << 18)) != 0u)
+            tc_src += tc_local;
+        else if ((pc.textureMode0 & (1u << 19)) != 0u)
+            tc_src += vec3(tca_local);
+
+        /* Step 5: clamp */
+        tc_src = clamp(tc_src, 0.0, 1.0);
+
+        /* Step 6: invert output */
+        if ((pc.textureMode0 & (1u << 20)) != 0u)
+            tc_src = vec3(1.0) - tc_src;
+
+        /* ---- Alpha combine ---- */
+
+        /* Step 1: tca_zero_other */
+        bool tca_z_other = (pc.textureMode0 & (1u << 21)) != 0u;
+        float tca_src = tca_z_other ? 0.0 : tca_other;
+
+        /* Step 2: tca_sub_clocal */
+        if ((pc.textureMode0 & (1u << 22)) != 0u)
+            tca_src -= tca_local;
+
+        /* Step 3: tca_mselect factor */
+        uint tca_ms = (pc.textureMode0 >> 23) & 7u;
+        float tca_factor;
+        switch (tca_ms) {
+            case 0u:  tca_factor = 0.0;               break; /* ZERO */
+            case 1u:  tca_factor = tca_local;          break; /* CLOCAL */
+            case 2u:  tca_factor = tca_other;          break; /* AOTHER */
+            case 3u:  tca_factor = tca_local;          break; /* ALOCAL */
+            case 4u:  tca_factor = 0.0;                break; /* DETAIL (TODO) */
+            case 5u:  tca_factor = 0.0;                break; /* LOD_FRAC (TODO) */
+            default:  tca_factor = 0.0;                break;
+        }
+
+        /* Reverse blend: if bit NOT set, invert factor */
+        if ((pc.textureMode0 & (1u << 26)) == 0u)
+            tca_factor = 1.0 - tca_factor;
+
+        tca_src *= tca_factor;
+
+        /* Step 4: add (both clocal and alocal add a_local for alpha) */
+        if ((pc.textureMode0 & (1u << 27)) != 0u ||
+            (pc.textureMode0 & (1u << 28)) != 0u)
+            tca_src += tca_local;
+
+        /* Step 5: clamp */
+        tca_src = clamp(tca_src, 0.0, 1.0);
+
+        /* Step 6: invert output */
+        if ((pc.textureMode0 & (1u << 29)) != 0u)
+            tca_src = 1.0 - tca_src;
+
+        /* Replace texel with combined result */
+        texel = vec4(tc_src, tca_src);
+    }
+
+    /* ==================================================================
      * STAGE 6-7: Color/alpha combine (Phase 5 -- full pipeline)
      *
      * fbzColorPath bit layout for color combine:
