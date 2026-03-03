@@ -68,9 +68,12 @@ typedef struct vc_display_t {
     VkShaderModule pp_vert_shader;
     VkShaderModule pp_frag_shader;
 
-    /* Per-frame sync primitives. */
-    VkSemaphore image_available_sem[VC_NUM_FRAMES];
-    VkSemaphore render_finished_sem[VC_NUM_FRAMES];
+    /* Per-swapchain-image sync primitives.  Indexed by acquired image
+       index so that each swapchain image has its own semaphore pair,
+       preventing reuse while the swapchain still holds a reference. */
+    VkSemaphore image_available_sem[VC_MAX_SWAPCHAIN_IMAGES];
+    VkSemaphore render_finished_sem[VC_MAX_SWAPCHAIN_IMAGES];
+    uint32_t    acquire_sem_index; /* Rotating index for acquire semaphore. */
 
     /* Pointer to voodoo_t::vc_divert_to_gpu.  The GPU thread sets this
        to 1 in vc_display_create() to permanently enable triangle routing

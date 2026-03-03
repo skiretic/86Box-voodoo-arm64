@@ -449,7 +449,7 @@ vc_display_create_semaphores(vc_ctx_t *ctx, vc_display_t *disp)
     memset(&sem_ci, 0, sizeof(sem_ci));
     sem_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    for (uint32_t i = 0; i < VC_NUM_FRAMES; i++) {
+    for (uint32_t i = 0; i < VC_MAX_SWAPCHAIN_IMAGES; i++) {
         VkResult r1 = vkCreateSemaphore(ctx->device, &sem_ci, NULL,
                                         &disp->image_available_sem[i]);
         VkResult r2 = vkCreateSemaphore(ctx->device, &sem_ci, NULL,
@@ -465,7 +465,7 @@ vc_display_create_semaphores(vc_ctx_t *ctx, vc_display_t *disp)
 static void
 vc_display_destroy_semaphores(vc_ctx_t *ctx, vc_display_t *disp)
 {
-    for (uint32_t i = 0; i < VC_NUM_FRAMES; i++) {
+    for (uint32_t i = 0; i < VC_MAX_SWAPCHAIN_IMAGES; i++) {
         if (disp->image_available_sem[i] != VK_NULL_HANDLE) {
             vkDestroySemaphore(ctx->device, disp->image_available_sem[i], NULL);
             disp->image_available_sem[i] = VK_NULL_HANDLE;
@@ -475,6 +475,7 @@ vc_display_destroy_semaphores(vc_ctx_t *ctx, vc_display_t *disp)
             disp->render_finished_sem[i] = VK_NULL_HANDLE;
         }
     }
+    disp->acquire_sem_index = 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1065,10 +1066,16 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
        GPU thread.  On MoltenVK (FIFO only, no MAILBOX), a blocking
        acquire can stall for up to 16 ms, starving the SPSC ring
        consumer and freezing the guest. */
+    /* Use a rotating index for the acquire semaphore so that each
+       acquire uses a different semaphore, avoiding reuse while the
+       swapchain still holds a reference from a previous present. */
+    uint32_t acq_sem_idx = disp->acquire_sem_index;
+    disp->acquire_sem_index = (acq_sem_idx + 1) % disp->image_count;
+
     uint32_t image_idx;
     VkResult acq = vkAcquireNextImageKHR(
         ctx->device, disp->swapchain, 0 /* non-blocking */,
-        disp->image_available_sem[frame_index],
+        disp->image_available_sem[acq_sem_idx],
         VK_NULL_HANDLE, &image_idx);
 
     VC_LOG("VideoCommon: present: acquire result=%d image_idx=%u\n", acq, image_idx);
@@ -1078,14 +1085,18 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
            and retry on the next swap.  The command buffer has NOT been
            submitted, so the caller can safely reuse it. */
         VC_LOG("VideoCommon: present: no swapchain image available, skipping\n");
+        /* Roll back the acquire semaphore index since we didn't use it. */
+        disp->acquire_sem_index = acq_sem_idx;
         return 0;
     }
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
         VC_LOG("VideoCommon: present: swapchain out of date\n");
+        disp->acquire_sem_index = acq_sem_idx;
         return 1; /* Caller should recreate swapchain. */
     }
     if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
         VC_LOG("VideoCommon: present: acquire failed (%d), returning -1\n", acq);
+        disp->acquire_sem_index = acq_sem_idx;
         return -1;
     }
 
@@ -1182,12 +1193,12 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     memset(&submit, 0, sizeof(submit));
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &disp->image_available_sem[frame_index];
+    submit.pWaitSemaphores      = &disp->image_available_sem[acq_sem_idx];
     submit.pWaitDstStageMask    = &wait_stage;
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &cmd_buf;
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores    = &disp->render_finished_sem[frame_index];
+    submit.pSignalSemaphores    = &disp->render_finished_sem[image_idx];
 
     vc_frame_t *f          = &gpu_st->frame[frame_index];
     VkResult    sub_result = vkQueueSubmit(ctx->queue, 1, &submit, VK_NULL_HANDLE);
@@ -1202,7 +1213,7 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     memset(&present, 0, sizeof(present));
     present.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores    = &disp->render_finished_sem[frame_index];
+    present.pWaitSemaphores    = &disp->render_finished_sem[image_idx];
     present.swapchainCount     = 1;
     present.pSwapchains        = &disp->swapchain;
     present.pImageIndices      = &image_idx;
@@ -1635,16 +1646,20 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
        GPU thread.  MAILBOX mode normally makes this instant, but even
        with FIFO this avoids a 16 ms stall that would starve the SPSC
        ring and freeze the guest. */
+    uint32_t acq_sem_idx = disp->acquire_sem_index;
+    disp->acquire_sem_index = (acq_sem_idx + 1) % disp->image_count;
+
     uint32_t image_idx;
     VkResult acq = vkAcquireNextImageKHR(
         ctx->device, disp->swapchain, 0 /* non-blocking */,
-        disp->image_available_sem[frame_index],
+        disp->image_available_sem[acq_sem_idx],
         VK_NULL_HANDLE, &image_idx);
 
     if (acq == VK_TIMEOUT || acq == VK_NOT_READY) {
         /* No swapchain image available right now -- skip this frame
            and retry on the next tick. */
         vkEndCommandBuffer(cmd_buf);
+        disp->acquire_sem_index = acq_sem_idx;
         atomic_store_explicit(&disp->vga_frame_ready, 1,
                               memory_order_release);
         vc_ring_wake(&ctx->ring);
@@ -1652,11 +1667,13 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
         vkEndCommandBuffer(cmd_buf);
+        disp->acquire_sem_index = acq_sem_idx;
         vc_display_recreate_swapchain(ctx, gpu_st);
         return 0;
     }
     if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
         vkEndCommandBuffer(cmd_buf);
+        disp->acquire_sem_index = acq_sem_idx;
         VC_LOG("VideoCommon: VGA blit vkAcquireNextImageKHR failed (%d)\n", acq);
         return -1;
     }
@@ -1712,12 +1729,12 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     memset(&submit, 0, sizeof(submit));
     submit.sType                = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &disp->image_available_sem[frame_index];
+    submit.pWaitSemaphores      = &disp->image_available_sem[acq_sem_idx];
     submit.pWaitDstStageMask    = &wait_stage;
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &cmd_buf;
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores    = &disp->render_finished_sem[frame_index];
+    submit.pSignalSemaphores    = &disp->render_finished_sem[image_idx];
 
     VkResult sub_result = vkQueueSubmit(ctx->queue, 1, &submit, VK_NULL_HANDLE);
     if (sub_result != VK_SUCCESS) {
@@ -1730,7 +1747,7 @@ vc_display_present_vga(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     memset(&present, 0, sizeof(present));
     present.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores    = &disp->render_finished_sem[frame_index];
+    present.pWaitSemaphores    = &disp->render_finished_sem[image_idx];
     present.swapchainCount     = 1;
     present.pSwapchains        = &disp->swapchain;
     present.pImageIndices      = &image_idx;
