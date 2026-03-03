@@ -52,8 +52,8 @@ layout(set = 0, binding = 0) uniform sampler2D tex_tmu0;
 
 /* ---- Inputs from Vertex Shader ---------------------------------------- */
 layout(location = 0) noperspective in vec4  vColor;
-layout(location = 1)               in vec3  vTexCoord0;
-layout(location = 2)               in vec3  vTexCoord1;
+layout(location = 1) noperspective in vec3  vTexCoord0;
+layout(location = 2) noperspective in vec3  vTexCoord1;
 layout(location = 3) noperspective in float vDepth;
 layout(location = 4) noperspective in float vFog;
 

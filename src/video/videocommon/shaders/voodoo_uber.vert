@@ -51,19 +51,22 @@ layout(location = 6) in float inFog;         /* fog coordinate              */
 
 /* ---- Outputs to Fragment Shader ---------------------------------------- */
 layout(location = 0) noperspective out vec4  vColor;     /* iterated RGBA   */
-layout(location = 1)               out vec3  vTexCoord0; /* perspective TMU0 */
-layout(location = 2)               out vec3  vTexCoord1; /* perspective TMU1 */
+layout(location = 1) noperspective out vec3  vTexCoord0; /* S/W, T/W, 1/W   */
+layout(location = 2) noperspective out vec3  vTexCoord1; /* S/W, T/W, 1/W   */
 layout(location = 3) noperspective out float vDepth;     /* Voodoo Z depth  */
 layout(location = 4) noperspective out float vFog;       /* fog coordinate  */
 
 void main() {
     /*
-     * W from 1/W.  When inOOW == 0 (affine / Phase 2 dummy), W = 1.0
-     * so that gl_Position.w = 1 and perspective division is identity.
-     * For textured/perspective-correct rendering (Phase 4+), W enables
-     * hardware perspective interpolation on 'smooth' varyings.
+     * All varyings use noperspective interpolation because Voodoo
+     * hardware iterates S/W, T/W, 1/W linearly in screen space and
+     * does the perspective divide per-pixel in the texture unit.
+     * Using smooth (perspective-correct) interpolation would
+     * double-correct these values and cause mosaic/scrambling
+     * artifacts.  With no smooth varyings, gl_Position.w = 1.0 and
+     * the clip-space position is simply NDC.
      */
-    float W = (inOOW > 0.0) ? (1.0 / inOOW) : 1.0;
+    float W = 1.0;
 
     /*
      * Screen-space to Vulkan NDC.
@@ -78,18 +81,15 @@ void main() {
     float ndc_y = (2.0 * inPosition.y / pc.fb_height) - 1.0;
 
     /*
-     * Encode W for perspective-correct varying interpolation.
-     * gl_Position.w = W causes the GPU to interpolate 'smooth' varyings
-     * with the correct 1/W weighting, reproducing Voodoo's S/W, T/W
-     * perspective-correct pipeline.  'noperspective' varyings (color,
-     * depth, fog) are interpolated linearly in screen space regardless.
+     * Straight NDC -- no perspective encoding needed since all
+     * varyings are noperspective.
      */
-    gl_Position = vec4(ndc_x * W, ndc_y * W, inDepth * W, W);
+    gl_Position = vec4(ndc_x, ndc_y, inDepth, W);
 
     /* Colors: noperspective (Voodoo Gouraud shading is screen-space). */
     vColor = inColor;
 
-    /* Texture coords: smooth (perspective-corrected by W). */
+    /* Texture coords: noperspective (linear in screen space). */
     vTexCoord0 = inTexCoord0;
     vTexCoord1 = inTexCoord1;
 
