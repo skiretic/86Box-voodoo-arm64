@@ -359,14 +359,9 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
         w1C = w1A + ((double) p->tmu[1].dWdX * dx_ca + (double) p->tmu[1].dWdY * dy_ca) / VC_ST_SCALE;
     }
 
-    /* Backward compatibility: when only TMU1 is active (common on Voodoo 2
-       single-texture), copy TMU1 data into TMU0 vertex fields so the shader's
-       existing single-TMU path (which reads vTexCoord0) still works. */
-    if (textured && tmu1_enabled && !tmu0_enabled) {
-        s0A = s1A; t0A = t1A; w0A = w1A;
-        s0B = s1B; t0B = t1B; w0B = w1B;
-        s0C = s1C; t0C = t1C; w0C = w1C;
-    }
+    /* TMU1 coords stay in their own vertex fields (vTexCoord1).
+       The shader samples tex_tmu1 via vTexCoord1 when only TMU1 is active,
+       or when both TMUs are active (dual-TMU mode). */
 
     /* Depth: compute per-vertex Z from Voodoo gradients.
      *
@@ -640,14 +635,27 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
 
     /* Handle texture if textured.
        On Voodoo 2, TMU 1 is the upstream texture unit — when only a single
-       texture is active, the driver programs TMU 1 (not TMU 0). */
+       texture is active, the driver programs TMU 1 (not TMU 0).
+       For dual-TMU: push both TMU0 and TMU1 textures. */
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
-        int active_tmu = (params->textureMode[1] & 1) ? 1 : 0;
+        int tmu0_act = (params->textureMode[0] & 1) ? 1 : 0;
+        int tmu1_act = (params->textureMode[1] & 1) ? 1 : 0;
 
-        /* Ensure voodoo_use_texture() has been called (it has -- the
-           render path calls it before us).  Now push to GPU thread. */
-        voodoo_vk_push_texture(voodoo, params, active_tmu);
-
+        if (tmu0_act && tmu1_act) {
+            /* Dual-TMU: upload/bind TMU1 first (upstream), then TMU0.
+               TMU1 bind as tmu=1 writes to binding 1.
+               TMU0 bind as tmu=0 writes to binding 0 and includes TMU1
+               at binding 1 in the same descriptor set. */
+            voodoo_vk_push_texture(voodoo, params, 1);
+            voodoo_vk_push_texture(voodoo, params, 0);
+        } else if (tmu1_act) {
+            /* Single-TMU via TMU1: push with tmu=1.
+               The shader samples tex_tmu1 via vTexCoord1 directly. */
+            voodoo_vk_push_texture(voodoo, params, 1);
+        } else if (tmu0_act) {
+            /* Single-TMU via TMU0. */
+            voodoo_vk_push_texture(voodoo, params, 0);
+        }
     }
 
     /* Balance refcount_r for both TMUs unconditionally, matching the

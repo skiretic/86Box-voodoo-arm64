@@ -50,6 +50,7 @@ layout(push_constant, std430) uniform PushConstants {
 
 /* ---- Descriptor Set 0: Texture Samplers -------------------------------- */
 layout(set = 0, binding = 0) uniform sampler2D tex_tmu0;
+layout(set = 0, binding = 1) uniform sampler2D tex_tmu1;
 layout(set = 0, binding = 2) uniform sampler2D fog_table; /* 64x1 R8G8_UNORM */
 
 /* ---- Inputs from Vertex Shader ---------------------------------------- */
@@ -218,17 +219,38 @@ void main() {
     }
 
     /* ==================================================================
-     * STAGE 5: Texture fetch (Phase 4)
+     * STAGE 5: Texture fetch (Phase 4 + Phase 6.1 dual-TMU)
      *
      * When FBZCP_TEXTURE_ENABLED (bit 27 of fbzColorPath) is set,
-     * sample TMU0 using perspective-corrected texture coordinates.
-     * vTexCoord0 = (S/W, T/W, 1/W) from vertex shader (smooth interp).
+     * sample TMU(s) using perspective-corrected texture coordinates.
+     * vTexCoord0/1 = (S/W, T/W, 1/W) from vertex shader (noperspective).
      * Perspective divide: U = (S/W) / (1/W), V = (T/W) / (1/W).
+     *
+     * Voodoo 2 TMU pipeline: TMU1 (upstream) -> TMU0 (downstream).
+     * TMU1's output becomes TMU0's c_other input.
      * ================================================================== */
     vec4 texel = vec4(1.0);
     bool textured = (pc.fbzColorPath & (1u << 27)) != 0u;
+    bool tmu0_enabled = (pc.textureMode0 & 1u) != 0u;
+    bool tmu1_enabled = (pc.textureMode1 & 1u) != 0u;
 
-    if (textured) {
+    /* TMU1 fetch (upstream, or single-TMU-via-TMU1). */
+    vec4 texel1 = vec4(0.0);
+    if (textured && tmu1_enabled) {
+        /* TMU1 texture is at binding 1, coords in vTexCoord1. */
+        float oow1 = vTexCoord1.z;
+        if (oow1 > 0.0) {
+            vec2 uv1 = vTexCoord1.xy / oow1;
+            vec2 tex_size1 = vec2(textureSize(tex_tmu1, 0));
+            uv1 /= tex_size1;
+            texel1 = texture(tex_tmu1, uv1);
+        } else {
+            texel1 = texture(tex_tmu1, vec2(0.0));
+        }
+    }
+
+    /* TMU0 fetch (downstream). */
+    if (textured && tmu0_enabled) {
         float oow = vTexCoord0.z;
         if (oow > 0.0) {
             vec2 uv = vTexCoord0.xy / oow;
@@ -242,20 +264,132 @@ void main() {
         } else {
             texel = texture(tex_tmu0, vec2(0.0));
         }
+    } else if (textured && tmu1_enabled) {
+        /* Single-TMU via TMU1: use TMU1's texel as the primary texel.
+           This texel will go through TMU0 combine (or color combine directly). */
+        texel = texel1;
     }
 
     /* ==================================================================
-     * STAGE 5b: Texture combine (Phase 5.11)
+     * STAGE 5a: TMU1 texture combine (Phase 6.1 -- dual-TMU)
+     *
+     * TMU1 is the upstream texture unit.  Its c_other is always 0
+     * (no further upstream TMU).  Its c_local is its own texel (texel1).
+     * The SW renderer only processes TMU1 combine when tc_sub_clocal_1
+     * or tca_sub_clocal_1 is set; otherwise TMU1 outputs raw texel.
+     *
+     * textureMode1 bits use the same layout as textureMode0:
+     *   [13]    tc_sub_clocal
+     *   [14:16] tc_mselect
+     *   [17]    tc_reverse_blend
+     *   [18]    tc_add_clocal
+     *   [19]    tc_add_alocal
+     *   [22]    tca_sub_clocal
+     *   [23:25] tca_mselect
+     *   [26]    tca_reverse_blend
+     *   [27]    tca_add_clocal
+     *   [28]    tca_add_alocal
+     * ================================================================== */
+    if (textured && tmu1_enabled && tmu0_enabled) {
+        vec3 tc1_local = texel1.rgb;
+        float tca1_local = texel1.a;
+
+        /* ---- TMU1 Color combine ---- */
+        /* TMU1 c_other = 0 always (no upstream). */
+        if ((pc.textureMode1 & (1u << 13)) != 0u) {
+            /* tc_sub_clocal_1: src = 0 - c_local = -c_local */
+            vec3 tc1_src = -tc1_local;
+
+            /* mselect factor */
+            uint tc1_ms = (pc.textureMode1 >> 14) & 7u;
+            vec3 tc1_factor;
+            switch (tc1_ms) {
+                case 0u:  tc1_factor = vec3(0.0);               break; /* ZERO */
+                case 1u:  tc1_factor = tc1_local;               break; /* CLOCAL */
+                case 2u:  tc1_factor = vec3(0.0);               break; /* AOTHER (0, no upstream) */
+                case 3u:  tc1_factor = vec3(tca1_local);        break; /* ALOCAL */
+                case 4u:  tc1_factor = vec3(0.0);               break; /* DETAIL (TODO) */
+                case 5u:  tc1_factor = vec3(0.0);               break; /* LOD_FRAC (TODO) */
+                default:  tc1_factor = vec3(0.0);               break;
+            }
+
+            /* Reverse blend */
+            bool tc1_reverse = (pc.textureMode1 & (1u << 17)) != 0u;
+
+            /* Trilinear: flip reverse on odd LOD levels. */
+            if ((pc.textureMode1 & (1u << 30)) != 0u) {
+                /* Approximate: just use the trilinear flip. */
+                /* TODO: proper LOD computation for TMU1. */
+            }
+
+            if (!tc1_reverse)
+                tc1_factor = vec3(1.0) - tc1_factor;
+
+            tc1_src *= tc1_factor;
+
+            /* Add */
+            if ((pc.textureMode1 & (1u << 18)) != 0u)
+                tc1_src += tc1_local;
+            else if ((pc.textureMode1 & (1u << 19)) != 0u)
+                tc1_src += vec3(tca1_local);
+
+            texel1.rgb = clamp(tc1_src, 0.0, 1.0);
+        }
+
+        /* ---- TMU1 Alpha combine ---- */
+        if ((pc.textureMode1 & (1u << 22)) != 0u) {
+            /* tca_sub_clocal_1: src = 0 - a_local = -a_local */
+            float tca1_src = -tca1_local;
+
+            /* mselect factor */
+            uint tca1_ms = (pc.textureMode1 >> 23) & 7u;
+            float tca1_factor;
+            switch (tca1_ms) {
+                case 0u:  tca1_factor = 0.0;               break; /* ZERO */
+                case 1u:  tca1_factor = tca1_local;         break; /* CLOCAL */
+                case 2u:  tca1_factor = 0.0;                break; /* AOTHER (0) */
+                case 3u:  tca1_factor = tca1_local;         break; /* ALOCAL */
+                case 4u:  tca1_factor = 0.0;                break; /* DETAIL (TODO) */
+                case 5u:  tca1_factor = 0.0;                break; /* LOD_FRAC (TODO) */
+                default:  tca1_factor = 0.0;                break;
+            }
+
+            /* Reverse blend */
+            bool tca1_reverse = (pc.textureMode1 & (1u << 26)) != 0u;
+            if (!tca1_reverse)
+                tca1_factor = 1.0 - tca1_factor;
+
+            tca1_src *= tca1_factor;
+
+            /* Add */
+            if ((pc.textureMode1 & (1u << 27)) != 0u ||
+                (pc.textureMode1 & (1u << 28)) != 0u)
+                tca1_src += tca1_local;
+
+            texel1.a = clamp(tca1_src, 0.0, 1.0);
+        }
+        /* Note: TMU1 has no invert_output bits in the SW renderer macros. */
+    }
+
+    /* ==================================================================
+     * STAGE 5b: TMU0 texture combine (Phase 5.11 + Phase 6.1)
      *
      * textureMode0 bits 12-29 control a configurable blend formula
      * that processes the raw texel before color combine consumes it.
-     * For single-TMU, c_other = 0 (no upstream TMU), c_local = texel.
      *
-     * Passthrough shortcut: if all combine bits are zero, skip entirely.
+     * c_other = TMU1 output (for dual-TMU) or 0 (for single-TMU).
+     * c_local = TMU0 texel.
+     *
+     * Passthrough shortcut: for single-TMU, if all combine bits are zero
+     * the texel passes through unchanged.  For dual-TMU, we must always
+     * run the combine because the default path (all zeros, reverse=0)
+     * produces c_other * 1.0 = TMU1 output, replacing the TMU0 texel.
      * ================================================================== */
-    if (textured && (pc.textureMode0 & 0x3FFFF000u) != 0u) {
-        vec3 tc_other = vec3(0.0);  /* no upstream TMU yet */
-        float tca_other = 0.0;
+    bool dual_tmu = tmu0_enabled && tmu1_enabled;
+    if (textured && (dual_tmu || (pc.textureMode0 & 0x3FFFF000u) != 0u)) {
+        /* c_other = TMU1 output when both TMUs active, else 0. */
+        vec3 tc_other = dual_tmu ? texel1.rgb : vec3(0.0);
+        float tca_other = dual_tmu ? texel1.a : 0.0;
         vec3 tc_local = texel.rgb;
         float tca_local = texel.a;
 

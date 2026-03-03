@@ -93,6 +93,7 @@ typedef struct vc_texture_state_t {
 
     /* Descriptor set layout:
        binding 0 = TMU0 combined image sampler
+       binding 1 = TMU1 combined image sampler
        binding 2 = fog table (64x1 R8G8_UNORM) */
     VkDescriptorSetLayout desc_layout;
 

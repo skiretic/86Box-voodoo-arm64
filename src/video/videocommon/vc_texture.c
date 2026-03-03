@@ -324,8 +324,9 @@ vc_tex_create_descriptors(vc_ctx_t *ctx, vc_texture_state_t *tex)
 {
     /* Descriptor set layout:
        binding 0 = TMU0 combined image sampler
+       binding 1 = TMU1 combined image sampler
        binding 2 = fog table (64x1 R8G8_UNORM combined image sampler) */
-    VkDescriptorSetLayoutBinding bindings[2];
+    VkDescriptorSetLayoutBinding bindings[3];
     memset(bindings, 0, sizeof(bindings));
 
     bindings[0].binding         = 0;
@@ -333,15 +334,20 @@ vc_tex_create_descriptors(vc_ctx_t *ctx, vc_texture_state_t *tex)
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    bindings[1].binding         = 2;
+    bindings[1].binding         = 1;
     bindings[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
 
+    bindings[2].binding         = 2;
+    bindings[2].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+
     VkDescriptorSetLayoutCreateInfo layout_ci;
     memset(&layout_ci, 0, sizeof(layout_ci));
     layout_ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_ci.bindingCount = 2;
+    layout_ci.bindingCount = 3;
     layout_ci.pBindings    = bindings;
 
     VkResult result = vkCreateDescriptorSetLayout(ctx->device, &layout_ci, NULL,
@@ -352,10 +358,10 @@ vc_tex_create_descriptors(vc_ctx_t *ctx, vc_texture_state_t *tex)
         return -1;
     }
 
-    /* Descriptor pool: 2 samplers per set (TMU0 + fog table). */
+    /* Descriptor pool: 3 samplers per set (TMU0 + TMU1 + fog table). */
     VkDescriptorPoolSize pool_size;
     pool_size.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = VC_TEX_MAX_DESC_SETS * 2;
+    pool_size.descriptorCount = VC_TEX_MAX_DESC_SETS * 3;
 
     VkDescriptorPoolCreateInfo pool_ci;
     memset(&pool_ci, 0, sizeof(pool_ci));
@@ -601,27 +607,9 @@ vc_texture_create(vc_ctx_t *ctx, vc_texture_state_t *tex)
         tex->fog_checksum = 0;
     }
 
-    /* Write dummy descriptor (binding 0) for dummy set. */
-    VkDescriptorImageInfo img_info;
-    memset(&img_info, 0, sizeof(img_info));
-    img_info.sampler     = tex->dummy_sampler;
-    img_info.imageView   = tex->dummy_view;
-    img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    VkWriteDescriptorSet write;
-    memset(&write, 0, sizeof(write));
-    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet          = tex->dummy_desc_set;
-    write.dstBinding      = 0;
-    write.descriptorCount = 1;
-    write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    write.pImageInfo      = &img_info;
-
-    vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
-
-    /* Write fog table descriptor (binding 2) into ALL pre-allocated
-       descriptor sets (dummy + all texture slots).  This ensures the
-       fog table is always bound regardless of which set is active. */
+    /* Write dummy descriptors (binding 0 + binding 1) and fog (binding 2)
+       into ALL pre-allocated descriptor sets.  This ensures TMU0, TMU1, and
+       fog table are always bound regardless of which set is active. */
     {
         const uint32_t total_sets = 1 + VC_TEX_MAX_TMU * VC_TEX_SLOTS_PER_TMU;
         VkDescriptorSet all_sets[1 + VC_TEX_MAX_TMU * VC_TEX_SLOTS_PER_TMU];
@@ -631,8 +619,37 @@ vc_texture_create(vc_ctx_t *ctx, vc_texture_state_t *tex)
             for (int s = 0; s < VC_TEX_SLOTS_PER_TMU; s++)
                 all_sets[idx++] = tex->slots[tmu][s].desc_set;
 
-        for (uint32_t i = 0; i < total_sets; i++)
+        VkDescriptorImageInfo dummy_info;
+        memset(&dummy_info, 0, sizeof(dummy_info));
+        dummy_info.sampler     = tex->dummy_sampler;
+        dummy_info.imageView   = tex->dummy_view;
+        dummy_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        for (uint32_t i = 0; i < total_sets; i++) {
+            /* Binding 0: TMU0 dummy. */
+            VkWriteDescriptorSet writes[2];
+            memset(writes, 0, sizeof(writes));
+
+            writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet          = all_sets[i];
+            writes[0].dstBinding      = 0;
+            writes[0].descriptorCount = 1;
+            writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[0].pImageInfo      = &dummy_info;
+
+            /* Binding 1: TMU1 dummy. */
+            writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet          = all_sets[i];
+            writes[1].dstBinding      = 1;
+            writes[1].descriptorCount = 1;
+            writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[1].pImageInfo      = &dummy_info;
+
+            vkUpdateDescriptorSets(ctx->device, 2, writes, 0, NULL);
+
+            /* Binding 2: fog table. */
             vc_texture_write_fog_descriptor(ctx, tex, all_sets[i]);
+        }
     }
 
     tex->current_desc_set = tex->dummy_desc_set;
@@ -892,7 +909,6 @@ vc_texture_handle_bind(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     uint32_t tmu  = payload->tmu;
     uint32_t slot = payload->slot;
 
-
     if (tmu >= VC_TEX_MAX_TMU || slot >= VC_TEX_SLOTS_PER_TMU)
         return;
 
@@ -901,58 +917,139 @@ vc_texture_handle_bind(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
         /* Texture not uploaded yet -- bind dummy. */
         VC_LOG("VideoCommon: tex bind slot not ready tmu=%u slot=%u\n",
                tmu, slot);
-        tex->current_desc_set = tex->dummy_desc_set;
+        if (tmu == 0)
+            tex->current_desc_set = tex->dummy_desc_set;
         return;
     }
 
     /* Get or create sampler. */
     VkSampler sampler = vc_texture_get_sampler(ctx, tex, payload->sampler_key);
     if (sampler == VK_NULL_HANDLE) {
-        tex->current_desc_set = tex->dummy_desc_set;
+        if (tmu == 0)
+            tex->current_desc_set = tex->dummy_desc_set;
         return;
     }
 
+    /* Track bound state for this TMU. */
+    tex->bound_slot[tmu]    = (int) slot;
+    tex->bound_sampler[tmu] = sampler;
+
     /*
-     * Only update the descriptor if the sampler or view changed.
+     * Descriptor set update strategy for dual-TMU:
      *
-     * SAFETY NOTE (M4 -- descriptor set update while in-flight):
-     * Per-slot descriptor sets are pre-allocated and persistent.  In theory,
-     * calling vkUpdateDescriptorSets on a set that is bound in an in-flight
-     * command buffer violates the Vulkan spec.  In practice this is safe here
-     * because:
-     *   1. bound_sampler is reset to VK_NULL_HANDLE only after a texture
-     *      upload.  If a render pass was active, the upload path waits on the
-     *      frame fence (ensuring all in-flight command buffers have completed)
-     *      before returning control to the ring command loop.
-     *   2. The bound_sampler check below prevents redundant updates when the
-     *      same texture+sampler combination is rebound across draws within
-     *      a single frame (the common case).
-     *   3. The GPU thread is single-threaded, so descriptor updates and
-     *      command buffer recording are serialized.
+     * Each TMU slot has a pre-allocated descriptor set.  We use TMU0's
+     * slot descriptor set as the "primary" set, writing:
+     *   binding 0 = TMU0 texture
+     *   binding 1 = TMU1 texture (if bound, else dummy)
+     *   binding 2 = fog table (always pre-written)
+     *
+     * For single-TMU via TMU1 (backward compat): the bridge copies TMU1
+     * coords into vTexCoord0 and pushes the bind as tmu=0, so the texture
+     * ends up at binding 0 automatically.
+     *
+     * For TMU1 binds in dual-TMU mode: we write TMU1 to binding 1 of the
+     * current TMU0 descriptor set (if TMU0 is currently bound).
+     *
+     * SAFETY NOTE: same reasoning as before -- descriptor set updates are
+     * safe because the GPU thread is single-threaded and upload waits on
+     * the frame fence.
      */
-    if (s->bound_sampler != sampler) {
+    if (tmu == 0) {
+        /* TMU0 bind: write to binding 0 of TMU0's slot descriptor set. */
         VkDescriptorImageInfo img_info;
         memset(&img_info, 0, sizeof(img_info));
         img_info.sampler     = sampler;
         img_info.imageView   = s->view;
         img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        VkWriteDescriptorSet write;
-        memset(&write, 0, sizeof(write));
-        write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet          = s->desc_set;
-        write.dstBinding      = 0;
-        write.descriptorCount = 1;
-        write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo      = &img_info;
+        VkWriteDescriptorSet writes[2];
+        uint32_t write_count = 0;
 
-        vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+        memset(&writes[0], 0, sizeof(VkWriteDescriptorSet));
+        writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet          = s->desc_set;
+        writes[0].dstBinding      = 0;
+        writes[0].descriptorCount = 1;
+        writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[0].pImageInfo      = &img_info;
+        write_count = 1;
+
+        /* Also write TMU1 to binding 1 if TMU1 is currently bound. */
+        VkDescriptorImageInfo tmu1_info;
+        if (tex->bound_slot[1] >= 0) {
+            vc_tex_slot_t *s1 = &tex->slots[1][tex->bound_slot[1]];
+            if (s1->valid && s1->view != VK_NULL_HANDLE
+                && tex->bound_sampler[1] != VK_NULL_HANDLE) {
+                memset(&tmu1_info, 0, sizeof(tmu1_info));
+                tmu1_info.sampler     = tex->bound_sampler[1];
+                tmu1_info.imageView   = s1->view;
+                tmu1_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+                memset(&writes[1], 0, sizeof(VkWriteDescriptorSet));
+                writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writes[1].dstSet          = s->desc_set;
+                writes[1].dstBinding      = 1;
+                writes[1].descriptorCount = 1;
+                writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                writes[1].pImageInfo      = &tmu1_info;
+                write_count = 2;
+            }
+        }
+
+        vkUpdateDescriptorSets(ctx->device, write_count, writes, 0, NULL);
         s->bound_sampler = sampler;
-    }
+        tex->current_desc_set = s->desc_set;
+    } else {
+        /* TMU1 bind: if TMU0 is currently bound, write TMU1 to binding 1
+           of TMU0's current descriptor set (dual-TMU mode).
+           If TMU0 is NOT bound, this is single-TMU-via-TMU1: write to
+           binding 0 of TMU1's own descriptor set (the vertex extraction
+           already copied TMU1 coords into vTexCoord0). */
+        if (tex->bound_slot[0] >= 0) {
+            /* Dual-TMU: write TMU1 to binding 1 of TMU0's descriptor set. */
+            vc_tex_slot_t *s0 = &tex->slots[0][tex->bound_slot[0]];
+            if (s0->desc_set != VK_NULL_HANDLE) {
+                VkDescriptorImageInfo img_info;
+                memset(&img_info, 0, sizeof(img_info));
+                img_info.sampler     = sampler;
+                img_info.imageView   = s->view;
+                img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    tex->current_desc_set   = s->desc_set;
-    tex->bound_slot[tmu]    = (int) slot;
-    tex->bound_sampler[tmu] = sampler;
+                VkWriteDescriptorSet write;
+                memset(&write, 0, sizeof(write));
+                write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                write.dstSet          = s0->desc_set;
+                write.dstBinding      = 1;
+                write.descriptorCount = 1;
+                write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                write.pImageInfo      = &img_info;
+
+                vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+                tex->current_desc_set = s0->desc_set;
+            }
+        } else {
+            /* Single-TMU via TMU1: write to binding 1 of TMU1's slot
+               descriptor set.  The shader samples tex_tmu1 via vTexCoord1
+               when only TMU1 is enabled. */
+            VkDescriptorImageInfo img_info;
+            memset(&img_info, 0, sizeof(img_info));
+            img_info.sampler     = sampler;
+            img_info.imageView   = s->view;
+            img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkWriteDescriptorSet write;
+            memset(&write, 0, sizeof(write));
+            write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet          = s->desc_set;
+            write.dstBinding      = 1;
+            write.descriptorCount = 1;
+            write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            write.pImageInfo      = &img_info;
+
+            vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+            tex->current_desc_set = s->desc_set;
+        }
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -983,9 +1080,15 @@ vc_texture_reset_frame(vc_ctx_t *ctx, vc_texture_state_t *tex)
 {
     /* Descriptor sets are persistent per-slot -- no pool reset needed.
        Just reset current binding to dummy so the next draw either binds
-       a real texture or falls back to the 1x1 white dummy. */
+       a real texture or falls back to the 1x1 white dummy.
+       Also reset bound_slot so dual-TMU / single-TMU transitions between
+       frames don't use stale descriptor set references. */
     (void) ctx;
     tex->current_desc_set = tex->dummy_desc_set;
+    tex->bound_slot[0]    = -1;
+    tex->bound_slot[1]    = -1;
+    tex->bound_sampler[0] = VK_NULL_HANDLE;
+    tex->bound_sampler[1] = VK_NULL_HANDLE;
 }
 
 /* -------------------------------------------------------------------------- */
