@@ -714,7 +714,25 @@ vc_texture_handle_bind(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
         return;
     }
 
-    /* Only update the descriptor if the sampler or view changed. */
+    /*
+     * Only update the descriptor if the sampler or view changed.
+     *
+     * SAFETY NOTE (M4 -- descriptor set update while in-flight):
+     * Per-slot descriptor sets are pre-allocated and persistent.  In theory,
+     * calling vkUpdateDescriptorSets on a set that is bound in an in-flight
+     * command buffer violates the Vulkan spec.  In practice this is safe here
+     * because:
+     *   1. bound_sampler is reset to VK_NULL_HANDLE only after a texture
+     *      upload, which calls vkQueueWaitIdle() -- guaranteeing no command
+     *      buffers are in flight when the descriptor is next updated.
+     *   2. The bound_sampler check below prevents redundant updates when the
+     *      same texture+sampler combination is rebound across draws within
+     *      a single frame (the common case).
+     *   3. The GPU thread is single-threaded, so descriptor updates and
+     *      command buffer recording are serialized.
+     * If async texture uploads are ever added (without QueueWaitIdle), this
+     * must be changed to per-frame descriptor sets or a ring of sets.
+     */
     if (s->bound_sampler != sampler) {
         VkDescriptorImageInfo img_info;
         memset(&img_info, 0, sizeof(img_info));

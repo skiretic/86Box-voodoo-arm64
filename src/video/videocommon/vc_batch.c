@@ -34,6 +34,22 @@ extern VkResult vc_vma_create_buffer(void *allocator,
 extern void     vc_vma_destroy_buffer(void *allocator, VkBuffer buffer,
                                       void *alloc);
 
+/*
+ * NOTE ON VERTEX BUFFER SHARING (M3):
+ *
+ * A single vertex buffer is shared across all triple-buffered frame indices.
+ * This is safe because the GPU thread processes commands sequentially:
+ *   1. vc_batch_append_triangle() writes vertices into the mapped buffer.
+ *   2. vkCmdDraw() references those vertices in the current command buffer.
+ *   3. The swap handler waits on the frame fence (vkWaitForFences) before
+ *      reusing a frame index, guaranteeing the previous draw has completed.
+ *   4. vc_batch_reset() zeroes the offset at frame start, AFTER the fence wait.
+ *
+ * Therefore no write-after-read hazard exists: the fence wait in the swap
+ * path ensures the GPU has finished reading all vertices before the buffer
+ * is overwritten.  If frame overlap is ever introduced (e.g. async submit
+ * without fence wait), this must be changed to per-frame vertex buffers.
+ */
 int
 vc_batch_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
 {

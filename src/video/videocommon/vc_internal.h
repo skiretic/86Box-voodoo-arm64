@@ -104,6 +104,7 @@ typedef struct vc_caps_t {
     int has_extended_dynamic_state3;
     int has_push_descriptor;
     int has_dual_src_blend;
+    int has_independent_blend;
 } vc_caps_t;
 
 /* -------------------------------------------------------------------------- */

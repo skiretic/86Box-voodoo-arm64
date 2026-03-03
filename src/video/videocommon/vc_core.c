@@ -196,14 +196,16 @@ vc_detect_capabilities(vc_ctx_t *ctx)
 
     VkPhysicalDeviceFeatures features;
     vkGetPhysicalDeviceFeatures(dev, &features);
-    ctx->caps.has_dual_src_blend = features.dualSrcBlend ? 1 : 0;
+    ctx->caps.has_dual_src_blend   = features.dualSrcBlend ? 1 : 0;
+    ctx->caps.has_independent_blend = features.independentBlend ? 1 : 0;
 
-    VC_LOG("VideoCommon: capabilities: eds=%d eds2=%d eds3=%d push_desc=%d dual_src=%d\n",
+    VC_LOG("VideoCommon: capabilities: eds=%d eds2=%d eds3=%d push_desc=%d dual_src=%d ind_blend=%d\n",
            ctx->caps.has_extended_dynamic_state,
            ctx->caps.has_extended_dynamic_state2,
            ctx->caps.has_extended_dynamic_state3,
            ctx->caps.has_push_descriptor,
-           ctx->caps.has_dual_src_blend);
+           ctx->caps.has_dual_src_blend,
+           ctx->caps.has_independent_blend);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -455,6 +457,8 @@ vc_init(void)
     features2.pNext = features_pnext;
     if (ctx->caps.has_dual_src_blend)
         features2.features.dualSrcBlend = VK_TRUE;
+    if (ctx->caps.has_independent_blend)
+        features2.features.independentBlend = VK_TRUE;
 
     VkDeviceCreateInfo device_ci;
     memset(&device_ci, 0, sizeof(device_ci));
