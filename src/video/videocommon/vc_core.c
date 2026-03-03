@@ -234,10 +234,49 @@ vc_debug_messenger_cb(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     return VK_FALSE;
 }
 
+
+/* -------------------------------------------------------------------------- */
+/*  macOS: Auto-discover MoltenVK ICD if VK_ICD_FILENAMES is not set          */
+/* -------------------------------------------------------------------------- */
+
+#ifdef __APPLE__
+#include <unistd.h>
+
+static void
+vc_probe_moltenvk_icd(void)
+{
+    /* If the user (or a wrapper script) already set VK_ICD_FILENAMES, respect it. */
+    if (getenv("VK_ICD_FILENAMES") != NULL)
+        return;
+
+    static const char *icd_paths[] = {
+        "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json",     /* Homebrew ARM64 */
+        "/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json",        /* Homebrew Intel */
+        "/opt/homebrew/share/vulkan/icd.d/MoltenVK_icd.json",   /* Alternate ARM64 */
+        "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json",      /* Alternate Intel */
+    };
+
+    for (size_t i = 0; i < sizeof(icd_paths) / sizeof(icd_paths[0]); i++) {
+        if (access(icd_paths[i], F_OK) == 0) {
+            setenv("VK_ICD_FILENAMES", icd_paths[i], 0);
+            fprintf(stderr, "VideoCommon: auto-discovered MoltenVK ICD: %s\n", icd_paths[i]);
+            return;
+        }
+    }
+
+    fprintf(stderr, "VideoCommon: WARNING: could not find MoltenVK ICD json -- "
+                    "set VK_ICD_FILENAMES manually if vkCreateInstance fails\n");
+}
+#endif /* __APPLE__ */
+
 vc_ctx_t *
 vc_init(void)
 {
     VkResult result;
+
+#ifdef __APPLE__
+    vc_probe_moltenvk_icd();
+#endif
 
     result = volkInitialize();
     if (result != VK_SUCCESS) {
