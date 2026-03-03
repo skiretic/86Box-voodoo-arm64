@@ -51,8 +51,11 @@ typedef struct vc_vertex_t {
 _Static_assert(sizeof(vc_vertex_t) == 72,
                "vc_vertex_t must be 72 bytes");
 
-/* Number of vertex input attributes declared in the pipeline. */
-#define VC_VERTEX_ATTRIB_COUNT 7
+/* Number of vertex input attributes declared in the pipeline.
+ * Currently: position, depth, color, texcoord0, texcoord1.
+ * OOW and fog are in vc_vertex_t but not consumed by shaders yet
+ * (deferred to Phase 6). */
+#define VC_VERTEX_ATTRIB_COUNT 5
 
 /* -------------------------------------------------------------------------- */
 /*  Push constants                                                             */

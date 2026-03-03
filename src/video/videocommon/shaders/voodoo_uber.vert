@@ -43,18 +43,15 @@ layout(push_constant, std430) uniform PushConstants {
 /* ---- Vertex Inputs (matches vc_vertex_t, 72 bytes per vertex) ---------- */
 layout(location = 0) in vec2  inPosition;    /* screen-space X, Y (pixels)  */
 layout(location = 1) in float inDepth;       /* Z depth, normalized [0,1]   */
-layout(location = 2) in float inOOW;         /* 1/W for perspective correct */
-layout(location = 3) in vec4  inColor;       /* RGBA, normalized [0,1]      */
-layout(location = 4) in vec3  inTexCoord0;   /* TMU0: S/W, T/W, 1/W        */
-layout(location = 5) in vec3  inTexCoord1;   /* TMU1: S/W, T/W, 1/W        */
-layout(location = 6) in float inFog;         /* fog coordinate              */
+layout(location = 2) in vec4  inColor;       /* RGBA, normalized [0,1]      */
+layout(location = 3) in vec3  inTexCoord0;   /* TMU0: S/W, T/W, 1/W        */
+layout(location = 4) in vec3  inTexCoord1;   /* TMU1: S/W, T/W, 1/W        */
 
 /* ---- Outputs to Fragment Shader ---------------------------------------- */
 layout(location = 0) noperspective out vec4  vColor;     /* iterated RGBA   */
 layout(location = 1) noperspective out vec3  vTexCoord0; /* S/W, T/W, 1/W   */
 layout(location = 2) noperspective out vec3  vTexCoord1; /* S/W, T/W, 1/W   */
 layout(location = 3) noperspective out float vDepth;     /* Voodoo Z depth  */
-layout(location = 4) noperspective out float vFog;       /* fog coordinate  */
 
 void main() {
     /*
@@ -95,12 +92,4 @@ void main() {
 
     /* Depth: noperspective (Voodoo Z is linearly interpolated). */
     vDepth = inDepth;
-
-    /* Fog coordinate: noperspective.
-     * Pass through inFog directly.  Also consume inOOW so the compiler
-     * does not optimise away the vertex attribute at location 2 (which
-     * must remain in the pipeline vertex-input state to match
-     * vc_vertex_t).  The multiplication by 1.0 is a no-op that keeps
-     * inOOW alive without changing the result. */
-    vFog = inFog + inOOW * 0.0;
 }

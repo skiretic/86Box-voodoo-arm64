@@ -55,7 +55,6 @@ layout(location = 0) noperspective in vec4  vColor;
 layout(location = 1) noperspective in vec3  vTexCoord0;
 layout(location = 2) noperspective in vec3  vTexCoord1;
 layout(location = 3) noperspective in float vDepth;
-layout(location = 4) noperspective in float vFog;
 
 /* ---- Output ------------------------------------------------------------- */
 layout(location = 0) out vec4 fragColor;
@@ -427,10 +426,7 @@ void main() {
     /* TODO */
 
     /* --- STAGE 15: Fog (Phase 6) --- */
-    /* Consume vFog so the compiler keeps the vertex-to-fragment interface
-     * intact and Vulkan validation does not warn about an unconsumed
-     * output at location 4.  The multiply-by-zero is a no-op. */
-    combined.rgb += vFog * 0.0;
+    /* TODO: fog implementation. */
 
     /* ==================================================================
      * STAGE 16: Alpha test

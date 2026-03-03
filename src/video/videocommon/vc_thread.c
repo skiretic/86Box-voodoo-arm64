@@ -395,7 +395,7 @@ vc_frame_resources_create(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         VkFenceCreateInfo fence_ci;
         memset(&fence_ci, 0, sizeof(fence_ci));
         fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fence_ci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        fence_ci.flags = 0; /* Unsignaled -- first use won't have a prior submit. */
 
         result = vkCreateFence(ctx->device, &fence_ci, NULL,
                                &gpu_st->frame[i].fence);
@@ -725,15 +725,21 @@ vc_gpu_handle_resize(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
 
     /* Ensure render passes are valid before recreating framebuffers.
        vc_create_single_fb references rp.render_pass_load for VkFramebuffer
-       creation -- if it were VK_NULL_HANDLE, we'd get a validation error. */
+       creation -- if it were VK_NULL_HANDLE, we'd get a validation error.
+       If render passes don't exist yet (e.g. resize arrives before
+       vc_gpu_thread_init completes), just store the new dimensions and
+       return.  The init path reads fb_width/fb_height and will create
+       framebuffers at the correct size. */
     if (gpu_st->rp.render_pass_load == VK_NULL_HANDLE) {
         fprintf(stderr, "VC_DIAG: GPU resize -- render_pass_load is NULL, "
-                        "recreating render passes\n");
-        if (vc_render_pass_create(ctx, gpu_st) != 0) {
-            fprintf(stderr, "VC_DIAG: GPU resize FAILED to recreate "
-                            "render passes\n");
-            return;
-        }
+                        "deferring framebuffer creation to init path\n");
+        gpu_st->fb_width  = new_w;
+        gpu_st->fb_height = new_h;
+        gpu_st->readback_width  = new_w;
+        gpu_st->readback_height = new_h;
+        fprintf(stderr, "VC_DIAG: GPU resize deferred, stored %ux%u\n",
+                new_w, new_h);
+        return;
     }
 
     /* Recreate framebuffers at new dimensions. */
