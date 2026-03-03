@@ -63,25 +63,35 @@ vc_fill_vertex_input(VkVertexInputBindingDescription *binding,
     attrs[1].format   = VK_FORMAT_R32_SFLOAT;
     attrs[1].offset   = offsetof(vc_vertex_t, z);
 
-    /* location 2: color (r, g, b, a) -- vec4
-     * Note: 1/W (vc_vertex_t.w) is in the vertex buffer but not consumed
-     * by the shader yet -- deferred to Phase 6 (fog). */
+    /* location 2: W (1/W) -- float */
     attrs[2].location = 2;
     attrs[2].binding  = 0;
-    attrs[2].format   = VK_FORMAT_R32G32B32A32_SFLOAT;
-    attrs[2].offset   = offsetof(vc_vertex_t, r);
+    attrs[2].format   = VK_FORMAT_R32_SFLOAT;
+    attrs[2].offset   = offsetof(vc_vertex_t, w);
 
-    /* location 3: TMU0 texcoord (s0, t0, w0) -- vec3 */
+    /* location 3: color (r, g, b, a) -- vec4 */
     attrs[3].location = 3;
     attrs[3].binding  = 0;
-    attrs[3].format   = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[3].offset   = offsetof(vc_vertex_t, s0);
+    attrs[3].format   = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attrs[3].offset   = offsetof(vc_vertex_t, r);
 
-    /* location 4: TMU1 texcoord (s1, t1, w1) -- vec3 */
+    /* location 4: TMU0 texcoord (s0, t0, w0) -- vec3 */
     attrs[4].location = 4;
     attrs[4].binding  = 0;
     attrs[4].format   = VK_FORMAT_R32G32B32_SFLOAT;
-    attrs[4].offset   = offsetof(vc_vertex_t, s1);
+    attrs[4].offset   = offsetof(vc_vertex_t, s0);
+
+    /* location 5: TMU1 texcoord (s1, t1, w1) -- vec3 */
+    attrs[5].location = 5;
+    attrs[5].binding  = 0;
+    attrs[5].format   = VK_FORMAT_R32G32B32_SFLOAT;
+    attrs[5].offset   = offsetof(vc_vertex_t, s1);
+
+    /* location 6: fog -- float */
+    attrs[6].location = 6;
+    attrs[6].binding  = 0;
+    attrs[6].format   = VK_FORMAT_R32_SFLOAT;
+    attrs[6].offset   = offsetof(vc_vertex_t, fog);
 }
 
 /* -------------------------------------------------------------------------- */

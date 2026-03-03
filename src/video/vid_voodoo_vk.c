@@ -115,6 +115,8 @@ typedef struct voodoo_vk_tex_track_t {
 /* Per-device VK bridge state (texture tracking, allocated lazily). */
 typedef struct voodoo_vk_state_t {
     voodoo_vk_tex_track_t tex_track[2];
+    uint32_t fog_checksum;  /* XOR checksum of fogTable[64] for dedup. */
+    int      fog_uploaded;  /* 1 = has been uploaded at least once. */
 } voodoo_vk_state_t;
 
 static voodoo_vk_state_t *

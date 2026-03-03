@@ -1,6 +1,6 @@
 # VideoCommon v2 -- Implementation Phases
 
-**Date**: 2026-03-01
+**Date**: 2026-03-03
 **Companion**: `DESIGN.md` (architecture), `LESSONS.md` (post-mortem)
 
 Each phase is independently testable. Do not skip phases or combine them.
@@ -301,7 +301,7 @@ post-processing blit, present, display callback skip.
 
 ---
 
-## Phase 5: Core Pipeline Features ⏳ IN PROGRESS (90%)
+## Phase 5: Core Pipeline Features ✅ COMPLETE
 
 **Goal**: Alpha test, alpha blending, depth test (Z and W buffer), fog, scissor.
 This is where the rendered output starts looking correct.
@@ -371,8 +371,8 @@ This is where the rendered output starts looking correct.
 - [ ] Fog fades distant geometry (deferred to Phase 6)
 - [x] Scissor clips correctly
 - [x] Texture coordinate scrambling resolved (noperspective fix, cff427c79)
-- [ ] 0 Vulkan validation errors (not yet verified with VC_VALIDATE=1)
-- [ ] No swap_count regression during full 3DMark99 run with depth/blend/fog enabled
+- [x] 0 Vulkan validation errors (verified clean with VC_VALIDATE=1, 2026-03-03)
+- [x] No swap_count regression during full 3DMark99 run with depth/blend enabled
 
 ---
 

@@ -91,7 +91,9 @@ typedef struct vc_texture_state_t {
     vc_sampler_entry_t sampler_cache[VC_SAMPLER_CACHE_MAX];
     uint32_t           sampler_count;
 
-    /* Descriptor set layout (binding 0 = TMU0 combined image sampler). */
+    /* Descriptor set layout:
+       binding 0 = TMU0 combined image sampler
+       binding 2 = fog table (64x1 R8G8_UNORM) */
     VkDescriptorSetLayout desc_layout;
 
     /* Per-frame descriptor pool. */
@@ -112,6 +114,14 @@ typedef struct vc_texture_state_t {
     void       *dummy_alloc;  /* VmaAllocation */
     VkSampler   dummy_sampler;
     VkDescriptorSet dummy_desc_set;
+
+    /* Fog table: 64x1 R8G8_UNORM image (fog, dfog per entry). */
+    VkImage     fog_image;
+    VkImageView fog_view;
+    void       *fog_alloc;    /* VmaAllocation */
+    VkSampler   fog_sampler;
+    uint32_t    fog_checksum; /* XOR checksum for dedup. */
+    int         fog_valid;    /* 1 = has been uploaded at least once. */
 } vc_texture_state_t;
 
 /* -------------------------------------------------------------------------- */
@@ -156,6 +166,18 @@ typedef struct vc_tex_bind_payload_t {
 _Static_assert(sizeof(vc_tex_bind_payload_t) == 16,
                "vc_tex_bind_payload_t must be 16 bytes");
 
+/*
+ * VC_CMD_FOG_UPLOAD payload:
+ *   128 bytes inline: 64 entries of { uint8_t fog, uint8_t dfog } = 128 bytes.
+ *   No malloc needed -- fits in ring command inline.
+ */
+typedef struct vc_fog_upload_payload_t {
+    uint8_t data[128]; /* fogTable[64] = 64 * {fog, dfog} = 128 bytes. */
+} vc_fog_upload_payload_t;
+
+_Static_assert(sizeof(vc_fog_upload_payload_t) == 128,
+               "vc_fog_upload_payload_t must be 128 bytes");
+
 /* -------------------------------------------------------------------------- */
 /*  Public API (GPU thread only)                                               */
 /* -------------------------------------------------------------------------- */
@@ -191,5 +213,15 @@ uint32_t vc_texture_sampler_key(uint32_t textureMode);
 /* Get or create a VkSampler for a given sampler key. */
 VkSampler vc_texture_get_sampler(vc_ctx_t *ctx, vc_texture_state_t *tex,
                                  uint32_t sampler_key);
+
+/* Handle a VC_CMD_FOG_UPLOAD command.  Uploads 64 entries of {fog, dfog}
+   to the 64x1 R8G8_UNORM fog table image. */
+void vc_texture_handle_fog_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
+                                  const vc_fog_upload_payload_t *payload);
+
+/* Write the fog table descriptor (binding 2) into a given descriptor set.
+   Called after fog table upload and during descriptor set initialization. */
+void vc_texture_write_fog_descriptor(vc_ctx_t *ctx, vc_texture_state_t *tex,
+                                     VkDescriptorSet desc_set);
 
 #endif /* VIDEOCOMMON_TEXTURE_H */

@@ -1092,6 +1092,12 @@ vc_gpu_thread_func(void *param)
                         (const vc_resize_payload_t *) (hdr + 1));
                 break;
 
+            case VC_CMD_FOG_UPLOAD:
+                if (gpu_st)
+                    vc_texture_handle_fog_upload(ctx, gpu_st,
+                        (const vc_fog_upload_payload_t *) (hdr + 1));
+                break;
+
             default:
                 VC_LOG("VideoCommon: GPU thread skipping cmd %d (size %d)\n",
                        hdr->type, hdr->size);

@@ -5,14 +5,19 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 
 ---
 
-## [In Progress] -- Phase 5: Core Pipeline (2026-03-02)
+## [Complete] -- Phase 5: Core Pipeline (2026-03-03)
 
 ### MILESTONE: Textured 3D with Correct Texture Coords, Blending, Scissor, Texture Combine!
 - 3DMark99 race benchmark renders fully: buildings, road, sky, vehicles, HUD transparency
 - Stable at 60 Hz, no crashes, no blue diagonal streaks (ring race fixed)
 - Texture coordinate scrambling FIXED — noperspective interpolation
 - Alpha blending working (speedometer HUD shows transparency)
+- **Vulkan validation fully clean** — zero errors during rendering
 - Remaining: sky banding, transparency edge cases, fog (Phase 6)
+
+### Vulkan Validation Fixes (2026-03-03)
+- **pp_render_pass NULL crash fix** (4d4f1419b) — `vc_display_create_pp_framebuffers` returned -1 on NULL pp_render_pass, cascading into fatal init failure. Changed to return 0 (skip). Added early-return guard in `vc_display_recreate_swapchain` when display not yet initialized.
+- **Swapchain semaphore reuse fix** (ad42ee7c8) — semaphore arrays changed from `VC_NUM_FRAMES` (3) to `VC_MAX_SWAPCHAIN_IMAGES` (8). Acquire semaphore indexed by rotating `acquire_sem_index`, render-finished semaphore indexed by acquired image index. Eliminates "semaphore still in use by swapchain" validation error.
 
 ### Implemented (vc-lead, vc-shader)
 - **Scissor clipping** (ec116a7b3) — wired Voodoo clipLeft/clipRight/clipLowY/clipHighY to vkCmdSetScissor per-triangle. Added vc_clip_rect_t to ring command (288->300 bytes). Fixes grey bar on left, corruption on bottom-right.

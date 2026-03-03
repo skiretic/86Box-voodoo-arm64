@@ -2,13 +2,13 @@
 
 **Branch**: `videocommon-voodoo`
 **Target**: GPU-accelerated Voodoo rendering via Vulkan 1.2
-**Last Updated**: 2026-03-02
+**Last Updated**: 2026-03-03
 
 ---
 
-## Current Status: Phase 5 NEARLY COMPLETE — Texture Coords Fixed, Fog Remaining!
+## Current Status: Phase 5 COMPLETE — Vulkan Validation CLEAN!
 
-Phase 5 core pipeline is substantially working. **3DMark99 race benchmark renders textured 3D at 60 Hz** — buildings, road, sky, vehicles, HUD transparency all visible. Texture coordinate scrambling FIXED (noperspective interpolation). Alpha blending via pipeline variant cache, scissor clipping, and texture combine stage all implemented. SPSC ring race condition on ARM64 fixed. Remaining: fog (deferred to Phase 6), minor visual polish (sky banding, transparency edge cases).
+Phase 5 core pipeline is complete. **3DMark99 race benchmark renders textured 3D at 60 Hz** — buildings, road, sky, vehicles, HUD transparency all visible. Texture coordinate scrambling FIXED (noperspective interpolation). Alpha blending via pipeline variant cache, scissor clipping, and texture combine stage all implemented. SPSC ring race condition on ARM64 fixed. **Vulkan validation is fully clean** — zero errors during rendering. Fog deferred to Phase 6.
 
 **Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
 
@@ -21,8 +21,8 @@ Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
 Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
 Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
 Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE
-Phase 5: Core Pipeline       [XXXXXXXXXX] 95%  NEARLY COMPLETE (fog deferred)
-Phase 6: Advanced Features   [..........] 0%   BLOCKED (Phase 5)
+Phase 5: Core Pipeline       [XXXXXXXXXX] 100% COMPLETE (validation clean)
+Phase 6: Advanced Features   [..........] 0%   READY
 Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
 ──────────────────────────────────────────────

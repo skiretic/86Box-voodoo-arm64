@@ -66,7 +66,8 @@ enum {
     VC_CMD_LFB_WRITE     = 6,
     VC_CMD_SHUTDOWN      = 7,
     VC_CMD_WRAPAROUND    = 8,
-    VC_CMD_RESIZE        = 9
+    VC_CMD_RESIZE        = 9,
+    VC_CMD_FOG_UPLOAD    = 10
 };
 
 /* -------------------------------------------------------------------------- */

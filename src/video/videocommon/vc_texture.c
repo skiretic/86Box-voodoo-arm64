@@ -322,19 +322,27 @@ vc_tex_create_dummy(vc_ctx_t *ctx, vc_texture_state_t *tex)
 static int
 vc_tex_create_descriptors(vc_ctx_t *ctx, vc_texture_state_t *tex)
 {
-    /* Descriptor set layout: binding 0 = TMU0 combined image sampler. */
-    VkDescriptorSetLayoutBinding binding;
-    memset(&binding, 0, sizeof(binding));
-    binding.binding         = 0;
-    binding.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    binding.descriptorCount = 1;
-    binding.stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+    /* Descriptor set layout:
+       binding 0 = TMU0 combined image sampler
+       binding 2 = fog table (64x1 R8G8_UNORM combined image sampler) */
+    VkDescriptorSetLayoutBinding bindings[2];
+    memset(bindings, 0, sizeof(bindings));
+
+    bindings[0].binding         = 0;
+    bindings[0].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    bindings[1].binding         = 2;
+    bindings[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags      = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo layout_ci;
     memset(&layout_ci, 0, sizeof(layout_ci));
     layout_ci.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    layout_ci.bindingCount = 1;
-    layout_ci.pBindings    = &binding;
+    layout_ci.bindingCount = 2;
+    layout_ci.pBindings    = bindings;
 
     VkResult result = vkCreateDescriptorSetLayout(ctx->device, &layout_ci, NULL,
                                                   &tex->desc_layout);
@@ -344,10 +352,10 @@ vc_tex_create_descriptors(vc_ctx_t *ctx, vc_texture_state_t *tex)
         return -1;
     }
 
-    /* Descriptor pool: enough for VC_TEX_MAX_DESC_SETS per frame. */
+    /* Descriptor pool: 2 samplers per set (TMU0 + fog table). */
     VkDescriptorPoolSize pool_size;
     pool_size.type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    pool_size.descriptorCount = VC_TEX_MAX_DESC_SETS;
+    pool_size.descriptorCount = VC_TEX_MAX_DESC_SETS * 2;
 
     VkDescriptorPoolCreateInfo pool_ci;
     memset(&pool_ci, 0, sizeof(pool_ci));
@@ -486,7 +494,114 @@ vc_texture_create(vc_ctx_t *ctx, vc_texture_state_t *tex)
         }
     }
 
-    /* Write dummy descriptor. */
+    /* Create fog table image (64x1 R8G8_UNORM).
+       Initial content is all zeros (no fog).  Uploaded via VC_CMD_FOG_UPLOAD. */
+    {
+        VkImageCreateInfo fog_ci;
+        memset(&fog_ci, 0, sizeof(fog_ci));
+        fog_ci.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        fog_ci.imageType     = VK_IMAGE_TYPE_2D;
+        fog_ci.format        = VK_FORMAT_R8G8_UNORM;
+        fog_ci.extent.width  = 64;
+        fog_ci.extent.height = 1;
+        fog_ci.extent.depth  = 1;
+        fog_ci.mipLevels     = 1;
+        fog_ci.arrayLayers   = 1;
+        fog_ci.samples       = VK_SAMPLE_COUNT_1_BIT;
+        fog_ci.tiling        = VK_IMAGE_TILING_OPTIMAL;
+        fog_ci.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                             | VK_IMAGE_USAGE_SAMPLED_BIT;
+        fog_ci.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+        fog_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        result = vc_vma_create_image(ctx->allocator, &fog_ci,
+                                     &tex->fog_image, &tex->fog_alloc);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: fog table image creation failed (%d)\n", result);
+            return -1;
+        }
+
+        VkImageViewCreateInfo fog_view_ci;
+        memset(&fog_view_ci, 0, sizeof(fog_view_ci));
+        fog_view_ci.sType                           = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        fog_view_ci.image                           = tex->fog_image;
+        fog_view_ci.viewType                        = VK_IMAGE_VIEW_TYPE_2D;
+        fog_view_ci.format                          = VK_FORMAT_R8G8_UNORM;
+        fog_view_ci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        fog_view_ci.subresourceRange.levelCount     = 1;
+        fog_view_ci.subresourceRange.layerCount     = 1;
+
+        result = vkCreateImageView(ctx->device, &fog_view_ci, NULL,
+                                   &tex->fog_view);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: fog table image view creation failed (%d)\n", result);
+            return -1;
+        }
+
+        /* Fog table sampler: nearest filtering, clamp-to-edge. */
+        VkSamplerCreateInfo fog_samp_ci;
+        memset(&fog_samp_ci, 0, sizeof(fog_samp_ci));
+        fog_samp_ci.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        fog_samp_ci.magFilter    = VK_FILTER_NEAREST;
+        fog_samp_ci.minFilter    = VK_FILTER_NEAREST;
+        fog_samp_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        fog_samp_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        fog_samp_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+
+        result = vkCreateSampler(ctx->device, &fog_samp_ci, NULL,
+                                 &tex->fog_sampler);
+        if (result != VK_SUCCESS) {
+            VC_LOG("VideoCommon: fog sampler creation failed (%d)\n", result);
+            return -1;
+        }
+
+        /* Transition fog image to SHADER_READ_ONLY (will be overwritten by upload). */
+        {
+            VkCommandBuffer cb = tex->upload_cmd_buf;
+            vkResetCommandBuffer(cb, 0);
+
+            VkCommandBufferBeginInfo begin_ci;
+            memset(&begin_ci, 0, sizeof(begin_ci));
+            begin_ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin_ci.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            vkBeginCommandBuffer(cb, &begin_ci);
+
+            VkImageMemoryBarrier barrier;
+            memset(&barrier, 0, sizeof(barrier));
+            barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+            barrier.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image               = tex->fog_image;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.layerCount = 1;
+            barrier.srcAccessMask       = 0;
+            barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+
+            vkCmdPipelineBarrier(cb,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                0, 0, NULL, 0, NULL, 1, &barrier);
+
+            vkEndCommandBuffer(cb);
+
+            VkSubmitInfo submit;
+            memset(&submit, 0, sizeof(submit));
+            submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit.commandBufferCount = 1;
+            submit.pCommandBuffers    = &cb;
+            vkQueueSubmit(ctx->queue, 1, &submit, tex->upload_fence);
+            vkWaitForFences(ctx->device, 1, &tex->upload_fence, VK_TRUE, UINT64_MAX);
+            vkResetFences(ctx->device, 1, &tex->upload_fence);
+        }
+
+        tex->fog_valid    = 0;
+        tex->fog_checksum = 0;
+    }
+
+    /* Write dummy descriptor (binding 0) for dummy set. */
     VkDescriptorImageInfo img_info;
     memset(&img_info, 0, sizeof(img_info));
     img_info.sampler     = tex->dummy_sampler;
@@ -503,6 +618,22 @@ vc_texture_create(vc_ctx_t *ctx, vc_texture_state_t *tex)
     write.pImageInfo      = &img_info;
 
     vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+
+    /* Write fog table descriptor (binding 2) into ALL pre-allocated
+       descriptor sets (dummy + all texture slots).  This ensures the
+       fog table is always bound regardless of which set is active. */
+    {
+        const uint32_t total_sets = 1 + VC_TEX_MAX_TMU * VC_TEX_SLOTS_PER_TMU;
+        VkDescriptorSet all_sets[1 + VC_TEX_MAX_TMU * VC_TEX_SLOTS_PER_TMU];
+        all_sets[0] = tex->dummy_desc_set;
+        uint32_t idx = 1;
+        for (int tmu = 0; tmu < VC_TEX_MAX_TMU; tmu++)
+            for (int s = 0; s < VC_TEX_SLOTS_PER_TMU; s++)
+                all_sets[idx++] = tex->slots[tmu][s].desc_set;
+
+        for (uint32_t i = 0; i < total_sets; i++)
+            vc_texture_write_fog_descriptor(ctx, tex, all_sets[i]);
+    }
 
     tex->current_desc_set = tex->dummy_desc_set;
 
@@ -549,6 +680,21 @@ vc_texture_destroy(vc_ctx_t *ctx, vc_texture_state_t *tex)
         vc_vma_destroy_image(ctx->allocator, tex->dummy_image, tex->dummy_alloc);
         tex->dummy_image = VK_NULL_HANDLE;
         tex->dummy_alloc = NULL;
+    }
+
+    /* Fog table. */
+    if (tex->fog_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(ctx->device, tex->fog_sampler, NULL);
+        tex->fog_sampler = VK_NULL_HANDLE;
+    }
+    if (tex->fog_view != VK_NULL_HANDLE) {
+        vkDestroyImageView(ctx->device, tex->fog_view, NULL);
+        tex->fog_view = VK_NULL_HANDLE;
+    }
+    if (tex->fog_image != VK_NULL_HANDLE) {
+        vc_vma_destroy_image(ctx->allocator, tex->fog_image, tex->fog_alloc);
+        tex->fog_image = VK_NULL_HANDLE;
+        tex->fog_alloc = NULL;
     }
 
     /* Sampler cache. */
@@ -925,4 +1071,143 @@ vc_texture_get_sampler(vc_ctx_t *ctx, vc_texture_state_t *tex,
            (sampler_key & 4) ? "clamp" : "wrap",
            (sampler_key & 8) ? "clamp" : "wrap");
     return sampler;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Public: write fog table descriptor (binding 2) into a descriptor set       */
+/* -------------------------------------------------------------------------- */
+
+void
+vc_texture_write_fog_descriptor(vc_ctx_t *ctx, vc_texture_state_t *tex,
+                                VkDescriptorSet desc_set)
+{
+    if (tex->fog_view == VK_NULL_HANDLE || tex->fog_sampler == VK_NULL_HANDLE)
+        return;
+
+    VkDescriptorImageInfo fog_info;
+    memset(&fog_info, 0, sizeof(fog_info));
+    fog_info.sampler     = tex->fog_sampler;
+    fog_info.imageView   = tex->fog_view;
+    fog_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet write;
+    memset(&write, 0, sizeof(write));
+    write.sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet          = desc_set;
+    write.dstBinding      = 2;
+    write.descriptorCount = 1;
+    write.descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo      = &fog_info;
+
+    vkUpdateDescriptorSets(ctx->device, 1, &write, 0, NULL);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Public: handle fog table upload                                            */
+/* -------------------------------------------------------------------------- */
+
+void
+vc_texture_handle_fog_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
+                             const vc_fog_upload_payload_t *payload)
+{
+    vc_texture_state_t *tex = &gpu_st->tex;
+
+    /* XOR checksum for deduplication (fog table rarely changes). */
+    uint32_t checksum = 0;
+    for (int i = 0; i < 128; i += 4) {
+        uint32_t word;
+        memcpy(&word, &payload->data[i], 4);
+        checksum ^= word;
+    }
+    if (tex->fog_valid && checksum == tex->fog_checksum)
+        return;  /* No change. */
+
+    /* Wait for any pending upload to complete. */
+    if (tex->upload_pending) {
+        vkWaitForFences(ctx->device, 1, &tex->upload_fence,
+                        VK_TRUE, UINT64_MAX);
+        vkResetFences(ctx->device, 1, &tex->upload_fence);
+        tex->upload_pending = 0;
+    }
+
+    /* Copy fog table data (128 bytes) into staging buffer. */
+    memcpy(tex->staging_mapped, payload->data, 128);
+
+    /* Record upload commands. */
+    vkResetCommandBuffer(tex->upload_cmd_buf, 0);
+
+    VkCommandBufferBeginInfo begin_ci;
+    memset(&begin_ci, 0, sizeof(begin_ci));
+    begin_ci.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_ci.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(tex->upload_cmd_buf, &begin_ci);
+
+    /* Transition fog image: SHADER_READ_ONLY -> TRANSFER_DST. */
+    VkImageMemoryBarrier barrier;
+    memset(&barrier, 0, sizeof(barrier));
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout           = tex->fog_valid
+                                    ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                    : VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image               = tex->fog_image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+    barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(tex->upload_cmd_buf,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, NULL, 0, NULL, 1, &barrier);
+
+    /* Copy staging -> fog image. */
+    VkBufferImageCopy region;
+    memset(&region, 0, sizeof(region));
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent.width           = 64;
+    region.imageExtent.height          = 1;
+    region.imageExtent.depth           = 1;
+
+    vkCmdCopyBufferToImage(tex->upload_cmd_buf, tex->staging_buf,
+                           tex->fog_image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1, &region);
+
+    /* Transition fog image: TRANSFER_DST -> SHADER_READ_ONLY. */
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(tex->upload_cmd_buf,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, NULL, 0, NULL, 1, &barrier);
+
+    vkEndCommandBuffer(tex->upload_cmd_buf);
+
+    /* Submit. */
+    VkSubmitInfo submit;
+    memset(&submit, 0, sizeof(submit));
+    submit.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers    = &tex->upload_cmd_buf;
+
+    VkResult res = vkQueueSubmit(ctx->queue, 1, &submit, tex->upload_fence);
+    if (res == VK_SUCCESS) {
+        tex->upload_pending = 1;
+    } else {
+        fprintf(stderr, "VideoCommon: fog upload submit failed (%d)\n", res);
+        vkResetFences(ctx->device, 1, &tex->upload_fence);
+    }
+
+    tex->fog_valid    = 1;
+    tex->fog_checksum = checksum;
+
+    VC_LOG("VideoCommon: fog table uploaded (checksum=0x%08x)\n", checksum);
 }
