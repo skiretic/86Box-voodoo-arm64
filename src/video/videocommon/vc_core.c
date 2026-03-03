@@ -843,7 +843,11 @@ vc_destroy_surface(void *ctx_ptr, uintptr_t surface)
 void *
 vc_display_get_ctx(void)
 {
-    return (void *) atomic_load_explicit(&vc_global_ctx, memory_order_acquire);
+    vc_ctx_t *ctx = atomic_load_explicit(&vc_global_ctx, memory_order_acquire);
+    /* Banshee/V3 uses SVGA scanout -- VCRenderer must not be created. */
+    if (ctx && ctx->is_banshee)
+        return NULL;
+    return (void *) ctx;
 }
 
 uintptr_t
