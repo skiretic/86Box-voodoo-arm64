@@ -761,12 +761,13 @@ The ring command payload for `VC_CMD_TRIANGLE` is:
 ```
 vc_ring_cmd_header_t  header;       /* 8 bytes */
 vc_push_constants_t   push;         /* 64 bytes */
+vc_clip_rect_t        clip;         /* 12 bytes (added Phase 5.10) */
 vc_vertex_t           verts[3];     /* 216 bytes (72 * 3) */
-/* Total: 288 bytes, aligned to 16 -> 288 bytes */
+/* Total: 300 bytes, aligned to 16 -> 304 bytes */
 ```
 
-At 288 bytes per triangle and 8 MB ring, the ring holds ~29,000 triangles.
-At 60 fps with 10K triangles/frame, this is ~3 frames of headroom. Adequate.
+At 304 bytes per triangle and 8 MB ring, the ring holds ~27,000 triangles.
+At 60 fps with 10K triangles/frame, this is ~2-3 frames of headroom. Adequate.
 
 ### 3.7 Recommendation for Phase 2
 

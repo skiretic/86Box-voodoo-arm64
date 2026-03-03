@@ -6,9 +6,9 @@
 
 ---
 
-## Current Status: Phase 5 NEARLY COMPLETE — Textured 3D with Blending, Scissor, Texture Combine!
+## Current Status: Phase 5 NEARLY COMPLETE — Texture Coords Fixed, Fog Remaining!
 
-Phase 5 core pipeline is substantially working. **3DMark99 race benchmark renders textured 3D** — buildings, road, sky, vehicles, HUD transparency all visible. Alpha blending via pipeline variant cache, scissor clipping, and texture combine stage all implemented. SPSC ring race condition on ARM64 fixed. Remaining: texture coordinate scrambling (UV mapping issues), some LOD/mip issues.
+Phase 5 core pipeline is substantially working. **3DMark99 race benchmark renders textured 3D at 60 Hz** — buildings, road, sky, vehicles, HUD transparency all visible. Texture coordinate scrambling FIXED (noperspective interpolation). Alpha blending via pipeline variant cache, scissor clipping, and texture combine stage all implemented. SPSC ring race condition on ARM64 fixed. Remaining: fog (deferred to Phase 6), minor visual polish (sky banding, transparency edge cases).
 
 **Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
 
@@ -21,12 +21,12 @@ Phase 1: Infrastructure     [XXXXXXXXXX] 100% COMPLETE
 Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
 Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
 Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE
-Phase 5: Core Pipeline       [XXXXXXXXX.] 90%  IN PROGRESS
+Phase 5: Core Pipeline       [XXXXXXXXXX] 95%  NEARLY COMPLETE (fog deferred)
 Phase 6: Advanced Features   [..........] 0%   BLOCKED (Phase 5)
 Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
 ──────────────────────────────────────────────
-Overall                      [XXXXXXX...] 65%
+Overall                      [XXXXXXX...] 68%
 ```
 
 ### Phase 5 Sub-task Status
@@ -46,6 +46,7 @@ Overall                      [XXXXXXX...] 65%
 | 5.10 | Scissor (clip rect wiring) | X | ec116a7b3 |
 | 5.11 | Texture combine stage (textureMode bits 12-29) | X | 5da589dcf |
 | 5.12 | SPSC ring ARM64 race fix (reserve/commit) | X | 3fd71c710 |
+| 5.13 | Texture coord fix (noperspective interpolation) | X | cff427c79 |
 
 Legend: `-` not started, `~` in progress, `X` done, `!` blocked/bug
 
@@ -54,8 +55,14 @@ Legend: `-` not started, `~` in progress, `X` done, `!` blocked/bug
 ## Known Bugs / Remaining Work (Phase 5)
 
 ### Remaining rendering artifacts in 3DMark99 race scene
-- **Texture coordinate glitches** — some textures appear scrambled/fragmented (mosaic pattern, UV mapping wrong)
-- **LOD/mip issues** — some textures show incorrect mip level selection
+- **Sky banding/smearing** — sky textures show horizontal stretching (likely fog or multi-pass blending issue, Phase 6)
+- **Transparency edge cases** — some objects appear ghostly that shouldn't (alpha combine edge cases)
+- **"3DMARK" text overlay** — smeared/duplicated (multi-pass alpha overlay issue)
+
+### FIXED: Texture coordinate scrambling (cff427c79)
+- Root cause: texture coordinate varyings (`vTexCoord0`, `vTexCoord1`) used `smooth` (default) interpolation, but Voodoo hardware iterates S/W, T/W, 1/W linearly in screen space and does the perspective divide per-pixel. The GPU's hardware perspective correction double-corrected these already-perspective-divided values, causing mosaic/scrambled textures on oblique geometry.
+- Fix: changed both varyings to `noperspective` in vertex and fragment shaders. Also simplified `gl_Position` to use `W=1.0` since all varyings are now noperspective (W component irrelevant for interpolation, vertices already in screen-space NDC).
+- Secondary note: `FBZ_PARAM_ADJUST` subpixel correction not yet implemented (minor, causes ~0.5px shimmer).
 
 ### FIXED: SPSC ring publish-before-write race on ARM64 (3fd71c710)
 - Root cause: `vc_ring_push` published write_pos (release store) before the payload was fully written. On ARM64 weak memory model, the GPU thread could read garbage from the ring (blue diagonal streaks, random corruption).

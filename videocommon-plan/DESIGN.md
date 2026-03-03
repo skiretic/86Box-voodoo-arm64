@@ -182,7 +182,8 @@ command FIFO.
 
 typedef struct vc_ring_t {
     uint8_t             *buffer;                 /* ring memory, VC_RING_SIZE bytes */
-    _Atomic(uint32_t)    write_pos;              /* producer write position */
+    _Atomic(uint32_t)    write_pos;              /* producer write position (published) */
+    uint32_t             staged_wp;              /* staged write position (reserve/commit) */
     _Atomic(uint32_t)    read_pos;               /* consumer read position */
     _Atomic(int32_t)     wake_counter;           /* DuckStation-style wake mechanism */
     thread_sem_t        *wake_sem;               /* semaphore for sleeping GPU thread */
@@ -283,9 +284,9 @@ void vc_ring_wait_for_space(vc_ring_t *ring, uint32_t needed) {
 }
 ```
 
-With an 8 MB ring and typical triangle commands at ~128 bytes, the ring holds
-~65K commands. At 60fps with ~10K triangles/frame, this is ~6 frames of headroom.
-Ring-full stalls should be extremely rare in practice.
+With an 8 MB ring and triangle commands at ~304 bytes (300 bytes aligned to 16),
+the ring holds ~27K triangles. At 60fps with ~10K triangles/frame, this is ~2-3
+frames of headroom. Ring-full stalls should be rare in practice.
 
 ### 4.7 Wraparound Handling
 
@@ -404,9 +405,20 @@ preventing deadlocks. VideoCommon does NOT modify this path.
 ### 5.6 Display Callback in VK Mode
 
 The display callback (`voodoo_callback`) continues to fire every scanline.
-In VK mode, its behavior changes ONLY in the scanout section:
+In VK mode, its behavior changes ONLY in the scanout section.
 
-| Section | SW Mode | VK Mode |
+**Two-flag mechanism**: The actual implementation uses two flags instead of the
+single `use_gpu_renderer` flag originally planned:
+
+- `vc_divert_to_gpu` -- permanent flag, set once GPU renderer is active.
+  Controls triangle routing (FIFO thread pushes to SPSC ring instead of SW
+  render threads).
+- `display_owner` -- transient flag managed by `vc_display_tick()` in the GPU
+  thread. Set to `VC_DISPLAY_GPU` when the GPU thread is actively presenting,
+  reverts to `VC_DISPLAY_VGA` after a timeout (no swap commands for N VGA
+  frames). This allows VGA passthrough to resume when the guest exits 3D mode.
+
+| Section | SW Mode | VK Mode (display_owner=GPU) |
 |---------|---------|---------|
 | Scanline pixel output (read from fb_mem, write to monitor buffer) | Active | **SKIPPED** (GPU thread handles display) |
 | Swap completion (swap_pending check, swap_count--, wake FIFO) | Active | **UNCHANGED** |
@@ -416,11 +428,11 @@ In VK mode, its behavior changes ONLY in the scanout section:
 The skip requires two insertion points, because the per-scanline pixel drawing
 and the svga_doblit trigger are in separate conditional blocks within
 `voodoo_callback()`. Both are gated by `FBIINIT0_VGA_PASS`, so the simplest
-approach is to add the `use_gpu_renderer` check to both VGA_PASS blocks:
+approach is to add the `display_owner` check to both VGA_PASS blocks:
 
 ```c
 /* Insertion point 1: per-scanline pixel drawing (line < v_disp) */
-if ((voodoo->fbiInit0 & FBIINIT0_VGA_PASS) && !voodoo->use_gpu_renderer) {
+if ((voodoo->fbiInit0 & FBIINIT0_VGA_PASS) && !voodoo->vc_display_active) {
     if (voodoo->line < voodoo->v_disp) {
         /* ... existing pixel scanout code ... */
     }
@@ -429,12 +441,17 @@ if ((voodoo->fbiInit0 & FBIINIT0_VGA_PASS) && !voodoo->use_gpu_renderer) {
 /* ... swap completion code (always runs, not inside VGA_PASS block) ... */
 
 /* Insertion point 2: svga_doblit trigger (line == v_disp after increment) */
-if ((voodoo->fbiInit0 & FBIINIT0_VGA_PASS) && !voodoo->use_gpu_renderer) {
+if ((voodoo->fbiInit0 & FBIINIT0_VGA_PASS) && !voodoo->vc_display_active) {
     if (voodoo->line == voodoo->v_disp) {
         svga_doblit(...);
     }
 }
 ```
+
+Note: `vc_display_active` is an int in `voodoo_t` that the GPU thread sets
+via a pointer (`display_active_ptr`). It is 1 when `display_owner=GPU`, 0
+otherwise. This avoids the VGA passthrough feedback loop that occurred with
+the original single-flag design (see commit e53f7c836).
 
 Note: a single `goto skip_scanout` before the first block would NOT also skip
 svga_doblit, which is in a separate block after `skip_draw:` and `line++`.
@@ -490,18 +507,22 @@ Triple-buffered command recording (matches PCSX2/DuckStation pattern):
 ```c
 #define VC_NUM_FRAMES   3
 
-typedef struct vc_frame_resources_t {
+/* NOTE: The actual implementation splits frame resources across subsystem
+   structs. vc_frame_t in vc_thread.h has the core 4 fields (cmd_pool, cmd_buf,
+   fence, fence_value). Vertex buffer state lives in vc_batch_t, descriptor
+   pool in vc_texture_t, and presentation semaphores in vc_display_t.
+   The logical grouping below is retained for architectural reference. */
+typedef struct vc_frame_t {
     VkCommandPool       cmd_pool;
     VkCommandBuffer     cmd_buf;
     VkFence             fence;
     uint64_t            fence_value;        /* monotonic counter */
-    VkSemaphore         image_available_sem; /* signaled by vkAcquireNextImageKHR */
-    VkSemaphore         render_finished_sem; /* waited on by vkQueuePresentKHR */
-    VkBuffer            vertex_buffer;      /* per-frame, persistently mapped */
-    void               *vertex_data;        /* mapped pointer */
-    uint32_t            vertex_offset;      /* current write position */
-    VkDescriptorPool    desc_pool;          /* per-frame, reset at frame start */
-} vc_frame_resources_t;
+} vc_frame_t;
+
+/* Additional per-frame state in subsystem structs:
+   vc_batch_t:    vertex_buffer, vertex_data (mapped ptr), vertex_offset
+   vc_texture_t:  desc_pool (per-frame, reset at frame start)
+   vc_display_t:  image_available_sem, render_finished_sem */
 ```
 
 Fence counter tracking for deferred resource destruction:
@@ -821,7 +842,9 @@ Texture binding:
 
 Descriptor management:
   Per-frame descriptor pool (reset at frame start via vkResetDescriptorPool)
-  Layout: set 0 = {TMU0 sampler, TMU1 sampler, fog table sampler}
+  Layout: set 0 = {binding 0: TMU0 sampler (implemented),
+                    binding 1: TMU1 sampler (Phase 6 -- not yet implemented),
+                    binding 2: fog table sampler (Phase 6 -- not yet implemented)}
 ```
 
 **Important: VK path must always increment refcount_r[0] to match** (not just on
@@ -993,7 +1016,7 @@ rendering) -> `PRESENT_SRC_KHR` (presentation).
 
 ### 8.5 Display Callback VK-Mode Skip
 
-In `voodoo_callback()`, when `use_gpu_renderer` is set:
+In `voodoo_callback()`, when `vc_display_active` is set (display_owner=GPU):
 
 ```
 SKIP:
@@ -1189,15 +1212,19 @@ is uploaded as a 64x1 VK_FORMAT_R32_SFLOAT sampler2D instead.
 
 ### 11.1 Existing Files Modified
 
-The v2 design minimizes changes to existing Voodoo code. Every modification
-is conditional on `voodoo->use_gpu_renderer`.
+The v2 design minimizes changes to existing Voodoo code. Triangle routing
+is conditional on `voodoo->vc_divert_to_gpu`, and scanout skipping is
+conditional on `voodoo->vc_display_active` (see section 5.6 for the
+two-flag mechanism).
 
 #### `src/include/86box/vid_voodoo_common.h`
 
 Add to `voodoo_t`:
 ```c
 void *vc_ctx;               /* VideoCommon context (opaque) */
-int   use_gpu_renderer;     /* 1 = VK path, 0 = SW path */
+int   use_gpu_renderer;     /* 1 = VK path configured, 0 = SW only */
+int   vc_divert_to_gpu;     /* 1 = route triangles to SPSC ring */
+int   vc_display_active;    /* 1 = GPU thread owns display (set via ptr from GPU thread) */
 ```
 
 #### `src/video/vid_voodoo.c`

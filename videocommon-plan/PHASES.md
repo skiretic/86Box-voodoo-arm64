@@ -370,9 +370,9 @@ This is where the rendered output starts looking correct.
 - [x] Alpha blending produces correct transparency
 - [ ] Fog fades distant geometry (deferred to Phase 6)
 - [x] Scissor clips correctly
+- [x] Texture coordinate scrambling resolved (noperspective fix, cff427c79)
 - [ ] 0 Vulkan validation errors (not yet verified with VC_VALIDATE=1)
 - [ ] No swap_count regression during full 3DMark99 run with depth/blend/fog enabled
-- [ ] Texture coordinate scrambling resolved
 
 ---
 
@@ -393,7 +393,7 @@ This is where the rendered output starts looking correct.
 - Remaining: multi-TMU combine (c_other from TMU1), DETAIL blend, LOD_FRAC
 - Push constant bits for combine mode selection
 
-**6.3 Color Combine**:
+**6.3 Color Combine** ✅ (completed in Phase 5, commit 6d7651879):
 - fbzColorPath: cc_rgbselect, cc_aselect, cc_localselect, cc_mselect
 - Iterated color, texture color, c_other, a_other combinations
 

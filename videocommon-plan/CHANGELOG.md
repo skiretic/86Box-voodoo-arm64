@@ -7,11 +7,12 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 
 ## [In Progress] -- Phase 5: Core Pipeline (2026-03-02)
 
-### MILESTONE: Textured 3D with Blending, Scissor, and Texture Combine!
+### MILESTONE: Textured 3D with Correct Texture Coords, Blending, Scissor, Texture Combine!
 - 3DMark99 race benchmark renders fully: buildings, road, sky, vehicles, HUD transparency
 - Stable at 60 Hz, no crashes, no blue diagonal streaks (ring race fixed)
-- Alpha blending partially working (speedometer HUD shows transparency)
-- Remaining: texture coordinate scrambling (UV mapping), some LOD/mip issues
+- Texture coordinate scrambling FIXED — noperspective interpolation
+- Alpha blending working (speedometer HUD shows transparency)
+- Remaining: sky banding, transparency edge cases, fog (Phase 6)
 
 ### Implemented (vc-lead, vc-shader)
 - **Scissor clipping** (ec116a7b3) — wired Voodoo clipLeft/clipRight/clipLowY/clipHighY to vkCmdSetScissor per-triangle. Added vc_clip_rect_t to ring command (288->300 bytes). Fixes grey bar on left, corruption on bottom-right.
@@ -50,10 +51,16 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 - **Also fixed** (9223a2729): Texture identity tracking replaced XOR hash (collision-prone) with direct 3-field comparison (slot + base + tLOD + palette_checksum).
 - **Result**: First textured 3D output! 3DMark99 race scene shows bridge, sky, HUD with real textures.
 
+### Fixed — Texture coordinate scrambling (cff427c79)
+- **Root cause**: texture coordinate varyings used `smooth` (default) interpolation, but Voodoo iterates S/W, T/W, 1/W linearly in screen space with per-pixel perspective divide. GPU hardware perspective correction double-corrected these values, causing mosaic/scrambled textures.
+- **Fix**: changed vTexCoord0/vTexCoord1 to `noperspective` in both vertex and fragment shaders. Simplified gl_Position to W=1.0 (all varyings now noperspective, vertices already in NDC).
+- **Audit also found**: missing FBZ_PARAM_ADJUST subpixel correction (minor, ~0.5px shimmer — lower priority).
+
 ### Known Issues (next)
-- Texture coordinate scrambling (UV mapping wrong, mosaic/fragmented textures on some surfaces)
-- Some LOD/mip level selection issues
-- Fog not yet implemented (Phase 5.4 / Phase 6)
+- Sky banding/smearing (likely fog or multi-pass issue, Phase 6)
+- Transparency edge cases (ghostly objects, alpha combine)
+- "3DMARK" text overlay smeared (multi-pass alpha)
+- Fog not yet implemented (Phase 6)
 - ACOLORBEFOREFOG uses VK_BLEND_FACTOR_ONE instead of dual-source (Phase 6)
 
 ---
@@ -140,7 +147,7 @@ Format: newest entries first. Each entry includes the phase, what changed, and w
 - Y-axis: Vulkan Y-down matches Voodoo — NO flip needed (v1 OpenGL code had a flip)
 - Depth format: D32_SFLOAT (v2) vs D16_UNORM (v1) — deliberate upgrade for W-buffer
 - Phase 2 pipeline: no descriptors needed, push constants only, viewport+scissor dynamic state
-- Ring command size per triangle: 288 bytes (header + push constants + 3 vertices)
+- Ring command size per triangle: 300 bytes (header + push constants + clip rect + 3 vertices, aligned to 304)
 - Voodoo setup engine handles face culling — keep VK_CULL_MODE_NONE permanently
 
 ---
