@@ -619,6 +619,25 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     if (!ctx)
         return;
 
+    /* Upload fog table if fog is enabled and table has changed. */
+    if (params->fogMode & FOG_ENABLE) {
+        voodoo_vk_state_t *vk_st = voodoo_vk_get_state(voodoo);
+        uint32_t checksum = 0;
+        for (int i = 0; i < 64; i++)
+            checksum ^= ((uint32_t) params->fogTable[i].fog << 8)
+                       | (uint32_t) params->fogTable[i].dfog
+                       | ((uint32_t) i << 16);
+        if (!vk_st->fog_uploaded || checksum != vk_st->fog_checksum) {
+            /* Push VC_CMD_FOG_UPLOAD with 128 bytes of fog table data. */
+            uint16_t cmd_size = sizeof(vc_ring_cmd_header_t) + 128;
+            void *payload = vc_ring_reserve(&ctx->ring, VC_CMD_FOG_UPLOAD, cmd_size);
+            memcpy(payload, params->fogTable, 128);
+            vc_ring_commit_and_wake(&ctx->ring);
+            vk_st->fog_checksum = checksum;
+            vk_st->fog_uploaded = 1;
+        }
+    }
+
     /* Handle texture if textured.
        On Voodoo 2, TMU 1 is the upstream texture unit — when only a single
        texture is active, the driver programs TMU 1 (not TMU 0). */
