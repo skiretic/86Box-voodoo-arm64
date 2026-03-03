@@ -534,9 +534,10 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
 
     vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
 
-    /* Extract push constants and vertices from payload. */
-    const vc_push_constants_t *pc    = (const vc_push_constants_t *) payload;
-    const vc_vertex_t         *verts = (const vc_vertex_t *) ((const uint8_t *) payload + sizeof(vc_push_constants_t));
+    /* Extract push constants, clip rect, and vertices from payload. */
+    const vc_push_constants_t *pc   = (const vc_push_constants_t *) payload;
+    const vc_clip_rect_t      *clip = (const vc_clip_rect_t *) ((const uint8_t *) payload + sizeof(vc_push_constants_t));
+    const vc_vertex_t         *verts = (const vc_vertex_t *) ((const uint8_t *) payload + sizeof(vc_push_constants_t) + sizeof(vc_clip_rect_t));
 
     /* Bind texture descriptor set. */
     vc_texture_bind_current(ctx, gpu_st, f->cmd_buf);
@@ -579,15 +580,44 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
         vkCmdSetDepthCompareOpEXT(f->cmd_buf, depth_func);
     }
 
-    /* Scissor from framebuffer dimensions (full viewport -- clip rect
-     * support will be added when clipLeftRight/clipLowYHighY registers
-     * are wired through the ring command). */
+    /* Scissor from Voodoo clip registers (or full framebuffer if disabled). */
     {
         int back_idx = gpu_st->rp.back_index;
+        uint32_t fb_w = gpu_st->rp.fb[back_idx].width;
+        uint32_t fb_h = gpu_st->rp.fb[back_idx].height;
         VkRect2D scissor;
         memset(&scissor, 0, sizeof(scissor));
-        scissor.extent.width  = gpu_st->rp.fb[back_idx].width;
-        scissor.extent.height = gpu_st->rp.fb[back_idx].height;
+
+        if (clip->enable && fb_w > 0 && fb_h > 0) {
+            /* Voodoo clip registers: left, right (exclusive), lowY, highY (exclusive).
+             * Vulkan scissor: offset + extent (exclusive right/bottom edge).
+             * Clamp to framebuffer dimensions. */
+            uint32_t cl = clip->left;
+            uint32_t cr = clip->right;
+            uint32_t cy_lo = clip->low_y;
+            uint32_t cy_hi = clip->high_y;
+
+            if (cl > fb_w) cl = fb_w;
+            if (cr > fb_w) cr = fb_w;
+            if (cy_lo > fb_h) cy_lo = fb_h;
+            if (cy_hi > fb_h) cy_hi = fb_h;
+
+            if (cr > cl && cy_hi > cy_lo) {
+                scissor.offset.x      = (int32_t) cl;
+                scissor.offset.y      = (int32_t) cy_lo;
+                scissor.extent.width  = cr - cl;
+                scissor.extent.height = cy_hi - cy_lo;
+            } else {
+                /* Degenerate clip rect -- use zero-area scissor. */
+                scissor.extent.width  = 0;
+                scissor.extent.height = 0;
+            }
+        } else {
+            /* Clipping disabled -- full framebuffer. */
+            scissor.extent.width  = fb_w;
+            scissor.extent.height = fb_h;
+        }
+
         vkCmdSetScissor(f->cmd_buf, 0, 1, &scissor);
     }
 

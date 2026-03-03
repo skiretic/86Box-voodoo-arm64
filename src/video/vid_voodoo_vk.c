@@ -405,13 +405,24 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     vc_push_constants_t pc;
     voodoo_vk_extract_push_constants(params, &pc, fb_w, fb_h);
 
+    /* Extract clip rectangle from Voodoo registers. */
+    vc_clip_rect_t clip;
+    memset(&clip, 0, sizeof(clip));
+    clip.enable = (params->fbzMode & 1) ? 1 : 0;
+    clip.left   = (uint16_t) params->clipLeft;
+    clip.right  = (uint16_t) params->clipRight;
+    clip.low_y  = (uint16_t) params->clipLowY;
+    clip.high_y = (uint16_t) params->clipHighY;
+
     /* Push VC_CMD_TRIANGLE to ring and wake GPU thread. */
     void *payload = vc_ring_push_and_wake(&ctx->ring, VC_CMD_TRIANGLE,
                                           VC_CMD_TRIANGLE_SIZE);
 
-    /* Layout: [push_constants] [verts[3]] */
+    /* Layout: [push_constants] [clip_rect] [verts[3]] */
     memcpy(payload, &pc, sizeof(vc_push_constants_t));
     memcpy((uint8_t *) payload + sizeof(vc_push_constants_t),
+           &clip, sizeof(vc_clip_rect_t));
+    memcpy((uint8_t *) payload + sizeof(vc_push_constants_t) + sizeof(vc_clip_rect_t),
            verts, 3 * sizeof(vc_vertex_t));
 }
 

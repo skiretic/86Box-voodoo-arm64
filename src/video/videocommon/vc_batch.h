@@ -23,13 +23,28 @@
 typedef struct vc_gpu_state_t vc_gpu_state_t;
 
 /* -------------------------------------------------------------------------- */
+/*  Per-triangle clip rectangle (extracted from Voodoo clip registers).        */
+/*  When clip_enable is 0, the GPU thread uses full-framebuffer scissor.       */
+/* -------------------------------------------------------------------------- */
+
+typedef struct vc_clip_rect_t {
+    uint16_t left;
+    uint16_t right;
+    uint16_t low_y;
+    uint16_t high_y;
+    uint16_t enable;
+    uint16_t _pad;           /* pad to 12 bytes for alignment */
+} vc_clip_rect_t;
+
+/* -------------------------------------------------------------------------- */
 /*  Ring command payload for VC_CMD_TRIANGLE.                                  */
-/*  Layout: [push_constants (64)] [verts[3] (216)]  = 280 bytes payload.      */
-/*  Total with 8-byte header: 288 bytes.                                       */
+/*  Layout: [push_constants (64)] [clip_rect (12)] [verts[3] (216)]           */
+/*  = 292 bytes payload.  Total with 8-byte header: 300 bytes.                 */
 /* -------------------------------------------------------------------------- */
 
 #define VC_CMD_TRIANGLE_SIZE ((uint16_t)(sizeof(vc_ring_cmd_header_t) \
                             + sizeof(vc_push_constants_t)             \
+                            + sizeof(vc_clip_rect_t)                  \
                             + 3 * sizeof(vc_vertex_t)))
 
 /* Maximum triangles per batch flush (bounded by vertex buffer size). */
