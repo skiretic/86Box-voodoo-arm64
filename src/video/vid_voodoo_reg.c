@@ -622,7 +622,12 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
             break;
         case SST_fastfillCMD:
             voodoo_wait_for_render_thread_idle(voodoo);
-            voodoo_fastfill(voodoo, &voodoo->params);
+#ifdef USE_VIDEOCOMMON
+            if (voodoo->use_gpu_renderer)
+                voodoo_vk_push_fastfill(voodoo, &voodoo->params);
+            else
+#endif
+                voodoo_fastfill(voodoo, &voodoo->params);
             voodoo->cmd_read++;
             break;
 

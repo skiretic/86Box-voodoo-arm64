@@ -676,6 +676,75 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
 }
 
 /* -------------------------------------------------------------------------- */
+/*  GPU thread: handle VC_CMD_CLEAR (fastfill)                                 */
+/* -------------------------------------------------------------------------- */
+
+static void
+vc_gpu_handle_clear(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
+                    const vc_clear_payload_t *payload)
+{
+    if (gpu_st->rp.fb[gpu_st->rp.back_index].framebuffer == VK_NULL_HANDLE)
+        return;
+
+    /* Ensure a render pass is active so we can use vkCmdClearAttachments. */
+    if (!gpu_st->render_pass_active)
+        vc_gpu_begin_frame(ctx, gpu_st);
+
+    vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
+
+    /* Build attachment list based on clear flags. */
+    VkClearAttachment attachments[2];
+    uint32_t          attachment_count = 0;
+
+    if (payload->flags & VC_CLEAR_COLOR) {
+        memset(&attachments[attachment_count], 0, sizeof(VkClearAttachment));
+        attachments[attachment_count].aspectMask      = VK_IMAGE_ASPECT_COLOR_BIT;
+        attachments[attachment_count].colorAttachment  = 0;
+        attachments[attachment_count].clearValue.color.float32[0] = payload->color[0];
+        attachments[attachment_count].clearValue.color.float32[1] = payload->color[1];
+        attachments[attachment_count].clearValue.color.float32[2] = payload->color[2];
+        attachments[attachment_count].clearValue.color.float32[3] = payload->color[3];
+        attachment_count++;
+    }
+
+    if (payload->flags & VC_CLEAR_DEPTH) {
+        memset(&attachments[attachment_count], 0, sizeof(VkClearAttachment));
+        attachments[attachment_count].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        attachments[attachment_count].clearValue.depthStencil.depth = payload->depth;
+        attachment_count++;
+    }
+
+    if (attachment_count == 0)
+        return;
+
+    /* Clear rectangle from clip region. */
+    VkClearRect clear_rect;
+    memset(&clear_rect, 0, sizeof(clear_rect));
+    clear_rect.rect.offset.x      = (int32_t) payload->x;
+    clear_rect.rect.offset.y      = (int32_t) payload->y;
+    clear_rect.rect.extent.width  = payload->width;
+    clear_rect.rect.extent.height = payload->height;
+    clear_rect.baseArrayLayer     = 0;
+    clear_rect.layerCount         = 1;
+
+    /* Clamp to framebuffer dimensions. */
+    int back_idx = gpu_st->rp.back_index;
+    uint32_t fb_w = gpu_st->rp.fb[back_idx].width;
+    uint32_t fb_h = gpu_st->rp.fb[back_idx].height;
+
+    if ((uint32_t) clear_rect.rect.offset.x + clear_rect.rect.extent.width > fb_w)
+        clear_rect.rect.extent.width = fb_w - (uint32_t) clear_rect.rect.offset.x;
+    if ((uint32_t) clear_rect.rect.offset.y + clear_rect.rect.extent.height > fb_h)
+        clear_rect.rect.extent.height = fb_h - (uint32_t) clear_rect.rect.offset.y;
+
+    if (clear_rect.rect.extent.width == 0 || clear_rect.rect.extent.height == 0)
+        return;
+
+    vkCmdClearAttachments(f->cmd_buf, attachment_count, attachments,
+                          1, &clear_rect);
+}
+
+/* -------------------------------------------------------------------------- */
 /*  GPU thread: handle VC_CMD_SWAP                                             */
 /* -------------------------------------------------------------------------- */
 
@@ -1096,6 +1165,12 @@ vc_gpu_thread_func(void *param)
                 if (gpu_st)
                     vc_texture_handle_fog_upload(ctx, gpu_st,
                         (const vc_fog_upload_payload_t *) (hdr + 1));
+                break;
+
+            case VC_CMD_CLEAR:
+                if (gpu_st)
+                    vc_gpu_handle_clear(ctx, gpu_st,
+                        (const vc_clear_payload_t *) (hdr + 1));
                 break;
 
             default:

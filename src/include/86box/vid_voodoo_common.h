@@ -806,6 +806,7 @@ void  voodoo_card_close(voodoo_t *voodoo);
 #ifdef USE_VIDEOCOMMON
 extern void voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params);
 extern void voodoo_vk_push_swap(voodoo_t *voodoo);
+extern void voodoo_vk_push_fastfill(voodoo_t *voodoo, voodoo_params_t *params);
 #endif
 
 #endif /*VIDEO_VOODOO_COMMON_H*/

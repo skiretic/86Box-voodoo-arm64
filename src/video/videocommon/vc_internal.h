@@ -96,6 +96,26 @@ _Static_assert(sizeof(vc_resize_payload_t) == 8,
                "vc_resize_payload_t must be 8 bytes");
 
 /* -------------------------------------------------------------------------- */
+/*  VC_CMD_CLEAR payload (fastfill)                                            */
+/* -------------------------------------------------------------------------- */
+
+typedef struct vc_clear_payload_t {
+    float    color[4]; /* RGBA clear color (0.0-1.0)       */
+    float    depth;    /* Depth clear value (0.0-1.0)      */
+    uint32_t flags;    /* Bit 0: clear color, bit 1: clear depth */
+    uint16_t x;        /* Clip rect left                   */
+    uint16_t y;        /* Clip rect top (lowY)             */
+    uint16_t width;    /* Clip rect width                  */
+    uint16_t height;   /* Clip rect height                 */
+} vc_clear_payload_t;
+
+_Static_assert(sizeof(vc_clear_payload_t) == 32,
+               "vc_clear_payload_t must be 32 bytes");
+
+#define VC_CLEAR_COLOR (1u << 0)
+#define VC_CLEAR_DEPTH (1u << 1)
+
+/* -------------------------------------------------------------------------- */
 /*  SPSC ring buffer                                                           */
 /* -------------------------------------------------------------------------- */
 

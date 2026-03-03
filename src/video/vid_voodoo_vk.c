@@ -748,6 +748,82 @@ vc_voodoo_set_resolution(void *ctx_opaque, int width, int height)
 }
 
 /* -------------------------------------------------------------------------- */
+/*  Public API: push fastfill (hardware clear) to ring                         */
+/* -------------------------------------------------------------------------- */
+
+void
+voodoo_vk_push_fastfill(voodoo_t *voodoo, voodoo_params_t *params)
+{
+    vc_ctx_t *ctx = (vc_ctx_t *) voodoo->vc_ctx;
+    if (!ctx)
+        return;
+
+    uint32_t flags = 0;
+
+    /* FBZ_RGB_WMASK = bit 9 of fbzMode: enable color writes.
+     * FBZ_DEPTH_WMASK = bit 10 of fbzMode: enable depth writes. */
+    if (params->fbzMode & (1 << 9))
+        flags |= VC_CLEAR_COLOR;
+    if (params->fbzMode & (1 << 10))
+        flags |= VC_CLEAR_DEPTH;
+
+    if (flags == 0)
+        return; /* Nothing to clear. */
+
+    /* Convert Voodoo color1 (packed ARGB8888) to float RGBA. */
+    float r = (float) ((params->color1 >> 16) & 0xff) / 255.0f;
+    float g = (float) ((params->color1 >> 8) & 0xff) / 255.0f;
+    float b = (float) (params->color1 & 0xff) / 255.0f;
+    float a = (float) ((params->color1 >> 24) & 0xff) / 255.0f;
+
+    /* Convert Voodoo zaColor bits [15:0] (16-bit depth) to float [0,1]. */
+    float depth = (float) (params->zaColor & 0xffff) / 65535.0f;
+
+    /* Clip rectangle -- handle Y origin inversion (fbzMode bit 17). */
+    int low_y, high_y;
+    if (params->fbzMode & (1 << 17)) {
+        /* Y origin at top: invert using display height. */
+        int y_origin = (voodoo->type >= VOODOO_BANSHEE)
+                           ? (voodoo->y_origin_swap + 1)
+                           : voodoo->v_disp;
+        high_y = y_origin - params->clipLowY;
+        low_y  = y_origin - params->clipHighY;
+    } else {
+        low_y  = params->clipLowY;
+        high_y = params->clipHighY;
+    }
+
+    int left  = params->clipLeft;
+    int right = params->clipRight;
+
+    if (left < 0)
+        left = 0;
+    if (low_y < 0)
+        low_y = 0;
+    if (right <= left || high_y <= low_y)
+        return; /* Degenerate rectangle. */
+
+    /* Push VC_CMD_CLEAR to ring. */
+    uint16_t cmd_size = (uint16_t) (sizeof(vc_ring_cmd_header_t)
+                                    + sizeof(vc_clear_payload_t));
+    vc_clear_payload_t *cp = (vc_clear_payload_t *)
+        vc_ring_reserve(&ctx->ring, VC_CMD_CLEAR, cmd_size);
+
+    cp->color[0] = r;
+    cp->color[1] = g;
+    cp->color[2] = b;
+    cp->color[3] = a;
+    cp->depth    = depth;
+    cp->flags    = flags;
+    cp->x        = (uint16_t) left;
+    cp->y        = (uint16_t) low_y;
+    cp->width    = (uint16_t) (right - left);
+    cp->height   = (uint16_t) (high_y - low_y);
+
+    vc_ring_commit_and_wake(&ctx->ring);
+}
+
+/* -------------------------------------------------------------------------- */
 /*  Public API: push swap to ring                                              */
 /* -------------------------------------------------------------------------- */
 
