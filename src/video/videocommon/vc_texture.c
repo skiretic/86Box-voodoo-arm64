@@ -838,11 +838,16 @@ vc_texture_get_sampler(vc_ctx_t *ctx, vc_texture_state_t *tex,
         return VK_NULL_HANDLE;
     }
 
-    if (tex->sampler_count < VC_SAMPLER_CACHE_MAX) {
-        tex->sampler_cache[tex->sampler_count].key     = sampler_key;
-        tex->sampler_cache[tex->sampler_count].sampler = sampler;
-        tex->sampler_count++;
+    if (tex->sampler_count >= VC_SAMPLER_CACHE_MAX) {
+        /* Cache full -- evict oldest entry (index 0). */
+        vkDestroySampler(ctx->device, tex->sampler_cache[0].sampler, NULL);
+        memmove(&tex->sampler_cache[0], &tex->sampler_cache[1],
+                (VC_SAMPLER_CACHE_MAX - 1) * sizeof(tex->sampler_cache[0]));
+        tex->sampler_count = VC_SAMPLER_CACHE_MAX - 1;
     }
+    tex->sampler_cache[tex->sampler_count].key     = sampler_key;
+    tex->sampler_cache[tex->sampler_count].sampler = sampler;
+    tex->sampler_count++;
 
     VC_LOG("VideoCommon: sampler created key=0x%x (mag=%s min=%s s=%s t=%s)\n",
            sampler_key,
