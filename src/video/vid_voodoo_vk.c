@@ -274,6 +274,11 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
         && trk->addr == tc->base
         && trk->tLOD == tc->tLOD
         && trk->pal_checksum == tc->palette_checksum) {
+        /* Diagnostic: log every 10000th skip. */
+        static int skip_count = 0;
+        if (++skip_count % 10000 == 0)
+            fprintf(stderr, "VK tex skip #%d: tmu=%d slot=%d base=0x%x tLOD=0x%x\n",
+                    skip_count, tmu, tex_entry, tc->base, tc->tLOD);
         return; /* Already uploaded and bound. */
     }
 
@@ -326,6 +331,10 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
     /* Compute identity from the cache entry fields (used by GPU-side tracking). */
     uint32_t identity = tc->base ^ tc->tLOD ^ tc->palette_checksum;
 
+    /* Diagnostic: log every actual upload (should be rare). */
+    fprintf(stderr, "VK tex UPLOAD: tmu=%d slot=%d %ux%u base=0x%x tLOD=0x%x\n",
+            tmu, tex_entry, width, height, tc->base, tc->tLOD);
+
     /* Push upload command -- GPU thread takes ownership of data pointer. */
     uint16_t cmd_size = (uint16_t) (sizeof(vc_ring_cmd_header_t)
                                   + sizeof(vc_tex_upload_payload_t));
@@ -373,6 +382,16 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     vc_ctx_t *ctx = (vc_ctx_t *) voodoo->vc_ctx;
     if (!ctx)
         return;
+
+    /* Diagnostic: log every 1000th triangle's texture register state. */
+    static int tri_count = 0;
+    if (++tri_count % 1000 == 0)
+        fprintf(stderr, "VK tri #%d: tex_en=%d tex_entry=%d texBaseAddr=0x%x tLOD=0x%x\n",
+                tri_count,
+                (params->fbzColorPath & (1 << 27)) ? 1 : 0,
+                params->tex_entry[0],
+                params->texBaseAddr[0],
+                params->tLOD[0]);
 
 
     /* Handle texture if textured. */

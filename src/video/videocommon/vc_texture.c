@@ -21,6 +21,7 @@
  *          Copyright 2026 skiretic.
  */
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -548,6 +549,7 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     uint32_t h    = payload->height;
     uint8_t *data = (uint8_t *) (uintptr_t) payload->data_ptr;
 
+
     if (tmu >= VC_TEX_MAX_TMU || slot >= VC_TEX_SLOTS_PER_TMU) {
         VC_LOG("VideoCommon: tex upload invalid tmu=%u slot=%u\n", tmu, slot);
         free(data);
@@ -672,6 +674,7 @@ vc_texture_handle_upload(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     s->valid    = 1;
     s->identity = payload->identity;
 
+
     /* Invalidate the bound sampler so the next bind re-writes the
        descriptor with the (potentially new) image view. */
     s->bound_sampler = VK_NULL_HANDLE;
@@ -690,6 +693,7 @@ vc_texture_handle_bind(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     vc_texture_state_t *tex = &gpu_st->tex;
     uint32_t tmu  = payload->tmu;
     uint32_t slot = payload->slot;
+
 
     if (tmu >= VC_TEX_MAX_TMU || slot >= VC_TEX_SLOTS_PER_TMU)
         return;
