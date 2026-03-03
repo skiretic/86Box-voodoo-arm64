@@ -697,7 +697,7 @@ vc_gpu_handle_resize(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     fprintf(stderr, "VC_DIAG: GPU resize %ux%u -> %ux%u\n",
             gpu_st->fb_width, gpu_st->fb_height, new_w, new_h);
 
-    /* End any active render pass before destroying framebuffers. */
+    /* End any active render pass before waiting. */
     if (gpu_st->render_pass_active) {
         vc_frame_t *f = &gpu_st->frame[gpu_st->frame_index];
         vkCmdEndRenderPass(f->cmd_buf);
@@ -708,8 +708,33 @@ vc_gpu_handle_resize(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     /* Wait for all GPU work to complete before destroying resources. */
     vkDeviceWaitIdle(ctx->device);
 
+    /* Reset ALL command pools so that no command buffer retains internal
+       references to the framebuffer images/views we are about to destroy.
+       Without this, the validation layer reports vkDestroyImage errors
+       ("image still in use by command buffer") even after vkDeviceWaitIdle,
+       because the command buffers still hold object references until reset. */
+    for (uint32_t i = 0; i < VC_NUM_FRAMES; i++) {
+        if (gpu_st->frame[i].cmd_pool != VK_NULL_HANDLE) {
+            vkResetCommandPool(ctx->device, gpu_st->frame[i].cmd_pool, 0);
+            gpu_st->frame[i].submitted = 0;
+        }
+    }
+
     /* Destroy old framebuffers (both front and back). */
     vc_render_pass_destroy_framebuffers(ctx, gpu_st);
+
+    /* Ensure render passes are valid before recreating framebuffers.
+       vc_create_single_fb references rp.render_pass_load for VkFramebuffer
+       creation -- if it were VK_NULL_HANDLE, we'd get a validation error. */
+    if (gpu_st->rp.render_pass_load == VK_NULL_HANDLE) {
+        fprintf(stderr, "VC_DIAG: GPU resize -- render_pass_load is NULL, "
+                        "recreating render passes\n");
+        if (vc_render_pass_create(ctx, gpu_st) != 0) {
+            fprintf(stderr, "VC_DIAG: GPU resize FAILED to recreate "
+                            "render passes\n");
+            return;
+        }
+    }
 
     /* Recreate framebuffers at new dimensions. */
     if (vc_render_pass_create_framebuffers(ctx, gpu_st, new_w, new_h) != 0) {
@@ -951,6 +976,16 @@ vc_gpu_thread_cleanup(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     }
 
     vkDeviceWaitIdle(ctx->device);
+
+    /* Reset all command pools so that no command buffer retains references
+       to objects we are about to destroy (framebuffers, images, etc.).
+       This prevents Vulkan validation errors during teardown. */
+    for (uint32_t i = 0; i < VC_NUM_FRAMES; i++) {
+        if (gpu_st->frame[i].cmd_pool != VK_NULL_HANDLE) {
+            vkResetCommandPool(ctx->device, gpu_st->frame[i].cmd_pool, 0);
+            gpu_st->frame[i].submitted = 0;
+        }
+    }
 
     vc_readback_destroy(ctx, gpu_st);
     vc_display_destroy(ctx, gpu_st);

@@ -264,7 +264,11 @@ vc_init(void)
     app_info.apiVersion         = VK_API_VERSION_1_2;
 
     const char *validation_layer = "VK_LAYER_KHRONOS_validation";
-    int         use_validation   = vc_validation_requested() && vc_has_validation_layer();
+    int         val_requested    = vc_validation_requested();
+    int         val_available    = val_requested ? vc_has_validation_layer() : 0;
+    int         use_validation   = val_requested && val_available;
+    fprintf(stderr, "VK_VALIDATE: requested=%d available=%d enabled=%d\n",
+            val_requested, val_available, use_validation);
 
     const char *inst_extensions[8];
     uint32_t    inst_ext_count = 0;
@@ -297,6 +301,7 @@ vc_init(void)
         instance_ci.enabledLayerCount   = 1;
         instance_ci.ppEnabledLayerNames = &validation_layer;
         VC_LOG("VideoCommon: validation layers enabled\n");
+        fprintf(stderr, "VK_VALIDATE: validation layers enabled\n");
     }
 
     result = vkCreateInstance(&instance_ci, NULL, &ctx->instance);
