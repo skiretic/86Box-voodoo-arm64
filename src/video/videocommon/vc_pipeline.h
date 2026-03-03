@@ -98,15 +98,14 @@ _Static_assert(sizeof(vc_push_constants_t) == 64,
  *   bit 4:      blend enable
  *   bits 11:8:  src RGB factor
  *   bits 15:12: dst RGB factor
- *   bits 19:16: src alpha factor
- *   bits 23:20: dst alpha factor
+ *   (Voodoo has no separate alpha blend factors; RGB factors are reused.)
  */
 typedef struct vc_blend_key_t {
     uint8_t blend_enable;
     uint8_t src_rgb;          /* Voodoo AFUNC enum (0-0xF) */
     uint8_t dst_rgb;          /* Voodoo AFUNC enum (0-0xF) */
-    uint8_t src_alpha;        /* Voodoo AFUNC enum (0-0xF) */
-    uint8_t dst_alpha;        /* Voodoo AFUNC enum (0-0xF) */
+    uint8_t src_alpha;        /* Same as src_rgb (Voodoo has no separate alpha factors) */
+    uint8_t dst_alpha;        /* Same as dst_rgb (Voodoo has no separate alpha factors) */
     uint8_t pad[3];           /* Pad to 8 bytes for memcmp. */
 } vc_blend_key_t;
 

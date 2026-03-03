@@ -151,8 +151,9 @@ vc_blend_key_from_alpha_mode(uint32_t alphaMode)
     key.blend_enable = (alphaMode >> 4) & 1;
     key.src_rgb      = (alphaMode >> 8) & 0xF;
     key.dst_rgb      = (alphaMode >> 12) & 0xF;
-    key.src_alpha    = (alphaMode >> 16) & 0xF;
-    key.dst_alpha    = (alphaMode >> 20) & 0xF;
+    /* Voodoo has NO separate alpha blend factors — RGB factors apply to both. */
+    key.src_alpha    = key.src_rgb;
+    key.dst_alpha    = key.dst_rgb;
     return key;
 }
 
