@@ -570,10 +570,14 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
     uint32_t first_vertex = gpu_st->batch.triangle_count * 3;
 
     if (vc_batch_append_triangle(ctx, gpu_st, verts) != 0) {
-        /* Batch full -- reset and start fresh. */
-        VC_LOG("VideoCommon: batch full (%u tris), resetting\n",
+        /* Batch full -- flush the current command buffer so that all
+         * recorded draw commands execute against the correct vertex data,
+         * then start a fresh frame/batch before appending the new triangle. */
+        VC_LOG("VideoCommon: batch full (%u tris), flushing mid-frame\n",
                gpu_st->batch.triangle_count);
-        vc_batch_reset(ctx, gpu_st);
+        vc_gpu_end_frame(ctx, gpu_st);
+        vc_gpu_begin_frame(ctx, gpu_st);
+        f = &gpu_st->frame[gpu_st->frame_index];
         first_vertex = 0;
         vc_batch_append_triangle(ctx, gpu_st, verts);
     }
