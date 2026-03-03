@@ -334,7 +334,7 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
     uint16_t cmd_size = (uint16_t) (sizeof(vc_ring_cmd_header_t)
                                   + sizeof(vc_tex_upload_payload_t));
     vc_tex_upload_payload_t *up = (vc_tex_upload_payload_t *)
-        vc_ring_push_and_wake(&ctx->ring, VC_CMD_TEXTURE_UPLOAD, cmd_size);
+        vc_ring_reserve(&ctx->ring, VC_CMD_TEXTURE_UPLOAD, cmd_size);
 
     up->tmu      = (uint32_t) tmu;
     up->slot     = (uint32_t) tex_entry;
@@ -344,16 +344,20 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
     up->pad      = 0;
     up->data_ptr = (uint64_t) (uintptr_t) data;
 
+    vc_ring_commit_and_wake(&ctx->ring);
+
     /* Push bind command. */
     uint16_t bind_size = (uint16_t) (sizeof(vc_ring_cmd_header_t)
                                    + sizeof(vc_tex_bind_payload_t));
     vc_tex_bind_payload_t *bp = (vc_tex_bind_payload_t *)
-        vc_ring_push_and_wake(&ctx->ring, VC_CMD_TEXTURE_BIND, bind_size);
+        vc_ring_reserve(&ctx->ring, VC_CMD_TEXTURE_BIND, bind_size);
 
     bp->tmu         = (uint32_t) tmu;
     bp->slot        = (uint32_t) tex_entry;
     bp->sampler_key = vc_texture_sampler_key(params->textureMode[tmu]);
     bp->pad         = 0;
+
+    vc_ring_commit_and_wake(&ctx->ring);
 
     /* Update tracking with actual cache fields (not the XOR hash). */
     trk->addr          = tc->base;
@@ -414,9 +418,10 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     clip.low_y  = (uint16_t) params->clipLowY;
     clip.high_y = (uint16_t) params->clipHighY;
 
-    /* Push VC_CMD_TRIANGLE to ring and wake GPU thread. */
-    void *payload = vc_ring_push_and_wake(&ctx->ring, VC_CMD_TRIANGLE,
-                                          VC_CMD_TRIANGLE_SIZE);
+    /* Reserve space in the ring, fill payload, then commit + wake.
+       This ensures write_pos is not published until payload is complete. */
+    void *payload = vc_ring_reserve(&ctx->ring, VC_CMD_TRIANGLE,
+                                    VC_CMD_TRIANGLE_SIZE);
 
     /* Layout: [push_constants] [clip_rect] [verts[3]] */
     memcpy(payload, &pc, sizeof(vc_push_constants_t));
@@ -424,6 +429,8 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
            &clip, sizeof(vc_clip_rect_t));
     memcpy((uint8_t *) payload + sizeof(vc_push_constants_t) + sizeof(vc_clip_rect_t),
            verts, 3 * sizeof(vc_vertex_t));
+
+    vc_ring_commit_and_wake(&ctx->ring);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -282,11 +282,15 @@ vc_ring_sleep(vc_ring_t *ring)
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Push API (producer -- FIFO thread only)                                    */
+/*  Reserve / Commit API (producer -- FIFO thread only)                        */
+/*                                                                             */
+/*  vc_ring_reserve() writes the header but does NOT publish write_pos.        */
+/*  The caller fills the payload, then calls vc_ring_commit() or              */
+/*  vc_ring_commit_and_wake() to make the command visible to the consumer.     */
 /* -------------------------------------------------------------------------- */
 
 void *
-vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
+vc_ring_reserve(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
 {
     total_size = vc_ring_align(total_size);
 
@@ -298,7 +302,9 @@ vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
 
     uint32_t wp = atomic_load_explicit(&ring->write_pos, memory_order_relaxed);
 
-    /* Check if we need a wraparound sentinel. */
+    /* Check if we need a wraparound sentinel.  The sentinel is a header-only
+       command with no payload, so publishing write_pos=0 here is safe -- the
+       consumer will simply skip past it. */
     if (wp + total_size > VC_RING_SIZE) {
         vc_ring_cmd_header_t *wrap = (vc_ring_cmd_header_t *) &ring->buffer[wp];
         wrap->type                 = VC_CMD_WRAPAROUND;
@@ -319,18 +325,34 @@ vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
     hdr->size                 = total_size;
     hdr->reserved             = 0;
 
-    uint32_t new_wp = (wp + total_size) & VC_RING_MASK;
-    atomic_store_explicit(&ring->write_pos, new_wp, memory_order_release);
+    /* Stage the new write position but do NOT publish yet. */
+    ring->staged_wp = (wp + total_size) & VC_RING_MASK;
 
     return (void *) (hdr + 1);
 }
 
-void *
+void
+vc_ring_commit(vc_ring_t *ring)
+{
+    /* Publish the staged write position.  The release fence ensures all
+       preceding payload writes are visible to the consumer before it
+       sees the updated write_pos. */
+    atomic_store_explicit(&ring->write_pos, ring->staged_wp, memory_order_release);
+}
+
+void
+vc_ring_commit_and_wake(vc_ring_t *ring)
+{
+    vc_ring_commit(ring);
+    vc_ring_wake(ring);
+}
+
+/* Convenience: reserve + commit + wake for header-only commands (no payload). */
+void
 vc_ring_push_and_wake(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size)
 {
-    void *payload = vc_ring_push(ring, cmd_type, total_size);
-    vc_ring_wake(ring);
-    return payload;
+    vc_ring_reserve(ring, cmd_type, total_size);
+    vc_ring_commit_and_wake(ring);
 }
 
 /* -------------------------------------------------------------------------- */

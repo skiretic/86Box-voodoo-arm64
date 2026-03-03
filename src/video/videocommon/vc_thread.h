@@ -43,14 +43,25 @@ void vc_gpu_end_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st);
 int  vc_ring_init(vc_ring_t *ring);
 void vc_ring_destroy(vc_ring_t *ring);
 
-/* Push a command into the ring.  Returns pointer to the payload area
-   (immediately after the header).  Blocks (with backpressure) if ring
-   is full.  `total_size` is the size of the entire command including
-   the header; it will be aligned up to VC_RING_ALIGN internally. */
-void *vc_ring_push(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size);
+/* Reserve space for a command in the ring.  Writes the header but does NOT
+   publish write_pos.  Returns pointer to the payload area (immediately
+   after the header).  Blocks (with backpressure) if ring is full.
+   `total_size` is the size of the entire command including the header;
+   it will be aligned up to VC_RING_ALIGN internally.
+   After filling the payload, call vc_ring_commit() or
+   vc_ring_commit_and_wake() to make the command visible to the consumer. */
+void *vc_ring_reserve(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size);
 
-/* Same as vc_ring_push but also wakes the GPU thread. */
-void *vc_ring_push_and_wake(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size);
+/* Publish the staged write_pos (release fence).  Must be called after
+   vc_ring_reserve() and payload fill to make the command visible. */
+void vc_ring_commit(vc_ring_t *ring);
+
+/* Commit + wake the GPU thread. */
+void vc_ring_commit_and_wake(vc_ring_t *ring);
+
+/* Convenience: reserve + commit + wake for header-only commands (no payload).
+   For commands with payloads, use vc_ring_reserve / fill / commit_and_wake. */
+void vc_ring_push_and_wake(vc_ring_t *ring, uint16_t cmd_type, uint16_t total_size);
 
 /* Wake the GPU thread (DuckStation-style: atomic counter + semaphore). */
 void vc_ring_wake(vc_ring_t *ring);

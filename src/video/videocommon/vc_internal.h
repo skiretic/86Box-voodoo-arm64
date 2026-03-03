@@ -91,6 +91,7 @@ typedef struct vc_ring_t {
     _Atomic(uint32_t) read_pos;
     _Atomic(int32_t)  wake_counter;
     void             *wake_sem;   /* Platform counting semaphore (opaque) */
+    uint32_t          staged_wp;  /* Next write_pos, not yet published (producer only) */
 } vc_ring_t;
 
 /* -------------------------------------------------------------------------- */
