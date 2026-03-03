@@ -300,35 +300,70 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     double oowC = oowA + ((double) p->dWdX * dx_ca + (double) p->dWdY * dy_ca) / VC_W_SCALE;
 
     /* TMU S/T/W: 18.32 fixed-point.
-       On Voodoo 2, TMU 1 is the upstream texture unit — when only a single
-       texture is active, the driver programs TMU 1 (not TMU 0).  We must
-       read gradients from whichever TMU is actually active. */
+       Populate both TMU0 and TMU1 vertex fields independently so the shader
+       can access both texture units for multi-texture rendering (Phase 6).
+       Each TMU is populated if its textureMode enable bit is set. */
     int textured = (p->fbzColorPath & FBZCP_TEXTURE_ENABLED) ? 1 : 0;
-    int active_tmu = (p->textureMode[1] & 1) ? 1 : 0;
+    int tmu0_enabled = (p->textureMode[0] & 1) ? 1 : 0;
+    int tmu1_enabled = (p->textureMode[1] & 1) ? 1 : 0;
     double s0A = 0.0, t0A = 0.0, w0A = 0.0;
     double s0B = 0.0, t0B = 0.0, w0B = 0.0;
     double s0C = 0.0, t0C = 0.0, w0C = 0.0;
+    double s1A = 0.0, t1A = 0.0, w1A = 0.0;
+    double s1B = 0.0, t1B = 0.0, w1B = 0.0;
+    double s1C = 0.0, t1C = 0.0, w1C = 0.0;
 
-    if (textured) {
-        int64_t adj_s = p->tmu[active_tmu].startS;
-        int64_t adj_t = p->tmu[active_tmu].startT;
-        int64_t adj_tw = p->tmu[active_tmu].startW;
+    if (textured && tmu0_enabled) {
+        int64_t adj_s = p->tmu[0].startS;
+        int64_t adj_t = p->tmu[0].startT;
+        int64_t adj_tw = p->tmu[0].startW;
         if (p->fbzColorPath & FBZ_PARAM_ADJUST) {
-            adj_s += ((int64_t) adj_dx * p->tmu[active_tmu].dSdX + (int64_t) adj_dy * p->tmu[active_tmu].dSdY) >> 4;
-            adj_t += ((int64_t) adj_dx * p->tmu[active_tmu].dTdX + (int64_t) adj_dy * p->tmu[active_tmu].dTdY) >> 4;
-            adj_tw += ((int64_t) adj_dx * p->tmu[active_tmu].dWdX + (int64_t) adj_dy * p->tmu[active_tmu].dWdY) >> 4;
+            adj_s += ((int64_t) adj_dx * p->tmu[0].dSdX + (int64_t) adj_dy * p->tmu[0].dSdY) >> 4;
+            adj_t += ((int64_t) adj_dx * p->tmu[0].dTdX + (int64_t) adj_dy * p->tmu[0].dTdY) >> 4;
+            adj_tw += ((int64_t) adj_dx * p->tmu[0].dWdX + (int64_t) adj_dy * p->tmu[0].dWdY) >> 4;
         }
         s0A = (double) adj_s / VC_ST_SCALE;
         t0A = (double) adj_t / VC_ST_SCALE;
         w0A = (double) adj_tw / VC_ST_SCALE;
 
-        s0B = s0A + ((double) p->tmu[active_tmu].dSdX * dx_ba + (double) p->tmu[active_tmu].dSdY * dy_ba) / VC_ST_SCALE;
-        t0B = t0A + ((double) p->tmu[active_tmu].dTdX * dx_ba + (double) p->tmu[active_tmu].dTdY * dy_ba) / VC_ST_SCALE;
-        w0B = w0A + ((double) p->tmu[active_tmu].dWdX * dx_ba + (double) p->tmu[active_tmu].dWdY * dy_ba) / VC_ST_SCALE;
+        s0B = s0A + ((double) p->tmu[0].dSdX * dx_ba + (double) p->tmu[0].dSdY * dy_ba) / VC_ST_SCALE;
+        t0B = t0A + ((double) p->tmu[0].dTdX * dx_ba + (double) p->tmu[0].dTdY * dy_ba) / VC_ST_SCALE;
+        w0B = w0A + ((double) p->tmu[0].dWdX * dx_ba + (double) p->tmu[0].dWdY * dy_ba) / VC_ST_SCALE;
 
-        s0C = s0A + ((double) p->tmu[active_tmu].dSdX * dx_ca + (double) p->tmu[active_tmu].dSdY * dy_ca) / VC_ST_SCALE;
-        t0C = t0A + ((double) p->tmu[active_tmu].dTdX * dx_ca + (double) p->tmu[active_tmu].dTdY * dy_ca) / VC_ST_SCALE;
-        w0C = w0A + ((double) p->tmu[active_tmu].dWdX * dx_ca + (double) p->tmu[active_tmu].dWdY * dy_ca) / VC_ST_SCALE;
+        s0C = s0A + ((double) p->tmu[0].dSdX * dx_ca + (double) p->tmu[0].dSdY * dy_ca) / VC_ST_SCALE;
+        t0C = t0A + ((double) p->tmu[0].dTdX * dx_ca + (double) p->tmu[0].dTdY * dy_ca) / VC_ST_SCALE;
+        w0C = w0A + ((double) p->tmu[0].dWdX * dx_ca + (double) p->tmu[0].dWdY * dy_ca) / VC_ST_SCALE;
+    }
+
+    if (textured && tmu1_enabled) {
+        int64_t adj_s = p->tmu[1].startS;
+        int64_t adj_t = p->tmu[1].startT;
+        int64_t adj_tw = p->tmu[1].startW;
+        if (p->fbzColorPath & FBZ_PARAM_ADJUST) {
+            adj_s += ((int64_t) adj_dx * p->tmu[1].dSdX + (int64_t) adj_dy * p->tmu[1].dSdY) >> 4;
+            adj_t += ((int64_t) adj_dx * p->tmu[1].dTdX + (int64_t) adj_dy * p->tmu[1].dTdY) >> 4;
+            adj_tw += ((int64_t) adj_dx * p->tmu[1].dWdX + (int64_t) adj_dy * p->tmu[1].dWdY) >> 4;
+        }
+        s1A = (double) adj_s / VC_ST_SCALE;
+        t1A = (double) adj_t / VC_ST_SCALE;
+        w1A = (double) adj_tw / VC_ST_SCALE;
+
+        s1B = s1A + ((double) p->tmu[1].dSdX * dx_ba + (double) p->tmu[1].dSdY * dy_ba) / VC_ST_SCALE;
+        t1B = t1A + ((double) p->tmu[1].dTdX * dx_ba + (double) p->tmu[1].dTdY * dy_ba) / VC_ST_SCALE;
+        w1B = w1A + ((double) p->tmu[1].dWdX * dx_ba + (double) p->tmu[1].dWdY * dy_ba) / VC_ST_SCALE;
+
+        s1C = s1A + ((double) p->tmu[1].dSdX * dx_ca + (double) p->tmu[1].dSdY * dy_ca) / VC_ST_SCALE;
+        t1C = t1A + ((double) p->tmu[1].dTdX * dx_ca + (double) p->tmu[1].dTdY * dy_ca) / VC_ST_SCALE;
+        w1C = w1A + ((double) p->tmu[1].dWdX * dx_ca + (double) p->tmu[1].dWdY * dy_ca) / VC_ST_SCALE;
+    }
+
+    /* Backward compatibility: when only TMU1 is active (common on Voodoo 2
+       single-texture), copy TMU1 data into TMU0 vertex fields so the shader's
+       existing single-TMU path (which reads vTexCoord0) still works. */
+    if (textured && tmu1_enabled && !tmu0_enabled) {
+        s0A = s1A; t0A = t1A; w0A = w1A;
+        s0B = s1B; t0B = t1B; w0B = w1B;
+        s0C = s1C; t0C = t1C; w0C = w1C;
     }
 
     /* Depth: compute per-vertex Z from Voodoo gradients.
@@ -381,6 +416,9 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     verts[0].s0 = (float) s0A;
     verts[0].t0 = (float) t0A;
     verts[0].w0 = (float) w0A;
+    verts[0].s1 = (float) s1A;
+    verts[0].t1 = (float) t1A;
+    verts[0].w1 = (float) w1A;
 
     /* Vertex B. */
     memset(&verts[1], 0, sizeof(vc_vertex_t));
@@ -395,6 +433,9 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     verts[1].s0 = (float) s0B;
     verts[1].t0 = (float) t0B;
     verts[1].w0 = (float) w0B;
+    verts[1].s1 = (float) s1B;
+    verts[1].t1 = (float) t1B;
+    verts[1].w1 = (float) w1B;
 
     /* Vertex C. */
     memset(&verts[2], 0, sizeof(vc_vertex_t));
@@ -409,6 +450,9 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     verts[2].s0 = (float) s0C;
     verts[2].t0 = (float) t0C;
     verts[2].w0 = (float) w0C;
+    verts[2].s1 = (float) s1C;
+    verts[2].t1 = (float) t1C;
+    verts[2].w1 = (float) w1C;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -429,9 +473,11 @@ voodoo_vk_extract_push_constants(const voodoo_params_t *p,
     pc->color0        = p->color0;
     pc->color1        = p->color1;
     pc->chromaKey      = p->chromaKey;
-    pc->fogColor       = (uint32_t) p->fogColor.r
+    /* Pack fogColor as 0x00RRGGBB for the shader's unpackRGB().
+       Voodoo fogColor is stored as {r, g, b} in rgbvoodoo_t. */
+    pc->fogColor       = ((uint32_t) p->fogColor.r << 16)
                        | ((uint32_t) p->fogColor.g << 8)
-                       | ((uint32_t) p->fogColor.b << 16);
+                       | ((uint32_t) p->fogColor.b);
     pc->zaColor        = p->zaColor;
     pc->stipple        = p->stipple;
     pc->detail0        = 0;
