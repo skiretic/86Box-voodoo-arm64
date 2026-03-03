@@ -535,6 +535,11 @@ vc_display_destroy_pp_framebuffers(vc_ctx_t *ctx, vc_display_t *disp)
 static int
 vc_display_create_pp_framebuffers(vc_ctx_t *ctx, vc_display_t *disp)
 {
+    if (disp->pp_render_pass == VK_NULL_HANDLE) {
+        fprintf(stderr, "VC_DIAG: pp_render_pass is NULL in create_pp_framebuffers, skipping\n");
+        return -1;
+    }
+
     for (uint32_t i = 0; i < disp->image_count; i++) {
         VkFramebufferCreateInfo fb_ci;
         memset(&fb_ci, 0, sizeof(fb_ci));
@@ -897,6 +902,10 @@ vc_display_recreate_swapchain(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
         return -1;
 
     vc_display_update_descriptors(ctx, gpu_st);
+
+    /* Recreate post-process framebuffers (destroyed above). */
+    if (vc_display_create_pp_framebuffers(ctx, disp) != 0)
+        return -1;
 
     VC_LOG("VideoCommon: swapchain recreated (%ux%u)\n",
            disp->extent.width, disp->extent.height);

@@ -288,6 +288,12 @@ vc_create_single_fb(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, int idx,
     }
 
     /* VkFramebuffer. */
+    if (gpu_st->rp.render_pass_load == VK_NULL_HANDLE) {
+        VC_LOG("VideoCommon: render_pass_load is NULL in create_single_fb, skipping\n");
+        vc_destroy_single_fb(ctx, gpu_st, idx);
+        return -1;
+    }
+
     VkImageView fb_attachments[2] = { gpu_st->rp.fb[idx].color_view,
                                       gpu_st->rp.fb[idx].depth_view };
 
