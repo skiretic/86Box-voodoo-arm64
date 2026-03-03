@@ -674,6 +674,7 @@ vc_voodoo_init_thread(void *voodoo_ptr)
        GPU thread is guaranteed to see these values during its init. */
     ctx->voodoo_ptr = voodoo;
     ctx->divert_to_gpu_ptr = &voodoo->vc_divert_to_gpu;
+    ctx->is_banshee = (voodoo->type >= VOODOO_BANSHEE) ? 1 : 0;
 
     if (vc_start_gpu_thread(ctx) != 0) {
         VC_LOG("VideoCommon: GPU thread start failed, falling back to SW renderer\n");

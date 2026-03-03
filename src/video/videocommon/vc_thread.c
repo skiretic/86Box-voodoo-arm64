@@ -1134,10 +1134,16 @@ vc_gpu_thread_func(void *param)
                        is actively rendering, safe to switch from SW display
                        to VCRenderer.  Before this, VGA passthrough stays on
                        the normal Qt display path so Glide detection isn't
-                       disrupted. */
+                       disrupted.
+                       For Banshee/V3: do NOT activate VCRenderer.  Banshee
+                       has an integrated SVGA display engine that scans out
+                       from svga.vram.  The readback writes rendered pixels
+                       into svga.vram (since fb_mem aliases it), so the
+                       existing SVGA display path handles presentation. */
                     if (!gpu_st->renderer_switch_done) {
                         gpu_st->renderer_switch_done = 1;
-                        vc_notify_renderer_ready();
+                        if (!ctx->is_banshee)
+                            vc_notify_renderer_ready();
                     }
                     vc_gpu_handle_swap(ctx, gpu_st);
                 }

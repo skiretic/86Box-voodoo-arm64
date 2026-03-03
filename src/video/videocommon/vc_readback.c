@@ -260,6 +260,20 @@ vc_readback_copy_to_sw_fb(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     voodoo->dirty_line_low  = 0;
     voodoo->dirty_line_high = (int) h;
 
-    vc_readback_log("VideoCommon: readback copied %ux%u to SW FB (offset 0x%x)\n",
-                    w, h, dst_offset);
+    /* For Banshee/V3: fb_mem aliases svga.vram, and the SVGA display engine
+       checks changedvram[addr >> 12] (per 4KB page) to decide whether to
+       redraw.  Mark all pages touched by the readback as changed so the
+       overlay and desktop display paths pick up the new pixels. */
+    if (ctx->is_banshee && voodoo->changedvram) {
+        int mon_cfc = monitors[voodoo->monitor_index].mon_changeframecount;
+        uint32_t first_page = dst_offset >> 12;
+        uint32_t last_addr  = dst_offset + (h > 0 ? (h - 1) : 0) * (uint32_t) row_width
+                             + (w > 0 ? (w - 1) : 0) * 2;
+        uint32_t last_page  = (last_addr & fb_mask) >> 12;
+        for (uint32_t page = first_page; page <= last_page; page++)
+            voodoo->changedvram[page] = mon_cfc;
+    }
+
+    vc_readback_log("VideoCommon: readback copied %ux%u to SW FB (offset 0x%x)%s\n",
+                    w, h, dst_offset, ctx->is_banshee ? " [banshee]" : "");
 }

@@ -234,6 +234,12 @@ typedef struct vc_ctx_t {
        Set during vc_voodoo_init, read by GPU thread. */
     void *voodoo_ptr;
 
+    /* Non-zero for Banshee/V3 (type >= VOODOO_BANSHEE).  Affects display
+       path: Banshee uses SVGA scanout from vram, not VGA passthrough
+       overlay, so VCRenderer must NOT be activated and readback must
+       mark svga.changedvram instead of (just) dirty_line[]. */
+    int is_banshee;
+
     /* Pointer to voodoo_t::vc_divert_to_gpu.  Set BEFORE starting the GPU
        thread so it is visible via the thread-creation happens-before edge.
        The GPU thread sets *divert_to_gpu_ptr = 1 in vc_display_create()

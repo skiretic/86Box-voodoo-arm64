@@ -515,10 +515,6 @@ voodoo_fifo_thread(void *param)
             int      num_verticies;
             int      v_num;
 
-#if 0
-            voodoo_fifo_log(" CMDFIFO header %08x at %08x\n", header, voodoo->cmdfifo_rp);
-#endif
-
             voodoo->cmd_status &= ~7;
             voodoo->cmd_status |= (header & 7);
             voodoo->cmd_status |= (1 << 11);
@@ -788,6 +784,27 @@ voodoo_fifo_thread(void *param)
                     break;
 
                 default:
+                    fprintf(stderr, "CMDFIFO0 BAD PACKET: header=%08x rp=%08x base=%08x end=%08x\n"
+                                    "  depth_rd=%u depth_wr=%u in_sub=%d in_agp=%d\n"
+                                    "  amin=%08x amax=%08x holecount=%d\n"
+                                    "  vc_divert=%d vc_ctx=%p\n",
+                            header, voodoo->cmdfifo_rp,
+                            voodoo->cmdfifo_base, voodoo->cmdfifo_end,
+                            voodoo->cmdfifo_depth_rd, voodoo->cmdfifo_depth_wr,
+                            voodoo->cmdfifo_in_sub, voodoo->cmdfifo_in_agp,
+                            voodoo->cmdfifo_amin, voodoo->cmdfifo_amax,
+                            voodoo->cmdfifo_holecount,
+                            voodoo->vc_divert_to_gpu, voodoo->vc_ctx);
+                    /* Dump VRAM around rp */
+                    {
+                        uint32_t dump_rp = (voodoo->cmdfifo_rp > 32) ? (voodoo->cmdfifo_rp - 32) : 0;
+                        fprintf(stderr, "  VRAM around rp (rp-32..rp+32):\n  ");
+                        for (int di = 0; di < 16; di++) {
+                            uint32_t da = (dump_rp + di * 4) & voodoo->fb_mask;
+                            fprintf(stderr, " %08x", *(uint32_t *) &voodoo->fb_mem[da]);
+                        }
+                        fprintf(stderr, "\n");
+                    }
                     fatal("Bad CMDFIFO packet %08x %08x\n", header, voodoo->cmdfifo_rp);
             }
 
@@ -1079,6 +1096,14 @@ voodoo_fifo_thread(void *param)
                     break;
 
                 default:
+                    fprintf(stderr, "CMDFIFO1 BAD PACKET: header=%08x rp_2=%08x base_2=%08x end_2=%08x\n"
+                                    "  depth_rd_2=%u depth_wr_2=%u in_sub_2=%d in_agp_2=%d\n"
+                                    "  vc_divert=%d vc_ctx=%p\n",
+                            header, voodoo->cmdfifo_rp_2,
+                            voodoo->cmdfifo_base_2, voodoo->cmdfifo_end_2,
+                            voodoo->cmdfifo_depth_rd_2, voodoo->cmdfifo_depth_wr_2,
+                            voodoo->cmdfifo_in_sub_2, voodoo->cmdfifo_in_agp_2,
+                            voodoo->vc_divert_to_gpu, voodoo->vc_ctx);
                     fatal("Bad CMDFIFO packet %08x %08x\n", header, voodoo->cmdfifo_rp);
             }
 
