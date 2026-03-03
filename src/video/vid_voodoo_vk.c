@@ -156,24 +156,28 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     double oowB = oowA + ((double) p->dWdX * dx_ba + (double) p->dWdY * dy_ba) / VC_W_SCALE;
     double oowC = oowA + ((double) p->dWdX * dx_ca + (double) p->dWdY * dy_ca) / VC_W_SCALE;
 
-    /* TMU0 S/T/W: 18.32 fixed-point. */
+    /* TMU S/T/W: 18.32 fixed-point.
+       On Voodoo 2, TMU 1 is the upstream texture unit — when only a single
+       texture is active, the driver programs TMU 1 (not TMU 0).  We must
+       read gradients from whichever TMU is actually active. */
     int textured = (p->fbzColorPath & FBZCP_TEXTURE_ENABLED) ? 1 : 0;
+    int active_tmu = (p->textureMode[1] & 1) ? 1 : 0;
     double s0A = 0.0, t0A = 0.0, w0A = 0.0;
     double s0B = 0.0, t0B = 0.0, w0B = 0.0;
     double s0C = 0.0, t0C = 0.0, w0C = 0.0;
 
     if (textured) {
-        s0A = (double) p->tmu[0].startS / VC_ST_SCALE;
-        t0A = (double) p->tmu[0].startT / VC_ST_SCALE;
-        w0A = (double) p->tmu[0].startW / VC_ST_SCALE;
+        s0A = (double) p->tmu[active_tmu].startS / VC_ST_SCALE;
+        t0A = (double) p->tmu[active_tmu].startT / VC_ST_SCALE;
+        w0A = (double) p->tmu[active_tmu].startW / VC_ST_SCALE;
 
-        s0B = s0A + ((double) p->tmu[0].dSdX * dx_ba + (double) p->tmu[0].dSdY * dy_ba) / VC_ST_SCALE;
-        t0B = t0A + ((double) p->tmu[0].dTdX * dx_ba + (double) p->tmu[0].dTdY * dy_ba) / VC_ST_SCALE;
-        w0B = w0A + ((double) p->tmu[0].dWdX * dx_ba + (double) p->tmu[0].dWdY * dy_ba) / VC_ST_SCALE;
+        s0B = s0A + ((double) p->tmu[active_tmu].dSdX * dx_ba + (double) p->tmu[active_tmu].dSdY * dy_ba) / VC_ST_SCALE;
+        t0B = t0A + ((double) p->tmu[active_tmu].dTdX * dx_ba + (double) p->tmu[active_tmu].dTdY * dy_ba) / VC_ST_SCALE;
+        w0B = w0A + ((double) p->tmu[active_tmu].dWdX * dx_ba + (double) p->tmu[active_tmu].dWdY * dy_ba) / VC_ST_SCALE;
 
-        s0C = s0A + ((double) p->tmu[0].dSdX * dx_ca + (double) p->tmu[0].dSdY * dy_ca) / VC_ST_SCALE;
-        t0C = t0A + ((double) p->tmu[0].dTdX * dx_ca + (double) p->tmu[0].dTdY * dy_ca) / VC_ST_SCALE;
-        w0C = w0A + ((double) p->tmu[0].dWdX * dx_ca + (double) p->tmu[0].dWdY * dy_ca) / VC_ST_SCALE;
+        s0C = s0A + ((double) p->tmu[active_tmu].dSdX * dx_ca + (double) p->tmu[active_tmu].dSdY * dy_ca) / VC_ST_SCALE;
+        t0C = t0A + ((double) p->tmu[active_tmu].dTdX * dx_ca + (double) p->tmu[active_tmu].dTdY * dy_ca) / VC_ST_SCALE;
+        w0C = w0A + ((double) p->tmu[active_tmu].dWdX * dx_ca + (double) p->tmu[active_tmu].dWdY * dy_ca) / VC_ST_SCALE;
     }
 
     /* Vertex A. */
@@ -274,11 +278,6 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
         && trk->addr == tc->base
         && trk->tLOD == tc->tLOD
         && trk->pal_checksum == tc->palette_checksum) {
-        /* Diagnostic: log every 10000th skip. */
-        static int skip_count = 0;
-        if (++skip_count % 10000 == 0)
-            fprintf(stderr, "VK tex skip #%d: tmu=%d slot=%d base=0x%x tLOD=0x%x\n",
-                    skip_count, tmu, tex_entry, tc->base, tc->tLOD);
         return; /* Already uploaded and bound. */
     }
 
@@ -331,10 +330,6 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
     /* Compute identity from the cache entry fields (used by GPU-side tracking). */
     uint32_t identity = tc->base ^ tc->tLOD ^ tc->palette_checksum;
 
-    /* Diagnostic: log every actual upload (should be rare). */
-    fprintf(stderr, "VK tex UPLOAD: tmu=%d slot=%d %ux%u base=0x%x tLOD=0x%x\n",
-            tmu, tex_entry, width, height, tc->base, tc->tLOD);
-
     /* Push upload command -- GPU thread takes ownership of data pointer. */
     uint16_t cmd_size = (uint16_t) (sizeof(vc_ring_cmd_header_t)
                                   + sizeof(vc_tex_upload_payload_t));
@@ -383,27 +378,20 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
     if (!ctx)
         return;
 
-    /* Diagnostic: log every 1000th triangle's texture register state. */
-    static int tri_count = 0;
-    if (++tri_count % 1000 == 0)
-        fprintf(stderr, "VK tri #%d: tex_en=%d tex_entry=%d texBaseAddr=0x%x tLOD=0x%x\n",
-                tri_count,
-                (params->fbzColorPath & (1 << 27)) ? 1 : 0,
-                params->tex_entry[0],
-                params->texBaseAddr[0],
-                params->tLOD[0]);
-
-
-    /* Handle texture if textured. */
+    /* Handle texture if textured.
+       On Voodoo 2, TMU 1 is the upstream texture unit — when only a single
+       texture is active, the driver programs TMU 1 (not TMU 0). */
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
+        int active_tmu = (params->textureMode[1] & 1) ? 1 : 0;
+
         /* Ensure voodoo_use_texture() has been called (it has -- the
            render path calls it before us).  Now push to GPU thread. */
-        voodoo_vk_push_texture(voodoo, params, 0);
+        voodoo_vk_push_texture(voodoo, params, active_tmu);
 
         /* CRITICAL: increment refcount_r[0] to match refcount for eviction.
            The SW render path does this in voodoo_half_triangle; since we
            divert to VK, we must do it here. */
-        voodoo->texture_cache[0][params->tex_entry[0]].refcount_r[0]++;
+        voodoo->texture_cache[active_tmu][params->tex_entry[active_tmu]].refcount_r[0]++;
     }
 
     vc_vertex_t verts[3];
