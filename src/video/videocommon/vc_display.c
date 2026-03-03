@@ -964,8 +964,8 @@ vc_display_tick(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
             if (disp->vga_ticks_since_present >= VC_VGA_TIMEOUT_FRAMES) {
                 disp->display_owner = 0;
                 disp->vga_ticks_since_present = 0;
-                fprintf(stderr, "VideoCommon: VGA timeout (%d VGA frames), re-enabling VGA passthrough\n",
-                        VC_VGA_TIMEOUT_FRAMES);
+                VC_LOG("VideoCommon: VGA timeout (%d VGA frames), re-enabling VGA passthrough\n",
+                       VC_VGA_TIMEOUT_FRAMES);
             }
         } else if (gpu_st->render_pass_active) {
             /* Orphan triangles without a swap (driver self-test).
@@ -999,13 +999,13 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     vc_display_t *disp = &gpu_st->disp;
 
     if (disp->swapchain == VK_NULL_HANDLE) {
-        fprintf(stderr, "VideoCommon: present: swapchain is NULL, returning -1\n");
+        VC_LOG("VideoCommon: present: swapchain is NULL, returning -1\n");
         return -1;
     }
 
     int back_idx = gpu_st->rp.back_index;
-    fprintf(stderr, "VideoCommon: present: back_idx=%d extent=%ux%u\n",
-            back_idx, disp->extent.width, disp->extent.height);
+    VC_LOG("VideoCommon: present: back_idx=%d extent=%ux%u\n",
+           back_idx, disp->extent.width, disp->extent.height);
 
     /* Acquire swapchain image. */
     uint32_t image_idx;
@@ -1014,14 +1014,14 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
         disp->image_available_sem[frame_index],
         VK_NULL_HANDLE, &image_idx);
 
-    fprintf(stderr, "VideoCommon: present: acquire result=%d image_idx=%u\n", acq, image_idx);
+    VC_LOG("VideoCommon: present: acquire result=%d image_idx=%u\n", acq, image_idx);
 
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) {
-        fprintf(stderr, "VideoCommon: present: swapchain out of date\n");
+        VC_LOG("VideoCommon: present: swapchain out of date\n");
         return 1; /* Caller should recreate swapchain. */
     }
     if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
-        fprintf(stderr, "VideoCommon: present: acquire failed (%d), returning -1\n", acq);
+        VC_LOG("VideoCommon: present: acquire failed (%d), returning -1\n", acq);
         return -1;
     }
 
@@ -1061,7 +1061,7 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     rp_begin.pClearValues      = &clear_value;
 
     vkCmdBeginRenderPass(cmd_buf, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
-    fprintf(stderr, "VideoCommon: present: PP render pass started (image_idx=%u)\n", image_idx);
+    VC_LOG("VideoCommon: present: PP render pass started (image_idx=%u)\n", image_idx);
 
     /* Set viewport and scissor to swapchain extent. */
     VkViewport viewport;
@@ -1119,7 +1119,7 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
 
     vc_frame_t *f          = &gpu_st->frame[frame_index];
     VkResult    sub_result = vkQueueSubmit(ctx->queue, 1, &submit, f->fence);
-    fprintf(stderr, "VideoCommon: present: vkQueueSubmit result=%d\n", sub_result);
+    VC_LOG("VideoCommon: present: vkQueueSubmit result=%d\n", sub_result);
     if (sub_result != VK_SUCCESS) {
         VC_LOG("VideoCommon: display vkQueueSubmit failed (%d)\n", sub_result);
         return -1;
@@ -1137,7 +1137,7 @@ vc_display_present(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st,
     present.pImageIndices      = &image_idx;
 
     VkResult pres = vkQueuePresentKHR(ctx->queue, &present);
-    fprintf(stderr, "VideoCommon: present: vkQueuePresentKHR result=%d\n", pres);
+    VC_LOG("VideoCommon: present: vkQueuePresentKHR result=%d\n", pres);
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) {
         return 1; /* Caller should recreate swapchain. */
     }
