@@ -686,7 +686,10 @@ vc_gpu_handle_swap(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     /* If no render pass is active, this is an "empty" swap (no triangles
        were submitted since the last swap).  Nothing to present. */
     if (!gpu_st->render_pass_active) {
-
+        /* Still reset VGA timeout — empty swaps prove the 3D app is
+           alive (e.g. loading screens), so don't let the VGA timeout
+           reclaim display ownership. */
+        gpu_st->disp.vga_ticks_since_present = 0;
         return;
     }
 
