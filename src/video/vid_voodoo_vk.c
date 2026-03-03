@@ -627,11 +627,17 @@ voodoo_vk_push_triangle(voodoo_t *voodoo, voodoo_params_t *params)
            render path calls it before us).  Now push to GPU thread. */
         voodoo_vk_push_texture(voodoo, params, active_tmu);
 
-        /* CRITICAL: increment refcount_r[0] to match refcount for eviction.
-           The SW render path does this in voodoo_half_triangle; since we
-           divert to VK, we must do it here. */
-        voodoo->texture_cache[active_tmu][params->tex_entry[active_tmu]].refcount_r[0]++;
     }
+
+    /* Balance refcount_r for both TMUs unconditionally, matching the
+       unconditional voodoo_use_texture calls in voodoo_queue_triangle
+       and the SW renderer's unconditional increments (vid_voodoo_render.c:1628-1629).
+       Only incrementing the active TMU caused the inactive TMU's refcount
+       to drift ahead of refcount_r, eventually spinning voodoo_use_texture's
+       eviction loop forever after 64 unique textures. */
+    voodoo->texture_cache[0][params->tex_entry[0]].refcount_r[0]++;
+    if (voodoo->dual_tmus)
+        voodoo->texture_cache[1][params->tex_entry[1]].refcount_r[0]++;
 
     vc_vertex_t verts[3];
     voodoo_vk_extract_vertices(params, verts);
