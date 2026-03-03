@@ -644,6 +644,12 @@ vc_voodoo_close(void *voodoo_ptr)
 
     atomic_store_explicit(&vc_global_ctx, NULL, memory_order_release);
 
+    /* Free per-device VK bridge state (texture tracking). */
+    if (voodoo->vc_vk_state) {
+        free(voodoo->vc_vk_state);
+        voodoo->vc_vk_state = NULL;
+    }
+
     vc_ctx_t *ctx = (vc_ctx_t *) voodoo->vc_ctx;
     vc_stop_gpu_thread(ctx);
     vc_destroy(ctx);

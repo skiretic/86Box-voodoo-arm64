@@ -112,11 +112,30 @@ typedef struct voodoo_vk_tex_track_t {
 /* Diagnostic counter for producer-side triangle pushes. */
 
 
-/* Global tracking (could be per-voodoo if needed, but there's only ever one). */
-static voodoo_vk_tex_track_t vk_tex_track[2] = {
-    { .addr = ~0u, .tLOD = ~0u, .pal_checksum = ~0u, .slot = -1, .last_upload_slot = -1, .last_identity = 0 },
-    { .addr = ~0u, .tLOD = ~0u, .pal_checksum = ~0u, .slot = -1, .last_upload_slot = -1, .last_identity = 0 },
-};
+/* Per-device VK bridge state (texture tracking, allocated lazily). */
+typedef struct voodoo_vk_state_t {
+    voodoo_vk_tex_track_t tex_track[2];
+} voodoo_vk_state_t;
+
+static voodoo_vk_state_t *
+voodoo_vk_get_state(voodoo_t *voodoo)
+{
+    if (!voodoo->vc_vk_state) {
+        voodoo_vk_state_t *st = (voodoo_vk_state_t *) calloc(1, sizeof(voodoo_vk_state_t));
+        st->tex_track[0].addr = ~0u;
+        st->tex_track[0].tLOD = ~0u;
+        st->tex_track[0].pal_checksum = ~0u;
+        st->tex_track[0].slot = -1;
+        st->tex_track[0].last_upload_slot = -1;
+        st->tex_track[1].addr = ~0u;
+        st->tex_track[1].tLOD = ~0u;
+        st->tex_track[1].pal_checksum = ~0u;
+        st->tex_track[1].slot = -1;
+        st->tex_track[1].last_upload_slot = -1;
+        voodoo->vc_vk_state = st;
+    }
+    return (voodoo_vk_state_t *) voodoo->vc_vk_state;
+}
 
 /* -------------------------------------------------------------------------- */
 /*  Depth helpers                                                              */
@@ -224,31 +243,59 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     float xC = (float) p->vertexCx / 16.0f;
     float yC = (float) p->vertexCy / 16.0f;
 
-    float dx_ba = xB - xA;
-    float dy_ba = yB - yA;
-    float dx_ca = xC - xA;
-    float dy_ca = yC - yA;
+    double dx_ba = (double) xB - (double) xA;
+    double dy_ba = (double) yB - (double) yA;
+    double dx_ca = (double) xC - (double) xA;
+    double dy_ca = (double) yC - (double) yA;
 
-    /* Color A (start values). */
-    float rA = (float) (int32_t) p->startR / VC_COLOR_SCALE;
-    float gA = (float) (int32_t) p->startG / VC_COLOR_SCALE;
-    float bA = (float) (int32_t) p->startB / VC_COLOR_SCALE;
-    float aA = (float) (int32_t) p->startA / VC_COLOR_SCALE;
+    /* FBZ_PARAM_ADJUST: subpixel correction for vertex A start values.
+       The SW renderer snaps the starting scanline to pixel centers and
+       adjusts iterated parameters accordingly.  dx/dy are the subpixel
+       offsets from vertex A to the nearest pixel center, in 12.4 units. */
+    int32_t adj_dx = 0, adj_dy = 0;
+    if (p->fbzColorPath & FBZ_PARAM_ADJUST) {
+        adj_dx = 8 - (p->vertexAx & 0xf);
+        if ((p->vertexAx & 0xf) > 8)
+            adj_dx += 16;
+        adj_dy = 8 - (p->vertexAy & 0xf);
+        if ((p->vertexAy & 0xf) > 8)
+            adj_dy += 16;
+    }
 
-    /* Color B = A + gradient * delta. */
-    float rB = rA + ((float) p->dRdX * dx_ba + (float) p->dRdY * dy_ba) / VC_COLOR_SCALE;
-    float gB = gA + ((float) p->dGdX * dx_ba + (float) p->dGdY * dy_ba) / VC_COLOR_SCALE;
-    float bB = bA + ((float) p->dBdX * dx_ba + (float) p->dBdY * dy_ba) / VC_COLOR_SCALE;
-    float aB = aA + ((float) p->dAdX * dx_ba + (float) p->dAdY * dy_ba) / VC_COLOR_SCALE;
+    /* Color A (start values), with optional subpixel adjustment. */
+    int32_t startR = (int32_t) p->startR;
+    int32_t startG = (int32_t) p->startG;
+    int32_t startB = (int32_t) p->startB;
+    int32_t startA = (int32_t) p->startA;
+    if (p->fbzColorPath & FBZ_PARAM_ADJUST) {
+        startR += (adj_dx * p->dRdX + adj_dy * p->dRdY) >> 4;
+        startG += (adj_dx * p->dGdX + adj_dy * p->dGdY) >> 4;
+        startB += (adj_dx * p->dBdX + adj_dy * p->dBdY) >> 4;
+        startA += (adj_dx * p->dAdX + adj_dy * p->dAdY) >> 4;
+    }
+    float rA = (float) startR / VC_COLOR_SCALE;
+    float gA = (float) startG / VC_COLOR_SCALE;
+    float bA = (float) startB / VC_COLOR_SCALE;
+    float aA = (float) startA / VC_COLOR_SCALE;
 
-    /* Color C = A + gradient * delta. */
-    float rC = rA + ((float) p->dRdX * dx_ca + (float) p->dRdY * dy_ca) / VC_COLOR_SCALE;
-    float gC = gA + ((float) p->dGdX * dx_ca + (float) p->dGdY * dy_ca) / VC_COLOR_SCALE;
-    float bC = bA + ((float) p->dBdX * dx_ca + (float) p->dBdY * dy_ca) / VC_COLOR_SCALE;
-    float aC = aA + ((float) p->dAdX * dx_ca + (float) p->dAdY * dy_ca) / VC_COLOR_SCALE;
+    /* Color B = A + gradient * delta (double intermediates for precision). */
+    float rB = rA + (float) ((double) p->dRdX * dx_ba + (double) p->dRdY * dy_ba) / VC_COLOR_SCALE;
+    float gB = gA + (float) ((double) p->dGdX * dx_ba + (double) p->dGdY * dy_ba) / VC_COLOR_SCALE;
+    float bB = bA + (float) ((double) p->dBdX * dx_ba + (double) p->dBdY * dy_ba) / VC_COLOR_SCALE;
+    float aB = aA + (float) ((double) p->dAdX * dx_ba + (double) p->dAdY * dy_ba) / VC_COLOR_SCALE;
 
-    /* 1/W: 18.32 fixed-point (int64_t).  startW IS 1/W (not W). */
-    double oowA = (double) p->startW / VC_W_SCALE;
+    /* Color C = A + gradient * delta (double intermediates for precision). */
+    float rC = rA + (float) ((double) p->dRdX * dx_ca + (double) p->dRdY * dy_ca) / VC_COLOR_SCALE;
+    float gC = gA + (float) ((double) p->dGdX * dx_ca + (double) p->dGdY * dy_ca) / VC_COLOR_SCALE;
+    float bC = bA + (float) ((double) p->dBdX * dx_ca + (double) p->dBdY * dy_ca) / VC_COLOR_SCALE;
+    float aC = aA + (float) ((double) p->dAdX * dx_ca + (double) p->dAdY * dy_ca) / VC_COLOR_SCALE;
+
+    /* 1/W: 18.32 fixed-point (int64_t).  startW IS 1/W (not W).
+       Apply subpixel adjustment in fixed-point before float conversion. */
+    int64_t adj_startW = p->startW;
+    if (p->fbzColorPath & FBZ_PARAM_ADJUST)
+        adj_startW += ((int64_t) adj_dx * p->dWdX + (int64_t) adj_dy * p->dWdY) >> 4;
+    double oowA = (double) adj_startW / VC_W_SCALE;
     double oowB = oowA + ((double) p->dWdX * dx_ba + (double) p->dWdY * dy_ba) / VC_W_SCALE;
     double oowC = oowA + ((double) p->dWdX * dx_ca + (double) p->dWdY * dy_ca) / VC_W_SCALE;
 
@@ -263,9 +310,17 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
     double s0C = 0.0, t0C = 0.0, w0C = 0.0;
 
     if (textured) {
-        s0A = (double) p->tmu[active_tmu].startS / VC_ST_SCALE;
-        t0A = (double) p->tmu[active_tmu].startT / VC_ST_SCALE;
-        w0A = (double) p->tmu[active_tmu].startW / VC_ST_SCALE;
+        int64_t adj_s = p->tmu[active_tmu].startS;
+        int64_t adj_t = p->tmu[active_tmu].startT;
+        int64_t adj_tw = p->tmu[active_tmu].startW;
+        if (p->fbzColorPath & FBZ_PARAM_ADJUST) {
+            adj_s += ((int64_t) adj_dx * p->tmu[active_tmu].dSdX + (int64_t) adj_dy * p->tmu[active_tmu].dSdY) >> 4;
+            adj_t += ((int64_t) adj_dx * p->tmu[active_tmu].dTdX + (int64_t) adj_dy * p->tmu[active_tmu].dTdY) >> 4;
+            adj_tw += ((int64_t) adj_dx * p->tmu[active_tmu].dWdX + (int64_t) adj_dy * p->tmu[active_tmu].dWdY) >> 4;
+        }
+        s0A = (double) adj_s / VC_ST_SCALE;
+        t0A = (double) adj_t / VC_ST_SCALE;
+        w0A = (double) adj_tw / VC_ST_SCALE;
 
         s0B = s0A + ((double) p->tmu[active_tmu].dSdX * dx_ba + (double) p->tmu[active_tmu].dSdY * dy_ba) / VC_ST_SCALE;
         t0B = t0A + ((double) p->tmu[active_tmu].dTdX * dx_ba + (double) p->tmu[active_tmu].dTdY * dy_ba) / VC_ST_SCALE;
@@ -290,8 +345,9 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
         float z_const = (float) (p->zaColor & 0xffff) / VC_Z_MAX;
         zA = zB = zC = z_const;
     } else if (is_w_buffer) {
-        /* W-buffer mode: compute per-vertex W, then convert via fls. */
-        int64_t wA_fp = p->startW;
+        /* W-buffer mode: compute per-vertex W, then convert via fls.
+           adj_startW already has subpixel correction applied. */
+        int64_t wA_fp = adj_startW;
         int64_t wB_fp = wA_fp + (int64_t) ((double) p->dWdX * dx_ba + (double) p->dWdY * dy_ba);
         int64_t wC_fp = wA_fp + (int64_t) ((double) p->dWdX * dx_ca + (double) p->dWdY * dy_ca);
 
@@ -299,8 +355,11 @@ voodoo_vk_extract_vertices(const voodoo_params_t *p, vc_vertex_t verts[3])
         zB = voodoo_z_to_float(p->fbzMode, p->zaColor, wB_fp, 1);
         zC = voodoo_z_to_float(p->fbzMode, p->zaColor, wC_fp, 1);
     } else {
-        /* Z-buffer mode: linear iteration of Z (20.12 fixed-point). */
+        /* Z-buffer mode: linear iteration of Z (20.12 fixed-point).
+           Apply subpixel adjustment to Z start value. */
         int64_t zA_fp = (int64_t) p->startZ;
+        if (p->fbzColorPath & FBZ_PARAM_ADJUST)
+            zA_fp += ((int64_t) adj_dx * p->dZdX + (int64_t) adj_dy * p->dZdY) >> 4;
         int64_t zB_fp = zA_fp + (int64_t) ((double) p->dZdX * dx_ba + (double) p->dZdY * dy_ba);
         int64_t zC_fp = zA_fp + (int64_t) ((double) p->dZdX * dx_ca + (double) p->dZdY * dy_ca);
 
@@ -402,7 +461,8 @@ voodoo_vk_push_texture(voodoo_t *voodoo, voodoo_params_t *params, int tmu)
 
     /* Check if this texture is already uploaded using direct field comparison
        (more robust than the previous XOR hash which could collide). */
-    voodoo_vk_tex_track_t *trk = &vk_tex_track[tmu];
+    voodoo_vk_state_t     *vk_st = voodoo_vk_get_state(voodoo);
+    voodoo_vk_tex_track_t *trk   = &vk_st->tex_track[tmu];
     if (trk->slot == tex_entry
         && trk->addr == tc->base
         && trk->tLOD == tc->tLOD

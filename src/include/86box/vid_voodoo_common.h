@@ -765,6 +765,7 @@ typedef struct voodoo_t {
     int        use_gpu_renderer; /* 1 = VK path, 0 = SW fallback. */
     volatile int vc_divert_to_gpu; /* 1 = triangles go to VK ring.  Set once on VK surface create, cleared only on close. */
     thread_t  *vc_init_thread;   /* Background thread for deferred Vulkan init. */
+    void      *vc_vk_state;      /* voodoo_vk_state_t* -- per-device VK bridge state (tex tracking). */
 
     uint32_t launch_pending;
 
