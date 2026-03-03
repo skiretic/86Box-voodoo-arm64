@@ -9,13 +9,13 @@
  *          VideoCommon pipeline module -- graphics pipeline creation,
  *          push constant layout, vertex input state, pipeline cache.
  *
- *          Phase 5: single pipeline with dynamic depth state (EDS1),
- *          no blending, no face culling.  Dynamic state: viewport,
- *          scissor, depth test enable, depth write enable, depth
- *          compare op.
- *
- *          Phase 5+ will add pipeline variants keyed on blend state
- *          (MoltenVK does not support EDS3 dynamic blend factors).
+ *          Phase 5.9: pipeline variant cache keyed on blend state.
+ *          MoltenVK does NOT support EDS3 dynamic blend factors, so
+ *          blend enable / blend factors / blend op are baked into
+ *          VkPipeline objects.  A small linear cache (typically 5-15
+ *          entries for real games) maps blend keys to pipelines.
+ *          Dynamic state: viewport, scissor, depth test enable,
+ *          depth write enable, depth compare op (via EDS1).
  *
  * Authors: skiretic
  *
@@ -92,6 +92,199 @@ vc_fill_vertex_input(VkVertexInputBindingDescription *binding,
     attrs[6].binding  = 0;
     attrs[6].format   = VK_FORMAT_R32_SFLOAT;
     attrs[6].offset   = offsetof(vc_vertex_t, fog);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Voodoo blend factor mapping                                                */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Map a Voodoo AFUNC blend factor enum to VkBlendFactor.
+ * `is_src` disambiguates AFUNC_A_COLOR / AFUNC_AOM_COLOR which are
+ * asymmetric: src side uses DST_COLOR, dst side uses SRC_COLOR.
+ *
+ * Voodoo AFUNC values (from vid_voodoo_regs.h):
+ *   0x0 = AZERO           -> ZERO
+ *   0x1 = ASRC_ALPHA      -> SRC_ALPHA
+ *   0x2 = A_COLOR         -> src: DST_COLOR / dst: SRC_COLOR
+ *   0x3 = ADST_ALPHA      -> DST_ALPHA
+ *   0x4 = AONE            -> ONE
+ *   0x5 = AOMSRC_ALPHA    -> ONE_MINUS_SRC_ALPHA
+ *   0x6 = AOM_COLOR       -> src: ONE_MINUS_DST_COLOR / dst: ONE_MINUS_SRC_COLOR
+ *   0x7 = AOMDST_ALPHA    -> ONE_MINUS_DST_ALPHA
+ *   0xF = ASATURATE (src) / ACOLORBEFOREFOG (dst) -> SRC_ALPHA_SATURATE / mapped below
+ */
+static VkBlendFactor
+vc_voodoo_blend_factor(uint32_t afunc, int is_src)
+{
+    switch (afunc) {
+        case 0x0: return VK_BLEND_FACTOR_ZERO;
+        case 0x1: return VK_BLEND_FACTOR_SRC_ALPHA;
+        case 0x2: return is_src ? VK_BLEND_FACTOR_DST_COLOR
+                                : VK_BLEND_FACTOR_SRC_COLOR;
+        case 0x3: return VK_BLEND_FACTOR_DST_ALPHA;
+        case 0x4: return VK_BLEND_FACTOR_ONE;
+        case 0x5: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        case 0x6: return is_src ? VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR
+                                : VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+        case 0x7: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+        case 0xF:
+            if (is_src)
+                return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
+            /* ACOLORBEFOREFOG (dst): use SRC1_COLOR if dual-source blend
+               is available; otherwise fall back to ONE. */
+            return VK_BLEND_FACTOR_ONE;
+        default:
+            return VK_BLEND_FACTOR_ZERO;
+    }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Blend key extraction                                                       */
+/* -------------------------------------------------------------------------- */
+
+vc_blend_key_t
+vc_blend_key_from_alpha_mode(uint32_t alphaMode)
+{
+    vc_blend_key_t key;
+    memset(&key, 0, sizeof(key));
+    key.blend_enable = (alphaMode >> 4) & 1;
+    key.src_rgb      = (alphaMode >> 8) & 0xF;
+    key.dst_rgb      = (alphaMode >> 12) & 0xF;
+    key.src_alpha    = (alphaMode >> 16) & 0xF;
+    key.dst_alpha    = (alphaMode >> 20) & 0xF;
+    return key;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Common pipeline creation helper                                            */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Create a VkPipeline with the given blend attachment state.
+ * Shares layout, cache, shaders, vertex input, dynamic state with `pl`.
+ * Returns VK_NULL_HANDLE on failure.
+ */
+static VkPipeline
+vc_create_pipeline_with_blend(vc_ctx_t *ctx, vc_pipeline_t *pl,
+                              const VkPipelineColorBlendAttachmentState *blend_att)
+{
+    VkResult result;
+
+    /* Shader stages. */
+    VkPipelineShaderStageCreateInfo stages[2];
+    memset(stages, 0, sizeof(stages));
+    stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = pl->saved_shaders.vert;
+    stages[0].pName  = "main";
+    stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = pl->saved_shaders.frag;
+    stages[1].pName  = "main";
+
+    /* Vertex input. */
+    VkVertexInputBindingDescription   binding;
+    VkVertexInputAttributeDescription attrs[VC_VERTEX_ATTRIB_COUNT];
+    vc_fill_vertex_input(&binding, attrs);
+
+    VkPipelineVertexInputStateCreateInfo vertex_input;
+    memset(&vertex_input, 0, sizeof(vertex_input));
+    vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertex_input.vertexBindingDescriptionCount   = 1;
+    vertex_input.pVertexBindingDescriptions      = &binding;
+    vertex_input.vertexAttributeDescriptionCount = VC_VERTEX_ATTRIB_COUNT;
+    vertex_input.pVertexAttributeDescriptions    = attrs;
+
+    /* Input assembly. */
+    VkPipelineInputAssemblyStateCreateInfo input_assembly;
+    memset(&input_assembly, 0, sizeof(input_assembly));
+    input_assembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    /* Viewport / scissor (dynamic). */
+    VkPipelineViewportStateCreateInfo viewport_state;
+    memset(&viewport_state, 0, sizeof(viewport_state));
+    viewport_state.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state.viewportCount = 1;
+    viewport_state.scissorCount  = 1;
+
+    /* Rasterization. */
+    VkPipelineRasterizationStateCreateInfo rast;
+    memset(&rast, 0, sizeof(rast));
+    rast.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rast.polygonMode = VK_POLYGON_MODE_FILL;
+    rast.cullMode    = VK_CULL_MODE_NONE;
+    rast.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rast.lineWidth   = 1.0f;
+
+    /* Multisample (disabled). */
+    VkPipelineMultisampleStateCreateInfo multisample;
+    memset(&multisample, 0, sizeof(multisample));
+    multisample.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    /* Depth/stencil (defaults; EDS1 overrides per-draw). */
+    VkPipelineDepthStencilStateCreateInfo depth_stencil;
+    memset(&depth_stencil, 0, sizeof(depth_stencil));
+    depth_stencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depth_stencil.depthTestEnable  = VK_TRUE;
+    depth_stencil.depthWriteEnable = VK_TRUE;
+    depth_stencil.depthCompareOp   = VK_COMPARE_OP_ALWAYS;
+
+    /* Color blend. */
+    VkPipelineColorBlendStateCreateInfo color_blend;
+    memset(&color_blend, 0, sizeof(color_blend));
+    color_blend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blend.attachmentCount = 1;
+    color_blend.pAttachments    = blend_att;
+
+    /* Dynamic state. */
+    VkDynamicState dynamic_states[5];
+    uint32_t       dynamic_count = 0;
+    dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_VIEWPORT;
+    dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_SCISSOR;
+    if (ctx->caps.has_extended_dynamic_state) {
+        dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_DEPTH_TEST_ENABLE;
+        dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_DEPTH_WRITE_ENABLE;
+        dynamic_states[dynamic_count++] = VK_DYNAMIC_STATE_DEPTH_COMPARE_OP;
+    }
+
+    VkPipelineDynamicStateCreateInfo dynamic_state;
+    memset(&dynamic_state, 0, sizeof(dynamic_state));
+    dynamic_state.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamic_state.dynamicStateCount = dynamic_count;
+    dynamic_state.pDynamicStates    = dynamic_states;
+
+    /* Graphics pipeline. */
+    VkGraphicsPipelineCreateInfo pipeline_ci;
+    memset(&pipeline_ci, 0, sizeof(pipeline_ci));
+    pipeline_ci.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    pipeline_ci.stageCount          = 2;
+    pipeline_ci.pStages             = stages;
+    pipeline_ci.pVertexInputState   = &vertex_input;
+    pipeline_ci.pInputAssemblyState = &input_assembly;
+    pipeline_ci.pViewportState      = &viewport_state;
+    pipeline_ci.pRasterizationState = &rast;
+    pipeline_ci.pMultisampleState   = &multisample;
+    pipeline_ci.pDepthStencilState  = &depth_stencil;
+    pipeline_ci.pColorBlendState    = &color_blend;
+    pipeline_ci.pDynamicState       = &dynamic_state;
+    pipeline_ci.layout              = pl->layout;
+    pipeline_ci.renderPass          = pl->saved_render_pass;
+    pipeline_ci.subpass             = 0;
+    pipeline_ci.basePipelineHandle  = VK_NULL_HANDLE;
+    pipeline_ci.basePipelineIndex   = -1;
+
+    VkPipeline pipe = VK_NULL_HANDLE;
+    result = vkCreateGraphicsPipelines(ctx->device, pl->cache, 1,
+                                       &pipeline_ci, NULL, &pipe);
+    if (result != VK_SUCCESS) {
+        VC_LOG("VideoCommon: vkCreateGraphicsPipelines (blend variant) failed (%d)\n", result);
+        return VK_NULL_HANDLE;
+    }
+
+    return pipe;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -324,8 +517,73 @@ vc_pipeline_create(vc_ctx_t *ctx, vc_pipeline_t *pl,
         return -1;
     }
 
+    /* Save creation params for spawning blend variants later. */
+    pl->saved_render_pass = render_pass;
+    pl->saved_desc_layout = desc_layout;
+    pl->saved_shaders     = *shaders;
+    pl->blend_pipeline_count = 0;
+    pl->bound_pipeline       = VK_NULL_HANDLE;
+
     VC_LOG("VideoCommon: graphics pipeline created\n");
     return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Blend pipeline variant lookup / creation                                   */
+/* -------------------------------------------------------------------------- */
+
+VkPipeline
+vc_pipeline_get_for_blend(vc_ctx_t *ctx, vc_pipeline_t *pl,
+                          uint32_t alphaMode)
+{
+    vc_blend_key_t key = vc_blend_key_from_alpha_mode(alphaMode);
+
+    /* No blending -> use the default pipeline (created without blend). */
+    if (!key.blend_enable)
+        return pl->pipeline;
+
+    /* Search existing cache. */
+    for (uint32_t i = 0; i < pl->blend_pipeline_count; i++) {
+        if (memcmp(&pl->blend_pipelines[i].key, &key, sizeof(key)) == 0)
+            return pl->blend_pipelines[i].pipeline;
+    }
+
+    /* Not found -- create a new variant. */
+    if (pl->blend_pipeline_count >= VC_MAX_BLEND_PIPELINES) {
+        VC_LOG("VideoCommon: blend pipeline cache full (%u entries), "
+               "falling back to no-blend pipeline\n",
+               VC_MAX_BLEND_PIPELINES);
+        return pl->pipeline;
+    }
+
+    VkPipelineColorBlendAttachmentState blend_att;
+    memset(&blend_att, 0, sizeof(blend_att));
+    blend_att.blendEnable         = VK_TRUE;
+    blend_att.srcColorBlendFactor = vc_voodoo_blend_factor(key.src_rgb, 1);
+    blend_att.dstColorBlendFactor = vc_voodoo_blend_factor(key.dst_rgb, 0);
+    blend_att.colorBlendOp        = VK_BLEND_OP_ADD;
+    blend_att.srcAlphaBlendFactor = vc_voodoo_blend_factor(key.src_alpha, 1);
+    blend_att.dstAlphaBlendFactor = vc_voodoo_blend_factor(key.dst_alpha, 0);
+    blend_att.alphaBlendOp        = VK_BLEND_OP_ADD;
+    blend_att.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT
+                                  | VK_COLOR_COMPONENT_G_BIT
+                                  | VK_COLOR_COMPONENT_B_BIT
+                                  | VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipeline pipe = vc_create_pipeline_with_blend(ctx, pl, &blend_att);
+    if (pipe == VK_NULL_HANDLE)
+        return pl->pipeline; /* Fallback to no-blend. */
+
+    /* Cache it. */
+    uint32_t idx = pl->blend_pipeline_count++;
+    pl->blend_pipelines[idx].key      = key;
+    pl->blend_pipelines[idx].pipeline = pipe;
+
+    VC_LOG("VideoCommon: blend pipeline variant #%u created "
+           "(src_rgb=%u dst_rgb=%u src_a=%u dst_a=%u)\n",
+           idx, key.src_rgb, key.dst_rgb, key.src_alpha, key.dst_alpha);
+
+    return pipe;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -337,6 +595,15 @@ vc_pipeline_destroy(vc_ctx_t *ctx, vc_pipeline_t *pl)
 {
     if (!pl)
         return;
+
+    /* Destroy blend variant pipelines. */
+    for (uint32_t i = 0; i < pl->blend_pipeline_count; i++) {
+        if (pl->blend_pipelines[i].pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(ctx->device, pl->blend_pipelines[i].pipeline, NULL);
+            pl->blend_pipelines[i].pipeline = VK_NULL_HANDLE;
+        }
+    }
+    pl->blend_pipeline_count = 0;
 
     if (pl->pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(ctx->device, pl->pipeline, NULL);
@@ -352,4 +619,6 @@ vc_pipeline_destroy(vc_ctx_t *ctx, vc_pipeline_t *pl)
         vkDestroyPipelineLayout(ctx->device, pl->layout, NULL);
         pl->layout = VK_NULL_HANDLE;
     }
+
+    pl->bound_pipeline = VK_NULL_HANDLE;
 }

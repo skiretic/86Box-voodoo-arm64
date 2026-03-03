@@ -467,10 +467,12 @@ vc_gpu_begin_frame(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st)
     scissor.extent.height = gpu_st->rp.fb[back_idx].height;
     vkCmdSetScissor(f->cmd_buf, 0, 1, &scissor);
 
-    /* Bind pipeline and vertex buffer. */
-    if (gpu_st->pipe.pipeline != VK_NULL_HANDLE)
+    /* Bind default pipeline (no blend) and vertex buffer. */
+    if (gpu_st->pipe.pipeline != VK_NULL_HANDLE) {
         vkCmdBindPipeline(f->cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           gpu_st->pipe.pipeline);
+        gpu_st->pipe.bound_pipeline = gpu_st->pipe.pipeline;
+    }
 
     if (gpu_st->batch.vertex_buffer != VK_NULL_HANDLE) {
         VkDeviceSize offset = 0;
@@ -558,6 +560,27 @@ vc_gpu_handle_triangle(vc_ctx_t *ctx, vc_gpu_state_t *gpu_st, const void *payloa
     vkCmdPushConstants(f->cmd_buf, gpu_st->pipe.layout,
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(vc_push_constants_t), pc);
+
+    /* Blend pipeline selection.
+     * Blend state is baked into VkPipeline objects (no EDS3 on MoltenVK).
+     * Look up or create the pipeline variant for this triangle's blend mode.
+     * Only rebind if the pipeline changed. */
+    {
+        VkPipeline blend_pipe = vc_pipeline_get_for_blend(ctx, &gpu_st->pipe,
+                                                          pc->alphaMode);
+        if (blend_pipe != gpu_st->pipe.bound_pipeline) {
+            vkCmdBindPipeline(f->cmd_buf, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              blend_pipe);
+            gpu_st->pipe.bound_pipeline = blend_pipe;
+
+            /* Re-bind vertex buffer after pipeline change. */
+            if (gpu_st->batch.vertex_buffer != VK_NULL_HANDLE) {
+                VkDeviceSize offset = 0;
+                vkCmdBindVertexBuffers(f->cmd_buf, 0, 1,
+                                       &gpu_st->batch.vertex_buffer, &offset);
+            }
+        }
+    }
 
     /* Dynamic depth state (EDS1).
      * fbzMode bit  4: depth test enable

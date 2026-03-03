@@ -88,13 +88,59 @@ _Static_assert(sizeof(vc_push_constants_t) == 64,
                "vc_push_constants_t must be 64 bytes");
 
 /* -------------------------------------------------------------------------- */
+/*  Blend pipeline key                                                         */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * Pipeline cache key for blend state variants.  Voodoo games typically use
+ * only 5-15 unique blend configs, so a small linear array suffices.
+ * The key is derived from alphaMode register bits:
+ *   bit 4:      blend enable
+ *   bits 11:8:  src RGB factor
+ *   bits 15:12: dst RGB factor
+ *   bits 19:16: src alpha factor
+ *   bits 23:20: dst alpha factor
+ */
+typedef struct vc_blend_key_t {
+    uint8_t blend_enable;
+    uint8_t src_rgb;          /* Voodoo AFUNC enum (0-0xF) */
+    uint8_t dst_rgb;          /* Voodoo AFUNC enum (0-0xF) */
+    uint8_t src_alpha;        /* Voodoo AFUNC enum (0-0xF) */
+    uint8_t dst_alpha;        /* Voodoo AFUNC enum (0-0xF) */
+    uint8_t pad[3];           /* Pad to 8 bytes for memcmp. */
+} vc_blend_key_t;
+
+_Static_assert(sizeof(vc_blend_key_t) == 8,
+               "vc_blend_key_t must be 8 bytes");
+
+/* Maximum number of cached blend pipeline variants. */
+#define VC_MAX_BLEND_PIPELINES 32
+
+typedef struct vc_blend_pipeline_entry_t {
+    vc_blend_key_t key;
+    VkPipeline     pipeline;
+} vc_blend_pipeline_entry_t;
+
+/* -------------------------------------------------------------------------- */
 /*  Pipeline state                                                             */
 /* -------------------------------------------------------------------------- */
 
 typedef struct vc_pipeline_t {
     VkPipelineLayout  layout;
     VkPipelineCache   cache;
-    VkPipeline        pipeline;   /* Phase 2: single pipeline (no blend) */
+    VkPipeline        pipeline;   /* Default pipeline (blend disabled). */
+
+    /* Blend pipeline variant cache (lazily populated). */
+    vc_blend_pipeline_entry_t blend_pipelines[VC_MAX_BLEND_PIPELINES];
+    uint32_t                  blend_pipeline_count;
+
+    /* Saved creation parameters for spawning blend variants. */
+    VkRenderPass          saved_render_pass;
+    VkDescriptorSetLayout saved_desc_layout;
+    vc_shaders_t          saved_shaders;
+
+    /* Currently bound pipeline (tracked to avoid redundant binds). */
+    VkPipeline            bound_pipeline;
 } vc_pipeline_t;
 
 /* Create the pipeline layout, pipeline cache, and default graphics pipeline.
@@ -107,7 +153,16 @@ int  vc_pipeline_create(vc_ctx_t *ctx, vc_pipeline_t *pl,
                         VkRenderPass render_pass,
                         VkDescriptorSetLayout desc_layout);
 
-/* Destroy the pipeline, layout, and cache. */
+/* Destroy the pipeline, layout, cache, and all blend variants. */
 void vc_pipeline_destroy(vc_ctx_t *ctx, vc_pipeline_t *pl);
+
+/* Look up or create a pipeline variant for the given blend state.
+   Extracts blend key from alphaMode register value.
+   Returns the VkPipeline to bind, or VK_NULL_HANDLE on failure. */
+VkPipeline vc_pipeline_get_for_blend(vc_ctx_t *ctx, vc_pipeline_t *pl,
+                                     uint32_t alphaMode);
+
+/* Extract a blend key from an alphaMode register value. */
+vc_blend_key_t vc_blend_key_from_alpha_mode(uint32_t alphaMode);
 
 #endif /* VIDEOCOMMON_PIPELINE_H */
