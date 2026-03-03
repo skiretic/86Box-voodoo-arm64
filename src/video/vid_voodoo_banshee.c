@@ -49,6 +49,7 @@
 #include <86box/vid_voodoo_regs.h>
 #include <86box/vid_voodoo_render.h>
 #include <86box/vid_voodoo_texture.h>
+#include <86box/videocommon.h>
 
 #define ROM_BANSHEE                 "roms/video/voodoo/Pci_sg.rom"
 #define ROM_CREATIVE_BANSHEE        "roms/video/voodoo/BlasterPCI.rom"
@@ -3507,6 +3508,12 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
     banshee->voodoo->cmd_status_2 = (1 << 28);
     voodoo_generate_filter_v1(banshee->voodoo);
 
+#ifdef USE_VIDEOCOMMON
+    banshee->voodoo->use_gpu_renderer = device_get_config_int("gpu_renderer");
+    if (banshee->voodoo->use_gpu_renderer)
+        vc_voodoo_init(banshee->voodoo);
+#endif
+
     banshee->vidSerialParallelPort = VIDSERIAL_DDC_DCK_W | VIDSERIAL_DDC_DDA_W;
 
     banshee->i2c     = i2c_gpio_init("i2c_voodoo_banshee");
@@ -3919,6 +3926,19 @@ static const device_config_t banshee_sgram_config[] = {
         .selection      = { { 0 } },
         .bios           = { { 0 } }
     },
+#ifdef USE_VIDEOCOMMON
+    {
+        .name           = "gpu_renderer",
+        .description    = "GPU Renderer (Vulkan)",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 0,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+#endif
     { .name = "", .description = "", .type = CONFIG_END }
 };
 
@@ -4007,6 +4027,19 @@ static const device_config_t banshee_sgram_16mbonly_config[] = {
         .selection      = { { 0 } },
         .bios           = { { 0 } }
     },
+#ifdef USE_VIDEOCOMMON
+    {
+        .name           = "gpu_renderer",
+        .description    = "GPU Renderer (Vulkan)",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 0,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+#endif
     { .name = "", .description = "", .type = CONFIG_END }
 };
 
@@ -4095,6 +4128,19 @@ static const device_config_t banshee_sdram_config[] = {
         .selection      = { { 0 } },
         .bios           = { { 0 } }
     },
+#ifdef USE_VIDEOCOMMON
+    {
+        .name           = "gpu_renderer",
+        .description    = "GPU Renderer (Vulkan)",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 0,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+#endif
     { .name = "", .description = "", .type = CONFIG_END }
 };
 // clang-format on
