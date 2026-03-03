@@ -115,7 +115,7 @@ vc_fill_vertex_input(VkVertexInputBindingDescription *binding,
  *   0xF = ASATURATE (src) / ACOLORBEFOREFOG (dst) -> SRC_ALPHA_SATURATE / mapped below
  */
 static VkBlendFactor
-vc_voodoo_blend_factor(uint32_t afunc, int is_src)
+vc_voodoo_blend_factor(uint32_t afunc, int is_src, int has_dual_src)
 {
     switch (afunc) {
         case 0x0: return VK_BLEND_FACTOR_ZERO;
@@ -132,8 +132,9 @@ vc_voodoo_blend_factor(uint32_t afunc, int is_src)
             if (is_src)
                 return VK_BLEND_FACTOR_SRC_ALPHA_SATURATE;
             /* ACOLORBEFOREFOG (dst): use SRC1_COLOR if dual-source blend
-               is available; otherwise fall back to ONE. */
-            return VK_BLEND_FACTOR_ONE;
+               is available; otherwise fall back to SRC_COLOR. */
+            return has_dual_src ? VK_BLEND_FACTOR_SRC1_COLOR
+                                : VK_BLEND_FACTOR_SRC_COLOR;
         default:
             return VK_BLEND_FACTOR_ZERO;
     }
@@ -560,11 +561,12 @@ vc_pipeline_get_for_blend(vc_ctx_t *ctx, vc_pipeline_t *pl,
     VkPipelineColorBlendAttachmentState blend_att;
     memset(&blend_att, 0, sizeof(blend_att));
     blend_att.blendEnable         = VK_TRUE;
-    blend_att.srcColorBlendFactor = vc_voodoo_blend_factor(key.src_rgb, 1);
-    blend_att.dstColorBlendFactor = vc_voodoo_blend_factor(key.dst_rgb, 0);
+    const int dual_src = ctx->caps.has_dual_src_blend;
+    blend_att.srcColorBlendFactor = vc_voodoo_blend_factor(key.src_rgb, 1, dual_src);
+    blend_att.dstColorBlendFactor = vc_voodoo_blend_factor(key.dst_rgb, 0, dual_src);
     blend_att.colorBlendOp        = VK_BLEND_OP_ADD;
-    blend_att.srcAlphaBlendFactor = vc_voodoo_blend_factor(key.src_alpha, 1);
-    blend_att.dstAlphaBlendFactor = vc_voodoo_blend_factor(key.dst_alpha, 0);
+    blend_att.srcAlphaBlendFactor = vc_voodoo_blend_factor(key.src_alpha, 1, dual_src);
+    blend_att.dstAlphaBlendFactor = vc_voodoo_blend_factor(key.dst_alpha, 0, dual_src);
     blend_att.alphaBlendOp        = VK_BLEND_OP_ADD;
     blend_att.colorWriteMask      = VK_COLOR_COMPONENT_R_BIT
                                   | VK_COLOR_COMPONENT_G_BIT
