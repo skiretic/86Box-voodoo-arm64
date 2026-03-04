@@ -22,6 +22,9 @@
 #        include <sys/mman.h>
 #        include <unistd.h>
 #    endif
+#    if defined(__APPLE__)
+#        include <pthread.h>
+#    endif
 #    if defined WIN32 || defined _WIN32 || defined _WIN32
 #        include <windows.h>
 #    endif
@@ -48,27 +51,27 @@ void *codegen_gpf_rout;
 void *codegen_exit_rout;
 
 host_reg_def_t codegen_host_reg_list[CODEGEN_HOST_REGS] = {
-    { REG_X19, 0},
-    { REG_X20, 0},
-    { REG_X21, 0},
-    { REG_X22, 0},
-    { REG_X23, 0},
-    { REG_X24, 0},
-    { REG_X25, 0},
-    { REG_X26, 0},
-    { REG_X27, 0},
-    { REG_X28, 0}
+    { REG_X19, 0 },
+    { REG_X20, 0 },
+    { REG_X21, 0 },
+    { REG_X22, 0 },
+    { REG_X23, 0 },
+    { REG_X24, 0 },
+    { REG_X25, 0 },
+    { REG_X26, 0 },
+    { REG_X27, 0 },
+    { REG_X28, 0 }
 };
 
 host_reg_def_t codegen_host_fp_reg_list[CODEGEN_HOST_FP_REGS] = {
-    { REG_V8,  0},
-    { REG_V9,  0},
-    { REG_V10, 0},
-    { REG_V11, 0},
-    { REG_V12, 0},
-    { REG_V13, 0},
-    { REG_V14, 0},
-    { REG_V15, 0}
+    { REG_V8,  0 },
+    { REG_V9,  0 },
+    { REG_V10, 0 },
+    { REG_V11, 0 },
+    { REG_V12, 0 },
+    { REG_V13, 0 },
+    { REG_V14, 0 },
+    { REG_V15, 0 }
 };
 
 static void
@@ -364,6 +367,10 @@ codegen_backend_prologue(codeblock_t *block)
 
     host_arm64_MOVX_IMM(block, REG_CPUSTATE, (uint64_t) &cpu_state);
 
+    /* Record entry point past prologue for block linking.
+       Linked blocks jump here, skipping the STP/MOVX_IMM prologue. */
+    block->link_entry_offset = (uint16_t) ((uint8_t *) &block_write_data[block_pos] - block->data);
+
     if (block->flags & CODEBLOCK_HAS_FPU) {
         host_arm64_LDR_IMM_W(block, REG_TEMP, REG_CPUSTATE, (uintptr_t) &cpu_state.TOP - (uintptr_t) &cpu_state);
         host_arm64_SUB_IMM(block, REG_TEMP, REG_TEMP, block->TOP);
@@ -374,6 +381,44 @@ codegen_backend_prologue(codeblock_t *block)
 void
 codegen_backend_epilogue(codeblock_t *block)
 {
+    /* Cycle-guarded exit stub for block linking (5 instructions, 20 bytes).
+       When unlinked, the patchable B falls through to the LDP epilogue.
+       When linked, the patchable B jumps to the target block's link_entry_offset. */
+    int64_t exit_rout_offset = (int64_t) codegen_exit_rout - (int64_t) &block_write_data[block_pos + 12];
+    if (exit_rout_offset >= -(128 * 1024 * 1024) && exit_rout_offset < (128 * 1024 * 1024)) {
+        /* Record epilogue fall-through exit PC for block linking. */
+        if (block->_pending_exit_pc != BLOCK_PC_INVALID) {
+            if (block->exit_count < BLOCK_EXIT_MAX)
+                block->exit_pc[block->exit_count] = block->_pending_exit_pc;
+            block->_pending_exit_pc = BLOCK_PC_INVALID;
+        }
+
+        /* 1. LDR W16, [X29, #_cycles_offset] */
+        host_arm64_LDR_IMM_W(block, REG_TEMP, REG_CPUSTATE, (uintptr_t) &cpu_state._cycles - (uintptr_t) &cpu_state);
+        /* 2. CMP W16, #0 */
+        host_arm64_CMP_IMM(block, REG_TEMP, 0);
+        /* 3. B.GT +8 — skip bail if cycles > 0 (raw encoding) */
+        *(uint32_t *) &block_write_data[block_pos] = 0x5400004c;
+        block_pos += 4;
+        /* 4. B codegen_exit_rout (bail — unconditional) */
+        host_arm64_B(block, codegen_exit_rout);
+        /* 5. Patchable B — initially B +4 (falls through to epilogue LDPs) */
+        if (block->exit_count < BLOCK_EXIT_MAX) {
+            int      exit_idx      = block->exit_count;
+            uint32_t original_insn = 0x14000001; /* B +4: skip to next instruction */
+
+            block->exit_patch_offset[exit_idx]         = (uint32_t) ((uint8_t *) &block_write_data[block_pos] - block->data);
+            block->exit_original_insn[exit_idx]        = original_insn;
+            *(uint32_t *) &block_write_data[block_pos] = original_insn;
+            block_pos += 4;
+            block->exit_count++;
+        } else {
+            /* No room — just fall through */
+            *(uint32_t *) &block_write_data[block_pos] = 0x14000001; /* B +4 */
+            block_pos += 4;
+        }
+    }
+
     host_arm64_LDP_POSTIDX_X(block, REG_X19, REG_X20, REG_XSP, 64);
     host_arm64_LDP_POSTIDX_X(block, REG_X21, REG_X22, REG_XSP, 16);
     host_arm64_LDP_POSTIDX_X(block, REG_X23, REG_X24, REG_XSP, 16);
@@ -387,6 +432,54 @@ codegen_backend_epilogue(codeblock_t *block)
     host_arm64_RET(block, REG_X30);
 
     codegen_allocator_clean_blocks(block->head_mem_block, block_pos);
+}
+
+void
+codegen_backend_patch_link(codeblock_t *source, int exit_idx, codeblock_t *target)
+{
+    uint32_t *patch_addr  = (uint32_t *) (source->data + source->exit_patch_offset[exit_idx]);
+    uint32_t *target_addr = (uint32_t *) (target->data + target->link_entry_offset);
+    ptrdiff_t offset      = (uintptr_t) target_addr - (uintptr_t) patch_addr;
+
+    /* Range check for B instruction (+/-128MB) */
+    if (offset < -(128 * 1024 * 1024) || offset >= (128 * 1024 * 1024))
+        return;
+
+    uint32_t new_insn = 0x14000000 | (((uint32_t) (offset >> 2)) & 0x03ffffff);
+
+#    if defined(__APPLE__) && defined(__aarch64__)
+    if (__builtin_available(macOS 11.0, *))
+        pthread_jit_write_protect_np(0);
+#    endif
+
+    *patch_addr = new_insn;
+
+#    if defined(__APPLE__) && defined(__aarch64__)
+    if (__builtin_available(macOS 11.0, *))
+        pthread_jit_write_protect_np(1);
+#    endif
+
+    __clear_cache((char *) patch_addr, (char *) (patch_addr + 1));
+}
+
+void
+codegen_backend_unpatch_link(codeblock_t *source, int exit_idx)
+{
+    uint32_t *patch_addr = (uint32_t *) (source->data + source->exit_patch_offset[exit_idx]);
+
+#    if defined(__APPLE__) && defined(__aarch64__)
+    if (__builtin_available(macOS 11.0, *))
+        pthread_jit_write_protect_np(0);
+#    endif
+
+    *patch_addr = source->exit_original_insn[exit_idx];
+
+#    if defined(__APPLE__) && defined(__aarch64__)
+    if (__builtin_available(macOS 11.0, *))
+        pthread_jit_write_protect_np(1);
+#    endif
+
+    __clear_cache((char *) patch_addr, (char *) (patch_addr + 1));
 }
 
 #endif
