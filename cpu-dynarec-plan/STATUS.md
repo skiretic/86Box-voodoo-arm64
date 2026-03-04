@@ -1,6 +1,6 @@
 # Status
 
-## Current Phase: 1 — Bug Fixes & Quick Wins (COMPLETE)
+## Current Phase: 3 — Dead Flag Elimination (IN PROGRESS)
 
 ## Phase 1 Progress
 
@@ -90,9 +90,59 @@
 3. `87c56036d` — Add Phase 1 quick-win instruction handlers (LAHF/SAHF/BSWAP/EMMS/FPU constants/FLDCW/SETcc)
 4. `07fd7fd0a` — Revert is_a16 fix: backend applies 16-bit mask after segment base
 
+## Phase 3 Progress — Dead Flag Elimination
+
+### Implementation (COMPLETE)
+
+| Task | Status | Commit | Description |
+|------|--------|--------|-------------|
+| Analysis (Task #1) | DONE | — | Analyzed all flag producers/consumers, understood existing DCE |
+| Backward liveness pass (Task #2) | DONE | 693af2e27 | `codegen_ir_eliminate_dead_flags()` in codegen_ir.c |
+| Backend updates (Task #3) | NOT NEEDED | — | Existing `UOP_INVALID` skip handles eliminated UOPs |
+| clang-format | DONE | 7b8609839 | Minor formatting fixes |
+
+### Design Summary
+
+- Backward walk over UOP stream, tracking 4-bit flag liveness mask
+- All 4 flag registers treated as a group (all must be overwritten to kill)
+- Dead flag versions have REG_FLAGS_REQUIRED cleared and added to dead list
+- Existing `codegen_reg_process_dead_list()` cascades to eliminate source operands
+- Conservative: BARRIER + ORDER_BARRIER make all flags live
+- Fires for consecutive register-only ALU instructions without memory access between them
+
+### Key Analysis Findings
+
+1. **Flag producers**: Every flag-setting instruction writes all 4 registers (flags_op, flags_res, flags_op1, flags_op2)
+2. **Flag consumers**:
+   - Branch handlers (codegen_ops_branch.c): read flags_res/op1/op2 via IR, or CALL_FUNC (BARRIER)
+   - LAHF/SAHF/PUSHF: use CALL_FUNC (BARRIER) with flags_rebuild/flags_rebuild_c
+   - SETcc: use CALL_FUNC_RESULT (BARRIER)
+   - INC/DEC: call flags_rebuild_c (BARRIER) then overwrite all 4 flags
+3. **Existing DCE**: Already eliminates per-register dead versions between barriers, but dirty_ir_regs mechanism marks intermediate versions as REQUIRED at barrier points
+4. **New pass**: Clears REQUIRED on intermediate flag versions proven dead by backward analysis
+5. **No backend changes needed**: Dead UOPs set to UOP_INVALID by existing process_dead_list, skipped in compile loop
+
+### Optimization Scope
+
+The pass eliminates flag writes between consecutive flag-setting instructions that have NO intervening:
+- BARRIER (CALL_FUNC, FP_ENTER, etc.)
+- ORDER_BARRIER (memory loads/stores, jumps)
+- Flag register reads (branch tests, MOVZX of flag values)
+
+Common patterns that benefit:
+- `ADD EAX, EBX` / `SUB ECX, EDX` (consecutive register ALU)
+- `ADD EAX, EBX` / `MOV ECX, EDX` / `XOR ESI, ESI` (ALU with non-barrier MOV gap)
+- `TEST EAX, EAX` / `CMP ECX, 0` (redundant flag sets)
+
+### Future Enhancements
+
+- **Relaxed ORDER_BARRIER handling**: Could skip ORDER_BARRIERs within the same x86 instruction (flag writes come after memory ops), but requires proving fault recovery correctness
+- **Per-flag-component analysis**: Track individual flag bits (CF, ZF, SF, OF) instead of the 4 lazy-eval registers for finer granularity
+- **Cross-block analysis**: Extend liveness to block successors (requires block linking first)
+
 ## Next Phase
 
-Phase 1 is COMPLETE. Next recommended phases (from PHASES.md):
-- **Phase 3**: Dead flag elimination — Kildall's backward liveness analysis (10-30% gain)
+Phase 3 dead flag elimination core is COMPLETE. Next recommended phases:
 - **Phase 4**: Block linking — direct jump patching between blocks (15-30% gain)
 - **Phase 2**: More instruction coverage — IMUL, DIV, CMOVcc, BT/BS*, RCL/RCR, SHLD/SHRD
+- **Phase 3b**: Relaxed ORDER_BARRIER handling within same x86 instruction
