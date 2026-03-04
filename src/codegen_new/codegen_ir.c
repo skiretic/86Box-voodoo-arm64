@@ -22,6 +22,10 @@ codegen_ir_init(void)
 {
     ir_block.wr_pos = 0;
 
+    ir_block.exit_pc[0] = 0xffffffff;
+    ir_block.exit_pc[1] = 0xffffffff;
+    ir_block.exit_count = 0;
+
     codegen_unroll_count = 0;
 
     return &ir_block;
@@ -213,6 +217,68 @@ codegen_ir_eliminate_dead_flags(ir_data_t *ir)
             }
         }
     }
+}
+
+/*Extract exit PCs from the UOP stream for block linking.
+  Scans backward looking for uop_MOV_IMM(IREG_pc, addr) + uop_JMP(codegen_exit_rout)
+  patterns. The last such pair in the stream is the primary exit (exit_pc[1] for
+  conditional branches). exit_pc[0] is set by codegen_generate_call when the handler
+  returns a non-zero/non-(-1) value.
+
+  This sets ir->exit_pc[1] and adjusts ir->exit_count. exit_pc[0] must already
+  be set by the caller (codegen_generate_call or codegen_block_end_recompile).*/
+void
+codegen_ir_extract_exit_pcs(ir_data_t *ir)
+{
+    int found_exit_count = 0;
+
+    /*Walk backward through UOPs looking for exit stubs.
+      Pattern: uop_MOV_IMM(IREG_pc, addr) followed by uop_JMP(codegen_exit_rout).
+      We only need the last two distinct exit PCs.*/
+    for (int c = ir->wr_pos - 1; c >= 1; c--) {
+        uop_t *uop = &ir->uops[c];
+
+        if ((uop->type & UOP_MASK) != (UOP_JMP & UOP_MASK))
+            continue;
+        if (uop->p != codegen_exit_rout)
+            continue;
+
+        /*Found a uop_JMP(codegen_exit_rout). Look backward for the
+          preceding uop_MOV_IMM that writes IREG_pc.*/
+        for (int j = c - 1; j >= 0 && j >= c - 8; j--) {
+            uop_t *prev = &ir->uops[j];
+
+            if ((prev->type & UOP_MASK) != (UOP_MOV_IMM & UOP_MASK))
+                continue;
+            if (IREG_GET_REG(prev->dest_reg_a.reg) != IREG_pc)
+                continue;
+
+            /*Found the exit PC. Record it.*/
+            uint32_t exit_addr = (uint32_t) prev->imm_data;
+
+            /*Skip if this is the same as exit_pc[0] (fall-through).*/
+            if (exit_addr == ir->exit_pc[0])
+                break;
+
+            /*Record as exit_pc[1] (branch-taken exit).*/
+            if (found_exit_count == 0 && ir->exit_pc[1] == BLOCK_PC_INVALID) {
+                ir->exit_pc[1] = exit_addr;
+                found_exit_count++;
+            }
+            break;
+        }
+
+        /*We only need one branch-taken exit for now.*/
+        if (found_exit_count >= 1)
+            break;
+    }
+
+    /*Update exit_count based on what we found.*/
+    ir->exit_count = 0;
+    if (ir->exit_pc[0] != BLOCK_PC_INVALID)
+        ir->exit_count++;
+    if (ir->exit_pc[1] != BLOCK_PC_INVALID)
+        ir->exit_count = 2;
 }
 
 void

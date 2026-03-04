@@ -787,6 +787,20 @@ codegen_block_end_recompile(codeblock_t *block)
         block->flags &= ~CODEBLOCK_STATIC_TOP;
 
     codegen_accumulate_flush(ir_data);
+
+    /*Extract exit PCs from the UOP stream for block linking.
+      If exit_pc[0] was not set by codegen_generate_call (e.g. the block
+      ended at max instruction count without a branch), set it to the
+      sequential fall-through address.*/
+    if (ir_data->exit_pc[0] == BLOCK_PC_INVALID)
+        ir_data->exit_pc[0] = cs + cpu_state.pc;
+    codegen_ir_extract_exit_pcs(ir_data);
+
+    /*Copy exit PCs from ir_data to the block for use by the dispatcher.*/
+    block->exit_pc[0] = ir_data->exit_pc[0];
+    block->exit_pc[1] = ir_data->exit_pc[1];
+    block->exit_count = ir_data->exit_count;
+
     codegen_ir_compile(ir_data, block);
 }
 

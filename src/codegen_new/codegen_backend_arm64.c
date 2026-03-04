@@ -341,20 +341,37 @@ codegen_backend_init(void)
 void
 codegen_backend_patch_link(codeblock_t *source_block, uint32_t patch_offset, codeblock_t *target_block)
 {
-    /*TODO: patch exit stub at source_block->data[patch_offset] to jump
-      directly to target_block->data[BLOCK_START].*/
-    (void) source_block;
-    (void) patch_offset;
-    (void) target_block;
+    uint8_t *patch_addr  = &source_block->data[patch_offset];
+    uint8_t *target_addr = &target_block->data[target_block->link_entry_offset];
+    int64_t  offset      = (int64_t) (target_addr - patch_addr);
+
+    /*Verify the branch offset fits in a 26-bit signed field (+-128MB).*/
+    if (!in_range_b26((int) offset))
+        return;
+
+    /*Encode and write the ARM64 B instruction.
+      B encoding: 0x14000000 | (imm26 & 0x03ffffff), where imm26 = offset >> 2.*/
+    *(uint32_t *) patch_addr = 0x14000000 | (((uint32_t) (offset >> 2)) & 0x03ffffff);
+
+    /*Flush the I-cache for the patched instruction.*/
+    __clear_cache((char *) patch_addr, (char *) patch_addr + 4);
 }
 
 void
 codegen_backend_unpatch_link(codeblock_t *source_block, uint32_t patch_offset)
 {
-    /*TODO: revert exit stub at source_block->data[patch_offset] back to
-      the dispatcher-returning sequence.*/
-    (void) source_block;
-    (void) patch_offset;
+    uint8_t *patch_addr = &source_block->data[patch_offset];
+    int64_t  offset     = (int64_t) ((uint8_t *) codegen_exit_rout - patch_addr);
+
+    /*Revert the exit stub to branch to codegen_exit_rout
+      (the shared register-restore + RET sequence).*/
+    if (!in_range_b26((int) offset))
+        return;
+
+    *(uint32_t *) patch_addr = 0x14000000 | (((uint32_t) (offset >> 2)) & 0x03ffffff);
+
+    /*Flush the I-cache for the restored instruction.*/
+    __clear_cache((char *) patch_addr, (char *) patch_addr + 4);
 }
 
 void
@@ -396,6 +413,19 @@ codegen_backend_prologue(codeblock_t *block)
 void
 codegen_backend_epilogue(codeblock_t *block)
 {
+    /*Emit a patchable fall-through exit stub. In unlinked state this
+      branches to the very next instruction (the register-restore
+      sequence), so it's effectively a NOP. When linked, block linking
+      patches it to jump directly to the next block's entry point.
+      Encoding: B #4 = 0x14000001 (imm26=1, offset=+4 bytes).*/
+    if (block->exit_count < BLOCK_EXIT_MAX) {
+        codegen_alloc(block, 4);
+        block->exit_patch_offset[block->exit_count] = (uint32_t) block_pos;
+        block->exit_count++;
+        *(uint32_t *) &block_write_data[block_pos] = 0x14000001;
+        block_pos += 4;
+    }
+
     host_arm64_LDP_POSTIDX_X(block, REG_X19, REG_X20, REG_XSP, 64);
     host_arm64_LDP_POSTIDX_X(block, REG_X21, REG_X22, REG_XSP, 16);
     host_arm64_LDP_POSTIDX_X(block, REG_X23, REG_X24, REG_XSP, 16);
