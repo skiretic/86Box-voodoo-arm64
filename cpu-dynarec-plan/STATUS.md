@@ -140,9 +140,52 @@ Common patterns that benefit:
 - **Per-flag-component analysis**: Track individual flag bits (CF, ZF, SF, OF) instead of the 4 lazy-eval registers for finer granularity
 - **Cross-block analysis**: Extend liveness to block successors (requires block linking first)
 
+## Phase 4 — Block Linking (REVERTED)
+
+### Attempt Summary
+
+8 commits implemented lazy block linking (387a88199..5919b02b5), then reverted in 4d5fbbb42.
+The code is preserved in git history for reference.
+
+### Root Causes of Failure
+
+Three bugs were identified during testing:
+
+1. **W^X violation (SIGBUS)**: `codegen_backend_patch_link` and `codegen_backend_unpatch_link`
+   write to JIT code pages without calling `pthread_jit_write_protect_np(0)` first. On macOS
+   ARM64, JIT pages are executable-not-writable at runtime. Fix: wrap writes in W^X toggles.
+
+2. **No cycle guard in linked chains (hang)**: Linked blocks jump directly A→B→A→B without
+   returning to the dispatcher. No JIT block checks `cycles <= 0` — that check only exists
+   in the C dispatcher loop. Fix: add a cycle-check sequence before each patchable exit stub:
+   ```
+   LDR  W16, [CPUSTATE, #_cycles]
+   CMP  W16, #0
+   B.GT +8            ; short forward skip (always in range)
+   B    codegen_exit_rout  ; bail if cycles exhausted
+   B    target_or_exit     ; <-- patchable instruction
+   ```
+
+3. **`host_arm64_branch_set_offset` encoding bug**: This function uses `OFFSET26` (bits [25:0])
+   but `B.cond` instructions use `OFFSET19` (bits [23:5]). Using `branch_set_offset` on a
+   conditional branch to a far target corrupts the instruction encoding. Fix: never use
+   `branch_set_offset` on conditional branches to far targets — use `B.GT +8` (fixed short
+   offset) + unconditional `B` (which uses OFFSET26 correctly).
+
+### Lessons for Next Attempt
+
+- Test W^X compliance immediately — any write to JIT code outside recompilation needs guards
+- Block linking MUST include cycle guards to prevent infinite chains
+- ARM64 conditional branches (B.cond) have ±1MB range (19-bit), unconditional B has ±128MB (26-bit)
+- `host_arm64_branch_set_offset` is ONLY safe for unconditional B instructions
+- The `link_entry_offset` (skip prologue) design is correct — linked blocks share the caller's stack frame
+- FPU blocks need special handling: linking from non-FPU to FPU block skips TOP initialization
+- The research doc and core design are sound; only the ARM64 implementation had bugs
+
 ## Next Phase
 
-Phase 3 dead flag elimination core is COMPLETE. Next recommended phases:
-- **Phase 4**: Block linking — direct jump patching between blocks (15-30% gain)
+Phase 3 dead flag elimination is COMPLETE. Phase 4 block linking was attempted and reverted.
+Next recommended phases:
+- **Phase 4 (retry)**: Block linking with W^X guards + cycle checks + correct B.cond encoding
 - **Phase 2**: More instruction coverage — IMUL, DIV, CMOVcc, BT/BS*, RCL/RCR, SHLD/SHRD
 - **Phase 3b**: Relaxed ORDER_BARRIER handling within same x86 instruction
