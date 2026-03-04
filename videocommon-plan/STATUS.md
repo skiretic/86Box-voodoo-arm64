@@ -6,13 +6,17 @@
 
 ---
 
-## Current Status: Phase 6 IN PROGRESS — Fog Complete, TMU1 Next
+## Current Status: Phase 6 IN PROGRESS — Banshee Status Busy Spin (Last Blocker)
 
-Phase 6 fog implementation complete (327068f57, eae24c4a8). Full Voodoo fog pipeline: fog table upload (64-entry R8G8_UNORM texture), all fog modes (table W-depth, FOG_Z, FOG_ALPHA, FOG_W, FOG_CONSTANT), FOG_ADD/FOG_MULT modifiers, dual-source blending for ACOLORBEFOREFOG. Stipple test and dither also added. W-depth computation uses pure 32-bit GLSL (no double/int64). Verified working with 3DMark99 — fogMode=0x59 (FOG_W) produces fog_a=0 for near geometry, matching SW renderer.
+Phase 6 features done: fog, TMU1, fastfill. Voodoo 3/Banshee bring-up: 4/5 blockers fixed.
 
-**Next**: TMU1 multi-texture (6.1), then fastfill (6.7).
+**Remaining blocker**: `banshee_status()` reports busy due to `cmdfifo_depth_rd != cmdfifo_depth_wr` race. Guest spins on status register. Immediate wake fix (97d64568a) eliminated livelock but creates thundering herd on condition variable mutex. Need smarter approach — likely mask depth imbalance from busy calc when VK active.
 
-**Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing order: Voodoo 2 first, then Voodoo 3/Banshee.
+**Fixed this session**: MoltenVK ICD auto-probe (ccdc96a84), CMDFIFO rp wrap (d9bd6e281), Banshee readback-to-SVGA (d6a868b51), VCRenderer blocked for Banshee (868a92f6c), status livelock partial fix (97d64568a).
+
+**Next**: Fix busy spin, then re-test V3 + V2 with real Vulkan rendering.
+
+**Target hardware**: All Voodoo cards (V1, V2, Banshee, V3). Testing on Voodoo 3 primarily.
 
 ---
 
@@ -24,7 +28,7 @@ Phase 2: Basic Rendering     [XXXXXXXXXX] 100% COMPLETE
 Phase 3: Display             [XXXXXXXXXX] 100% COMPLETE
 Phase 4: Textures            [XXXXXXXXXX] 100% COMPLETE
 Phase 5: Core Pipeline       [XXXXXXXXXX] 100% COMPLETE (validation clean)
-Phase 6: Advanced Features   [XXX.......] 30%  Fog done, TMU1 next
+Phase 6: Advanced Features   [XXXXX.....] 50%  Fog+TMU1+fastfill done, V3 blockers
 Phase 7: LFB Access          [XX........] 20%  Readback hack in place
 Phase 8: Polish              [..........] 0%   BLOCKED (All)
 ──────────────────────────────────────────────
