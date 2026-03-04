@@ -5,6 +5,7 @@
 #    include <86box/86box.h>
 #    include "cpu.h"
 #    include <86box/mem.h>
+#    include <86box/plat_unused.h>
 
 #    include "codegen.h"
 #    include "codegen_allocator.h"
@@ -426,6 +427,11 @@ codegen_backend_epilogue(codeblock_t *block)
             codegen_addlong(block, (uint32_t) diff);
         }
     }
+
+    /*Record the epilogue offset past the patchable stub. This is the
+      actual register-restore + RET sequence. Kept for diagnostics;
+      unpatching uses codegen_exit_rout directly.*/
+    block->link_epilogue_offset = (uint16_t) block_pos;
 
 #    ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);

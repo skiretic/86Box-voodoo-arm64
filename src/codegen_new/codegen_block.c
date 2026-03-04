@@ -863,13 +863,13 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
 
     /*Try hash lookup first, then tree lookup.*/
     target = &codeblock[codeblock_hash[HASH(target_phys)]];
-    if (target->pc != target_pc || target->_cs != (target_pc - (target_pc & 0xfff)) /* wrong cs */) {
-        target = codeblock_tree_find(target_phys, target_pc & 0xfffff000);
+    if (target->pc != target_pc || target->_cs != cs) {
+        target = codeblock_tree_find(target_phys, cs);
         if (!target)
             return;
     }
 
-    /*Target must match exactly and be compiled.*/
+    /*Target must match exactly and be compiled with same CPU mode.*/
     if (target->pc != target_pc)
         return;
     if (target->phys != target_phys)
@@ -877,6 +877,10 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     if (!(target->flags & CODEBLOCK_WAS_RECOMPILED))
         return;
     if (target->pc == BLOCK_PC_INVALID)
+        return;
+    if ((target->status ^ cpu_cur_status) & CPU_STATUS_FLAGS)
+        return;
+    if ((target->status & cpu_cur_status & CPU_STATUS_MASK) != (cpu_cur_status & CPU_STATUS_MASK))
         return;
 
     /*Don't link to self.*/
