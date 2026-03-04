@@ -1876,7 +1876,7 @@ codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
     if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
         /*TODO: This could be improved (use VRSQRTE/VRSQRTS)*/
         host_arm64_FSQRT_S(block, REG_V_TEMP, src_reg_a);
-        host_arm64_FMOV_S_ONE(block, REG_V_TEMP);
+        host_arm64_FMOV_S_ONE(block, dest_reg);
         host_arm64_FDIV_S(block, dest_reg, dest_reg, REG_V_TEMP);
         host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);
     } else

@@ -73,8 +73,10 @@
 #    define OPCODE_LDR_IMM_F64        (0x3f5 << 22)
 #    define OPCODE_LDRB_IMM_W         (0x0e5 << 22)
 #    define OPCODE_LDRH_IMM           (0x1e5 << 22)
+#    define OPCODE_LDP_POSTIDX_D      (0x1b3 << 22)
 #    define OPCODE_LDP_POSTIDX_X      (0x2a3 << 22)
 #    define OPCODE_SBFX               (0x04c << 22)
+#    define OPCODE_STP_PREIDX_D       (0x1b6 << 22)
 #    define OPCODE_STP_PREIDX_X       (0x2a6 << 22)
 #    define OPCODE_STR_IMM_W          (0x2e4 << 22)
 #    define OPCODE_STR_IMM_Q          (0x3e4 << 22)
@@ -945,6 +947,13 @@ host_arm64_FSQRT_S(codeblock_t *block, int dst_reg, int src_reg)
 }
 
 void
+host_arm64_LDP_POSTIDX_D(codeblock_t *block, int src_reg1, int src_reg2, int base_reg, int offset)
+{
+    if (!in_range7_x(offset))
+        fatal("host_arm64_LDP_POSTIDX_D out of range7 %i\n", offset);
+    codegen_addlong(block, OPCODE_LDP_POSTIDX_D | IMM7_X(offset) | Rn(base_reg) | Rt(src_reg1) | Rt2(src_reg2));
+}
+void
 host_arm64_LDP_POSTIDX_X(codeblock_t *block, int src_reg1, int src_reg2, int base_reg, int offset)
 {
     if (!in_range7_x(offset))
@@ -1288,6 +1297,13 @@ host_arm64_SSHR_V2D(codeblock_t *block, int dst_reg, int src_n_reg, int shift)
     codegen_addlong(block, OPCODE_SSHR_VQ | Rd(dst_reg) | Rn(src_n_reg) | SHIFT_IMM_V2D(64 - shift));
 }
 
+void
+host_arm64_STP_PREIDX_D(codeblock_t *block, int src_reg1, int src_reg2, int base_reg, int offset)
+{
+    if (!in_range7_x(offset))
+        fatal("host_arm64_STP_PREIDX_D out of range7 %i\n", offset);
+    codegen_addlong(block, OPCODE_STP_PREIDX_D | IMM7_X(offset) | Rn(base_reg) | Rt(src_reg1) | Rt2(src_reg2));
+}
 void
 host_arm64_STP_PREIDX_X(codeblock_t *block, int src_reg1, int src_reg2, int base_reg, int offset)
 {

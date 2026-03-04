@@ -321,11 +321,15 @@ codegen_backend_init(void)
     host_arm64_LDP_POSTIDX_X(block, REG_X25, REG_X26, REG_XSP, 16);
     host_arm64_LDP_POSTIDX_X(block, REG_X27, REG_X28, REG_XSP, 16);
     host_arm64_LDP_POSTIDX_X(block, REG_X29, REG_X30, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V8, REG_V9, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V10, REG_V11, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V12, REG_V13, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V14, REG_V15, REG_XSP, 16);
     host_arm64_RET(block, REG_X30);
 
     block_write_data = NULL;
 
-    codegen_allocator_clean_blocks(block->head_mem_block);
+    codegen_allocator_clean_blocks(block->head_mem_block, block_pos);
 
     asm("mrs %0, fpcr\n"
         : "=r"(cpu_state.old_fp_control));
@@ -347,6 +351,10 @@ codegen_backend_prologue(codeblock_t *block)
 
     /*Entry code*/
 
+    host_arm64_STP_PREIDX_D(block, REG_V14, REG_V15, REG_XSP, -16);
+    host_arm64_STP_PREIDX_D(block, REG_V12, REG_V13, REG_XSP, -16);
+    host_arm64_STP_PREIDX_D(block, REG_V10, REG_V11, REG_XSP, -16);
+    host_arm64_STP_PREIDX_D(block, REG_V8, REG_V9, REG_XSP, -16);
     host_arm64_STP_PREIDX_X(block, REG_X29, REG_X30, REG_XSP, -16);
     host_arm64_STP_PREIDX_X(block, REG_X27, REG_X28, REG_XSP, -16);
     host_arm64_STP_PREIDX_X(block, REG_X25, REG_X26, REG_XSP, -16);
@@ -372,9 +380,13 @@ codegen_backend_epilogue(codeblock_t *block)
     host_arm64_LDP_POSTIDX_X(block, REG_X25, REG_X26, REG_XSP, 16);
     host_arm64_LDP_POSTIDX_X(block, REG_X27, REG_X28, REG_XSP, 16);
     host_arm64_LDP_POSTIDX_X(block, REG_X29, REG_X30, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V8, REG_V9, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V10, REG_V11, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V12, REG_V13, REG_XSP, 16);
+    host_arm64_LDP_POSTIDX_D(block, REG_V14, REG_V15, REG_XSP, 16);
     host_arm64_RET(block, REG_X30);
 
-    codegen_allocator_clean_blocks(block->head_mem_block);
+    codegen_allocator_clean_blocks(block->head_mem_block, block_pos);
 }
 
 #endif

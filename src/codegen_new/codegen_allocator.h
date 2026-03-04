@@ -29,8 +29,10 @@ struct mem_block_t *codegen_allocator_allocate(struct mem_block_t *parent, int c
 void codegen_allocator_free(struct mem_block_t *block);
 /*Get a pointer to the backing memory associated with block*/
 uint8_t *codeblock_allocator_get_ptr(struct mem_block_t *block);
-/*Cache clean memory block list*/
-void codegen_allocator_clean_blocks(struct mem_block_t *block);
+/*Cache clean memory block list. last_block_size specifies the number of bytes
+  actually written in the last block for narrow I-cache invalidation.
+  Pass MEM_BLOCK_SIZE to flush entire blocks.*/
+void codegen_allocator_clean_blocks(struct mem_block_t *block, int last_block_size);
 
 extern int codegen_allocator_usage;
 

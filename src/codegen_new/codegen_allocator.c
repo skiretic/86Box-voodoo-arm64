@@ -188,15 +188,20 @@ codeblock_allocator_get_ptr(mem_block_t *block)
 }
 
 void
-codegen_allocator_clean_blocks(UNUSED(struct mem_block_t *block))
+codegen_allocator_clean_blocks(UNUSED(struct mem_block_t *block), UNUSED(int last_block_size))
 {
 #if defined __ARM_EABI__ || defined __aarch64__ || defined _M_ARM64
     while (1) {
-        __clear_cache(&mem_block_alloc[block->offset], &mem_block_alloc[block->offset + MEM_BLOCK_SIZE]);
-        if (block->next)
+        if (block->next) {
+            /*Not the last block - flush entire block*/
+            __clear_cache(&mem_block_alloc[block->offset], &mem_block_alloc[block->offset + MEM_BLOCK_SIZE]);
             block = &mem_blocks[block->next - 1];
-        else
+        } else {
+            /*Last block - only flush the bytes actually written*/
+            int flush_size = (last_block_size > 0 && last_block_size <= MEM_BLOCK_SIZE) ? last_block_size : MEM_BLOCK_SIZE;
+            __clear_cache(&mem_block_alloc[block->offset], &mem_block_alloc[block->offset + flush_size]);
             break;
+        }
     }
 #endif
 }
