@@ -62,6 +62,159 @@ duplicate_uop(ir_data_t *ir, uop_t *uop, int offset)
     }
 }
 
+/*
+ * Dead Flag Elimination Pass
+ *
+ * Walks UOPs backward from the end of the block, tracking which of the 4
+ * flag registers (flags_op, flags_res, flags_op1, flags_op2) are live at
+ * each point. A flag write whose output is provably dead (overwritten by a
+ * later instruction before being read) has its destination register's
+ * refcount decremented. If the refcount drops to zero, the register version
+ * is added to the dead list for removal by the existing DCE pass.
+ *
+ * Conservative assumptions:
+ *   - All flags are live at block exit (interpreter needs valid flag state)
+ *   - BARRIER UOPs (CALL_FUNC, etc.) make all flags live (C code may read them)
+ *   - ORDER_BARRIER UOPs (memory ops, jumps) make all flags live (fault
+ *     recovery needs consistent flag state)
+ *   - Jump destinations make all flags live (control flow merge point)
+ *
+ * The 4 flag registers are treated as a group: all must be written before
+ * the group is considered "killed" (dead for earlier producers).
+ */
+
+/* Bitmask for flag register liveness */
+#define FLAG_BIT_OP  (1 << 0) /* IREG_flags_op */
+#define FLAG_BIT_RES (1 << 1) /* IREG_flags_res */
+#define FLAG_BIT_OP1 (1 << 2) /* IREG_flags_op1 */
+#define FLAG_BIT_OP2 (1 << 3) /* IREG_flags_op2 */
+#define FLAG_BITS_ALL (FLAG_BIT_OP | FLAG_BIT_RES | FLAG_BIT_OP1 | FLAG_BIT_OP2)
+
+/* Return the flag bit for a register, or 0 if not a flag register */
+static inline int
+flag_reg_bit(int reg)
+{
+    int base_reg = IREG_GET_REG(reg);
+
+    switch (base_reg) {
+        case IREG_flags_op:
+            return FLAG_BIT_OP;
+        case IREG_flags_res:
+            return FLAG_BIT_RES;
+        case IREG_flags_op1:
+            return FLAG_BIT_OP1;
+        case IREG_flags_op2:
+            return FLAG_BIT_OP2;
+        default:
+            return 0;
+    }
+}
+
+static void
+codegen_ir_eliminate_dead_flags(ir_data_t *ir)
+{
+    /*
+     * flags_live: true means some consumer below needs the flag state.
+     * killed: bitmask of flag regs that have been written (going backward)
+     *         since the last consumer. When all 4 bits are set, the flag
+     *         group is fully killed and flags_live becomes false.
+     *
+     * Start with flags_live=true (block exit needs valid flags).
+     */
+    int flags_live = 1;
+    int killed     = 0;
+
+    for (int i = ir->wr_pos - 1; i >= 0; i--) {
+        uop_t *uop = &ir->uops[i];
+
+        /* Skip already-dead UOPs */
+        if ((uop->type & UOP_MASK) == UOP_INVALID)
+            continue;
+
+        /*
+         * BARRIER or ORDER_BARRIER: conservatively assume flags may be
+         * read (by C function calls or needed for fault recovery).
+         * Also treat jump destinations as conservative points since
+         * control flow merges make liveness analysis unreliable.
+         */
+        if (uop->type & (UOP_TYPE_BARRIER | UOP_TYPE_ORDER_BARRIER)) {
+            flags_live = 1;
+            killed     = 0;
+        }
+
+        /*
+         * Check source registers for flag reads.
+         * If any source operand is a flag register, that flag is live.
+         */
+        if (!ir_reg_is_invalid(uop->src_reg_a) && flag_reg_bit(uop->src_reg_a.reg)) {
+            flags_live = 1;
+            killed     = 0;
+        }
+        if (!ir_reg_is_invalid(uop->src_reg_b) && flag_reg_bit(uop->src_reg_b.reg)) {
+            flags_live = 1;
+            killed     = 0;
+        }
+        if (!ir_reg_is_invalid(uop->src_reg_c) && flag_reg_bit(uop->src_reg_c.reg)) {
+            flags_live = 1;
+            killed     = 0;
+        }
+
+        /*
+         * Check destination register for flag writes.
+         */
+        if (!ir_reg_is_invalid(uop->dest_reg_a)) {
+            int bit = flag_reg_bit(uop->dest_reg_a.reg);
+
+            if (bit) {
+                if (!flags_live) {
+                    /*
+                     * This flag write is dead: no consumer below needs it
+                     * before the next complete overwrite. Decrement the
+                     * destination register's refcount (it was incremented
+                     * by codegen_reg_read in the source operand of the
+                     * consuming UOP, but there is none). Since the dest
+                     * version was created by codegen_reg_write with refcount=0,
+                     * and no reader incremented it, the refcount is already 0.
+                     * We just need to ensure it gets on the dead list.
+                     *
+                     * The version may already be on the dead list from the
+                     * normal codegen_reg_write path (if the next write to
+                     * the same register triggered dead list addition). But
+                     * the BARRIER/ORDER_BARRIER dirty_ir_regs mechanism may
+                     * have blocked that by marking it REG_FLAGS_REQUIRED.
+                     * Clear the REQUIRED flag so the DCE pass can remove it.
+                     */
+                    int            base_reg = IREG_GET_REG(uop->dest_reg_a.reg);
+                    int            version  = uop->dest_reg_a.version;
+                    reg_version_t *regv     = &reg_version[base_reg][version];
+
+                    if (regv->flags & REG_FLAGS_REQUIRED) {
+                        regv->flags &= ~REG_FLAGS_REQUIRED;
+                        /*
+                         * If refcount is 0 and it's native size, add to
+                         * dead list so existing DCE can cascade.
+                         */
+                        if (!regv->refcount && reg_is_native_size(uop->dest_reg_a)) {
+                            add_to_dead_list(regv, base_reg, version);
+                        }
+                    }
+                } else {
+                    /*
+                     * This flag write satisfies liveness. Record that
+                     * this flag component has been "killed" (written).
+                     * Once all 4 are killed, flags_live becomes false.
+                     */
+                    killed |= bit;
+                    if (killed == FLAG_BITS_ALL) {
+                        flags_live = 0;
+                        killed     = 0;
+                    }
+                }
+            }
+        }
+    }
+}
+
 void
 codegen_ir_compile(ir_data_t *ir, codeblock_t *block)
 {
@@ -84,6 +237,7 @@ codegen_ir_compile(ir_data_t *ir, codeblock_t *block)
         }
     }
 
+    codegen_ir_eliminate_dead_flags(ir);
     codegen_reg_mark_as_required();
     codegen_reg_process_dead_list(ir);
     block_write_data = codeblock_allocator_get_ptr(block->head_mem_block);
