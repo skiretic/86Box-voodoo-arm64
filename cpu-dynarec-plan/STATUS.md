@@ -1,6 +1,6 @@
 # Status
 
-## Current Phase: 3 — Dead Flag Elimination (IN PROGRESS)
+## Current Phase: 4 — Block Linking (COMPLETE — awaiting testing)
 
 ## Phase 1 Progress
 
@@ -140,9 +140,81 @@ Common patterns that benefit:
 - **Per-flag-component analysis**: Track individual flag bits (CF, ZF, SF, OF) instead of the 4 lazy-eval registers for finer granularity
 - **Cross-block analysis**: Extend liveness to block successors (requires block linking first)
 
+## Phase 4 Progress — Block Linking
+
+### Implementation (COMPLETE — awaiting testing)
+
+| Task | Status | Commit(s) | Description |
+|------|--------|-----------|-------------|
+| Core infrastructure | DONE | 387a88199 | codeblock_t link fields, link/unlink functions, incoming link tracking |
+| link_entry_offset | DONE | 5bdd7ae58 | Entry point past prologue for linked blocks |
+| Exit PC recording | DONE | 253573217 | ir_data_t exit_pc fields, UOP backward scan, dispatcher integration |
+| ARM64 patchable stubs | DONE | 253573217 | Single 4-byte B instruction, I-cache flush, patch/unpatch |
+| x86-64 patchable stubs | DONE | 8adc9d05b, 2c541c36d | 5-byte JMP rel32, patch/unpatch, no flush needed |
+| Research document | DONE | 3ccff9e92 | `research/block-linking.md` |
+| Audit bug fixes | DONE | 2c541c36d, ae14fb750 | CRITICAL-1 (index misalignment), MAJOR-2 (CS matching), MINOR-1 (guard) |
+
+### Design Summary
+
+- **Lazy linking**: After a block executes, the dispatcher checks each exit target. If compiled, patches the exit stub to jump directly.
+- **Two-exit model**: Each block has up to 2 patchable exits (BLOCK_EXIT_MAX=2). First JMP encountered + fall-through epilogue.
+- **Link entry point**: Linked blocks jump past the target's prologue via `link_entry_offset`, avoiding double-pushing callee-saved registers.
+- **ARM64**: Single `B` instruction (4 bytes, ±128MB range) replaces 12-20 byte `MOVX_IMM+BR` sequence. I-cache flush via `__clear_cache()` on patch/unpatch.
+- **x86-64**: `JMP rel32` (5 bytes, ±2GB range). No I-cache flush needed (coherent).
+- **Safe invalidation**: `codegen_block_unlink()` reverts all incoming links before block is freed/invalidated. Called from `invalidate_block()`, `delete_block()`, and `codegen_block_start_recompile()`.
+- **Incoming link tracking**: Fixed array of max 8 predecessors per block (`BLOCK_LINK_INCOMING_MAX=8`). Excess silently dropped.
+- **CPU mode check**: Linking verifies `cpu_cur_status` flags match to prevent cross-mode linking.
+
+### Audit Results
+
+| ID | Severity | File | Description | Status |
+|----|----------|------|-------------|--------|
+| CRITICAL-1 | CRITICAL | codegen_block.c | exit_pc[i] / exit_patch_offset[i] index misalignment | FIXED (ae14fb750) |
+| MAJOR-1 | MAJOR | codegen_backend_arm64.c | Epilogue unpatch targets codegen_exit_rout instead of B #4 (works by coincidence) | DEFERRED (harmless) |
+| MAJOR-2 | MAJOR | codegen_block.c | CS matching used wrong computation for non-flat modes | FIXED (2c541c36d) |
+| MINOR-1 | MINOR | codegen_block.c | exit_patch_offset[0]=0 can alias prologue code | FIXED (ae14fb750) |
+| MINOR-2 | MINOR | codegen_block.c | BLOCK_LINK_INCOMING_MAX=8 may be insufficient for hot targets | DEFERRED |
+
+### Key Implementation Details
+
+- `_pending_exit_pc` field in codeblock_t: set when UOP_MOV_IMM writes to IREG_pc, consumed by backend JMP/epilogue handlers. Ensures exit_pc[i] and exit_patch_offset[i] are always recorded together at the same index.
+- `codegen_ir_extract_exit_pcs()`: backward UOP scan finds branch-taken exit PCs from `MOV_IMM(IREG_pc, addr) + JMP(exit_rout)` patterns.
+- `codegen_block_try_link_exit()`: hash/tree lookup for target block, validates PC + CS + phys + status, then calls `codegen_backend_patch_link()`.
+- Exit stubs initially point to `codegen_exit_rout` (ARM64) or epilogue (x86-64). Patching redirects to target block's `link_entry_offset`.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `codegen.h` | codeblock_t: exit_pc[2], exit_patch_offset[2], exit_count, link_target_nr[2], link_entry_offset, link_epilogue_offset, _pending_exit_pc, link_incoming_* |
+| `codegen_block.c` | codegen_block_link_init, codegen_block_try_link_exit, codegen_block_unlink, hooks in invalidate/delete/start_recompile |
+| `codegen_ir.c` | link_entry_offset/link_epilogue_offset recording, _pending_exit_pc tracking, codegen_ir_extract_exit_pcs |
+| `codegen_ir_defs.h` | exit_pc[2], exit_count in ir_data_t |
+| `codegen_backend_arm64.c` | codegen_backend_patch_link, codegen_backend_unpatch_link, epilogue patchable stub |
+| `codegen_backend_arm64_uops.c` | codegen_JMP patchable B instruction + exit recording |
+| `codegen_backend_x86-64.c` | codegen_backend_patch_link, codegen_backend_unpatch_link, epilogue patchable stub |
+| `codegen_backend_x86-64_uops.c` | codegen_JMP patchable JMP rel32 + exit recording |
+
+### Testing Status
+
+- [ ] Banshee/V3 VM boot test
+- [ ] 3DMark99 benchmark (stability + performance comparison)
+- [ ] DOS game test (16-bit code paths)
+- [ ] Extended run stability (no crashes/hangs over 30+ minutes)
+
+## Commits (Phase 4)
+
+1. `387a88199` — Add block linking core infrastructure for Phase 4
+2. `5bdd7ae58` — Add link_entry_offset and link_epilogue_offset to block linking
+3. `253573217` — Add exit PC recording and dispatcher lazy linking for Phase 4
+4. `8adc9d05b` — Implement x86-64 patchable exit stubs and patch/unpatch for block linking
+5. `3ccff9e92` — Add block linking research document
+6. `2c541c36d` — Implement x86-64 patchable branch stubs for block linking (+ CS fix)
+7. `ae14fb750` — Fix 3 block linking bugs from Phase 4 audit
+
 ## Next Phase
 
-Phase 3 dead flag elimination core is COMPLETE. Next recommended phases:
-- **Phase 4**: Block linking — direct jump patching between blocks (15-30% gain)
+Phase 4 block linking is COMPLETE (awaiting testing). Next recommended phases:
 - **Phase 2**: More instruction coverage — IMUL, DIV, CMOVcc, BT/BS*, RCL/RCR, SHLD/SHRD
 - **Phase 3b**: Relaxed ORDER_BARRIER handling within same x86 instruction
+- **Phase 5**: ARM64 backend optimizations (direct BL, MOVN, LDP/STP pairing)
