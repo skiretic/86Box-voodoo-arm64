@@ -810,21 +810,6 @@ codegen_MMX_ENTER(codeblock_t *block, uop_t *uop)
 static int
 codegen_JMP(codeblock_t *block, uop_t *uop)
 {
-    if (uop->p == codegen_exit_rout && block->exit_count < BLOCK_EXIT_MAX) {
-        /*Emit a single patchable B instruction to codegen_exit_rout.
-          Record the exit PC and patch offset together so they are always
-          paired correctly, regardless of UOP processing order.*/
-        int offset = (uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos];
-        if (in_range_b26(offset)) {
-            block->exit_pc[block->exit_count]           = block->_pending_exit_pc;
-            block->exit_patch_offset[block->exit_count] = (uint32_t) block_pos;
-            block->exit_count++;
-            host_arm64_B(block, codegen_exit_rout);
-            return 0;
-        }
-    }
-
-    /*Fallback: out of range or not an exit_rout target — use MOVX_IMM+BR.*/
     host_arm64_jump(block, (uintptr_t) uop->p);
 
     return 0;

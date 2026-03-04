@@ -331,15 +331,15 @@
 #define UOP_MASK    0xffff
 
 typedef struct uop_t {
-    uint32_t type;
-    ir_reg_t dest_reg_a;
-    ir_reg_t src_reg_a;
-    ir_reg_t src_reg_b;
-    ir_reg_t src_reg_c;
+    uint32_t      type;
+    ir_reg_t      dest_reg_a;
+    ir_reg_t      src_reg_a;
+    ir_reg_t      src_reg_b;
+    ir_reg_t      src_reg_c;
 #if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64
-    uintptr_t imm_data;
+    uintptr_t     imm_data;
 #else
-    uint32_t imm_data;
+    uint32_t      imm_data;
 #endif
     void         *p;
     ir_host_reg_t dest_reg_a_real;
@@ -357,13 +357,6 @@ typedef struct ir_data_t {
     uop_t               uops[UOP_NR_MAX];
     int                 wr_pos;
     struct codeblock_t *block;
-
-    /*Block linking: exit PCs recorded during compilation.
-      exit_pc[0] is the fall-through (or sole exit for unconditional jumps).
-      exit_pc[1] is the branch-taken target for conditional branches.
-      exit_count is the number of valid entries (0, 1, or 2).*/
-    uint32_t exit_pc[2];
-    uint8_t  exit_count;
 } ir_data_t;
 
 static inline uop_t *
@@ -376,7 +369,7 @@ uop_alloc(ir_data_t *ir, uint32_t uop_type)
 
     uop = &ir->uops[ir->wr_pos++];
 
-    uop->is_a16 = 0;
+    uop->is_a16     = 0;
 
     uop->dest_reg_a = invalid_ir_reg;
     uop->src_reg_a  = invalid_ir_reg;
@@ -404,7 +397,7 @@ uop_alloc_unroll(ir_data_t *ir, uint32_t uop_type)
 
     uop = &ir->uops[ir->wr_pos++];
 
-    uop->is_a16 = 0;
+    uop->is_a16     = 0;
 
     uop->dest_reg_a = invalid_ir_reg;
     uop->src_reg_a  = invalid_ir_reg;
@@ -529,14 +522,14 @@ uop_gen_reg_dst_src2_imm(uint32_t uop_type, ir_data_t *ir, int dest_reg, int src
 {
     uop_t *uop = uop_alloc(ir, uop_type);
 
-    uop->type      = uop_type;
-    uop->is_a16    = 0;
-    uop->src_reg_a = codegen_reg_read(src_reg_a);
+    uop->type       = uop_type;
+    uop->is_a16     = 0;    
+    uop->src_reg_a  = codegen_reg_read(src_reg_a);
     if (src_reg_b == IREG_eaa16) {
-        uop->src_reg_b = codegen_reg_read(IREG_eaaddr);
-        uop->is_a16    = 1;
+        uop->src_reg_b  = codegen_reg_read(IREG_eaaddr);
+        uop->is_a16     = 1;
     } else
-        uop->src_reg_b = codegen_reg_read(src_reg_b);
+        uop->src_reg_b  = codegen_reg_read(src_reg_b);
     /* NOTE: is_a16 is intentionally kept at 0 here. The ARM64 and x86-64
        backends apply the 16-bit address mask AFTER adding the segment base,
        which truncates the entire linear address instead of just the offset.
@@ -617,7 +610,7 @@ uop_gen_reg_src3_imm(uint32_t uop_type, ir_data_t *ir, int src_reg_a, int src_re
 
 static inline void
 #if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64
-                                                                       uop_gen_imm(uint32_t uop_type, ir_data_t *ir, uintptr_t imm)
+uop_gen_imm(uint32_t uop_type, ir_data_t *ir, uintptr_t imm)
 #else
 uop_gen_imm(uint32_t uop_type, ir_data_t *ir, uint32_t imm)
 #endif
@@ -747,41 +740,41 @@ extern int codegen_fp_enter(void);
 #define uop_FTST(ir, dst_reg, src_reg)                           uop_gen_reg_dst_src1(UOP_FTST, ir, dst_reg, src_reg)
 
 #if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64
-#    define uop_FP_ENTER(ir)                                            \
-        do {                                                            \
-            if (!codegen_fpu_entered) {                                 \
-                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);           \
-                uop_CALL_FUNC_RESULT(ir, IREG_temp0, codegen_fp_enter); \
-                uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);   \
-            }                                                           \
-            codegen_fpu_entered = 1;                                    \
-            codegen_mmx_entered = 0;                                    \
-        } while (0)
-#    define uop_MMX_ENTER(ir)                                            \
-        do {                                                             \
-            if (!codegen_mmx_entered) {                                  \
-                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);            \
-                uop_CALL_FUNC_RESULT(ir, IREG_temp0, codegen_mmx_enter); \
-                uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);    \
-            }                                                            \
-            codegen_mmx_entered = 1;                                     \
-            codegen_fpu_entered = 0;                                     \
-        } while (0)
+#define uop_FP_ENTER(ir)                                    \
+    do {                                                    \
+        if (!codegen_fpu_entered) {                         \
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);           \
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, codegen_fp_enter); \
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout); \
+        }                                                   \
+        codegen_fpu_entered = 1;                            \
+        codegen_mmx_entered = 0;                            \
+    } while (0)
+#define uop_MMX_ENTER(ir)                                    \
+    do {                                                     \
+        if (!codegen_mmx_entered) {                         \
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);            \
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, codegen_mmx_enter); \
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout); \
+        }                                                   \
+        codegen_mmx_entered = 1;                             \
+        codegen_fpu_entered = 0;                             \
+    } while (0)
 #else
-#    define uop_FP_ENTER(ir)                                    \
-        do {                                                    \
-            if (!codegen_fpu_entered)                           \
-                uop_gen_imm(UOP_FP_ENTER, ir, cpu_state.oldpc); \
-            codegen_fpu_entered = 1;                            \
-            codegen_mmx_entered = 0;                            \
-        } while (0)
-#    define uop_MMX_ENTER(ir)                                    \
-        do {                                                     \
-            if (!codegen_mmx_entered)                            \
-                uop_gen_imm(UOP_MMX_ENTER, ir, cpu_state.oldpc); \
-            codegen_mmx_entered = 1;                             \
-            codegen_fpu_entered = 0;                             \
-        } while (0)
+#define uop_FP_ENTER(ir)                                    \
+    do {                                                    \
+        if (!codegen_fpu_entered)                           \
+            uop_gen_imm(UOP_FP_ENTER, ir, cpu_state.oldpc); \
+        codegen_fpu_entered = 1;                            \
+        codegen_mmx_entered = 0;                            \
+    } while (0)
+#define uop_MMX_ENTER(ir)                                    \
+    do {                                                     \
+        if (!codegen_mmx_entered)                            \
+            uop_gen_imm(UOP_MMX_ENTER, ir, cpu_state.oldpc); \
+        codegen_mmx_entered = 1;                             \
+        codegen_fpu_entered = 0;                             \
+    } while (0)
 #endif
 
 #define uop_JMP(ir, p)                                                   uop_gen_pointer(UOP_JMP, ir, p)

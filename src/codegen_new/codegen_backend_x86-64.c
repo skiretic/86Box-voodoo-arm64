@@ -5,14 +5,12 @@
 #    include <86box/86box.h>
 #    include "cpu.h"
 #    include <86box/mem.h>
-#    include <86box/plat_unused.h>
 
 #    include "codegen.h"
 #    include "codegen_allocator.h"
 #    include "codegen_backend.h"
 #    include "codegen_backend_x86-64_defs.h"
 #    include "codegen_backend_x86-64_ops.h"
-#    include "codegen_backend_x86-64_ops_helpers.h"
 #    include "codegen_backend_x86-64_ops_sse.h"
 #    include "codegen_reg.h"
 #    include "x86.h"
@@ -46,29 +44,29 @@ void *codegen_gpf_rout;
 void *codegen_exit_rout;
 
 host_reg_def_t codegen_host_reg_list[CODEGEN_HOST_REGS] = {
-    /*Note: while EAX and EDX are normally volatile registers under x86
-    calling conventions, the recompiler will explicitly save and restore
-    them across funcion calls*/
-    { REG_EAX, 0 },
-    { REG_EBX, 0 },
-    { REG_EDX, 0 }
+  /*Note: while EAX and EDX are normally volatile registers under x86
+  calling conventions, the recompiler will explicitly save and restore
+  them across funcion calls*/
+    {REG_EAX,  0},
+    { REG_EBX, 0},
+    { REG_EDX, 0}
 };
 
 host_reg_def_t codegen_host_fp_reg_list[CODEGEN_HOST_FP_REGS] = {
 #    if _WIN64
-    /*Windows x86-64 calling convention preserves XMM6-XMM15*/
-    { REG_XMM6, 0                      },
-    { REG_XMM7, 0                      },
+  /*Windows x86-64 calling convention preserves XMM6-XMM15*/
+    {REG_XMM6,  0                     },
+    { REG_XMM7, 0                     },
 #    else
     /*System V AMD64 calling convention does not preserve any XMM registers*/
     { REG_XMM6, HOST_REG_FLAG_VOLATILE },
     { REG_XMM7, HOST_REG_FLAG_VOLATILE },
 #    endif
-    { REG_XMM1, HOST_REG_FLAG_VOLATILE },
-    { REG_XMM2, HOST_REG_FLAG_VOLATILE },
-    { REG_XMM3, HOST_REG_FLAG_VOLATILE },
-    { REG_XMM4, HOST_REG_FLAG_VOLATILE },
-    { REG_XMM5, HOST_REG_FLAG_VOLATILE }
+    { REG_XMM1, HOST_REG_FLAG_VOLATILE},
+    { REG_XMM2, HOST_REG_FLAG_VOLATILE},
+    { REG_XMM3, HOST_REG_FLAG_VOLATILE},
+    { REG_XMM4, HOST_REG_FLAG_VOLATILE},
+    { REG_XMM5, HOST_REG_FLAG_VOLATILE}
 };
 
 static void
@@ -317,19 +315,19 @@ codegen_backend_init(void)
 #    endif
     host_x86_CALL(block, (void *) x86gpf);
     codegen_exit_rout = &codeblock[block_current].data[block_pos];
-#    ifdef _WIN64
+#ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);
-#    else
+#else
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x48);
-#    endif
+#endif
     host_x86_POP(block, REG_R15);
     host_x86_POP(block, REG_R14);
     host_x86_POP(block, REG_R13);
     host_x86_POP(block, REG_R12);
-#    ifdef _WIN64
+#ifdef _WIN64
     host_x86_POP(block, REG_RDI);
     host_x86_POP(block, REG_RSI);
-#    endif
+#endif
     host_x86_POP(block, REG_RBP);
     host_x86_POP(block, REG_RBX);
     host_x86_RET(block);
@@ -348,56 +346,25 @@ codegen_set_rounding_mode(int mode)
     cpu_state.new_fp_control = (cpu_state.old_fp_control & ~0x6000) | (mode << 13);
 }
 
-/*Block linking: patch/unpatch exit stubs.
-  On x86-64, each patchable exit is a 5-byte JMP rel32 (0xE9 + 32-bit
-  displacement). Patching rewrites the displacement to jump directly
-  to the target block's entry point (past its prologue). Unpatching
-  restores the displacement to jump to codegen_exit_rout (the shared
-  epilogue in block 0).
-
-  No I-cache flush is needed on x86-64 -- the instruction cache is
-  coherent with data writes. No W^X issues either, as the code pages
-  are mapped RWX.*/
-void
-codegen_backend_patch_link(codeblock_t *source_block, uint32_t patch_offset, codeblock_t *target_block)
-{
-    uint8_t *patch_addr  = &source_block->data[patch_offset];
-    uint8_t *target_addr = &target_block->data[target_block->link_entry_offset];
-    int32_t  disp        = (int32_t) ((uintptr_t) target_addr - (uintptr_t) (patch_addr + 5));
-
-    /*Overwrite the rel32 displacement. The opcode byte (0xE9) stays.*/
-    *(int32_t *) (patch_addr + 1) = disp;
-}
-
-void
-codegen_backend_unpatch_link(codeblock_t *source_block, uint32_t patch_offset)
-{
-    uint8_t *patch_addr = &source_block->data[patch_offset];
-    int32_t  disp       = (int32_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) (patch_addr + 5));
-
-    /*Restore the rel32 displacement to point back to codegen_exit_rout.*/
-    *(int32_t *) (patch_addr + 1) = disp;
-}
-
 void
 codegen_backend_prologue(codeblock_t *block)
 {
     block_pos = BLOCK_START; /*Entry code*/
     host_x86_PUSH(block, REG_RBX);
     host_x86_PUSH(block, REG_RBP);
-#    ifdef _WIN64
+#ifdef _WIN64
     host_x86_PUSH(block, REG_RSI);
     host_x86_PUSH(block, REG_RDI);
-#    endif
+#endif
     host_x86_PUSH(block, REG_R12);
     host_x86_PUSH(block, REG_R13);
     host_x86_PUSH(block, REG_R14);
     host_x86_PUSH(block, REG_R15);
-#    ifdef _WIN64
+#ifdef _WIN64
     host_x86_SUB64_REG_IMM(block, REG_RSP, 0x38);
-#    else
+#else
     host_x86_SUB64_REG_IMM(block, REG_RSP, 0x48);
-#    endif
+#endif
     host_x86_MOV64_REG_IMM(block, REG_RBP, ((uintptr_t) &cpu_state) + 128);
     if (block->flags & CODEBLOCK_HAS_FPU) {
         host_x86_MOV32_REG_ABS(block, REG_EAX, &cpu_state.TOP);
@@ -411,42 +378,19 @@ codegen_backend_prologue(codeblock_t *block)
 void
 codegen_backend_epilogue(codeblock_t *block)
 {
-    /*Emit a patchable fall-through exit stub. Normally jumps to
-      codegen_exit_rout (the shared epilogue in block 0). Block
-      linking can patch this to jump directly to the next block's
-      entry point, skipping the dispatcher entirely.*/
-    if (block->exit_count < BLOCK_EXIT_MAX) {
-        intptr_t diff;
-
-        codegen_alloc_bytes(block, 5);
-        diff = (intptr_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos + 5]);
-        if (diff >= -0x80000000LL && diff < 0x7fffffffLL) {
-            block->exit_pc[block->exit_count]           = block->_pending_exit_pc;
-            block->exit_patch_offset[block->exit_count] = (uint32_t) block_pos;
-            block->exit_count++;
-            codegen_addbyte(block, 0xe9); /*JMP rel32*/
-            codegen_addlong(block, (uint32_t) diff);
-        }
-    }
-
-    /*Record the epilogue offset past the patchable stub. This is the
-      actual register-restore + RET sequence. Kept for diagnostics;
-      unpatching uses codegen_exit_rout directly.*/
-    block->link_epilogue_offset = (uint16_t) block_pos;
-
-#    ifdef _WIN64
+#ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);
-#    else
+#else
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x48);
-#    endif
+#endif
     host_x86_POP(block, REG_R15);
     host_x86_POP(block, REG_R14);
     host_x86_POP(block, REG_R13);
     host_x86_POP(block, REG_R12);
-#    ifdef _WIN64
+#ifdef _WIN64
     host_x86_POP(block, REG_RDI);
     host_x86_POP(block, REG_RSI);
-#    endif
+#endif
     host_x86_POP(block, REG_RBP);
     host_x86_POP(block, REG_RBX);
     host_x86_RET(block);

@@ -30,17 +30,6 @@
   same page).
 */
 
-/*Block linking: maximum number of exit slots per block.
-  EXIT_0 = fall-through or unconditional jump target.
-  EXIT_1 = conditional branch taken target.*/
-#define BLOCK_EXIT_MAX 2
-#define BLOCK_EXIT_0   0
-#define BLOCK_EXIT_1   1
-
-/*Maximum number of incoming links tracked per block. Blocks with more
-  predecessors than this simply won't have all predecessors linked.*/
-#define BLOCK_LINK_INCOMING_MAX 8
-
 typedef struct codeblock_t {
     uint32_t pc;
     uint32_t _cs;
@@ -68,38 +57,6 @@ typedef struct codeblock_t {
     /*First mem_block_t used by this block. Any subsequent mem_block_ts
       will be in the list starting at head_mem_block->next.*/
     struct mem_block_t *head_mem_block;
-
-    /*Block linking: entry/exit points.
-      link_entry_offset is the offset past the prologue -- linked blocks
-      jump here to avoid re-saving callee-saved registers.
-      link_epilogue_offset is the offset of the epilogue (register restore
-      + RET) -- used as the unpatch target for exit stubs.*/
-    uint16_t link_entry_offset;
-    uint16_t link_epilogue_offset;
-
-    /*Block linking: outgoing exits.
-      Each exit slot records the target PC (cs+eip) and the byte offset
-      within this block's native code where the patchable branch stub
-      lives. link_target_nr stores the block index of the linked target
-      (BLOCK_INVALID if not linked).*/
-    uint32_t exit_pc[BLOCK_EXIT_MAX];
-    uint32_t exit_patch_offset[BLOCK_EXIT_MAX];
-    uint16_t link_target_nr[BLOCK_EXIT_MAX];
-    uint8_t  exit_count;
-
-    /*Temporary field used during compilation only.
-      Set by codegen_ir_compile when processing UOP_MOV_IMM(IREG_pc, addr)
-      or by codegen_block_end_recompile for the fall-through PC.
-      The backend JMP handler reads this to pair exit_pc with exit_patch_offset.*/
-    uint32_t _pending_exit_pc;
-
-    /*Block linking: incoming links.
-      Array of (source_block_nr, exit_idx) pairs for blocks that have
-      linked their exits to this block's entry point. Used to unpatch
-      those blocks when this block is invalidated.*/
-    uint16_t link_incoming_block[BLOCK_LINK_INCOMING_MAX];
-    uint8_t  link_incoming_exit[BLOCK_LINK_INCOMING_MAX];
-    uint8_t  link_incoming_count;
 } codeblock_t;
 
 extern codeblock_t *codeblock;
@@ -345,20 +302,6 @@ extern void codegen_generate_seg_restore(void);
 extern void codegen_set_op32(void);
 extern void codegen_flush(void);
 extern void codegen_check_flush(struct page_t *page, uint64_t mask, uint32_t phys_addr);
-
-/*Block linking: link/unlink block exits to target blocks.*/
-extern void codegen_block_link_init(codeblock_t *block);
-extern void codegen_block_unlink(codeblock_t *block);
-extern void codegen_block_try_link_exit(codeblock_t *source, int exit_idx);
-extern void codegen_block_link_incoming(codeblock_t *target);
-
-/*Backend-provided block linking patch/unpatch routines.
-  codegen_backend_patch_link patches the exit stub at patch_offset in
-  source_block to jump directly to target_block's entry point.
-  codegen_backend_unpatch_link reverts the exit stub to the original
-  dispatcher-returning sequence.*/
-extern void codegen_backend_patch_link(codeblock_t *source_block, uint32_t patch_offset, codeblock_t *target_block);
-extern void codegen_backend_unpatch_link(codeblock_t *source_block, uint32_t patch_offset);
 struct ir_data_t;
 x86seg     *codegen_generate_ea(struct ir_data_t *ir, x86seg *op_ea_seg, uint32_t fetchdat, int op_ssegs, uint32_t *op_pc, uint32_t op_32, int stack_offset);
 extern void codegen_check_seg_read(codeblock_t *block, struct ir_data_t *ir, x86seg *seg);
