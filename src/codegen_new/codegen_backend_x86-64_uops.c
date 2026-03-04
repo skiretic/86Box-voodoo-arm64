@@ -24,7 +24,7 @@
 #    define STACK_ARG2        (8)
 #    define STACK_ARG3        (12)
 
-#    define HOST_REG_GET(reg) ((IREG_GET_SIZE(reg) == IREG_SIZE_BH) ? (IREG_GET_REG((reg) &3) | 4) : (IREG_GET_REG(reg) & 7))
+#    define HOST_REG_GET(reg) ((IREG_GET_SIZE(reg) == IREG_SIZE_BH) ? (IREG_GET_REG((reg) & 3) | 4) : (IREG_GET_REG(reg) & 7))
 
 #    define REG_IS_L(size)    (size == IREG_SIZE_L)
 #    define REG_IS_W(size)    (size == IREG_SIZE_W)
@@ -174,9 +174,9 @@ static int
 codegen_ANDN(codeblock_t *block, uop_t *uop)
 {
     int dest_reg = HOST_REG_GET(uop->dest_reg_a_real);
-#if 0
+#    if 0
     int src_reg_a = HOST_REG_GET(uop->src_reg_a_real);
-#endif
+#    endif
     int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
     int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
     int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
@@ -853,6 +853,25 @@ codegen_MMX_ENTER(codeblock_t *block, uop_t *uop)
 static int
 codegen_JMP(codeblock_t *block, uop_t *uop)
 {
+    /*If this is a block exit (jumping to codegen_exit_rout), emit a
+      patchable 5-byte JMP rel32 and record the exit patch offset.
+      Block linking can later patch this to jump directly to a
+      linked block's entry point.*/
+    if (uop->p == codegen_exit_rout && block->exit_count < BLOCK_EXIT_MAX) {
+        intptr_t diff;
+
+        codegen_alloc_bytes(block, 5);
+        diff = (intptr_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos + 5]);
+        if (diff >= -0x80000000LL && diff < 0x7fffffffLL) {
+            block->exit_patch_offset[block->exit_count] = (uint32_t) block_pos;
+            block->exit_count++;
+            codegen_addbyte(block, 0xe9); /*JMP rel32*/
+            codegen_addlong(block, (uint32_t) diff);
+            return 0;
+        }
+        /*Displacement out of range -- fall through to non-patchable JMP.*/
+    }
+
     host_x86_JMP(block, uop->p);
 
     return 0;

@@ -11,6 +11,7 @@
 #    include "codegen_backend.h"
 #    include "codegen_backend_x86-64_defs.h"
 #    include "codegen_backend_x86-64_ops.h"
+#    include "codegen_backend_x86-64_ops_helpers.h"
 #    include "codegen_backend_x86-64_ops_sse.h"
 #    include "codegen_reg.h"
 #    include "x86.h"
@@ -347,25 +348,34 @@ codegen_set_rounding_mode(int mode)
 }
 
 /*Block linking: patch/unpatch exit stubs.
-  These are stub implementations. The cpu-x64 agent will implement
-  the real x86-64-specific patching.*/
+  On x86-64, each patchable exit is a 5-byte JMP rel32 (0xE9 + 32-bit
+  displacement). Patching rewrites the displacement to jump directly
+  to the target block's entry point (past its prologue). Unpatching
+  restores the displacement to jump to codegen_exit_rout (the shared
+  epilogue in block 0).
+
+  No I-cache flush is needed on x86-64 -- the instruction cache is
+  coherent with data writes. No W^X issues either, as the code pages
+  are mapped RWX.*/
 void
 codegen_backend_patch_link(codeblock_t *source_block, uint32_t patch_offset, codeblock_t *target_block)
 {
-    /*TODO: patch exit stub at source_block->data[patch_offset] to jump
-      directly to target_block->data[BLOCK_START].*/
-    (void) source_block;
-    (void) patch_offset;
-    (void) target_block;
+    uint8_t *patch_addr  = &source_block->data[patch_offset];
+    uint8_t *target_addr = &target_block->data[target_block->link_entry_offset];
+    int32_t  disp        = (int32_t) ((uintptr_t) target_addr - (uintptr_t) (patch_addr + 5));
+
+    /*Overwrite the rel32 displacement. The opcode byte (0xE9) stays.*/
+    *(int32_t *) (patch_addr + 1) = disp;
 }
 
 void
 codegen_backend_unpatch_link(codeblock_t *source_block, uint32_t patch_offset)
 {
-    /*TODO: revert exit stub at source_block->data[patch_offset] back to
-      the dispatcher-returning sequence.*/
-    (void) source_block;
-    (void) patch_offset;
+    uint8_t *patch_addr = &source_block->data[patch_offset];
+    int32_t  disp       = (int32_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) (patch_addr + 5));
+
+    /*Restore the rel32 displacement to point back to codegen_exit_rout.*/
+    *(int32_t *) (patch_addr + 1) = disp;
 }
 
 void
@@ -400,6 +410,23 @@ codegen_backend_prologue(codeblock_t *block)
 void
 codegen_backend_epilogue(codeblock_t *block)
 {
+    /*Emit a patchable fall-through exit stub. Normally jumps to
+      codegen_exit_rout (the shared epilogue in block 0). Block
+      linking can patch this to jump directly to the next block's
+      entry point, skipping the dispatcher entirely.*/
+    if (block->exit_count < BLOCK_EXIT_MAX) {
+        intptr_t diff;
+
+        codegen_alloc_bytes(block, 5);
+        diff = (intptr_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos + 5]);
+        if (diff >= -0x80000000LL && diff < 0x7fffffffLL) {
+            block->exit_patch_offset[block->exit_count] = (uint32_t) block_pos;
+            block->exit_count++;
+            codegen_addbyte(block, 0xe9); /*JMP rel32*/
+            codegen_addlong(block, (uint32_t) diff);
+        }
+    }
+
 #    ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);
 #    else
