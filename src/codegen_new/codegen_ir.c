@@ -54,7 +54,7 @@ duplicate_uop(ir_data_t *ir, uop_t *uop, int offset)
     new_uop->p        = uop->p;
     new_uop->pc       = uop->pc;
 #if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64
-    new_uop->is_a16   = uop->is_a16;
+    new_uop->is_a16 = uop->is_a16;
 #endif
 
     if (uop->jump_dest_uop != -1) {
@@ -84,10 +84,10 @@ duplicate_uop(ir_data_t *ir, uop_t *uop, int offset)
  */
 
 /* Bitmask for flag register liveness */
-#define FLAG_BIT_OP  (1 << 0) /* IREG_flags_op */
-#define FLAG_BIT_RES (1 << 1) /* IREG_flags_res */
-#define FLAG_BIT_OP1 (1 << 2) /* IREG_flags_op1 */
-#define FLAG_BIT_OP2 (1 << 3) /* IREG_flags_op2 */
+#define FLAG_BIT_OP   (1 << 0) /* IREG_flags_op */
+#define FLAG_BIT_RES  (1 << 1) /* IREG_flags_res */
+#define FLAG_BIT_OP1  (1 << 2) /* IREG_flags_op1 */
+#define FLAG_BIT_OP2  (1 << 3) /* IREG_flags_op2 */
 #define FLAG_BITS_ALL (FLAG_BIT_OP | FLAG_BIT_RES | FLAG_BIT_OP1 | FLAG_BIT_OP2)
 
 /* Return the flag bit for a register, or 0 if not a flag register */
