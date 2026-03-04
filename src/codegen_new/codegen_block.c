@@ -810,6 +810,8 @@ codegen_block_end_recompile(codeblock_t *block)
 void
 codegen_block_link_init(codeblock_t *block)
 {
+    block->link_entry_offset    = 0;
+    block->link_epilogue_offset = 0;
     for (int i = 0; i < BLOCK_EXIT_MAX; i++) {
         block->exit_pc[i]           = BLOCK_PC_INVALID;
         block->exit_patch_offset[i] = 0;

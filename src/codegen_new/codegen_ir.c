@@ -244,6 +244,10 @@ codegen_ir_compile(ir_data_t *ir, codeblock_t *block)
     block_pos        = 0;
     codegen_backend_prologue(block);
 
+    /*Record the offset past the prologue. Linked blocks jump here
+      to avoid re-saving callee-saved registers.*/
+    block->link_entry_offset = (uint16_t) block_pos;
+
     for (c = 0; c < ir->wr_pos; c++) {
         uop_t *uop = &ir->uops[c];
 
@@ -344,6 +348,10 @@ codegen_ir_compile(ir_data_t *ir, codeblock_t *block)
             uop_dest = &ir->uops[uop_dest->jump_list_next];
         }
     }
+
+    /*Record the epilogue offset. When unpatching a linked exit stub,
+      the branch is reverted to point here (register restore + RET).*/
+    block->link_epilogue_offset = (uint16_t) block_pos;
 
     codegen_backend_epilogue(block);
     block_write_data = NULL;

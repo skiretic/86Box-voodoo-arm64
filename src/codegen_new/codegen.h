@@ -69,6 +69,14 @@ typedef struct codeblock_t {
       will be in the list starting at head_mem_block->next.*/
     struct mem_block_t *head_mem_block;
 
+    /*Block linking: entry/exit points.
+      link_entry_offset is the offset past the prologue -- linked blocks
+      jump here to avoid re-saving callee-saved registers.
+      link_epilogue_offset is the offset of the epilogue (register restore
+      + RET) -- used as the unpatch target for exit stubs.*/
+    uint16_t link_entry_offset;
+    uint16_t link_epilogue_offset;
+
     /*Block linking: outgoing exits.
       Each exit slot records the target PC (cs+eip) and the byte offset
       within this block's native code where the patchable branch stub
