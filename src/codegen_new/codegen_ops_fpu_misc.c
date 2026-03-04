@@ -124,3 +124,16 @@ ropFXCH(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), uint3
 
     return op_pc;
 }
+
+/*
+ * EMMS - Empty MMX state. Sets all FPU tags to empty.
+ * Opcode: 0F 77
+ */
+uint32_t
+ropEMMS(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    uop_MMX_ENTER(ir);
+    uop_CALL_FUNC(ir, x87_emms);
+
+    return op_pc;
+}

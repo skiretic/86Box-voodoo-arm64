@@ -628,3 +628,191 @@ ropSTI(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED
     uop_OR_IMM(ir, IREG_flags, IREG_flags, I_FLAG);
     return op_pc;
 }
+
+/*
+ * LAHF/SAHF helper functions.
+ * These must be called via uop_CALL_FUNC because there is no IREG_flags_B
+ * to directly manipulate the low byte of flags and AH together.
+ */
+static void
+helper_LAHF(void)
+{
+    flags_rebuild();
+    AH = cpu_state.flags & 0xff;
+}
+
+static void
+helper_SAHF(void)
+{
+    flags_rebuild();
+    cpu_state.flags = (cpu_state.flags & 0xff00) | (AH & 0xd5) | 2;
+}
+
+uint32_t
+ropLAHF(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    uop_CALL_FUNC(ir, helper_LAHF);
+    codegen_flags_changed = 0;
+
+    return op_pc;
+}
+
+uint32_t
+ropSAHF(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    uop_CALL_FUNC(ir, helper_SAHF);
+    codegen_flags_changed = 0;
+
+    return op_pc;
+}
+
+/*
+ * BSWAP - Byte swap 32-bit register.
+ * Opcode: 0F C8+r
+ * The register is encoded in the low 3 bits of the opcode byte.
+ */
+uint32_t
+ropBSWAP(UNUSED(codeblock_t *block), ir_data_t *ir, uint8_t opcode, UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    int reg = IREG_32(opcode & 7);
+
+    /* temp0 = (reg >> 24) & 0xff */
+    uop_SHR_IMM(ir, IREG_temp0, reg, 24);
+    /* temp1 = (reg >> 8) & 0xff00 */
+    uop_SHR_IMM(ir, IREG_temp1, reg, 8);
+    uop_AND_IMM(ir, IREG_temp1, IREG_temp1, 0xff00);
+    /* temp0 = temp0 | temp1 */
+    uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+    /* temp1 = (reg << 8) & 0xff0000 */
+    uop_SHL_IMM(ir, IREG_temp1, reg, 8);
+    uop_AND_IMM(ir, IREG_temp1, IREG_temp1, 0xff0000);
+    /* temp0 = temp0 | temp1 */
+    uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+    /* temp1 = (reg << 24) & 0xff000000 */
+    uop_SHL_IMM(ir, IREG_temp1, reg, 24);
+    uop_AND_IMM(ir, IREG_temp1, IREG_temp1, 0xff000000);
+    /* reg = temp0 | temp1 */
+    uop_OR(ir, reg, IREG_temp0, IREG_temp1);
+
+    return op_pc;
+}
+
+/*
+ * SETcc - Set byte on condition code.
+ * Opcodes: 0F 90-9F
+ * Uses CALL_FUNC_RESULT to evaluate the condition, then stores result.
+ */
+static uint32_t
+ropSETcc_common(codeblock_t *block, ir_data_t *ir, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc, void *cond_func)
+{
+    x86seg *target_seg;
+    int     reg;
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    if ((fetchdat & 0xc0) == 0xc0) {
+        reg = IREG_8(fetchdat & 7);
+    } else {
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+        codegen_check_seg_write(block, ir, target_seg);
+    }
+
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, cond_func);
+
+    if ((fetchdat & 0xc0) == 0xc0) {
+        uop_MOV(ir, reg, IREG_temp0_B);
+    } else {
+        uop_MEM_STORE_REG(ir, ireg_seg_base(target_seg), IREG_eaaddr, IREG_temp0_B);
+    }
+
+    return op_pc + 1;
+}
+
+/*
+ * SETcc helper functions that evaluate compound conditions and return 0 or 1.
+ * Single-flag conditions use the existing *_SET functions directly.
+ */
+static int
+helper_SETNO(void)
+{
+    return !VF_SET();
+}
+
+static int
+helper_SETNB(void)
+{
+    return !CF_SET();
+}
+
+static int
+helper_SETNE(void)
+{
+    return !ZF_SET();
+}
+
+static int
+helper_SETNBE(void)
+{
+    return !CF_SET() && !ZF_SET();
+}
+
+static int
+helper_SETNS(void)
+{
+    return !NF_SET();
+}
+
+static int
+helper_SETNP(void)
+{
+    return !PF_SET();
+}
+
+static int
+helper_SETBE(void)
+{
+    return CF_SET() || ZF_SET();
+}
+
+static int
+helper_SETL(void)
+{
+    return (NF_SET() ? 1 : 0) != (VF_SET() ? 1 : 0);
+}
+
+static int
+helper_SETNL(void)
+{
+    return (NF_SET() ? 1 : 0) == (VF_SET() ? 1 : 0);
+}
+
+static int
+helper_SETLE(void)
+{
+    return ((NF_SET() ? 1 : 0) != (VF_SET() ? 1 : 0)) || ZF_SET();
+}
+
+static int
+helper_SETNLE(void)
+{
+    return ((NF_SET() ? 1 : 0) == (VF_SET() ? 1 : 0)) && !ZF_SET();
+}
+
+// clang-format off
+uint32_t ropSETO(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)   { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, VF_SET); }
+uint32_t ropSETNO(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNO); }
+uint32_t ropSETB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)   { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, CF_SET); }
+uint32_t ropSETNB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNB); }
+uint32_t ropSETE(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)   { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, ZF_SET); }
+uint32_t ropSETNE(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNE); }
+uint32_t ropSETBE(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETBE); }
+uint32_t ropSETNBE(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc) { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNBE); }
+uint32_t ropSETS(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)   { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, NF_SET); }
+uint32_t ropSETNS(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNS); }
+uint32_t ropSETP(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)   { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, PF_SET); }
+uint32_t ropSETNP(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNP); }
+uint32_t ropSETL(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)   { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETL); }
+uint32_t ropSETNL(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNL); }
+uint32_t ropSETLE(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)  { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETLE); }
+uint32_t ropSETNLE(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc) { return ropSETcc_common(block, ir, fetchdat, op_32, op_pc, helper_SETNLE); }
+// clang-format on
