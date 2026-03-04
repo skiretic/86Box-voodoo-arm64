@@ -122,11 +122,32 @@ operation rather than emitting individual SUB instructions per x86 instruction.
 
 ## Phase Breakdown
 
-TBD -- Awaiting audit results from:
-- Instruction coverage audit (cpu-x86ops agent)
-- ARM64 backend audit (cpu-arm64 agent)
-- Correctness audit (cpu-debug agent)
-- Architecture research (cpu-arch agent)
+See `PHASES.md` for the complete phased roadmap. Summary:
+
+| Phase | Name | Effort | Impact |
+|-------|------|--------|--------|
+| 1 | Bug Fixes & Quick Wins | S | High |
+| 2 | Instruction Coverage — Core Gaps | M | High (5-15%) |
+| 3 | Dead Flag Elimination (Kildall's) | M-L | Very High (10-30%) |
+| 4 | Block Linking / Jump Patching | L | Very High (15-30%) |
+| 5 | ARM64 Backend Optimizations | M | Moderate (3-8%) |
+| 6 | REP String Operations | L | High (workload-dependent) |
+| 7 | Advanced (NZCV mapping, traces) | XL | High (10-25%) |
+
+**Recommended order**: 1 → 3 → 4 → 2 → 5 → 6 → 7
+
+## Research Documents
+
+All audit results are in `research/`:
+
+| Document | Contents |
+|----------|----------|
+| `other-dynarecs.md` | box64, FEX-Emu, QEMU TCG, Rosetta 2, Dolphin, RPCS3 analysis |
+| `instruction-coverage.md` | Full opcode dispatch table audit with coverage percentages |
+| `correctness-audit.md` | IR, flag handling, register allocator, block boundary audit |
+| `arm64-backend-audit.md` | ARM64 code generation quality, UOP coverage, NEON usage |
+| `uop-catalog.md` | Complete catalog of all 145 UOP types across 17 categories |
+| `prior-work.md` | Previous 86box-arm64-cpu branch optimization history |
 
 ## Key Metrics
 
