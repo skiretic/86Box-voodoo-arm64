@@ -185,7 +185,11 @@ Three bugs were identified during testing:
 ## Next Phase
 
 Phase 3 dead flag elimination is COMPLETE. Phase 4 block linking was attempted and reverted.
+
+**Retry plan**: `cpu-dynarec-plan/phase4-retry-plan.md` — detailed implementation plan with
+all 3 bugs addressed from the start, ARM64 backend audit findings, and step-by-step tasks.
+
 Next recommended phases:
-- **Phase 4 (retry)**: Block linking with W^X guards + cycle checks + correct B.cond encoding
+- **Phase 4 (retry)**: Block linking with W^X guards + cycle checks + correct encoding
 - **Phase 2**: More instruction coverage — IMUL, DIV, CMOVcc, BT/BS*, RCL/RCR, SHLD/SHRD
 - **Phase 3b**: Relaxed ORDER_BARRIER handling within same x86 instruction
