@@ -1133,8 +1133,28 @@ banshee_status(banshee_t *banshee)
     int           fifo_entries = FIFO_ENTRIES;
     int           swap_count   = voodoo->swap_count;
     int           written      = voodoo->cmd_written + voodoo->cmd_written_fifo;
-    int           busy         = (written - voodoo->cmd_read) || (voodoo->cmdfifo_depth_rd != voodoo->cmdfifo_depth_wr) || (voodoo->cmdfifo_depth_rd_2 != voodoo->cmdfifo_depth_wr_2) || RENDER_VOODOO_BUSY(voodoo, 0) || RENDER_VOODOO_BUSY(voodoo, 1) || RENDER_VOODOO_BUSY(voodoo, 2) || RENDER_VOODOO_BUSY(voodoo, 3) || voodoo->voodoo_busy;
+    int           busy;
     uint32_t      ret          = 0;
+
+    /*
+     * When the VK path is active, the GPU thread processes CMDFIFO commands
+     * nearly instantly — so fast that the FIFO thread often finishes and goes
+     * idle before the guest polls status.  The transient gap between
+     * cmdfifo_depth_rd and cmdfifo_depth_wr is just data the FIFO thread
+     * hasn't picked up yet, NOT "hardware busy".  Including it in the busy
+     * calculation causes a livelock: the guest spins on status, no emulated
+     * time passes, the delayed wake timer never fires, and the FIFO thread
+     * never wakes to consume the remaining data.
+     *
+     * Fix: exclude CMDFIFO depth from the busy calculation when VK is active.
+     * The depth bits (11, 12) are still reported in the status register so
+     * software can observe FIFO occupancy if desired.
+     */
+    if (voodoo->use_gpu_renderer) {
+        busy = (written - voodoo->cmd_read) || RENDER_VOODOO_BUSY(voodoo, 0) || RENDER_VOODOO_BUSY(voodoo, 1) || RENDER_VOODOO_BUSY(voodoo, 2) || RENDER_VOODOO_BUSY(voodoo, 3) || voodoo->voodoo_busy;
+    } else {
+        busy = (written - voodoo->cmd_read) || (voodoo->cmdfifo_depth_rd != voodoo->cmdfifo_depth_wr) || (voodoo->cmdfifo_depth_rd_2 != voodoo->cmdfifo_depth_wr_2) || RENDER_VOODOO_BUSY(voodoo, 0) || RENDER_VOODOO_BUSY(voodoo, 1) || RENDER_VOODOO_BUSY(voodoo, 2) || RENDER_VOODOO_BUSY(voodoo, 3) || voodoo->voodoo_busy;
+    }
 
     if (fifo_entries < 0x20)
         ret |= 0x1f - fifo_entries;
@@ -1159,15 +1179,18 @@ banshee_status(banshee_t *banshee)
         ret |= (1 << 12);
 
     if (!voodoo->voodoo_busy) {
-        /* The VK path processes CMDFIFO commands instantly (no SW render
-           thread blocking), so the FIFO thread often finishes and goes idle
-           before the guest polls status.  The delayed wake timer won't fire
-           while the guest CPU spins on MMIO reads (no emulated time passes),
-           causing a livelock.  Use immediate wake when VK is active. */
-        if (voodoo->use_gpu_renderer)
-            voodoo_wake_fifo_thread_now(voodoo);
-        else
+        if (voodoo->use_gpu_renderer) {
+            /*
+             * VK path: only wake the FIFO thread immediately when there is
+             * actually data to consume (depth imbalance).  Waking on every
+             * status poll creates a thundering herd — the main thread and
+             * FIFO thread fight over the mutex on every MMIO read.
+             */
+            if ((voodoo->cmdfifo_depth_rd != voodoo->cmdfifo_depth_wr) || (voodoo->cmdfifo_depth_rd_2 != voodoo->cmdfifo_depth_wr_2))
+                voodoo_wake_fifo_thread_now(voodoo);
+        } else {
             voodoo_wake_fifo_thread(voodoo);
+        }
     }
 
     return ret;
