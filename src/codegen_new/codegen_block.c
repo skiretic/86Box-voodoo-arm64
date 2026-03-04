@@ -377,6 +377,7 @@ invalidate_block(codeblock_t *block)
     if (block->pc == BLOCK_PC_INVALID)
         fatal("Invalidating deleted block\n");
 #endif
+    codegen_block_unlink(block);
     remove_from_block_list(block, old_pc);
     block_dirty_list_add(block);
     if (block->head_mem_block)
@@ -396,6 +397,7 @@ delete_block(codeblock_t *block)
     if (block->pc == BLOCK_PC_INVALID)
         fatal("Deleting deleted block\n");
 #endif
+    codegen_block_unlink(block);
     block->pc = BLOCK_PC_INVALID;
 
     codeblock_tree_delete(block);
@@ -419,6 +421,7 @@ delete_dirty_block(codeblock_t *block)
     if (block->pc == BLOCK_PC_INVALID)
         fatal("Deleting deleted block\n");
 #endif
+    codegen_block_unlink(block);
     block->pc = BLOCK_PC_INVALID;
 
     codeblock_tree_delete(block);
@@ -531,6 +534,8 @@ codegen_block_init(uint32_t phys_addr)
     block->flags                         = CODEBLOCK_STATIC_TOP;
     block->status                        = cpu_cur_status;
 
+    codegen_block_link_init(block);
+
     recomp_page = block->phys & ~0xfff;
     codeblock_tree_add(block);
 }
@@ -559,12 +564,16 @@ codegen_block_start_recompile(codeblock_t *block)
         fatal("Recompile to used block!\n");
 #endif
 
+    codegen_block_unlink(block);
+
     if (block->head_mem_block) {
         codegen_allocator_free(block->head_mem_block);
         block->head_mem_block = NULL;
     }
     block->head_mem_block = codegen_allocator_allocate(NULL, block_current);
     block->data           = codeblock_allocator_get_ptr(block->head_mem_block);
+
+    codegen_block_link_init(block);
 
     block->status = cpu_cur_status;
 
@@ -837,4 +846,177 @@ codegen_mark_code_present_multibyte(codeblock_t *block, uint32_t start_pc, int l
             }
         }
     }
+}
+
+/*
+ * Block linking — core infrastructure.
+ *
+ * codegen_block_link_init:     zero all link fields on a fresh block.
+ * codegen_block_try_link_exit: attempt to link one exit to its target.
+ * codegen_block_unlink:        tear down all links (outgoing + incoming).
+ */
+
+void
+codegen_block_link_init(codeblock_t *block)
+{
+    block->link_entry_offset   = 0;
+    block->exit_count          = 0;
+    block->_pending_exit_pc    = BLOCK_PC_INVALID;
+    block->link_incoming_count = 0;
+
+    for (int i = 0; i < BLOCK_EXIT_MAX; i++) {
+        block->exit_pc[i]            = BLOCK_PC_INVALID;
+        block->exit_patch_offset[i]  = 0;
+        block->exit_original_insn[i] = 0;
+        block->link_target_nr[i]     = BLOCK_INVALID;
+    }
+    for (int i = 0; i < BLOCK_LINK_INCOMING_MAX; i++) {
+        block->link_incoming_block[i] = BLOCK_INVALID;
+        block->link_incoming_exit[i]  = 0;
+    }
+}
+
+void
+codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
+{
+    uint32_t     target_pc;
+    uint32_t     target_phys;
+    codeblock_t *target;
+    int          target_nr;
+
+    if (exit_idx < 0 || exit_idx >= BLOCK_EXIT_MAX)
+        return;
+    if (source->link_target_nr[exit_idx] != BLOCK_INVALID)
+        return; /* already linked */
+
+    target_pc = source->exit_pc[exit_idx];
+    if (target_pc == BLOCK_PC_INVALID)
+        return;
+
+    /* Compute physical address for the target PC.
+       Use the same CS base as the source block — linking across CS changes
+       is not supported. */
+    target_phys = get_phys_noabrt(target_pc);
+    if (target_phys == 0xffffffff)
+        return;
+
+    /* Hash lookup — find compiled block at target PC. */
+    target = codeblock_tree_find(target_phys, source->_cs);
+    if (!target)
+        return;
+
+    /* Validate the target is a fully compiled, valid block. */
+    if (target->pc == BLOCK_PC_INVALID)
+        return;
+    if (!(target->flags & CODEBLOCK_WAS_RECOMPILED))
+        return;
+    if (!target->data)
+        return;
+
+    /* Status flags must match. */
+    if ((target->status ^ cpu_cur_status) & CPU_STATUS_FLAGS)
+        return;
+    if ((target->status & cpu_cur_status & CPU_STATUS_MASK) != (cpu_cur_status & CPU_STATUS_MASK))
+        return;
+
+    /* FPU guard: don't link blocks with mismatched FPU flags.
+       The FPU prologue writes TOP diff to a stack slot that non-FPU
+       blocks don't initialize. */
+    if ((source->flags & CODEBLOCK_HAS_FPU) != (target->flags & CODEBLOCK_HAS_FPU))
+        return;
+
+    /* Don't link to ourselves — would create a tight loop. */
+    target_nr = get_block_nr(target);
+    if (target_nr == get_block_nr(source))
+        return;
+
+    /* Check that the target has incoming link capacity. */
+    if (target->link_incoming_count >= BLOCK_LINK_INCOMING_MAX)
+        return;
+
+    /* Ask the backend to patch the branch instruction. */
+    codegen_backend_patch_link(source, exit_idx, target);
+
+    /* Record the outgoing link. */
+    source->link_target_nr[exit_idx] = (uint16_t) target_nr;
+
+    /* Record the incoming link on the target. */
+    int slot                          = target->link_incoming_count;
+    target->link_incoming_block[slot] = (uint16_t) get_block_nr(source);
+    target->link_incoming_exit[slot]  = (uint8_t) exit_idx;
+    target->link_incoming_count++;
+}
+
+void
+codegen_block_unlink(codeblock_t *block)
+{
+    int block_nr = get_block_nr(block);
+
+    /* 1. Revert all outgoing links: unpatch branch instructions and
+          remove ourselves from each target's incoming list. */
+    for (int i = 0; i < block->exit_count; i++) {
+        uint16_t target_nr = block->link_target_nr[i];
+        if (target_nr == BLOCK_INVALID)
+            continue;
+
+        /* Unpatch the branch back to original instruction. */
+        codegen_backend_unpatch_link(block, i);
+
+        /* Remove from target's incoming list. */
+        codeblock_t *target = &codeblock[target_nr];
+        for (int j = 0; j < target->link_incoming_count; j++) {
+            if (target->link_incoming_block[j] == (uint16_t) block_nr
+                && target->link_incoming_exit[j] == (uint8_t) i) {
+                /* Swap with last entry and shrink. */
+                target->link_incoming_count--;
+                if (j < target->link_incoming_count) {
+                    target->link_incoming_block[j] = target->link_incoming_block[target->link_incoming_count];
+                    target->link_incoming_exit[j]  = target->link_incoming_exit[target->link_incoming_count];
+                }
+                break;
+            }
+        }
+
+        block->link_target_nr[i] = BLOCK_INVALID;
+    }
+
+    /* 2. Revert all incoming links: other blocks jumping to us must be
+          unpatched so they return to the dispatcher. */
+    for (int i = 0; i < block->link_incoming_count; i++) {
+        uint16_t src_nr   = block->link_incoming_block[i];
+        uint8_t  exit_idx = block->link_incoming_exit[i];
+
+        if (src_nr == BLOCK_INVALID)
+            continue;
+
+        codeblock_t *src = &codeblock[src_nr];
+
+        /* Only unpatch if the source still points to us. */
+        if (exit_idx < src->exit_count
+            && src->link_target_nr[exit_idx] == (uint16_t) block_nr) {
+            codegen_backend_unpatch_link(src, exit_idx);
+            src->link_target_nr[exit_idx] = BLOCK_INVALID;
+        }
+    }
+    block->link_incoming_count = 0;
+}
+
+/*
+ * Weak stubs for backend patch/unpatch functions.
+ * The actual backends (ARM64, x86-64) will provide real implementations
+ * that override these. Until then, linking is a no-op.
+ */
+__attribute__((weak)) void
+codegen_backend_patch_link(codeblock_t *source, int exit_idx, codeblock_t *target)
+{
+    (void) source;
+    (void) exit_idx;
+    (void) target;
+}
+
+__attribute__((weak)) void
+codegen_backend_unpatch_link(codeblock_t *source, int exit_idx)
+{
+    (void) source;
+    (void) exit_idx;
 }

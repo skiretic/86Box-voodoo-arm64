@@ -30,6 +30,9 @@
   same page).
 */
 
+#define BLOCK_EXIT_MAX          2
+#define BLOCK_LINK_INCOMING_MAX 8
+
 typedef struct codeblock_t {
     uint32_t pc;
     uint32_t _cs;
@@ -57,6 +60,20 @@ typedef struct codeblock_t {
     /*First mem_block_t used by this block. Any subsequent mem_block_ts
       will be in the list starting at head_mem_block->next.*/
     struct mem_block_t *head_mem_block;
+
+    /* Block linking — outgoing exits */
+    uint16_t link_entry_offset;                  /* offset past prologue for linked entry */
+    uint32_t exit_pc[BLOCK_EXIT_MAX];            /* target CS+EIP per exit */
+    uint32_t exit_patch_offset[BLOCK_EXIT_MAX];  /* byte offset of patchable B/JMP */
+    uint32_t exit_original_insn[BLOCK_EXIT_MAX]; /* original instruction for unpatch */
+    uint16_t link_target_nr[BLOCK_EXIT_MAX];     /* block index of linked target */
+    uint8_t  exit_count;                         /* number of recorded exits */
+    uint32_t _pending_exit_pc;                   /* compile-time: set by MOV_IMM to IREG_pc */
+
+    /* Block linking — incoming links (other blocks jumping to us) */
+    uint16_t link_incoming_block[BLOCK_LINK_INCOMING_MAX];
+    uint8_t  link_incoming_exit[BLOCK_LINK_INCOMING_MAX];
+    uint8_t  link_incoming_count;
 } codeblock_t;
 
 extern codeblock_t *codeblock;
@@ -312,6 +329,15 @@ extern int codegen_purge_purgable_list(void);
 /*Delete a random code block to free memory. This is obviously quite expensive, and
   will only be called when the allocator is out of memory*/
 extern void codegen_delete_random_block(int required_mem_block);
+
+/* Block linking functions */
+extern void codegen_block_link_init(codeblock_t *block);
+extern void codegen_block_try_link_exit(codeblock_t *source, int exit_idx);
+extern void codegen_block_unlink(codeblock_t *block);
+
+/* Backend patch/unpatch (implemented per-platform) */
+extern void codegen_backend_patch_link(codeblock_t *source, int exit_idx, codeblock_t *target);
+extern void codegen_backend_unpatch_link(codeblock_t *source, int exit_idx);
 
 extern int      cpu_block_end;
 extern uint32_t codegen_endpc;
