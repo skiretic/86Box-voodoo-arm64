@@ -788,18 +788,13 @@ codegen_block_end_recompile(codeblock_t *block)
 
     codegen_accumulate_flush(ir_data);
 
-    /*Extract exit PCs from the UOP stream for block linking.
-      If exit_pc[0] was not set by codegen_generate_call (e.g. the block
-      ended at max instruction count without a branch), set it to the
-      sequential fall-through address.*/
-    if (ir_data->exit_pc[0] == BLOCK_PC_INVALID)
-        ir_data->exit_pc[0] = cs + cpu_state.pc;
-    codegen_ir_extract_exit_pcs(ir_data);
-
-    /*Copy exit PCs from ir_data to the block for use by the dispatcher.*/
-    block->exit_pc[0] = ir_data->exit_pc[0];
-    block->exit_pc[1] = ir_data->exit_pc[1];
-    block->exit_count = ir_data->exit_count;
+    /*Set the pending exit PC for the fall-through case (epilogue).
+      If the block ends without a branch (e.g. max instruction count),
+      the fall-through address is used.  The backend JMP handler will
+      override _pending_exit_pc for each explicit exit stub.
+      exit_count starts at 0; the backend increments it for each exit.*/
+    block->_pending_exit_pc = cs + cpu_state.pc;
+    block->exit_count       = 0;
 
     codegen_ir_compile(ir_data, block);
 }
@@ -861,10 +856,13 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     if (target_phys == (uint32_t) -1)
         return;
 
-    /*Try hash lookup first, then tree lookup.*/
+    /*Try hash lookup first, then tree lookup.
+      Use source->_cs rather than the current global `cs`, because
+      within a single block CS never changes (far jumps end the block),
+      and the target must share the same code segment.*/
     target = &codeblock[codeblock_hash[HASH(target_phys)]];
-    if (target->pc != target_pc || target->_cs != cs) {
-        target = codeblock_tree_find(target_phys, cs);
+    if (target->pc != target_pc || target->_cs != source->_cs) {
+        target = codeblock_tree_find(target_phys, source->_cs);
         if (!target)
             return;
     }
@@ -885,6 +883,11 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
 
     /*Don't link to self.*/
     if (target == source)
+        return;
+
+    /*Defensive: exit_patch_offset == 0 means no patchable stub was emitted
+      (e.g. branch displacement was out of range for a relative jump).*/
+    if (source->exit_patch_offset[exit_idx] == 0)
         return;
 
     /*Add to target's incoming link list. If full, don't link.*/

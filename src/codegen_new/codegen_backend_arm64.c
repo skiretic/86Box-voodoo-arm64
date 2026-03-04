@@ -420,6 +420,7 @@ codegen_backend_epilogue(codeblock_t *block)
       Encoding: B #4 = 0x14000001 (imm26=1, offset=+4 bytes).*/
     if (block->exit_count < BLOCK_EXIT_MAX) {
         codegen_alloc(block, 4);
+        block->exit_pc[block->exit_count]           = block->_pending_exit_pc;
         block->exit_patch_offset[block->exit_count] = (uint32_t) block_pos;
         block->exit_count++;
         *(uint32_t *) &block_write_data[block_pos] = 0x14000001;

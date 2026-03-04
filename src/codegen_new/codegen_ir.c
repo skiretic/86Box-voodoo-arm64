@@ -334,6 +334,13 @@ codegen_ir_compile(ir_data_t *ir, codeblock_t *block)
         if ((uop->type & UOP_MASK) == UOP_INVALID)
             continue;
 
+        /*Track the most recent exit PC for block linking.
+          When UOP_MOV_IMM writes to IREG_pc, the value is the target
+          address for the exit stub that follows.  The backend JMP
+          handler reads _pending_exit_pc to pair it with the patch offset.*/
+        if ((uop->type & UOP_MASK) == (UOP_MOV_IMM & UOP_MASK) && IREG_GET_REG(uop->dest_reg_a.reg) == IREG_pc)
+            block->_pending_exit_pc = (uint32_t) uop->imm_data;
+
 #ifdef CODEGEN_BACKEND_HAS_MOV_IMM
         if ((uop->type & UOP_MASK) == (UOP_MOV_IMM & UOP_MASK) && reg_is_native_size(uop->dest_reg_a) && !codegen_reg_is_loaded(uop->dest_reg_a) && reg_version[IREG_GET_REG(uop->dest_reg_a.reg)][uop->dest_reg_a.version].refcount <= 0) {
             /*Special case for UOP_MOV_IMM - if destination not already in host register

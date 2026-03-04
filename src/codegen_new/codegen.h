@@ -87,6 +87,12 @@ typedef struct codeblock_t {
     uint16_t link_target_nr[BLOCK_EXIT_MAX];
     uint8_t  exit_count;
 
+    /*Temporary field used during compilation only.
+      Set by codegen_ir_compile when processing UOP_MOV_IMM(IREG_pc, addr)
+      or by codegen_block_end_recompile for the fall-through PC.
+      The backend JMP handler reads this to pair exit_pc with exit_patch_offset.*/
+    uint32_t _pending_exit_pc;
+
     /*Block linking: incoming links.
       Array of (source_block_nr, exit_idx) pairs for blocks that have
       linked their exits to this block's entry point. Used to unpatch

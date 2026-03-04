@@ -421,6 +421,7 @@ codegen_backend_epilogue(codeblock_t *block)
         codegen_alloc_bytes(block, 5);
         diff = (intptr_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos + 5]);
         if (diff >= -0x80000000LL && diff < 0x7fffffffLL) {
+            block->exit_pc[block->exit_count]           = block->_pending_exit_pc;
             block->exit_patch_offset[block->exit_count] = (uint32_t) block_pos;
             block->exit_count++;
             codegen_addbyte(block, 0xe9); /*JMP rel32*/
