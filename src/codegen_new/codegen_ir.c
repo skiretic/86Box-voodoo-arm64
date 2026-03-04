@@ -308,6 +308,11 @@ codegen_ir_compile(ir_data_t *ir, codeblock_t *block)
             uop_handlers[uop->type & UOP_MASK](block, uop);
         }
 
+        /* Track _pending_exit_pc: when a UOP_MOV_IMM writes to IREG_pc,
+           record the immediate as the target EIP for block linking. */
+        if ((uop->type & UOP_MASK) == (UOP_MOV_IMM & UOP_MASK) && IREG_GET_REG(uop->dest_reg_a.reg) == IREG_pc)
+            block->_pending_exit_pc = (uint32_t) uop->imm_data;
+
         if (uop->type & UOP_TYPE_JUMP) {
             if (uop->jump_dest_uop == ir->wr_pos) {
                 if (jump_target_at_end == -1)

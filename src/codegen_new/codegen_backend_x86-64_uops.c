@@ -17,6 +17,7 @@
 #    include "codegen_backend_x86-64_defs.h"
 #    include "codegen_backend_x86-64_ops.h"
 #    include "codegen_backend_x86-64_ops_sse.h"
+#    include "codegen_backend_x86-64_ops_helpers.h"
 #    include "codegen_ir_defs.h"
 
 #    define STACK_ARG0        (0)
@@ -24,7 +25,7 @@
 #    define STACK_ARG2        (8)
 #    define STACK_ARG3        (12)
 
-#    define HOST_REG_GET(reg) ((IREG_GET_SIZE(reg) == IREG_SIZE_BH) ? (IREG_GET_REG((reg) &3) | 4) : (IREG_GET_REG(reg) & 7))
+#    define HOST_REG_GET(reg) ((IREG_GET_SIZE(reg) == IREG_SIZE_BH) ? (IREG_GET_REG((reg) & 3) | 4) : (IREG_GET_REG(reg) & 7))
 
 #    define REG_IS_L(size)    (size == IREG_SIZE_L)
 #    define REG_IS_W(size)    (size == IREG_SIZE_W)
@@ -174,9 +175,9 @@ static int
 codegen_ANDN(codeblock_t *block, uop_t *uop)
 {
     int dest_reg = HOST_REG_GET(uop->dest_reg_a_real);
-#if 0
+#    if 0
     int src_reg_a = HOST_REG_GET(uop->src_reg_a_real);
-#endif
+#    endif
     int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
     int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
     int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
@@ -853,7 +854,46 @@ codegen_MMX_ENTER(codeblock_t *block, uop_t *uop)
 static int
 codegen_JMP(codeblock_t *block, uop_t *uop)
 {
-    host_x86_JMP(block, uop->p);
+    /* Record exit PC for block linking before emitting the jump. */
+    if (block->exit_count < BLOCK_EXIT_MAX && block->_pending_exit_pc != BLOCK_PC_INVALID) {
+        int      exit_idx = block->exit_count;
+        uint32_t patchable_jmp_pos;
+        int32_t  exit_rel32;
+
+        block->exit_pc[exit_idx] = block->_pending_exit_pc;
+        block->_pending_exit_pc  = BLOCK_PC_INVALID;
+
+        /* Cycle-guarded exit stub:
+             MOV EAX, [RBP + _cycles_offset]   ; load cpu_state._cycles
+             CMP EAX, 0                         ; test cycles
+             JLE codegen_exit_rout              ; bail if cycles <= 0
+             JMP codegen_exit_rout              ; patchable (5-byte JMP rel32) */
+
+        /* MOV EAX, [RBP + _cycles_offset] */
+        host_x86_MOV32_REG_BASE_OFFSET(block, REG_EAX, REG_RBP, cpu_state_offset(_cycles));
+
+        /* CMP EAX, 0 */
+        host_x86_CMP32_REG_IMM(block, REG_EAX, 0);
+
+        /* JLE codegen_exit_rout */
+        codegen_alloc_bytes(block, 6);
+        codegen_addbyte2(block, 0x0f, 0x8e); /* JLE rel32 */
+        codegen_addlong(block, (uint32_t) ((uintptr_t) uop->p - (uintptr_t) &block_write_data[block_pos + 4]));
+
+        /* Patchable JMP rel32 to codegen_exit_rout (will be patched to target block). */
+        patchable_jmp_pos = block_pos;
+        codegen_alloc_bytes(block, 5);
+        codegen_addbyte(block, 0xe9); /* JMP rel32 */
+        exit_rel32 = (int32_t) ((uintptr_t) uop->p - (uintptr_t) &block_write_data[block_pos + 4]);
+        codegen_addlong(block, (uint32_t) exit_rel32);
+
+        block->exit_patch_offset[exit_idx]  = patchable_jmp_pos;
+        block->exit_original_insn[exit_idx] = (uint32_t) exit_rel32;
+        block->exit_count++;
+    } else {
+        /* No exit slot available — emit a plain JMP as before. */
+        host_x86_JMP(block, uop->p);
+    }
 
     return 0;
 }

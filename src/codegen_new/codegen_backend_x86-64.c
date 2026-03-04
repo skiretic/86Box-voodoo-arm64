@@ -11,6 +11,7 @@
 #    include "codegen_backend.h"
 #    include "codegen_backend_x86-64_defs.h"
 #    include "codegen_backend_x86-64_ops.h"
+#    include "codegen_backend_x86-64_ops_helpers.h"
 #    include "codegen_backend_x86-64_ops_sse.h"
 #    include "codegen_reg.h"
 #    include "x86.h"
@@ -44,29 +45,29 @@ void *codegen_gpf_rout;
 void *codegen_exit_rout;
 
 host_reg_def_t codegen_host_reg_list[CODEGEN_HOST_REGS] = {
-  /*Note: while EAX and EDX are normally volatile registers under x86
-  calling conventions, the recompiler will explicitly save and restore
-  them across funcion calls*/
-    {REG_EAX,  0},
-    { REG_EBX, 0},
-    { REG_EDX, 0}
+    /*Note: while EAX and EDX are normally volatile registers under x86
+    calling conventions, the recompiler will explicitly save and restore
+    them across funcion calls*/
+    { REG_EAX, 0 },
+    { REG_EBX, 0 },
+    { REG_EDX, 0 }
 };
 
 host_reg_def_t codegen_host_fp_reg_list[CODEGEN_HOST_FP_REGS] = {
 #    if _WIN64
-  /*Windows x86-64 calling convention preserves XMM6-XMM15*/
-    {REG_XMM6,  0                     },
-    { REG_XMM7, 0                     },
+    /*Windows x86-64 calling convention preserves XMM6-XMM15*/
+    { REG_XMM6, 0                      },
+    { REG_XMM7, 0                      },
 #    else
     /*System V AMD64 calling convention does not preserve any XMM registers*/
     { REG_XMM6, HOST_REG_FLAG_VOLATILE },
     { REG_XMM7, HOST_REG_FLAG_VOLATILE },
 #    endif
-    { REG_XMM1, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM2, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM3, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM4, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM5, HOST_REG_FLAG_VOLATILE}
+    { REG_XMM1, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM2, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM3, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM4, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM5, HOST_REG_FLAG_VOLATILE }
 };
 
 static void
@@ -315,19 +316,19 @@ codegen_backend_init(void)
 #    endif
     host_x86_CALL(block, (void *) x86gpf);
     codegen_exit_rout = &codeblock[block_current].data[block_pos];
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);
-#else
+#    else
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x48);
-#endif
+#    endif
     host_x86_POP(block, REG_R15);
     host_x86_POP(block, REG_R14);
     host_x86_POP(block, REG_R13);
     host_x86_POP(block, REG_R12);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_POP(block, REG_RDI);
     host_x86_POP(block, REG_RSI);
-#endif
+#    endif
     host_x86_POP(block, REG_RBP);
     host_x86_POP(block, REG_RBX);
     host_x86_RET(block);
@@ -352,19 +353,19 @@ codegen_backend_prologue(codeblock_t *block)
     block_pos = BLOCK_START; /*Entry code*/
     host_x86_PUSH(block, REG_RBX);
     host_x86_PUSH(block, REG_RBP);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_PUSH(block, REG_RSI);
     host_x86_PUSH(block, REG_RDI);
-#endif
+#    endif
     host_x86_PUSH(block, REG_R12);
     host_x86_PUSH(block, REG_R13);
     host_x86_PUSH(block, REG_R14);
     host_x86_PUSH(block, REG_R15);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_SUB64_REG_IMM(block, REG_RSP, 0x38);
-#else
+#    else
     host_x86_SUB64_REG_IMM(block, REG_RSP, 0x48);
-#endif
+#    endif
     host_x86_MOV64_REG_IMM(block, REG_RBP, ((uintptr_t) &cpu_state) + 128);
     if (block->flags & CODEBLOCK_HAS_FPU) {
         host_x86_MOV32_REG_ABS(block, REG_EAX, &cpu_state.TOP);
@@ -373,26 +374,98 @@ codegen_backend_prologue(codeblock_t *block)
     }
     if (block->flags & CODEBLOCK_NO_IMMEDIATES)
         host_x86_MOV64_REG_IMM(block, REG_R12, ((uintptr_t) ram) + 2147483648ULL);
+
+    /* Record the entry point past prologue for block linking.
+       Linked blocks jump here, sharing the caller's stack frame. */
+    block->link_entry_offset = (uint16_t) block_pos;
 }
 
 void
 codegen_backend_epilogue(codeblock_t *block)
 {
-#ifdef _WIN64
+    /* Cycle-guarded epilogue exit stub for block linking.
+       When unlinked, the patchable JMP falls through to the register
+       restore sequence below. When linked, it jumps to the target block. */
+    if (block->exit_count < BLOCK_EXIT_MAX && block->_pending_exit_pc != BLOCK_PC_INVALID) {
+        int      exit_idx = block->exit_count;
+        uint32_t patchable_jmp_pos;
+        int32_t  skip_rel32;
+
+        block->exit_pc[exit_idx] = block->_pending_exit_pc;
+        block->_pending_exit_pc  = BLOCK_PC_INVALID;
+
+        /* MOV EAX, [RBP + _cycles_offset] — load cpu_state._cycles */
+        host_x86_MOV32_REG_BASE_OFFSET(block, REG_EAX, REG_RBP, cpu_state_offset(_cycles));
+
+        /* CMP EAX, 0 */
+        host_x86_CMP32_REG_IMM(block, REG_EAX, 0);
+
+        /* JLE codegen_exit_rout — bail if cycles <= 0 */
+        codegen_alloc_bytes(block, 6);
+        codegen_addbyte2(block, 0x0f, 0x8e); /* JLE rel32 */
+        codegen_addlong(block, (uint32_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos + 4]));
+
+        /* Patchable JMP rel32 — initially jumps to next instruction (fall through
+           to epilogue). When linked, patched to jump to target block's entry. */
+        patchable_jmp_pos = block_pos;
+        codegen_alloc_bytes(block, 5);
+        codegen_addbyte(block, 0xe9); /* JMP rel32 */
+        skip_rel32 = 0;               /* rel32 = 0 means jump to next instruction */
+        codegen_addlong(block, (uint32_t) skip_rel32);
+
+        block->exit_patch_offset[exit_idx]  = patchable_jmp_pos;
+        block->exit_original_insn[exit_idx] = (uint32_t) skip_rel32;
+        block->exit_count++;
+    }
+
+    /* Actual register restore / return sequence. */
+#    ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);
-#else
+#    else
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x48);
-#endif
+#    endif
     host_x86_POP(block, REG_R15);
     host_x86_POP(block, REG_R14);
     host_x86_POP(block, REG_R13);
     host_x86_POP(block, REG_R12);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_POP(block, REG_RDI);
     host_x86_POP(block, REG_RSI);
-#endif
+#    endif
     host_x86_POP(block, REG_RBP);
     host_x86_POP(block, REG_RBX);
     host_x86_RET(block);
+}
+
+/*
+ * Block linking: patch/unpatch a 5-byte JMP rel32 instruction.
+ *
+ * On x86-64, code pages are coherent (no I-cache flush needed) and
+ * typically RWX or made writable as needed (no W^X toggle needed).
+ *
+ * exit_original_insn[exit_idx] stores the original rel32 displacement
+ * (the opcode byte 0xE9 is constant and does not need to be stored).
+ */
+void
+codegen_backend_patch_link(codeblock_t *source, int exit_idx, codeblock_t *target)
+{
+    uint8_t *patch_addr  = source->data + source->exit_patch_offset[exit_idx];
+    uint8_t *target_addr = target->data + target->link_entry_offset;
+    int32_t  rel         = (int32_t) (target_addr - (patch_addr + 5));
+
+    /* Write the 5-byte JMP rel32 to the target block's entry point. */
+    patch_addr[0]                 = 0xe9;
+    *(int32_t *) (patch_addr + 1) = rel;
+}
+
+void
+codegen_backend_unpatch_link(codeblock_t *source, int exit_idx)
+{
+    uint8_t *patch_addr = source->data + source->exit_patch_offset[exit_idx];
+    int32_t  orig_rel32 = (int32_t) source->exit_original_insn[exit_idx];
+
+    /* Restore the original 5-byte JMP rel32. */
+    patch_addr[0]                 = 0xe9;
+    *(int32_t *) (patch_addr + 1) = orig_rel32;
 }
 #endif
