@@ -48,27 +48,27 @@ void *codegen_gpf_rout;
 void *codegen_exit_rout;
 
 host_reg_def_t codegen_host_reg_list[CODEGEN_HOST_REGS] = {
-    { REG_X19, 0},
-    { REG_X20, 0},
-    { REG_X21, 0},
-    { REG_X22, 0},
-    { REG_X23, 0},
-    { REG_X24, 0},
-    { REG_X25, 0},
-    { REG_X26, 0},
-    { REG_X27, 0},
-    { REG_X28, 0}
+    { REG_X19, 0 },
+    { REG_X20, 0 },
+    { REG_X21, 0 },
+    { REG_X22, 0 },
+    { REG_X23, 0 },
+    { REG_X24, 0 },
+    { REG_X25, 0 },
+    { REG_X26, 0 },
+    { REG_X27, 0 },
+    { REG_X28, 0 }
 };
 
 host_reg_def_t codegen_host_fp_reg_list[CODEGEN_HOST_FP_REGS] = {
-    { REG_V8,  0},
-    { REG_V9,  0},
-    { REG_V10, 0},
-    { REG_V11, 0},
-    { REG_V12, 0},
-    { REG_V13, 0},
-    { REG_V14, 0},
-    { REG_V15, 0}
+    { REG_V8,  0 },
+    { REG_V9,  0 },
+    { REG_V10, 0 },
+    { REG_V11, 0 },
+    { REG_V12, 0 },
+    { REG_V13, 0 },
+    { REG_V14, 0 },
+    { REG_V15, 0 }
 };
 
 static void
@@ -333,6 +333,28 @@ codegen_backend_init(void)
 
     asm("mrs %0, fpcr\n"
         : "=r"(cpu_state.old_fp_control));
+}
+
+/*Block linking: patch/unpatch exit stubs.
+  These are stub implementations. The cpu-arm64 agent will implement
+  the real ARM64-specific patching.*/
+void
+codegen_backend_patch_link(codeblock_t *source_block, uint32_t patch_offset, codeblock_t *target_block)
+{
+    /*TODO: patch exit stub at source_block->data[patch_offset] to jump
+      directly to target_block->data[BLOCK_START].*/
+    (void) source_block;
+    (void) patch_offset;
+    (void) target_block;
+}
+
+void
+codegen_backend_unpatch_link(codeblock_t *source_block, uint32_t patch_offset)
+{
+    /*TODO: revert exit stub at source_block->data[patch_offset] back to
+      the dispatcher-returning sequence.*/
+    (void) source_block;
+    (void) patch_offset;
 }
 
 void

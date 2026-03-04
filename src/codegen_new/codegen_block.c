@@ -377,6 +377,7 @@ invalidate_block(codeblock_t *block)
     if (block->pc == BLOCK_PC_INVALID)
         fatal("Invalidating deleted block\n");
 #endif
+    codegen_block_unlink(block);
     remove_from_block_list(block, old_pc);
     block_dirty_list_add(block);
     if (block->head_mem_block)
@@ -396,6 +397,7 @@ delete_block(codeblock_t *block)
     if (block->pc == BLOCK_PC_INVALID)
         fatal("Deleting deleted block\n");
 #endif
+    codegen_block_unlink(block);
     block->pc = BLOCK_PC_INVALID;
 
     codeblock_tree_delete(block);
@@ -531,6 +533,8 @@ codegen_block_init(uint32_t phys_addr)
     block->flags                         = CODEBLOCK_STATIC_TOP;
     block->status                        = cpu_cur_status;
 
+    codegen_block_link_init(block);
+
     recomp_page = block->phys & ~0xfff;
     codeblock_tree_add(block);
 }
@@ -558,6 +562,9 @@ codegen_block_start_recompile(codeblock_t *block)
     if (block->pc != cs + cpu_state.pc || (block->flags & CODEBLOCK_WAS_RECOMPILED))
         fatal("Recompile to used block!\n");
 #endif
+
+    codegen_block_unlink(block);
+    codegen_block_link_init(block);
 
     if (block->head_mem_block) {
         codegen_allocator_free(block->head_mem_block);
@@ -781,6 +788,157 @@ codegen_block_end_recompile(codeblock_t *block)
 
     codegen_accumulate_flush(ir_data);
     codegen_ir_compile(ir_data, block);
+}
+
+/*
+ * Block linking infrastructure.
+ *
+ * Block linking eliminates the dispatcher overhead when transitioning between
+ * compiled blocks. Instead of returning to the C dispatcher (hash lookup,
+ * page validation, etc.), a linked block's exit stub is patched to jump
+ * directly to the target block's entry point.
+ *
+ * Each block has up to BLOCK_EXIT_MAX (2) exit slots:
+ *   EXIT_0: fall-through or unconditional jump target
+ *   EXIT_1: conditional branch taken target
+ *
+ * Each block also tracks incoming links: other blocks that have their exits
+ * patched to jump to this block. When a block is invalidated, all incoming
+ * links are unpatched so they return to the dispatcher instead.
+ */
+
+void
+codegen_block_link_init(codeblock_t *block)
+{
+    for (int i = 0; i < BLOCK_EXIT_MAX; i++) {
+        block->exit_pc[i]           = BLOCK_PC_INVALID;
+        block->exit_patch_offset[i] = 0;
+        block->link_target_nr[i]    = BLOCK_INVALID;
+    }
+    block->exit_count          = 0;
+    block->link_incoming_count = 0;
+}
+
+/*Try to link a single exit slot of source to the target block.
+  Looks up the target block by exit_pc[exit_idx] and patches the
+  exit stub if found and compiled.*/
+void
+codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
+{
+    uint32_t     target_pc;
+    uint32_t     target_phys;
+    codeblock_t *target;
+
+    if (exit_idx >= source->exit_count)
+        return;
+
+    target_pc = source->exit_pc[exit_idx];
+    if (target_pc == BLOCK_PC_INVALID)
+        return;
+
+    /*Already linked?*/
+    if (source->link_target_nr[exit_idx] != BLOCK_INVALID)
+        return;
+
+    /*Look up target block by physical address.*/
+    target_phys = get_phys_noabrt(target_pc);
+    if (target_phys == (uint32_t) -1)
+        return;
+
+    /*Try hash lookup first, then tree lookup.*/
+    target = &codeblock[codeblock_hash[HASH(target_phys)]];
+    if (target->pc != target_pc || target->_cs != (target_pc - (target_pc & 0xfff)) /* wrong cs */) {
+        target = codeblock_tree_find(target_phys, target_pc & 0xfffff000);
+        if (!target)
+            return;
+    }
+
+    /*Target must match exactly and be compiled.*/
+    if (target->pc != target_pc)
+        return;
+    if (target->phys != target_phys)
+        return;
+    if (!(target->flags & CODEBLOCK_WAS_RECOMPILED))
+        return;
+    if (target->pc == BLOCK_PC_INVALID)
+        return;
+
+    /*Don't link to self.*/
+    if (target == source)
+        return;
+
+    /*Add to target's incoming link list. If full, don't link.*/
+    if (target->link_incoming_count >= BLOCK_LINK_INCOMING_MAX)
+        return;
+
+    target->link_incoming_block[target->link_incoming_count] = get_block_nr(source);
+    target->link_incoming_exit[target->link_incoming_count]  = (uint8_t) exit_idx;
+    target->link_incoming_count++;
+
+    /*Patch the exit stub.*/
+    codegen_backend_patch_link(source, source->exit_patch_offset[exit_idx], target);
+    source->link_target_nr[exit_idx] = get_block_nr(target);
+}
+
+/*When a new block finishes compilation, check if any existing blocks
+  have exits that target this block's PC and link them.*/
+void
+codegen_block_link_incoming(codeblock_t *target)
+{
+    /*This is called after a block is compiled. We could scan all blocks
+      to find those with matching exit_pc, but that would be O(N).
+      Instead, we rely on lazy linking from the dispatcher: after a block
+      executes and returns to the dispatcher, the dispatcher checks if
+      the target is compiled and links on the spot.
+
+      This function is a placeholder for future proactive linking.*/
+    (void) target;
+}
+
+/*Unlink all connections to and from a block. Called before invalidation
+  or deletion. Reverts all incoming links (other blocks that jump to this
+  block) back to the dispatcher, and removes outgoing links from the
+  target blocks' incoming lists.*/
+void
+codegen_block_unlink(codeblock_t *block)
+{
+    /*Unpatch all incoming links: other blocks that jump to us.*/
+    for (uint8_t i = 0; i < block->link_incoming_count; i++) {
+        uint16_t     src_nr   = block->link_incoming_block[i];
+        uint8_t      exit_idx = block->link_incoming_exit[i];
+        codeblock_t *src      = &codeblock[src_nr];
+
+        /*Verify the link is still valid before unpatching.*/
+        if (src->pc != BLOCK_PC_INVALID && exit_idx < src->exit_count && src->link_target_nr[exit_idx] == get_block_nr(block)) {
+            codegen_backend_unpatch_link(src, src->exit_patch_offset[exit_idx]);
+            src->link_target_nr[exit_idx] = BLOCK_INVALID;
+        }
+    }
+    block->link_incoming_count = 0;
+
+    /*Remove our outgoing links from each target's incoming list.*/
+    for (int i = 0; i < block->exit_count; i++) {
+        uint16_t target_nr = block->link_target_nr[i];
+        if (target_nr == BLOCK_INVALID)
+            continue;
+
+        codeblock_t *target  = &codeblock[target_nr];
+        uint16_t     self_nr = get_block_nr(block);
+
+        /*Remove us from target's incoming list by swapping with last.*/
+        for (uint8_t j = 0; j < target->link_incoming_count; j++) {
+            if (target->link_incoming_block[j] == self_nr && target->link_incoming_exit[j] == (uint8_t) i) {
+                target->link_incoming_count--;
+                if (j < target->link_incoming_count) {
+                    target->link_incoming_block[j] = target->link_incoming_block[target->link_incoming_count];
+                    target->link_incoming_exit[j]  = target->link_incoming_exit[target->link_incoming_count];
+                }
+                break;
+            }
+        }
+
+        block->link_target_nr[i] = BLOCK_INVALID;
+    }
 }
 
 void

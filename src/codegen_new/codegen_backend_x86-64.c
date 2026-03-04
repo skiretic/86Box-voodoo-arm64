@@ -44,29 +44,29 @@ void *codegen_gpf_rout;
 void *codegen_exit_rout;
 
 host_reg_def_t codegen_host_reg_list[CODEGEN_HOST_REGS] = {
-  /*Note: while EAX and EDX are normally volatile registers under x86
-  calling conventions, the recompiler will explicitly save and restore
-  them across funcion calls*/
-    {REG_EAX,  0},
-    { REG_EBX, 0},
-    { REG_EDX, 0}
+    /*Note: while EAX and EDX are normally volatile registers under x86
+    calling conventions, the recompiler will explicitly save and restore
+    them across funcion calls*/
+    { REG_EAX, 0 },
+    { REG_EBX, 0 },
+    { REG_EDX, 0 }
 };
 
 host_reg_def_t codegen_host_fp_reg_list[CODEGEN_HOST_FP_REGS] = {
 #    if _WIN64
-  /*Windows x86-64 calling convention preserves XMM6-XMM15*/
-    {REG_XMM6,  0                     },
-    { REG_XMM7, 0                     },
+    /*Windows x86-64 calling convention preserves XMM6-XMM15*/
+    { REG_XMM6, 0                      },
+    { REG_XMM7, 0                      },
 #    else
     /*System V AMD64 calling convention does not preserve any XMM registers*/
     { REG_XMM6, HOST_REG_FLAG_VOLATILE },
     { REG_XMM7, HOST_REG_FLAG_VOLATILE },
 #    endif
-    { REG_XMM1, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM2, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM3, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM4, HOST_REG_FLAG_VOLATILE},
-    { REG_XMM5, HOST_REG_FLAG_VOLATILE}
+    { REG_XMM1, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM2, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM3, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM4, HOST_REG_FLAG_VOLATILE },
+    { REG_XMM5, HOST_REG_FLAG_VOLATILE }
 };
 
 static void
@@ -315,19 +315,19 @@ codegen_backend_init(void)
 #    endif
     host_x86_CALL(block, (void *) x86gpf);
     codegen_exit_rout = &codeblock[block_current].data[block_pos];
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);
-#else
+#    else
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x48);
-#endif
+#    endif
     host_x86_POP(block, REG_R15);
     host_x86_POP(block, REG_R14);
     host_x86_POP(block, REG_R13);
     host_x86_POP(block, REG_R12);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_POP(block, REG_RDI);
     host_x86_POP(block, REG_RSI);
-#endif
+#    endif
     host_x86_POP(block, REG_RBP);
     host_x86_POP(block, REG_RBX);
     host_x86_RET(block);
@@ -346,25 +346,47 @@ codegen_set_rounding_mode(int mode)
     cpu_state.new_fp_control = (cpu_state.old_fp_control & ~0x6000) | (mode << 13);
 }
 
+/*Block linking: patch/unpatch exit stubs.
+  These are stub implementations. The cpu-x64 agent will implement
+  the real x86-64-specific patching.*/
+void
+codegen_backend_patch_link(codeblock_t *source_block, uint32_t patch_offset, codeblock_t *target_block)
+{
+    /*TODO: patch exit stub at source_block->data[patch_offset] to jump
+      directly to target_block->data[BLOCK_START].*/
+    (void) source_block;
+    (void) patch_offset;
+    (void) target_block;
+}
+
+void
+codegen_backend_unpatch_link(codeblock_t *source_block, uint32_t patch_offset)
+{
+    /*TODO: revert exit stub at source_block->data[patch_offset] back to
+      the dispatcher-returning sequence.*/
+    (void) source_block;
+    (void) patch_offset;
+}
+
 void
 codegen_backend_prologue(codeblock_t *block)
 {
     block_pos = BLOCK_START; /*Entry code*/
     host_x86_PUSH(block, REG_RBX);
     host_x86_PUSH(block, REG_RBP);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_PUSH(block, REG_RSI);
     host_x86_PUSH(block, REG_RDI);
-#endif
+#    endif
     host_x86_PUSH(block, REG_R12);
     host_x86_PUSH(block, REG_R13);
     host_x86_PUSH(block, REG_R14);
     host_x86_PUSH(block, REG_R15);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_SUB64_REG_IMM(block, REG_RSP, 0x38);
-#else
+#    else
     host_x86_SUB64_REG_IMM(block, REG_RSP, 0x48);
-#endif
+#    endif
     host_x86_MOV64_REG_IMM(block, REG_RBP, ((uintptr_t) &cpu_state) + 128);
     if (block->flags & CODEBLOCK_HAS_FPU) {
         host_x86_MOV32_REG_ABS(block, REG_EAX, &cpu_state.TOP);
@@ -378,19 +400,19 @@ codegen_backend_prologue(codeblock_t *block)
 void
 codegen_backend_epilogue(codeblock_t *block)
 {
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x38);
-#else
+#    else
     host_x86_ADD64_REG_IMM(block, REG_RSP, 0x48);
-#endif
+#    endif
     host_x86_POP(block, REG_R15);
     host_x86_POP(block, REG_R14);
     host_x86_POP(block, REG_R13);
     host_x86_POP(block, REG_R12);
-#ifdef _WIN64
+#    ifdef _WIN64
     host_x86_POP(block, REG_RDI);
     host_x86_POP(block, REG_RSI);
-#endif
+#    endif
     host_x86_POP(block, REG_RBP);
     host_x86_POP(block, REG_RBX);
     host_x86_RET(block);
