@@ -530,7 +530,6 @@ uop_gen_reg_dst_src2_imm(uint32_t uop_type, ir_data_t *ir, int dest_reg, int src
         uop->is_a16     = 1;
     } else
         uop->src_reg_b  = codegen_reg_read(src_reg_b);
-    uop->is_a16     = 0;    
     uop->dest_reg_a = codegen_reg_write(dest_reg, ir->wr_pos - 1);
     uop->imm_data   = imm;
 }
