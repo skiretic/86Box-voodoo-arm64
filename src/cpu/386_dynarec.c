@@ -568,6 +568,30 @@ exec386_dynarec_dyn(void)
                         (unsigned long long) dispatch_count,
                         cpu_state.pc, cpu_state.seg_cs.base, cpu_state._cycles);
             }
+            /* Stuck-address trap: dump block info when CPU reaches the black-screen loop */
+            if (dispatch_count > 1000000 && cpu_state.pc == 0x2DA && cpu_state.seg_cs.base == 0x20000) {
+                static int stuck_dump_count = 0;
+                if (stuck_dump_count < 3) {
+                    stuck_dump_count++;
+                    uint32_t linear = cpu_state.seg_cs.base + cpu_state.pc;
+                    uint32_t phys = get_phys_noabrt(linear);
+                    fprintf(stderr, "\n=== STUCK-TRAP[%d] at dispatch %llu ===\n", stuck_dump_count, (unsigned long long) dispatch_count);
+                    fprintf(stderr, "  pc=0x%08x cs=0x%08x linear=0x%08x phys=0x%08x\n",
+                            cpu_state.pc, cpu_state.seg_cs.base, linear, phys);
+                    /* Look up the block that was just dispatched */
+                    fprintf(stderr, "  last_block: nr=%d pc=0x%08x exit_count=%d flags=0x%x\n",
+                            get_block_nr(block), block->pc, block->exit_count, block->flags);
+                    for (int j = 0; j < block->exit_count; j++) {
+                        fprintf(stderr, "    exit[%d]: pc=0x%08x link_target=%d patch_off=%u\n",
+                                j, block->exit_pc[j], block->link_target_nr[j], block->exit_patch_offset[j]);
+                    }
+                    fprintf(stderr, "  incoming links: %d\n", block->link_incoming_count);
+                    for (int j = 0; j < block->link_incoming_count; j++) {
+                        fprintf(stderr, "    incoming[%d]: from_block=%d exit=%d\n",
+                                j, block->link_incoming_block[j], block->link_incoming_exit[j]);
+                    }
+                }
+            }
         }
 #    ifdef USE_ACYCS
         acycs = 0;

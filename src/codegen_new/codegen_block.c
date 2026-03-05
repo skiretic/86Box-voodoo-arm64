@@ -885,6 +885,12 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     static uint64_t total_success = 0;
     static uint64_t total_fail = 0;
     total_attempts++;
+#define MAX_LINKS 13 /* Binary search: set to 0 to disable, 26 to allow all */
+    static uint64_t total_links_created = 0;
+    if (total_links_created >= MAX_LINKS) {
+        total_fail++;
+        return;
+    }
     if ((total_attempts % 1000) == 0) {
         fprintf(stderr, "LINK-STATS: attempts=%llu ok=%llu fail=%llu\n",
                 (unsigned long long) total_attempts,
@@ -995,6 +1001,7 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     target->link_incoming_exit[slot]  = (uint8_t) exit_idx;
     target->link_incoming_count++;
 
+    total_links_created++;
     total_success++;
 
     if (link_debug_count < 50)
