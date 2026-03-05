@@ -25,6 +25,7 @@ if(DYNAREC)
         codegen_ops.c
         codegen_ops_3dnow.c
         codegen_ops_branch.c
+        codegen_ops_cmov.c
         codegen_ops_arith.c
         codegen_ops_fpu_arith.c
         codegen_ops_fpu_constant.c
@@ -33,6 +34,7 @@ if(DYNAREC)
         codegen_ops_helpers.c
         codegen_ops_jump.c
         codegen_ops_logic.c
+        codegen_ops_bit.c
         codegen_ops_misc.c
         codegen_ops_mmx_arith.c
         codegen_ops_mmx_cmp.c
