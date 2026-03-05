@@ -1,6 +1,6 @@
 # Status
 
-## Current Phase: Phase 4 retry or Phase 2 next (Phase 1+3 COMPLETE, Phase 4 REVERTED)
+## Current Phase: Phase 4 COMPLETE (Phases 1, 3, 4 COMPLETE)
 
 ## Phase 1 Progress
 
@@ -24,10 +24,10 @@
 
 | Instruction | Status | Commit | Notes |
 |-------------|--------|--------|-------|
-| LAHF (9F) | DONE | 87c56036d | `CALL_FUNC` → `helper_LAHF` (flags_rebuild + AH load) |
-| SAHF (9E) | DONE | 87c56036d | `CALL_FUNC` → `helper_SAHF` (AH → flags) |
+| LAHF (9F) | DONE | 87c56036d | `CALL_FUNC` -> `helper_LAHF` (flags_rebuild + AH load) |
+| SAHF (9E) | DONE | 87c56036d | `CALL_FUNC` -> `helper_SAHF` (AH -> flags) |
 | BSWAP (0F C8-CF) | DONE | 87c56036d | Shift/OR UOPs on IREG_32, all 8 register variants |
-| EMMS (0F 77) | DONE | 87c56036d | `uop_MMX_ENTER` + `CALL_FUNC` → `x87_emms` |
+| EMMS (0F 77) | DONE | 87c56036d | `uop_MMX_ENTER` + `CALL_FUNC` -> `x87_emms` |
 | FPU constants (D9 E9-ED) | DONE | 87c56036d | 5 CALL_FUNC helpers pushing to `cpu_state.ST[]` |
 | FLDCW (D9 /5) | DONE | 87c56036d | MEM_LOAD_REG to IREG_NPXC + CALL_FUNC for rounding |
 | SETcc (0F 90-9F) | DONE | 87c56036d | 16 wrappers + shared common via CALL_FUNC_RESULT |
@@ -71,13 +71,13 @@
 
 ## Audit Status (Phase 0 — COMPLETE)
 
-- [x] Other dynarec research → `research/other-dynarecs.md`
-- [x] Instruction coverage audit → `research/instruction-coverage.md`
-- [x] Correctness audit → `research/correctness-audit.md`
-- [x] ARM64 backend audit → `research/arm64-backend-audit.md`
-- [x] UOP catalog → `research/uop-catalog.md`
-- [x] Prior work review → `research/prior-work.md`
-- [x] Phase roadmap synthesized → `PHASES.md`
+- [x] Other dynarec research -> `research/other-dynarecs.md`
+- [x] Instruction coverage audit -> `research/instruction-coverage.md`
+- [x] Correctness audit -> `research/correctness-audit.md`
+- [x] ARM64 backend audit -> `research/arm64-backend-audit.md`
+- [x] UOP catalog -> `research/uop-catalog.md`
+- [x] Prior work review -> `research/prior-work.md`
+- [x] Phase roadmap synthesized -> `PHASES.md`
 
 ## Branch
 
@@ -90,9 +90,9 @@
 3. `87c56036d` — Add Phase 1 quick-win instruction handlers (LAHF/SAHF/BSWAP/EMMS/FPU constants/FLDCW/SETcc)
 4. `07fd7fd0a` — Revert is_a16 fix: backend applies 16-bit mask after segment base
 
-## Phase 3 Progress — Dead Flag Elimination
+## Phase 3 Progress — Dead Flag Elimination (COMPLETE)
 
-### Implementation (COMPLETE)
+### Implementation
 
 | Task | Status | Commit | Description |
 |------|--------|--------|-------------|
@@ -110,18 +110,6 @@
 - Conservative: BARRIER + ORDER_BARRIER make all flags live
 - Fires for consecutive register-only ALU instructions without memory access between them
 
-### Key Analysis Findings
-
-1. **Flag producers**: Every flag-setting instruction writes all 4 registers (flags_op, flags_res, flags_op1, flags_op2)
-2. **Flag consumers**:
-   - Branch handlers (codegen_ops_branch.c): read flags_res/op1/op2 via IR, or CALL_FUNC (BARRIER)
-   - LAHF/SAHF/PUSHF: use CALL_FUNC (BARRIER) with flags_rebuild/flags_rebuild_c
-   - SETcc: use CALL_FUNC_RESULT (BARRIER)
-   - INC/DEC: call flags_rebuild_c (BARRIER) then overwrite all 4 flags
-3. **Existing DCE**: Already eliminates per-register dead versions between barriers, but dirty_ir_regs mechanism marks intermediate versions as REQUIRED at barrier points
-4. **New pass**: Clears REQUIRED on intermediate flag versions proven dead by backward analysis
-5. **No backend changes needed**: Dead UOPs set to UOP_INVALID by existing process_dead_list, skipped in compile loop
-
 ### Optimization Scope
 
 The pass eliminates flag writes between consecutive flag-setting instructions that have NO intervening:
@@ -129,67 +117,93 @@ The pass eliminates flag writes between consecutive flag-setting instructions th
 - ORDER_BARRIER (memory loads/stores, jumps)
 - Flag register reads (branch tests, MOVZX of flag values)
 
-Common patterns that benefit:
-- `ADD EAX, EBX` / `SUB ECX, EDX` (consecutive register ALU)
-- `ADD EAX, EBX` / `MOV ECX, EDX` / `XOR ESI, ESI` (ALU with non-barrier MOV gap)
-- `TEST EAX, EAX` / `CMP ECX, 0` (redundant flag sets)
+## Phase 4 — Block Linking (COMPLETE)
 
-### Future Enhancements
+### Summary
 
-- **Relaxed ORDER_BARRIER handling**: Could skip ORDER_BARRIERs within the same x86 instruction (flag writes come after memory ops), but requires proving fault recovery correctness
-- **Per-flag-component analysis**: Track individual flag bits (CF, ZF, SF, OF) instead of the 4 lazy-eval registers for finer granularity
-- **Cross-block analysis**: Extend liveness to block successors (requires block linking first)
+Lazy block linking with cycle-guarded exit stubs. Compiled blocks with unconditional JMP
+exits can be directly patched to jump to their target block, bypassing the C dispatcher.
+Tested and verified: Win98 boots to desktop on ARM64 (Apple Silicon).
 
-## Phase 4 — Block Linking (REVERTED)
+### Implementation
 
-### Attempt Summary
+| Component | File(s) | Description |
+|-----------|---------|-------------|
+| Core infrastructure | `codegen_block.c` | `codeblock_t` link fields, `try_link_exit()`, `codegen_block_unlink()`, `CODEBLOCK_NEEDS_LINKING` one-shot flag |
+| IR exit tracking | `codegen_ir.c` | Stores `exit_pc` (cs + eip) and `exit_patch_offset` per block exit during IR compilation |
+| ARM64 backend | `codegen_backend_arm64.c`, `codegen_backend_arm64_uops.c` | Cycle-guarded 5-instruction exit stubs, W^X-safe `patch_link`/`unpatch_link`, `link_entry_offset=52` |
+| x86-64 backend | `codegen_backend_x86-64.c`, `codegen_backend_x86-64_uops.c` | Equivalent exit stubs and patch/unpatch for x86-64 |
+| Dispatcher integration | `386_dynarec.c` | Calls `try_link_exit()` after block execution when `CODEBLOCK_NEEDS_LINKING` set, `_chain_remaining` counter for chain depth |
 
-8 commits implemented lazy block linking (387a88199..5919b02b5), then reverted in 4d5fbbb42.
-The code is preserved in git history for reference.
+### Design
 
-### Root Causes of Failure
+- **5-instruction cycle-guarded exit stub** (ARM64):
+  ```
+  LDR  W7, [CPUSTATE, #_cycles]
+  CMP  W7, #0
+  B.GT +8           ; skip bail if cycles > 0
+  B    codegen_exit_rout  ; bail — cycles exhausted
+  B    target_or_exit     ; <-- patchable instruction
+  ```
+- **W^X-safe patching**: `pthread_jit_write_protect_np(0)` before write, `(1)` + `__clear_cache` after
+- **FPU guard**: Refuse to link blocks with mismatched `CODEBLOCK_HAS_FPU` flag
+- **Invalidation-safe**: `try_link_exit()` rejects blocks with `CODEBLOCK_IN_DIRTY_LIST` or `head_mem_block == NULL`
+- **link_entry_offset = 52 bytes**: Linked blocks skip prologue (10 STPs + 3 MOVs for 48-bit cpu_state address)
+- **Lazy linking**: Only attempt once per block (`CODEBLOCK_NEEDS_LINKING` one-shot flag)
+- **JMP exits only**: Only unconditional JMP exits have linkable stubs; conditional branches and epilogue exits are not linked
+- **Pre-allocation**: `codegen_alloc(block, 40)` before emitting stub prevents buffer split across continuation blocks
+- **Continuation detection**: Skip linkable exit when `block_write_data != block->data` (stub in continuation block)
 
-Three bugs were identified during testing:
+### Commits (Phase 4 — both attempts)
 
-1. **W^X violation (SIGBUS)**: `codegen_backend_patch_link` and `codegen_backend_unpatch_link`
-   write to JIT code pages without calling `pthread_jit_write_protect_np(0)` first. On macOS
-   ARM64, JIT pages are executable-not-writable at runtime. Fix: wrap writes in W^X toggles.
+#### First attempt (REVERTED)
+| Commit | Description |
+|--------|-------------|
+| 387a88199 | Block linking core infrastructure |
+| 5bdd7ae58 | link_entry_offset and link_epilogue_offset |
+| 253573217 | Exit PC recording and dispatcher lazy linking |
+| 8adc9d05b | x86-64 patchable exit stubs |
+| 3ccff9e92 | Block linking research document |
+| 2c541c36d | x86-64 patchable branch stubs |
+| ae14fb750 | Fix 3 bugs from audit |
+| 5919b02b5 | STATUS update |
+| 4d5fbbb42 | **REVERT** — crashes on boot (3 bugs: W^X, cycle guard, B.cond encoding) |
 
-2. **No cycle guard in linked chains (hang)**: Linked blocks jump directly A→B→A→B without
-   returning to the dispatcher. No JIT block checks `cycles <= 0` — that check only exists
-   in the C dispatcher loop. Fix: add a cycle-check sequence before each patchable exit stub:
-   ```
-   LDR  W16, [CPUSTATE, #_cycles]
-   CMP  W16, #0
-   B.GT +8            ; short forward skip (always in range)
-   B    codegen_exit_rout  ; bail if cycles exhausted
-   B    target_or_exit     ; <-- patchable instruction
-   ```
+#### Second attempt (FINAL — WORKING)
+| Commit | Description |
+|--------|-------------|
+| da0a67d9e | Phase 4 retry plan with ARM64 audit |
+| ffb449cb6 | Step 1: Core infrastructure — codeblock_t fields, link_init, try_link_exit, unlink |
+| 3761522ef | Step 2: ARM64 backend — cycle-guarded exit stubs, W^X-safe patch/unpatch, link_entry_offset |
+| e9cf557d8 | Steps 3-5: IR exit tracking, x86-64 backend, dispatcher integration |
+| 3b2357d17 | Fix: one-shot CODEBLOCK_NEEDS_LINKING flag (was 2.1M spam/sec) |
+| 0fab70e9a | Debug: stuck-address trap and MAX_LINKS binary search limit |
+| 1933d7c57 | Debug: re-enable linking with enhanced diagnostics |
+| e8c61f108 | **FINAL**: All fixes + invalidation guard + diagnostics removed |
 
-3. **`host_arm64_branch_set_offset` encoding bug**: This function uses `OFFSET26` (bits [25:0])
-   but `B.cond` instructions use `OFFSET19` (bits [23:5]). Using `branch_set_offset` on a
-   conditional branch to a far target corrupts the instruction encoding. Fix: never use
-   `branch_set_offset` on conditional branches to far targets — use `B.GT +8` (fixed short
-   offset) + unconditional `B` (which uses OFFSET26 correctly).
+### Bugs Found and Fixed
 
-### Lessons for Next Attempt
+| Bug | Root Cause | Fix | Commit |
+|-----|-----------|-----|--------|
+| W^X violation (SIGBUS) | Patching JIT code without disabling write protection | `pthread_jit_write_protect_np()` wrapper | 3761522ef |
+| No cycle guard (infinite chain hang) | Linked blocks never return to dispatcher | 5-instruction cycle-guarded stub | 3761522ef |
+| B.cond encoding corruption | `branch_set_offset` uses OFFSET26, B.cond uses OFFSET19 | B.GT +8 (fixed short) + unconditional B | 3761522ef |
+| Linking spam (2.1M/sec) | `try_link_exit` called on EVERY `code()` return | `CODEBLOCK_NEEDS_LINKING` one-shot flag | 3b2357d17 |
+| JMP stub buffer overflow | Raw writes bypassed `codegen_alloc`, split across mem_blocks | `codegen_alloc(block, 40)` pre-allocation | e8c61f108 |
+| Epilogue stub crash | Extra bytes caused excessive continuations | Removed entirely — JMP exits only | e8c61f108 |
+| Continuation patch overflow | `patch_offset > BLOCK_MAX` in continuation block | Skip linkable exit when `block_write_data != block->data` | e8c61f108 |
+| exit_pc missing CS base | `codegen_ir.c` stored raw EIP, not cs+eip | `+ cs` added to `_pending_exit_pc` | e8c61f108 |
+| **Link to invalidated block** | `try_link_exit()` didn't check block validity | Reject `CODEBLOCK_IN_DIRTY_LIST` or `head_mem_block == NULL` | e8c61f108 |
 
-- Test W^X compliance immediately — any write to JIT code outside recompilation needs guards
-- Block linking MUST include cycle guards to prevent infinite chains
-- ARM64 conditional branches (B.cond) have ±1MB range (19-bit), unconditional B has ±128MB (26-bit)
-- `host_arm64_branch_set_offset` is ONLY safe for unconditional B instructions
-- The `link_entry_offset` (skip prologue) design is correct — linked blocks share the caller's stack frame
-- FPU blocks need special handling: linking from non-FPU to FPU block skips TOP initialization
-- The research doc and core design are sound; only the ARM64 implementation had bugs
+### Key Lessons Learned
+
+1. **W^X on macOS ARM64**: Any write to JIT code pages outside the recompilation path needs `pthread_jit_write_protect_np(0/1)` + `__clear_cache` guards.
+2. **Cycle guards are mandatory**: Without them, linked block chains loop forever without returning to the dispatcher's cycle check.
+3. **ARM64 branch encoding**: `B.cond` has +/- 1MB range (19-bit offset), unconditional `B` has +/- 128MB (26-bit). `host_arm64_branch_set_offset` is ONLY safe for unconditional B.
+4. **Block invalidation frees code buffers**: `invalidate_block()` calls `codegen_allocator_free()` but does NOT remove the block from `codeblock_tree`. Link formation must explicitly check for invalidated blocks.
+5. **Diagnostic-driven debugging**: Binary search on `chain_remaining` counter isolated the exact corrupting link out of millions. Always add logging first, observe, then fix.
+6. **Agent hazard — lost fixes**: Agents can remove uncommitted fixes or re-introduce deleted code. Always verify critical fixes after every agent run.
 
 ## Next Phase
 
-Phase 3 dead flag elimination is COMPLETE. Phase 4 block linking was attempted and reverted.
-
-**Retry plan**: `cpu-dynarec-plan/phase4-retry-plan.md` — detailed implementation plan with
-all 3 bugs addressed from the start, ARM64 backend audit findings, and step-by-step tasks.
-
-Next recommended phases:
-- **Phase 4 (retry)**: Block linking with W^X guards + cycle checks + correct encoding
-- **Phase 2**: More instruction coverage — IMUL, DIV, CMOVcc, BT/BS*, RCL/RCR, SHLD/SHRD
-- **Phase 3b**: Relaxed ORDER_BARRIER handling within same x86 instruction
+Phase 4 block linking is COMPLETE. Next recommended phase from the roadmap: **Phase 2 (Instruction Coverage — Core Gaps)**.
