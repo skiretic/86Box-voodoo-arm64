@@ -44,15 +44,229 @@ ropLEA_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fe
     return op_pc + 1;
 }
 
+/*
+ * Multiply/divide helper functions for F6/F7 group (1-operand forms).
+ *
+ * Convention: the source operand (from r/m) is passed in cpu_state.flags_op2.
+ * The CALL_FUNC barrier flushes all IREGs to cpu_state, so the helpers can
+ * read EAX/AX/AL and flags_op2 directly. Results are written back to
+ * cpu_state registers.
+ *
+ * DIV/IDIV helpers return 0 on success, 1 on divide-by-zero/overflow.
+ */
+
+static void
+helper_MUL_b(void)
+{
+    uint8_t src = (uint8_t) cpu_state.flags_op2;
+    AX          = AL * src;
+    flags_rebuild();
+    if (AH)
+        cpu_state.flags |= (C_FLAG | V_FLAG);
+    else
+        cpu_state.flags &= ~(C_FLAG | V_FLAG);
+}
+
+static void
+helper_MUL_w(void)
+{
+    uint32_t templ;
+    uint16_t src = (uint16_t) cpu_state.flags_op2;
+    templ        = (uint32_t) AX * (uint32_t) src;
+    AX           = templ & 0xFFFF;
+    DX           = templ >> 16;
+    flags_rebuild();
+    if (DX)
+        cpu_state.flags |= (C_FLAG | V_FLAG);
+    else
+        cpu_state.flags &= ~(C_FLAG | V_FLAG);
+}
+
+static void
+helper_MUL_l(void)
+{
+    uint64_t temp64;
+    uint32_t src = cpu_state.flags_op2;
+    temp64       = (uint64_t) EAX * (uint64_t) src;
+    EAX          = temp64 & 0xffffffff;
+    EDX          = temp64 >> 32;
+    flags_rebuild();
+    if (EDX)
+        cpu_state.flags |= (C_FLAG | V_FLAG);
+    else
+        cpu_state.flags &= ~(C_FLAG | V_FLAG);
+}
+
+static void
+helper_IMUL_b(void)
+{
+    int     tempws;
+    uint8_t src = (uint8_t) cpu_state.flags_op2;
+    tempws      = (int) ((int8_t) AL) * (int) ((int8_t) src);
+    AX          = tempws & 0xffff;
+    flags_rebuild();
+    if (((int16_t) AX >> 7) != 0 && ((int16_t) AX >> 7) != -1)
+        cpu_state.flags |= (C_FLAG | V_FLAG);
+    else
+        cpu_state.flags &= ~(C_FLAG | V_FLAG);
+}
+
+static void
+helper_IMUL_w(void)
+{
+    int32_t  templ;
+    uint16_t src = (uint16_t) cpu_state.flags_op2;
+    templ        = (int32_t) (int16_t) AX * (int32_t) (int16_t) src;
+    AX           = templ & 0xFFFF;
+    DX           = templ >> 16;
+    flags_rebuild();
+    if (((int32_t) templ >> 15) != 0 && ((int32_t) templ >> 15) != -1)
+        cpu_state.flags |= (C_FLAG | V_FLAG);
+    else
+        cpu_state.flags &= ~(C_FLAG | V_FLAG);
+}
+
+static void
+helper_IMUL_l(void)
+{
+    int64_t  temp64;
+    uint32_t src = cpu_state.flags_op2;
+    temp64       = (int64_t) (int32_t) EAX * (int64_t) (int32_t) src;
+    EAX          = temp64 & 0xffffffff;
+    EDX          = temp64 >> 32;
+    flags_rebuild();
+    if (((int64_t) temp64 >> 31) != 0 && ((int64_t) temp64 >> 31) != -1)
+        cpu_state.flags |= (C_FLAG | V_FLAG);
+    else
+        cpu_state.flags &= ~(C_FLAG | V_FLAG);
+}
+
+static int
+helper_DIV_b(void)
+{
+    uint8_t  src = (uint8_t) cpu_state.flags_op2;
+    uint16_t src16;
+    uint16_t tempw = 0;
+
+    src16 = AX;
+    if (src)
+        tempw = src16 / src;
+    if (src && !(tempw & 0xff00)) {
+        AH = src16 % src;
+        AL = (src16 / src) & 0xff;
+        if (!cpu_iscyrix) {
+            flags_rebuild();
+            cpu_state.flags |= 0x8D5;
+            cpu_state.flags &= ~1;
+        }
+        return 0;
+    } else {
+        x86_int(0);
+        return 1;
+    }
+}
+
+static int
+helper_DIV_w(void)
+{
+    uint16_t src = (uint16_t) cpu_state.flags_op2;
+    uint32_t templ;
+    uint32_t templ2 = 0;
+
+    templ = (DX << 16) | AX;
+    if (src)
+        templ2 = templ / src;
+    if (src && !(templ2 & 0xffff0000)) {
+        DX = templ % src;
+        AX = (templ / src) & 0xffff;
+        if (!cpu_iscyrix)
+            setznp16(AX);
+        return 0;
+    } else {
+        x86_int(0);
+        return 1;
+    }
+}
+
+static int
+helper_DIV_l(void)
+{
+    uint32_t src = cpu_state.flags_op2;
+    if (divl(src))
+        return 1;
+    if (!cpu_iscyrix)
+        setznp32(EAX);
+    return 0;
+}
+
+static int
+helper_IDIV_b(void)
+{
+    uint8_t src  = (uint8_t) cpu_state.flags_op2;
+    int     tempws;
+    int     tempws2 = 0;
+    int8_t  temps;
+
+    tempws = (int) (int16_t) AX;
+    if (src != 0)
+        tempws2 = tempws / (int) ((int8_t) src);
+    temps = tempws2 & 0xff;
+    if (src && ((int) temps == tempws2)) {
+        AH = (tempws % (int) ((int8_t) src)) & 0xff;
+        AL = tempws2 & 0xff;
+        if (!cpu_iscyrix) {
+            flags_rebuild();
+            cpu_state.flags |= 0x8D5;
+            cpu_state.flags &= ~1;
+        }
+        return 0;
+    } else {
+        x86_int(0);
+        return 1;
+    }
+}
+
+static int
+helper_IDIV_w(void)
+{
+    uint16_t src = (uint16_t) cpu_state.flags_op2;
+    int      tempws;
+    int      tempws2 = 0;
+    int16_t  temps16;
+
+    tempws = (int) ((DX << 16) | AX);
+    if (src)
+        tempws2 = tempws / (int) ((int16_t) src);
+    temps16 = tempws2 & 0xffff;
+    if ((src != 0) && ((int) temps16 == tempws2)) {
+        DX = tempws % (int) ((int16_t) src);
+        AX = tempws2 & 0xffff;
+        if (!cpu_iscyrix)
+            setznp16(AX);
+        return 0;
+    } else {
+        x86_int(0);
+        return 1;
+    }
+}
+
+static int
+helper_IDIV_l(void)
+{
+    int32_t src = (int32_t) cpu_state.flags_op2;
+    if (idivl(src))
+        return 1;
+    if (!cpu_iscyrix)
+        setznp32(EAX);
+    return 0;
+}
+
 uint32_t
 ropF6(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
     x86seg *target_seg = NULL;
     uint8_t imm_data;
     int     reg;
-
-    if (fetchdat & 0x20)
-        return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0)
@@ -109,6 +323,36 @@ ropF6(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchd
             codegen_flags_changed = 1;
             return op_pc + 1;
 
+        case 0x20: /*MUL AL,b*/
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC(ir, helper_MUL_b);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x28: /*IMUL AL,b*/
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC(ir, helper_IMUL_b);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x30: /*DIV AL,b*/
+            if ((fetchdat & 0xc0) == 0xc0)
+                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, helper_DIV_b);
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x38: /*IDIV AL,b*/
+            if ((fetchdat & 0xc0) == 0xc0)
+                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, helper_IDIV_b);
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
         default:
             break;
     }
@@ -120,9 +364,6 @@ ropF7_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
     x86seg  *target_seg = NULL;
     uint16_t imm_data;
     int      reg;
-
-    if (fetchdat & 0x20)
-        return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0)
@@ -179,6 +420,36 @@ ropF7_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
             codegen_flags_changed = 1;
             return op_pc + 1;
 
+        case 0x20: /*MUL AX,w*/
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC(ir, helper_MUL_w);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x28: /*IMUL AX,w*/
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC(ir, helper_IMUL_w);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x30: /*DIV AX,w*/
+            if ((fetchdat & 0xc0) == 0xc0)
+                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, helper_DIV_w);
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x38: /*IDIV AX,w*/
+            if ((fetchdat & 0xc0) == 0xc0)
+                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, helper_IDIV_w);
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
         default:
             break;
     }
@@ -190,9 +461,6 @@ ropF7_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
     x86seg  *target_seg = NULL;
     uint32_t imm_data;
     int      reg;
-
-    if (fetchdat & 0x20)
-        return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0)
@@ -246,6 +514,36 @@ ropF7_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
             uop_MOV_IMM(ir, IREG_flags_op1, 0);
 
             codegen_flags_changed = 1;
+            return op_pc + 1;
+
+        case 0x20: /*MUL EAX,l*/
+            uop_MOV(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC(ir, helper_MUL_l);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x28: /*IMUL EAX,l*/
+            uop_MOV(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC(ir, helper_IMUL_l);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x30: /*DIV EAX,l*/
+            if ((fetchdat & 0xc0) == 0xc0)
+                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOV(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, helper_DIV_l);
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);
+            codegen_flags_changed = 0;
+            return op_pc + 1;
+
+        case 0x38: /*IDIV EAX,l*/
+            if ((fetchdat & 0xc0) == 0xc0)
+                uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOV(ir, IREG_flags_op2, reg);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, helper_IDIV_l);
+            uop_CMP_IMM_JZ(ir, IREG_temp0, 1, codegen_exit_rout);
+            codegen_flags_changed = 0;
             return op_pc + 1;
 
         default:
