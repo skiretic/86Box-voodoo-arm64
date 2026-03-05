@@ -191,7 +191,7 @@ Tested and verified: Win98 boots to desktop on ARM64 (Apple Silicon).
 | Bug | Root Cause | Fix | Commit |
 |-----|-----------|-----|--------|
 | W^X violation (SIGBUS) | Patching JIT code without disabling write protection | `pthread_jit_write_protect_np()` wrapper | 3761522ef |
-| No cycle guard (infinite chain hang) | Linked blocks never return to dispatcher | 5-instruction cycle-guarded stub | 3761522ef |
+| No cycle guard (infinite chain hang) | Linked blocks never return to dispatcher | 10-instruction cycle-guarded stub | 3761522ef |
 | B.cond encoding corruption | `branch_set_offset` uses OFFSET26, B.cond uses OFFSET19 | B.GT +8 (fixed short) + unconditional B | 3761522ef |
 | Linking spam (2.1M/sec) | `try_link_exit` called on EVERY `code()` return | `CODEBLOCK_NEEDS_LINKING` one-shot flag | 3b2357d17 |
 | JMP stub buffer overflow | Raw writes bypassed `codegen_alloc`, split across mem_blocks | `codegen_alloc(block, 40)` pre-allocation | e8c61f108 |
@@ -199,6 +199,13 @@ Tested and verified: Win98 boots to desktop on ARM64 (Apple Silicon).
 | Continuation patch overflow | `patch_offset > BLOCK_MAX` in continuation block | Skip linkable exit when `block_write_data != block->data` | e8c61f108 |
 | exit_pc missing CS base | `codegen_ir.c` stored raw EIP, not cs+eip | `+ cs` added to `_pending_exit_pc` | e8c61f108 |
 | **Link to invalidated block** | `try_link_exit()` didn't check block validity | Reject `CODEBLOCK_IN_DIRTY_LIST` or `head_mem_block == NULL` | e8c61f108 |
+| x86-64: stale `_pending_exit_pc` leak | Not cleared when `exit_count >= BLOCK_EXIT_MAX` | Set to `BLOCK_PC_INVALID` in else branch | ce21d3e59 |
+| x86-64: missing pre-allocation | No `codegen_alloc_bytes` before cycle-guarded stub | Added 40-byte upfront reservation | ce21d3e59 |
+
+### Known Asymmetries (ARM64 vs x86-64)
+
+- x86-64 epilogue has a second linkable exit stub for fallthrough blocks; ARM64 epilogue does not
+- x86-64 `patch_link` has no range check on rel32 displacement; ARM64 checks ±128MB (low risk given allocator locality)
 
 ### Key Lessons Learned
 
