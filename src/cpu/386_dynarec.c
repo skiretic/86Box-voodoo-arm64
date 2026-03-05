@@ -530,11 +530,14 @@ exec386_dynarec_dyn(void)
         inrecomp = 0;
 
 #    ifdef USE_NEW_DYNAREC
-        /* Lazy block linking: after executing a compiled block, try to
-           link any unlinked exits to already-compiled target blocks. */
-        for (int i = 0; i < block->exit_count; i++) {
-            if (block->link_target_nr[i] == BLOCK_INVALID && block->exit_pc[i] != BLOCK_PC_INVALID)
-                codegen_block_try_link_exit(block, i);
+        /* Lazy block linking: attempt linking only once after a block is
+           freshly compiled, not on every execution. */
+        if (block->flags & CODEBLOCK_NEEDS_LINKING) {
+            block->flags &= ~CODEBLOCK_NEEDS_LINKING;
+            for (int i = 0; i < block->exit_count; i++) {
+                if (block->link_target_nr[i] == BLOCK_INVALID && block->exit_pc[i] != BLOCK_PC_INVALID)
+                    codegen_block_try_link_exit(block, i);
+            }
         }
 #    else
         if (!use32)

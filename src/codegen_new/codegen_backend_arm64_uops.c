@@ -846,6 +846,7 @@ codegen_JMP(codeblock_t *block, uop_t *uop)
             *(uint32_t *) &block_write_data[block_pos] = original_insn;
             block_pos += 4;
             block->exit_count++;
+
         } else {
             /* No room for more exits — emit non-linkable jump */
             host_arm64_B(block, (void *) exit_addr);

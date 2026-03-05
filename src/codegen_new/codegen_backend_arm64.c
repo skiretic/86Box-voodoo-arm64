@@ -350,6 +350,7 @@ codegen_set_rounding_mode(int mode)
 void
 codegen_backend_prologue(codeblock_t *block)
 {
+
     block_pos = BLOCK_START;
 
     /*Entry code*/
@@ -442,8 +443,10 @@ codegen_backend_patch_link(codeblock_t *source, int exit_idx, codeblock_t *targe
     ptrdiff_t offset      = (uintptr_t) target_addr - (uintptr_t) patch_addr;
 
     /* Range check for B instruction (+/-128MB) */
-    if (offset < -(128 * 1024 * 1024) || offset >= (128 * 1024 * 1024))
+    if (offset < -(128 * 1024 * 1024) || offset >= (128 * 1024 * 1024)) {
+
         return;
+    }
 
     uint32_t new_insn = 0x14000000 | (((uint32_t) (offset >> 2)) & 0x03ffffff);
 

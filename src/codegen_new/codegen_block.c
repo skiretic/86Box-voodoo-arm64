@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include <stdint.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <86box/86box.h>
@@ -603,7 +604,7 @@ codegen_block_start_recompile(codeblock_t *block)
     cpu_state.seg_ds.checked = cpu_state.seg_es.checked = cpu_state.seg_fs.checked = cpu_state.seg_gs.checked = (cr0 & 1) ? 0 : 1;
 
     block->TOP = cpu_state.TOP & 7;
-    block->flags |= CODEBLOCK_WAS_RECOMPILED;
+    block->flags |= CODEBLOCK_WAS_RECOMPILED | CODEBLOCK_NEEDS_LINKING;
 
     codegen_flat_ds = !(cpu_cur_status & CPU_STATUS_NOTFLATDS);
     codegen_flat_ss = !(cpu_cur_status & CPU_STATUS_NOTFLATSS);
@@ -922,8 +923,10 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     /* FPU guard: don't link blocks with mismatched FPU flags.
        The FPU prologue writes TOP diff to a stack slot that non-FPU
        blocks don't initialize. */
-    if ((source->flags & CODEBLOCK_HAS_FPU) != (target->flags & CODEBLOCK_HAS_FPU))
+    if ((source->flags & CODEBLOCK_HAS_FPU) != (target->flags & CODEBLOCK_HAS_FPU)) {
+
         return;
+    }
 
     /* Don't link to ourselves — would create a tight loop. */
     target_nr = get_block_nr(target);

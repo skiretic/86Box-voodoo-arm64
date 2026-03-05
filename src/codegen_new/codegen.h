@@ -98,6 +98,8 @@ extern uint8_t *block_write_data;
 #define CODEBLOCK_IN_DIRTY_LIST 0x40
 /*Code block is not inlining immediate parameters, parameters must be fetched from memory*/
 #define CODEBLOCK_NO_IMMEDIATES 0x80
+/*Code block was just compiled and needs its first block-linking attempt*/
+#define CODEBLOCK_NEEDS_LINKING 0x100
 
 #define BLOCK_PC_INVALID        0xffffffff
 
