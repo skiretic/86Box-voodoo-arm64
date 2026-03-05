@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #if defined(__APPLE__) && defined(__aarch64__)
 #    include <pthread.h>
+#    include <signal.h>
+#    include <sys/ucontext.h>
+#    include <unistd.h>
 #endif
 #include <wchar.h>
 #include <math.h>
@@ -37,6 +40,39 @@
 #    ifdef USE_NEW_DYNAREC
 #        include "codegen_backend.h"
 #    endif
+#endif
+
+/* Toggle block linking: set to 1 to enable, 0 to disable for debugging. */
+#define BLOCK_LINKING_ENABLED 1
+
+#if defined(__APPLE__) && defined(__aarch64__)
+static void
+crash_signal_handler(int sig, siginfo_t *info, void *ctx)
+{
+    ucontext_t *uc  = (ucontext_t *) ctx;
+    uint64_t    pc  = uc->uc_mcontext->__ss.__pc;
+    uint64_t    lr  = uc->uc_mcontext->__ss.__lr;
+    uint64_t    sp  = uc->uc_mcontext->__ss.__sp;
+    uint64_t    x29 = uc->uc_mcontext->__ss.__fp;
+    fprintf(stderr, "\n=== CRASH SIGNAL %d ===\n", sig);
+    fprintf(stderr, "  PC=0x%016llx  LR=0x%016llx\n", pc, lr);
+    fprintf(stderr, "  SP=0x%016llx  X29=0x%016llx\n", sp, x29);
+    fprintf(stderr, "  fault_addr=%p\n", info->si_addr);
+    _exit(128 + sig);
+}
+
+static void __attribute__((constructor))
+install_crash_handler(void)
+{
+    struct sigaction sa;
+    sa.sa_sigaction = crash_signal_handler;
+    sa.sa_flags     = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+}
 #endif
 
 #ifdef IS_DYNAREC
@@ -524,21 +560,43 @@ exec386_dynarec_dyn(void)
 #    endif
         inrecomp = 1;
         code();
+        {
+            static uint64_t dispatch_count = 0;
+            dispatch_count++;
+            if ((dispatch_count % 10000) == 0) {
+                fprintf(stderr, "DISPATCH[%llu]: pc=0x%08x cs=0x%08x cycles=%d\n",
+                        (unsigned long long) dispatch_count,
+                        cpu_state.pc, cpu_state.seg_cs.base, cpu_state._cycles);
+            }
+        }
 #    ifdef USE_ACYCS
         acycs = 0;
 #    endif
         inrecomp = 0;
 
 #    ifdef USE_NEW_DYNAREC
+#if BLOCK_LINKING_ENABLED
         /* Lazy block linking: attempt linking only once after a block is
            freshly compiled, not on every execution. */
         if (block->flags & CODEBLOCK_NEEDS_LINKING) {
             block->flags &= ~CODEBLOCK_NEEDS_LINKING;
+            {
+                static int dispatch_debug_count = 0;
+                if (dispatch_debug_count < 50) {
+                    fprintf(stderr, "DISPATCH-LINK[%d]: block_nr=%d exit_count=%d flags=0x%x pc=0x%08x data=%p\n",
+                            dispatch_debug_count, get_block_nr(block), block->exit_count, block->flags, block->pc, (void *) block->data);
+                    for (int j = 0; j < block->exit_count; j++)
+                        fprintf(stderr, "  exit[%d]: pc=0x%08x patch_off=%u link_target=%d orig_insn=0x%08x\n",
+                                j, block->exit_pc[j], block->exit_patch_offset[j], block->link_target_nr[j], block->exit_original_insn[j]);
+                    dispatch_debug_count++;
+                }
+            }
             for (int i = 0; i < block->exit_count; i++) {
                 if (block->link_target_nr[i] == BLOCK_INVALID && block->exit_pc[i] != BLOCK_PC_INVALID)
                     codegen_block_try_link_exit(block, i);
             }
         }
+#endif /* BLOCK_LINKING_ENABLED */
 #    else
         if (!use32)
             cpu_state.pc &= 0xffff;
@@ -560,6 +618,13 @@ exec386_dynarec_dyn(void)
         }
 #    endif
         codegen_block_start_recompile(block);
+#    if defined(__APPLE__) && defined(__aarch64__)
+        /* Re-assert write mode: codegen_block_start_recompile may have
+           called invalidate_block -> codegen_block_unlink ->
+           codegen_backend_unpatch_link, which toggles W^X to execute(1). */
+        if (__builtin_available(macOS 11.0, *))
+            pthread_jit_write_protect_np(0);
+#    endif
         codegen_in_recompile = 1;
 
         while (!cpu_block_end) {

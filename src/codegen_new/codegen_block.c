@@ -1,6 +1,6 @@
 #include <inttypes.h>
 #include <stdint.h>
-
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <86box/86box.h>
@@ -880,62 +880,108 @@ codegen_block_link_init(codeblock_t *block)
 void
 codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
 {
-    uint32_t     target_pc;
-    uint32_t     target_phys;
+    static int link_debug_count = 0;
+    static uint64_t total_attempts = 0;
+    static uint64_t total_success = 0;
+    static uint64_t total_fail = 0;
+    total_attempts++;
+    if ((total_attempts % 1000) == 0) {
+        fprintf(stderr, "LINK-STATS: attempts=%llu ok=%llu fail=%llu\n",
+                (unsigned long long) total_attempts,
+                (unsigned long long) total_success,
+                (unsigned long long) total_fail);
+    }
+    int        src_nr           = get_block_nr(source);
+    uint32_t   target_pc;
+    uint32_t   target_phys;
     codeblock_t *target;
     int          target_nr;
 
-    if (exit_idx < 0 || exit_idx >= BLOCK_EXIT_MAX)
+#define LINK_FAIL(reason) do { \
+        total_fail++; \
+        if (link_debug_count < 50) \
+            fprintf(stderr, "LINK-FAIL[%d]: src=%d exit=%d reason=%s\n", link_debug_count++, src_nr, exit_idx, reason); \
+    } while (0)
+
+    if (exit_idx < 0 || exit_idx >= BLOCK_EXIT_MAX) {
+        LINK_FAIL("bad_exit_idx");
         return;
-    if (source->link_target_nr[exit_idx] != BLOCK_INVALID)
-        return; /* already linked */
+    }
+    if (source->link_target_nr[exit_idx] != BLOCK_INVALID) {
+        /* already linked — not a failure, just skip silently */
+        return;
+    }
 
     target_pc = source->exit_pc[exit_idx];
-    if (target_pc == BLOCK_PC_INVALID)
+    if (target_pc == BLOCK_PC_INVALID) {
+        LINK_FAIL("invalid_exit_pc");
         return;
+    }
+
+    if (link_debug_count < 50)
+        fprintf(stderr, "LINK-TRY[%d]: src=%d exit=%d exit_pc=0x%08x patch_off=%u\n",
+                link_debug_count, src_nr, exit_idx, target_pc, source->exit_patch_offset[exit_idx]);
 
     /* Compute physical address for the target PC.
        Use the same CS base as the source block — linking across CS changes
        is not supported. */
     target_phys = get_phys_noabrt(target_pc);
-    if (target_phys == 0xffffffff)
+    if (target_phys == 0xffffffff) {
+        LINK_FAIL("phys_lookup_failed");
         return;
+    }
 
     /* Hash lookup — find compiled block at target PC. */
     target = codeblock_tree_find(target_phys, source->_cs);
-    if (!target)
+    if (!target) {
+        LINK_FAIL("no_target_block");
         return;
+    }
 
     /* Validate the target is a fully compiled, valid block. */
-    if (target->pc == BLOCK_PC_INVALID)
+    if (target->pc == BLOCK_PC_INVALID) {
+        LINK_FAIL("target_invalid_pc");
         return;
-    if (!(target->flags & CODEBLOCK_WAS_RECOMPILED))
+    }
+    if (!(target->flags & CODEBLOCK_WAS_RECOMPILED)) {
+        LINK_FAIL("target_not_recompiled");
         return;
-    if (!target->data)
+    }
+    if (!target->data) {
+        LINK_FAIL("target_no_data");
         return;
+    }
 
     /* Status flags must match. */
-    if ((target->status ^ cpu_cur_status) & CPU_STATUS_FLAGS)
+    if ((target->status ^ cpu_cur_status) & CPU_STATUS_FLAGS) {
+        LINK_FAIL("status_flags_mismatch");
         return;
-    if ((target->status & cpu_cur_status & CPU_STATUS_MASK) != (cpu_cur_status & CPU_STATUS_MASK))
+    }
+    if ((target->status & cpu_cur_status & CPU_STATUS_MASK) != (cpu_cur_status & CPU_STATUS_MASK)) {
+        LINK_FAIL("status_mask_mismatch");
         return;
+    }
 
     /* FPU guard: don't link blocks with mismatched FPU flags.
        The FPU prologue writes TOP diff to a stack slot that non-FPU
        blocks don't initialize. */
     if ((source->flags & CODEBLOCK_HAS_FPU) != (target->flags & CODEBLOCK_HAS_FPU)) {
-
+        LINK_FAIL("fpu_mismatch");
         return;
     }
 
     /* Don't link to ourselves — would create a tight loop. */
     target_nr = get_block_nr(target);
-    if (target_nr == get_block_nr(source))
+    if (target_nr == src_nr) {
+        LINK_FAIL("self_link");
         return;
+    }
 
     /* Check that the target has incoming link capacity. */
-    if (target->link_incoming_count >= BLOCK_LINK_INCOMING_MAX)
+    if (target->link_incoming_count >= BLOCK_LINK_INCOMING_MAX) {
+        LINK_FAIL("incoming_full");
         return;
+    }
 
     /* Ask the backend to patch the branch instruction. */
     codegen_backend_patch_link(source, exit_idx, target);
@@ -948,12 +994,30 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     target->link_incoming_block[slot] = (uint16_t) get_block_nr(source);
     target->link_incoming_exit[slot]  = (uint8_t) exit_idx;
     target->link_incoming_count++;
+
+    total_success++;
+
+    if (link_debug_count < 50)
+        fprintf(stderr, "LINK-OK[%d]: src=%d exit=%d -> target=%d data=%p entry_off=%u\n",
+                link_debug_count++, src_nr, exit_idx, target_nr, (void *) target->data, target->link_entry_offset);
+
+#undef LINK_FAIL
 }
 
 void
 codegen_block_unlink(codeblock_t *block)
 {
-    int block_nr = get_block_nr(block);
+    static int unlink_debug_count = 0;
+    int        block_nr           = get_block_nr(block);
+
+    if (unlink_debug_count < 50) {
+        int outgoing = 0, incoming = block->link_incoming_count;
+        for (int k = 0; k < block->exit_count; k++)
+            if (block->link_target_nr[k] != BLOCK_INVALID)
+                outgoing++;
+        fprintf(stderr, "UNLINK[%d]: block_nr=%d outgoing=%d incoming=%d pc=0x%08x\n",
+                unlink_debug_count++, block_nr, outgoing, incoming, block->pc);
+    }
 
     /* 1. Revert all outgoing links: unpatch branch instructions and
           remove ourselves from each target's incoming list. */
