@@ -131,24 +131,29 @@ Tested and verified: Win98 boots to desktop on ARM64 (Apple Silicon).
 |-----------|---------|-------------|
 | Core infrastructure | `codegen_block.c` | `codeblock_t` link fields, `try_link_exit()`, `codegen_block_unlink()`, `CODEBLOCK_NEEDS_LINKING` one-shot flag |
 | IR exit tracking | `codegen_ir.c` | Stores `exit_pc` (cs + eip) and `exit_patch_offset` per block exit during IR compilation |
-| ARM64 backend | `codegen_backend_arm64.c`, `codegen_backend_arm64_uops.c` | Cycle-guarded 5-instruction exit stubs, W^X-safe `patch_link`/`unpatch_link`, `link_entry_offset=52` |
+| ARM64 backend | `codegen_backend_arm64.c`, `codegen_backend_arm64_uops.c` | Cycle-guarded 10-instruction exit stubs, W^X-safe `patch_link`/`unpatch_link`, dynamic `link_entry_offset` |
 | x86-64 backend | `codegen_backend_x86-64.c`, `codegen_backend_x86-64_uops.c` | Equivalent exit stubs and patch/unpatch for x86-64 |
 | Dispatcher integration | `386_dynarec.c` | Calls `try_link_exit()` after block execution when `CODEBLOCK_NEEDS_LINKING` set, `_chain_remaining` counter for chain depth |
 
 ### Design
 
-- **5-instruction cycle-guarded exit stub** (ARM64):
+- **10-instruction cycle-guarded exit stub** (ARM64, includes chain_remaining check):
   ```
-  LDR  W7, [CPUSTATE, #_cycles]
-  CMP  W7, #0
-  B.GT +8           ; skip bail if cycles > 0
-  B    codegen_exit_rout  ; bail — cycles exhausted
+  LDR  W16, [CPUSTATE, #_cycles]
+  CMP  W16, #0
+  B.LE +24          ; bail if cycles <= 0
+  LDR  W16, [CPUSTATE, #_chain_remaining]
+  SUB  W16, W16, #1
+  STR  W16, [CPUSTATE, #_chain_remaining]
+  CMP  W16, #0
+  B.GT +8           ; skip bail if chain_remaining > 0
+  B    codegen_exit_rout  ; bail — exhausted
   B    target_or_exit     ; <-- patchable instruction
   ```
 - **W^X-safe patching**: `pthread_jit_write_protect_np(0)` before write, `(1)` + `__clear_cache` after
 - **FPU guard**: Refuse to link blocks with mismatched `CODEBLOCK_HAS_FPU` flag
 - **Invalidation-safe**: `try_link_exit()` rejects blocks with `CODEBLOCK_IN_DIRTY_LIST` or `head_mem_block == NULL`
-- **link_entry_offset = 52 bytes**: Linked blocks skip prologue (10 STPs + 3 MOVs for 48-bit cpu_state address)
+- **link_entry_offset = dynamically computed (skips full prologue)**: Linked blocks skip prologue (STPs + MOVs for 48-bit cpu_state address)
 - **Lazy linking**: Only attempt once per block (`CODEBLOCK_NEEDS_LINKING` one-shot flag)
 - **JMP exits only**: Only unconditional JMP exits have linkable stubs; conditional branches and epilogue exits are not linked
 - **Pre-allocation**: `codegen_alloc(block, 40)` before emitting stub prevents buffer split across continuation blocks
