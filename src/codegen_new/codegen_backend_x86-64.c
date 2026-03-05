@@ -386,7 +386,12 @@ codegen_backend_epilogue(codeblock_t *block)
     /* Cycle-guarded epilogue exit stub for block linking.
        When unlinked, the patchable JMP falls through to the register
        restore sequence below. When linked, it jumps to the target block. */
-    if (block->exit_count < BLOCK_EXIT_MAX && block->_pending_exit_pc != BLOCK_PC_INVALID) {
+    /* If we're in a continuation mem_block, exit_patch_offset would be wrong.
+       Skip linkable exit -- the epilogue will just run normally (non-linkable). */
+    if (block_write_data != block->data) {
+        if (block->_pending_exit_pc != BLOCK_PC_INVALID)
+            block->_pending_exit_pc = BLOCK_PC_INVALID;
+    } else if (block->exit_count < BLOCK_EXIT_MAX && block->_pending_exit_pc != BLOCK_PC_INVALID) {
         int      exit_idx = block->exit_count;
         uint32_t patchable_jmp_pos;
         int32_t  skip_rel32;
@@ -401,6 +406,20 @@ codegen_backend_epilogue(codeblock_t *block)
         host_x86_CMP32_REG_IMM(block, REG_EAX, 0);
 
         /* JLE codegen_exit_rout — bail if cycles <= 0 */
+        codegen_alloc_bytes(block, 6);
+        codegen_addbyte2(block, 0x0f, 0x8e); /* JLE rel32 */
+        codegen_addlong(block, (uint32_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos + 4]));
+
+        /* MOV EAX, [RBP + _chain_remaining_offset] */
+        host_x86_MOV32_REG_BASE_OFFSET(block, REG_EAX, REG_RBP, cpu_state_offset(_chain_remaining));
+
+        /* SUB EAX, 1 (sets flags) */
+        host_x86_SUB32_REG_IMM(block, REG_EAX, 1);
+
+        /* MOV [RBP + _chain_remaining_offset], EAX */
+        host_x86_MOV32_BASE_OFFSET_REG(block, REG_RBP, cpu_state_offset(_chain_remaining), REG_EAX);
+
+        /* JLE codegen_exit_rout — bail if chain_remaining <= 0 */
         codegen_alloc_bytes(block, 6);
         codegen_addbyte2(block, 0x0f, 0x8e); /* JLE rel32 */
         codegen_addlong(block, (uint32_t) ((uintptr_t) codegen_exit_rout - (uintptr_t) &block_write_data[block_pos + 4]));

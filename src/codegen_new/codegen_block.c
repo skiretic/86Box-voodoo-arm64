@@ -558,7 +558,7 @@ codegen_block_start_recompile(codeblock_t *block)
         mem_flush_write_page(block->phys, cs + cpu_state.pc);
 
     block_num     = HASH(block->phys);
-    block_current = get_block_nr(block); // block->pnt;
+    block_current = get_block_nr(block);
 
 #ifndef RELEASE_BUILD
     if (block->pc != cs + cpu_state.pc || (block->flags & CODEBLOCK_WAS_RECOMPILED))
@@ -877,56 +877,27 @@ codegen_block_link_init(codeblock_t *block)
     }
 }
 
+#define LINK_FAIL(reason) \
+    do {                  \
+    } while (0)
+
 void
 codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
 {
-    static int link_debug_count = 0;
-    static uint64_t total_attempts = 0;
-    static uint64_t total_success = 0;
-    static uint64_t total_fail = 0;
-    total_attempts++;
-#define MAX_LINKS 13 /* Binary search: set to 0 to disable, 26 to allow all */
-    static uint64_t total_links_created = 0;
-    if (total_links_created >= MAX_LINKS) {
-        total_fail++;
-        return;
-    }
-    if ((total_attempts % 1000) == 0) {
-        fprintf(stderr, "LINK-STATS: attempts=%llu ok=%llu fail=%llu\n",
-                (unsigned long long) total_attempts,
-                (unsigned long long) total_success,
-                (unsigned long long) total_fail);
-    }
-    int        src_nr           = get_block_nr(source);
-    uint32_t   target_pc;
-    uint32_t   target_phys;
+    uint32_t     target_pc;
+    uint32_t     target_phys;
     codeblock_t *target;
     int          target_nr;
+    int          src_nr = get_block_nr(source);
 
-#define LINK_FAIL(reason) do { \
-        total_fail++; \
-        if (link_debug_count < 50) \
-            fprintf(stderr, "LINK-FAIL[%d]: src=%d exit=%d reason=%s\n", link_debug_count++, src_nr, exit_idx, reason); \
-    } while (0)
-
-    if (exit_idx < 0 || exit_idx >= BLOCK_EXIT_MAX) {
-        LINK_FAIL("bad_exit_idx");
+    if (exit_idx < 0 || exit_idx >= BLOCK_EXIT_MAX)
         return;
-    }
-    if (source->link_target_nr[exit_idx] != BLOCK_INVALID) {
-        /* already linked — not a failure, just skip silently */
+    if (source->link_target_nr[exit_idx] != BLOCK_INVALID)
         return;
-    }
 
     target_pc = source->exit_pc[exit_idx];
-    if (target_pc == BLOCK_PC_INVALID) {
-        LINK_FAIL("invalid_exit_pc");
+    if (target_pc == BLOCK_PC_INVALID)
         return;
-    }
-
-    if (link_debug_count < 50)
-        fprintf(stderr, "LINK-TRY[%d]: src=%d exit=%d exit_pc=0x%08x patch_off=%u\n",
-                link_debug_count, src_nr, exit_idx, target_pc, source->exit_patch_offset[exit_idx]);
 
     /* Compute physical address for the target PC.
        Use the same CS base as the source block — linking across CS changes
@@ -955,6 +926,25 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     }
     if (!target->data) {
         LINK_FAIL("target_no_data");
+        return;
+    }
+
+    /* Reject invalidated blocks — their code buffer has been freed.
+       Without this check, we can link to a stale/reclaimed code region
+       because codeblock_tree_find() still returns invalidated blocks
+       (they are only removed from the tree on delete, not invalidate). */
+    if (target->flags & CODEBLOCK_IN_DIRTY_LIST) {
+#ifdef ENABLE_CODEGEN_LOG
+        pclog("LINK-SKIP: tgt_blk=%u(pc=%05x) is invalidated, skipping link\n",
+              (unsigned) get_block_nr(target), target->pc);
+#endif
+        return;
+    }
+    if (!target->head_mem_block) {
+#ifdef ENABLE_CODEGEN_LOG
+        pclog("LINK-SKIP: tgt_blk=%u(pc=%05x) has no mem_block (freed), skipping link\n",
+              (unsigned) get_block_nr(target), target->pc);
+#endif
         return;
     }
 
@@ -1001,30 +991,13 @@ codegen_block_try_link_exit(codeblock_t *source, int exit_idx)
     target->link_incoming_exit[slot]  = (uint8_t) exit_idx;
     target->link_incoming_count++;
 
-    total_links_created++;
-    total_success++;
-
-    if (link_debug_count < 50)
-        fprintf(stderr, "LINK-OK[%d]: src=%d exit=%d -> target=%d data=%p entry_off=%u\n",
-                link_debug_count++, src_nr, exit_idx, target_nr, (void *) target->data, target->link_entry_offset);
-
 #undef LINK_FAIL
 }
 
 void
 codegen_block_unlink(codeblock_t *block)
 {
-    static int unlink_debug_count = 0;
-    int        block_nr           = get_block_nr(block);
-
-    if (unlink_debug_count < 50) {
-        int outgoing = 0, incoming = block->link_incoming_count;
-        for (int k = 0; k < block->exit_count; k++)
-            if (block->link_target_nr[k] != BLOCK_INVALID)
-                outgoing++;
-        fprintf(stderr, "UNLINK[%d]: block_nr=%d outgoing=%d incoming=%d pc=0x%08x\n",
-                unlink_debug_count++, block_nr, outgoing, incoming, block->pc);
-    }
+    int block_nr = get_block_nr(block);
 
     /* 1. Revert all outgoing links: unpatch branch instructions and
           remove ourselves from each target's incoming list. */

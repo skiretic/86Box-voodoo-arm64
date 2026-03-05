@@ -854,6 +854,16 @@ codegen_MMX_ENTER(codeblock_t *block, uop_t *uop)
 static int
 codegen_JMP(codeblock_t *block, uop_t *uop)
 {
+    /* If we're in a continuation mem_block (block_write_data != block->data),
+       the patch_offset would be computed relative to the first mem_block's data,
+       giving a wrong address. Skip linkable exit -- just do a plain jump. */
+    if (block_write_data != block->data) {
+        if (block->_pending_exit_pc != BLOCK_PC_INVALID)
+            block->_pending_exit_pc = BLOCK_PC_INVALID;
+        host_x86_JMP(block, uop->p);
+        return 0;
+    }
+
     /* Record exit PC for block linking before emitting the jump. */
     if (block->exit_count < BLOCK_EXIT_MAX && block->_pending_exit_pc != BLOCK_PC_INVALID) {
         int      exit_idx = block->exit_count;
@@ -863,17 +873,35 @@ codegen_JMP(codeblock_t *block, uop_t *uop)
         block->exit_pc[exit_idx] = block->_pending_exit_pc;
         block->_pending_exit_pc  = BLOCK_PC_INVALID;
 
-        /* Cycle-guarded exit stub:
-             MOV EAX, [RBP + _cycles_offset]   ; load cpu_state._cycles
-             CMP EAX, 0                         ; test cycles
-             JLE codegen_exit_rout              ; bail if cycles <= 0
-             JMP codegen_exit_rout              ; patchable (5-byte JMP rel32) */
+        /* Cycle-guarded + chain-limited exit stub:
+             MOV EAX, [RBP + _cycles_offset]           ; load cpu_state._cycles
+             CMP EAX, 0                                 ; test cycles
+             JLE codegen_exit_rout                      ; bail if cycles <= 0
+             MOV EAX, [RBP + _chain_remaining_offset]   ; load chain_remaining
+             SUB EAX, 1                                 ; decrement (sets flags)
+             MOV [RBP + _chain_remaining_offset], EAX   ; store back
+             JLE codegen_exit_rout                      ; bail if chain_remaining <= 0
+             JMP codegen_exit_rout                      ; patchable (5-byte JMP rel32) */
 
         /* MOV EAX, [RBP + _cycles_offset] */
         host_x86_MOV32_REG_BASE_OFFSET(block, REG_EAX, REG_RBP, cpu_state_offset(_cycles));
 
         /* CMP EAX, 0 */
         host_x86_CMP32_REG_IMM(block, REG_EAX, 0);
+
+        /* JLE codegen_exit_rout */
+        codegen_alloc_bytes(block, 6);
+        codegen_addbyte2(block, 0x0f, 0x8e); /* JLE rel32 */
+        codegen_addlong(block, (uint32_t) ((uintptr_t) uop->p - (uintptr_t) &block_write_data[block_pos + 4]));
+
+        /* MOV EAX, [RBP + _chain_remaining_offset] */
+        host_x86_MOV32_REG_BASE_OFFSET(block, REG_EAX, REG_RBP, cpu_state_offset(_chain_remaining));
+
+        /* SUB EAX, 1 (sets flags) */
+        host_x86_SUB32_REG_IMM(block, REG_EAX, 1);
+
+        /* MOV [RBP + _chain_remaining_offset], EAX */
+        host_x86_MOV32_BASE_OFFSET_REG(block, REG_RBP, cpu_state_offset(_chain_remaining), REG_EAX);
 
         /* JLE codegen_exit_rout */
         codegen_alloc_bytes(block, 6);

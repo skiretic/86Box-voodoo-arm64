@@ -5,9 +5,6 @@
 #include <stdlib.h>
 #if defined(__APPLE__) && defined(__aarch64__)
 #    include <pthread.h>
-#    include <signal.h>
-#    include <sys/ucontext.h>
-#    include <unistd.h>
 #endif
 #include <wchar.h>
 #include <math.h>
@@ -42,48 +39,11 @@
 #    endif
 #endif
 
-/* Toggle block linking: set to 1 to enable, 0 to disable for debugging. */
-#define BLOCK_LINKING_ENABLED 1
-
-#if defined(__APPLE__) && defined(__aarch64__)
-static void
-crash_signal_handler(int sig, siginfo_t *info, void *ctx)
-{
-    ucontext_t *uc  = (ucontext_t *) ctx;
-    uint64_t    pc  = uc->uc_mcontext->__ss.__pc;
-    uint64_t    lr  = uc->uc_mcontext->__ss.__lr;
-    uint64_t    sp  = uc->uc_mcontext->__ss.__sp;
-    uint64_t    x29 = uc->uc_mcontext->__ss.__fp;
-    fprintf(stderr, "\n=== CRASH SIGNAL %d ===\n", sig);
-    fprintf(stderr, "  PC=0x%016llx  LR=0x%016llx\n", pc, lr);
-    fprintf(stderr, "  SP=0x%016llx  X29=0x%016llx\n", sp, x29);
-    fprintf(stderr, "  fault_addr=%p\n", info->si_addr);
-    _exit(128 + sig);
-}
-
-static void __attribute__((constructor))
-install_crash_handler(void)
-{
-    struct sigaction sa;
-    sa.sa_sigaction = crash_signal_handler;
-    sa.sa_flags     = SA_SIGINFO;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGABRT, &sa, NULL);
-}
-#endif
-
 #ifdef IS_DYNAREC
 #    undef IS_DYNAREC
 #endif
 
 #include "386_common.h"
-
-#if defined(__APPLE__) && defined(__aarch64__)
-#    include <pthread.h>
-#endif
 
 #define CPU_BLOCK_END() cpu_block_end = 1
 
@@ -558,69 +518,24 @@ exec386_dynarec_dyn(void)
 #    ifndef USE_NEW_DYNAREC
         codeblock_hash[hash] = block;
 #    endif
-        inrecomp = 1;
+        inrecomp                   = 1;
+        cpu_state._chain_remaining = 16;
         code();
-        {
-            static uint64_t dispatch_count = 0;
-            dispatch_count++;
-            if ((dispatch_count % 10000) == 0) {
-                fprintf(stderr, "DISPATCH[%llu]: pc=0x%08x cs=0x%08x cycles=%d\n",
-                        (unsigned long long) dispatch_count,
-                        cpu_state.pc, cpu_state.seg_cs.base, cpu_state._cycles);
-            }
-            /* Stuck-address trap: dump block info when CPU reaches the black-screen loop */
-            if (dispatch_count > 1000000 && cpu_state.pc == 0x2DA && cpu_state.seg_cs.base == 0x20000) {
-                static int stuck_dump_count = 0;
-                if (stuck_dump_count < 3) {
-                    stuck_dump_count++;
-                    uint32_t linear = cpu_state.seg_cs.base + cpu_state.pc;
-                    uint32_t phys = get_phys_noabrt(linear);
-                    fprintf(stderr, "\n=== STUCK-TRAP[%d] at dispatch %llu ===\n", stuck_dump_count, (unsigned long long) dispatch_count);
-                    fprintf(stderr, "  pc=0x%08x cs=0x%08x linear=0x%08x phys=0x%08x\n",
-                            cpu_state.pc, cpu_state.seg_cs.base, linear, phys);
-                    /* Look up the block that was just dispatched */
-                    fprintf(stderr, "  last_block: nr=%d pc=0x%08x exit_count=%d flags=0x%x\n",
-                            get_block_nr(block), block->pc, block->exit_count, block->flags);
-                    for (int j = 0; j < block->exit_count; j++) {
-                        fprintf(stderr, "    exit[%d]: pc=0x%08x link_target=%d patch_off=%u\n",
-                                j, block->exit_pc[j], block->link_target_nr[j], block->exit_patch_offset[j]);
-                    }
-                    fprintf(stderr, "  incoming links: %d\n", block->link_incoming_count);
-                    for (int j = 0; j < block->link_incoming_count; j++) {
-                        fprintf(stderr, "    incoming[%d]: from_block=%d exit=%d\n",
-                                j, block->link_incoming_block[j], block->link_incoming_exit[j]);
-                    }
-                }
-            }
-        }
 #    ifdef USE_ACYCS
         acycs = 0;
 #    endif
         inrecomp = 0;
 
 #    ifdef USE_NEW_DYNAREC
-#if BLOCK_LINKING_ENABLED
         /* Lazy block linking: attempt linking only once after a block is
            freshly compiled, not on every execution. */
         if (block->flags & CODEBLOCK_NEEDS_LINKING) {
             block->flags &= ~CODEBLOCK_NEEDS_LINKING;
-            {
-                static int dispatch_debug_count = 0;
-                if (dispatch_debug_count < 50) {
-                    fprintf(stderr, "DISPATCH-LINK[%d]: block_nr=%d exit_count=%d flags=0x%x pc=0x%08x data=%p\n",
-                            dispatch_debug_count, get_block_nr(block), block->exit_count, block->flags, block->pc, (void *) block->data);
-                    for (int j = 0; j < block->exit_count; j++)
-                        fprintf(stderr, "  exit[%d]: pc=0x%08x patch_off=%u link_target=%d orig_insn=0x%08x\n",
-                                j, block->exit_pc[j], block->exit_patch_offset[j], block->link_target_nr[j], block->exit_original_insn[j]);
-                    dispatch_debug_count++;
-                }
-            }
             for (int i = 0; i < block->exit_count; i++) {
                 if (block->link_target_nr[i] == BLOCK_INVALID && block->exit_pc[i] != BLOCK_PC_INVALID)
                     codegen_block_try_link_exit(block, i);
             }
         }
-#endif /* BLOCK_LINKING_ENABLED */
 #    else
         if (!use32)
             cpu_state.pc &= 0xffff;
