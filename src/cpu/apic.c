@@ -457,6 +457,18 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
         timer_disable(&ap_apic->timer);
         ap_apic->id = saved_id;
     }
+
+    /* Force the sending CPU to yield its remaining time slice so the AP
+       gets a chance to run before the BSP continues.  On real hardware
+       the AP starts immediately; in our cooperative model we must end
+       the current cpu_exec() call.  Zeroing both counters causes both
+       the inner (cycles) and outer (cycles_main) loops to exit.
+       cpu_block_end ends the current interpreter block in dynarec mode. */
+    cycles      = 0;
+    cycles_main = 0;
+    cpu_block_end = 1;
+    fprintf(stderr, "SMP: SIPI yield — BSP yielding remaining time slice for AP %d\n",
+            cpu_id);
 }
 
 /*
