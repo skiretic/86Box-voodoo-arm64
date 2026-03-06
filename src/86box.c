@@ -2005,6 +2005,16 @@ pc_run(void)
     startblit();
     if (num_cpus > 1) {
         /* SMP: cooperative time-slicing across all CPUs. */
+        static int smp_logged_startup = 0;
+        static int smp_iter_count     = 0;
+
+        if (!smp_logged_startup) {
+            fprintf(stderr, "SMP: SMP execution mode active, num_cpus=%d\n", num_cpus);
+            smp_logged_startup = 1;
+        }
+
+        smp_iter_count++;
+
         int32_t  total_cycles   = (int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000);
         int32_t  cycles_per_cpu = total_cycles / num_cpus;
 
@@ -2012,12 +2022,18 @@ pc_run(void)
             cpu_switch_to(i);
 
             /* AP waiting for Startup IPI — skip entirely. */
-            if (cpu_contexts[i].wait_for_sipi)
+            if (cpu_contexts[i].wait_for_sipi) {
+                if ((smp_iter_count % 10000) == 1)
+                    fprintf(stderr, "SMP: CPU %d skipped (wait_for_sipi) [iter %d]\n", i, smp_iter_count);
                 continue;
+            }
 
             /* CPU is halted — skip unless there is a pending interrupt to wake it. */
-            if (cpu_contexts[i].halted && !cpu_has_pending_interrupt(i))
+            if (cpu_contexts[i].halted && !cpu_has_pending_interrupt(i)) {
+                if ((smp_iter_count % 10000) == 1)
+                    fprintf(stderr, "SMP: CPU %d skipped (halted, no pending int) [iter %d]\n", i, smp_iter_count);
                 continue;
+            }
 
             /* If halted but an interrupt is pending, clear the halt. */
             if (cpu_contexts[i].halted)

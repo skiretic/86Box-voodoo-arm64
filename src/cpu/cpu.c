@@ -4755,8 +4755,16 @@ cpu_load_context(int cpu_id)
 void
 cpu_switch_to(int cpu_id)
 {
+    static int switch_count = 0;
+
     if (cpu_id == active_cpu)
         return;
+
+    switch_count++;
+    if (switch_count <= 10 || (switch_count % 1000) == 0) {
+        fprintf(stderr, "SMP: CPU switch %d -> %d (count=%d, pc=%08x)\n",
+                active_cpu, cpu_id, switch_count, cpu_state.pc);
+    }
 
     /* Save current CPU's state. */
     cpu_save_context(active_cpu);
@@ -4773,8 +4781,12 @@ cpu_switch_to(int cpu_id)
 void
 cpu_smp_init(void)
 {
-    if (num_cpus <= 1)
+    fprintf(stderr, "SMP: cpu_smp_init() called, num_cpus=%d\n", num_cpus);
+
+    if (num_cpus <= 1) {
+        fprintf(stderr, "SMP: cpu_smp_init() skipped (num_cpus <= 1)\n");
         return;
+    }
 
     /* Snapshot CPU 0 (BSP) state from the current globals.
        At this point cpu_set() has already initialized everything. */
@@ -4782,6 +4794,8 @@ cpu_smp_init(void)
     cpu_contexts[0].halted        = 0;
     cpu_contexts[0].wait_for_sipi = 0;
     cpu_contexts[0].apic          = NULL; /* Set later by apic_init(). */
+
+    fprintf(stderr, "SMP: BSP (CPU 0) context saved\n");
 
     /* Initialize CPU 1 (AP) with a clean copy of BSP state,
        then put it in wait-for-SIPI mode. */
@@ -4791,6 +4805,8 @@ cpu_smp_init(void)
     cpu_contexts[1].apic          = NULL; /* Set later by apic_init(). */
 
     active_cpu = 0;
+
+    fprintf(stderr, "SMP: AP (CPU 1) context initialized, wait_for_sipi=1, active_cpu=%d\n", active_cpu);
 }
 
 void

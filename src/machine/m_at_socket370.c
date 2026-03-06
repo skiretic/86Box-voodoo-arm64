@@ -188,8 +188,12 @@ machine_at_bp6_init(const machine_t *model)
 {
     int ret;
 
+    fprintf(stderr, "SMP: BP6 machine init starting\n");
+
     ret = bios_load_linear("roms/machines/bp6/bp6ru.bin",
                            0x000c0000, 262144, 0);
+
+    fprintf(stderr, "SMP: BP6 BIOS load result = %d\n", ret);
 
     if (bios_only || !ret)
         return ret;
@@ -199,6 +203,8 @@ machine_at_bp6_init(const machine_t *model)
     /* SMP: dual Socket 370 — set CPU count before SMP init. */
     num_cpus = 2;
     cpu_smp_init();
+
+    fprintf(stderr, "SMP: BP6 num_cpus = %d after cpu_smp_init()\n", num_cpus);
 
     pci_init(PCI_CONFIG_TYPE_1);
     pci_register_slot(0x00, PCI_CARD_NORTHBRIDGE, 0, 0, 0, 0);
@@ -217,6 +223,8 @@ machine_at_bp6_init(const machine_t *model)
     device_add(&sst_flash_39sf020_device);
     spd_register(SPD_TYPE_SDRAM, 0x7, 256);
     device_add(&w83782d_device); /* fans: CPU, Power, System; temperatures: System, CPU, unused */
+
+    fprintf(stderr, "SMP: BP6 machine init complete\n");
 
     return ret;
 }

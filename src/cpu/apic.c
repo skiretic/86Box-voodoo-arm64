@@ -305,10 +305,12 @@ apic_deliver_fixed(int cpu_id, int vector)
         return;
 
     if (vector < 0x10) {
+        fprintf(stderr, "SMP: Fixed IPI vector %02X too low (must be >= 0x10)\n", vector);
         apic_log("APIC: IPI vector %02X too low (must be >= 0x10)\n", vector);
         return;
     }
 
+    fprintf(stderr, "SMP: Fixed IPI vector %02X delivered to CPU %d\n", vector, cpu_id);
     apic_log("APIC: Deliver Fixed IPI vector %02X to CPU %d\n", vector, cpu_id);
     apic_set_bit(target->irr, vector);
 
@@ -327,6 +329,7 @@ apic_deliver_init(int cpu_id)
     if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
         return;
 
+    fprintf(stderr, "SMP: INIT IPI delivered to CPU %d\n", cpu_id);
     apic_log("APIC: INIT IPI to CPU %d\n", cpu_id);
 
     /* Reset the target CPU's context to power-on state. */
@@ -372,10 +375,13 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
 
     /* SIPI is only accepted when the CPU is waiting for SIPI. */
     if (!ctx->wait_for_sipi) {
+        fprintf(stderr, "SMP: SIPI to CPU %d IGNORED (not waiting for SIPI)\n", cpu_id);
         apic_log("APIC: SIPI to CPU %d ignored (not waiting for SIPI)\n", cpu_id);
         return;
     }
 
+    fprintf(stderr, "SMP: SIPI delivered to CPU %d, vector=%02X, start at %05X:0000\n",
+            cpu_id, vector, (uint32_t) vector << 8);
     apic_log("APIC: SIPI to CPU %d, vector %02X (start at %05X:0000)\n",
              cpu_id, vector, (uint32_t) vector << 8);
 
@@ -501,6 +507,10 @@ apic_deliver_ipi(apic_t *dev)
         }
     }
 
+    fprintf(stderr, "SMP: IPI from CPU %d: vector=%02X delmod=%d destmod=%d "
+            "level=%d shorthand=%d dest=%02X\n",
+            src_cpu, vector, delmod, destmod, level, shorthand, dest_id);
+
     apic_log("APIC: IPI from CPU %d: vector=%02X delmod=%d destmod=%d "
              "level=%d shorthand=%d dest=%02X\n",
              src_cpu, vector, delmod, destmod, level, shorthand, dest_id);
@@ -508,6 +518,7 @@ apic_deliver_ipi(apic_t *dev)
     /* INIT Level De-assert: special case, resets arbitration IDs.
        Broadcast to all CPUs, no actual INIT reset. */
     if (delmod == 5 && !level && (icr_low & APIC_ICR_TRIGGER)) {
+        fprintf(stderr, "SMP: INIT Level De-assert (broadcast arb ID reset)\n");
         apic_log("APIC: INIT Level De-assert (broadcast arb ID reset)\n");
         return;
     }
@@ -811,6 +822,8 @@ apic_mem_writel(uint32_t addr, uint32_t val, void *priv)
         case APIC_REG_ICR_LOW:
             /* ICR Low write triggers IPI delivery.
                ICR High (destination) must be written first. */
+            fprintf(stderr, "SMP: ICR write: low=%08X high=%08X (delmod=%d, dest=%02X)\n",
+                    val, dev->icr_high, (val >> 8) & 7, (dev->icr_high >> 24) & 0xFF);
             dev->icr_low = val;
             apic_deliver_ipi(dev);
             break;
