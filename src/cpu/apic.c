@@ -342,16 +342,57 @@ apic_deliver_init(int cpu_id)
     /* Restore the APIC pointer (it persists across INIT). */
     ctx->apic = saved_apic;
 
-    /* Set power-on reset state for the CPU. */
-    ctx->cpu_state.flags  = 0x0002;     /* Reserved bit 1 is always set. */
-    ctx->cpu_state.CR0.l  = 0x60000010; /* CD=1, NW=1, ET=1. */
+    /* EFLAGS: only reserved bit 1 is set. */
+    ctx->cpu_state.flags  = 0x0002;
     ctx->cpu_state.eflags = 0x00000002;
 
-    /* CS:IP = F000:FFF0 (reset vector) — but for APs after INIT,
-       the CPU enters wait-for-SIPI and doesn't execute until SIPI. */
-    ctx->cpu_state.pc = 0x0000FFF0;
+    /* CR0: CD=1, NW=1, ET=1.  PE=0 = real mode. */
+    ctx->cpu_state.CR0.l = 0x60000010;
 
-    /* DFR defaults to all 1s. */
+    /* CS:IP = F000:FFF0 (reset vector).
+       For APs after INIT, the CPU enters wait-for-SIPI and doesn't
+       execute until SIPI overrides CS:IP. */
+    ctx->cpu_state.pc                = 0x0000FFF0;
+    ctx->cpu_state.seg_cs.base       = 0xFFFF0000;
+    ctx->cpu_state.seg_cs.seg        = 0xF000;
+    ctx->cpu_state.seg_cs.limit      = 0xFFFF;
+    ctx->cpu_state.seg_cs.limit_low  = 0;
+    ctx->cpu_state.seg_cs.limit_high = 0xFFFF;
+    ctx->cpu_state.seg_cs.access     = 0x82;
+    ctx->cpu_state.seg_cs.ar_high    = 0x10;
+
+    /* DS/ES/SS/FS/GS: base=0, selector=0, limit=0xFFFF, real-mode access. */
+    x86seg seg_default;
+    memset(&seg_default, 0, sizeof(x86seg));
+    seg_default.base       = 0;
+    seg_default.seg        = 0;
+    seg_default.limit      = 0xFFFF;
+    seg_default.limit_low  = 0;
+    seg_default.limit_high = 0xFFFF;
+    seg_default.access     = 0x82;
+    seg_default.ar_high    = 0x10;
+
+    ctx->cpu_state.seg_ds = seg_default;
+    ctx->cpu_state.seg_es = seg_default;
+    ctx->cpu_state.seg_ss = seg_default;
+    ctx->cpu_state.seg_fs = seg_default;
+    ctx->cpu_state.seg_gs = seg_default;
+
+    /* IDTR: base=0, limit=0x3FF (real-mode IVT). */
+    memset(&ctx->idt, 0, sizeof(x86seg));
+    ctx->idt.base  = 0;
+    ctx->idt.limit = 0x03FF;
+
+    /* GDTR: base=0, limit=0xFFFF. */
+    memset(&ctx->gdt, 0, sizeof(x86seg));
+    ctx->gdt.base  = 0;
+    ctx->gdt.limit = 0xFFFF;
+
+    /* Debug registers: Intel reset defaults. */
+    ctx->dr[6] = 0xFFFF1FF0;
+    ctx->dr[7] = 0x00000400;
+
+    /* DFR defaults to all 1s in the APIC. */
     if (saved_apic)
         ((apic_t *) saved_apic)->dfr = 0xFFFFFFFF;
 
@@ -393,9 +434,7 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
        CS selector = vector << 8, CS base = vector * 0x1000, IP = 0. */
     ctx->cpu_state.pc = 0;
 
-    /* Set CS segment register in cpu_state.
-       The x86seg for CS is stored in cpu_state._seg[1] (CS = seg index 1).
-       We need to set base, limit, and access rights for real mode. */
+    /* Set CS segment register for real mode at SIPI vector. */
     ctx->cpu_state.seg_cs.base       = (uint32_t) vector * 0x1000;
     ctx->cpu_state.seg_cs.seg        = (uint16_t) vector << 8;
     ctx->cpu_state.seg_cs.limit      = 0xFFFF;
@@ -407,17 +446,23 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
     /* Real mode: CR0.PE = 0, rest of segments at their defaults. */
     ctx->cpu_state.CR0.l = 0x60000010; /* CD=1, NW=1, ET=1, PE=0. */
 
-    /* Set default data segment registers (real mode). */
-    ctx->cpu_state.seg_ds.base       = 0;
-    ctx->cpu_state.seg_ds.seg        = 0;
-    ctx->cpu_state.seg_ds.limit      = 0xFFFF;
-    ctx->cpu_state.seg_ds.limit_low  = 0;
-    ctx->cpu_state.seg_ds.limit_high = 0xFFFF;
-    ctx->cpu_state.seg_ds.access     = 0x93;
-    ctx->cpu_state.seg_ds.ar_high    = 0;
+    /* Set default data segment registers (real mode).
+       All data segments: base=0, selector=0, limit=0xFFFF. */
+    x86seg seg_default;
+    memset(&seg_default, 0, sizeof(x86seg));
+    seg_default.base       = 0;
+    seg_default.seg        = 0;
+    seg_default.limit      = 0xFFFF;
+    seg_default.limit_low  = 0;
+    seg_default.limit_high = 0xFFFF;
+    seg_default.access     = 0x93;
+    seg_default.ar_high    = 0;
 
-    ctx->cpu_state.seg_es = ctx->cpu_state.seg_ds;
-    ctx->cpu_state.seg_ss = ctx->cpu_state.seg_ds;
+    ctx->cpu_state.seg_ds = seg_default;
+    ctx->cpu_state.seg_es = seg_default;
+    ctx->cpu_state.seg_ss = seg_default;
+    ctx->cpu_state.seg_fs = seg_default;
+    ctx->cpu_state.seg_gs = seg_default;
 
     /* Stack pointer. */
     ctx->cpu_state.regs[4].l = 0; /* ESP = 0. */
@@ -428,6 +473,10 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
     /* Flags: reserved bit 1 set. */
     ctx->cpu_state.flags  = 0x0002;
     ctx->cpu_state.eflags = 0x00000002;
+
+    /* Ensure IDTR is set for real-mode IVT (base=0, limit=0x3FF). */
+    ctx->idt.base  = 0;
+    ctx->idt.limit = 0x03FF;
 
     /* Reset APIC state for the AP (SVR disabled, etc.). */
     apic_t *ap_apic = apics[cpu_id];

@@ -4809,12 +4809,71 @@ cpu_smp_init(void)
 
     fprintf(stderr, "SMP: BSP (CPU 0) context saved\n");
 
-    /* Initialize CPU 1 (AP) with a clean copy of BSP state,
-       then put it in wait-for-SIPI mode. */
-    cpu_contexts[1]               = cpu_contexts[0];
-    cpu_contexts[1].halted        = 1;
-    cpu_contexts[1].wait_for_sipi = 1;
-    cpu_contexts[1].apic          = NULL;
+    /* Initialize CPU 1 (AP) with a clean x86 hardware reset state.
+       Do NOT copy BSP state — the AP must start from proper reset defaults
+       so that when SIPI arrives, it begins executing in a known real-mode
+       environment.  The SIPI handler (apic_deliver_sipi) will set CS:IP. */
+    cpu_context_t *ap = &cpu_contexts[1];
+    memset(ap, 0, sizeof(cpu_context_t));
+
+    /* EFLAGS: only reserved bit 1 is set. */
+    ap->cpu_state.flags  = 0x0002;
+    ap->cpu_state.eflags = 0x00000002;
+
+    /* CR0: CD=1, NW=1, ET=1 (bits 30, 29, 4).  PE=0 = real mode. */
+    ap->cpu_state.CR0.l = 0x60000010;
+
+    /* CS:IP = F000:FFF0 (standard reset vector).
+       SIPI will override CS:IP when it arrives. */
+    ap->cpu_state.pc               = 0x0000FFF0;
+    ap->cpu_state.seg_cs.base      = 0xFFFF0000;
+    ap->cpu_state.seg_cs.seg       = 0xF000;
+    ap->cpu_state.seg_cs.limit     = 0xFFFF;
+    ap->cpu_state.seg_cs.limit_low = 0;
+    ap->cpu_state.seg_cs.limit_high = 0xFFFF;
+    ap->cpu_state.seg_cs.access    = 0x82;
+    ap->cpu_state.seg_cs.ar_high   = 0x10;
+
+    /* DS/ES/SS/FS/GS: base=0, selector=0, limit=0xFFFF, real-mode access. */
+    x86seg seg_default;
+    memset(&seg_default, 0, sizeof(x86seg));
+    seg_default.base       = 0;
+    seg_default.seg        = 0;
+    seg_default.limit      = 0xFFFF;
+    seg_default.limit_low  = 0;
+    seg_default.limit_high = 0xFFFF;
+    seg_default.access     = 0x82;
+    seg_default.ar_high    = 0x10;
+
+    ap->cpu_state.seg_ds = seg_default;
+    ap->cpu_state.seg_es = seg_default;
+    ap->cpu_state.seg_ss = seg_default;
+    ap->cpu_state.seg_fs = seg_default;
+    ap->cpu_state.seg_gs = seg_default;
+
+    /* IDTR: base=0, limit=0x3FF (real-mode IVT at physical 0). */
+    memset(&ap->idt, 0, sizeof(x86seg));
+    ap->idt.base  = 0;
+    ap->idt.limit = 0x03FF;
+
+    /* GDTR: base=0, limit=0xFFFF. */
+    memset(&ap->gdt, 0, sizeof(x86seg));
+    ap->gdt.base  = 0;
+    ap->gdt.limit = 0xFFFF;
+
+    /* Debug registers: DR6=0xFFFF1FF0, DR7=0x00000400 (Intel reset defaults). */
+    ap->dr[6] = 0xFFFF1FF0;
+    ap->dr[7] = 0x00000400;
+
+    /* All general-purpose registers are 0 (from memset).
+       EDX would normally contain CPUID signature on reset, but
+       the SIPI handler in apic_deliver_sipi() sets it to 0, and the
+       BIOS trampoline code doesn't rely on it. */
+
+    /* AP waits for SIPI before executing. */
+    ap->halted        = 1;
+    ap->wait_for_sipi = 1;
+    ap->apic          = NULL; /* Set later by apic_init_cpu(). */
 
     /* Re-add the BSP's APIC MMIO mapping which was destroyed by
        mem_reset() (called between cpu_set() and machine init).
@@ -4830,7 +4889,8 @@ cpu_smp_init(void)
     active_cpu               = 0;
     smp_fine_slice_countdown = 0;
 
-    fprintf(stderr, "SMP: AP (CPU 1) context initialized, wait_for_sipi=1, active_cpu=%d\n", active_cpu);
+    fprintf(stderr, "SMP: AP (CPU 1) context initialized with x86 reset state, "
+                    "wait_for_sipi=1, active_cpu=%d\n", active_cpu);
 }
 
 void
