@@ -38,6 +38,7 @@
 #include "x86seg_common.h"
 #include <86box/mem.h>
 #include <86box/nmi.h>
+#include <86box/apic.h>
 #include <86box/pic.h>
 #include <86box/pci.h>
 #include <86box/smram.h>
@@ -1871,11 +1872,18 @@ cpu_set(void)
         cpu_exec = execx86;
     mmx_init();
     gdbstub_cpu_init();
+
+    /* Initialize the Local APIC for P6-class CPUs. */
+    if (is_p6)
+        apic_init();
+    else
+        apic_close();
 }
 
 void
 cpu_close(void)
 {
+    apic_close();
     cpu_inited = 0;
 }
 
@@ -2464,7 +2472,7 @@ cpu_CPUID(void)
             } else if (EAX == 1) {
                 EAX = CPUID;
                 EBX = ECX = 0;
-                EDX       = CPUID_FPU | CPUID_VME | CPUID_DE | CPUID_PSE | CPUID_TSC | CPUID_MSR | CPUID_PAE | CPUID_MCE | CPUID_CMPXCHG8B | CPUID_MTRR | CPUID_PGE | CPUID_MCA | CPUID_SEP | CPUID_CMOV;
+                EDX       = CPUID_FPU | CPUID_VME | CPUID_DE | CPUID_PSE | CPUID_TSC | CPUID_MSR | CPUID_PAE | CPUID_MCE | CPUID_CMPXCHG8B | CPUID_APIC | CPUID_MTRR | CPUID_PGE | CPUID_MCA | CPUID_SEP | CPUID_CMOV;
                 /*
                    Return anything non-zero in bits 32-63 of the BIOS signature MSR
                    to indicate there has been an update.
@@ -2492,7 +2500,7 @@ cpu_CPUID(void)
             } else if (EAX == 1) {
                 EAX = CPUID;
                 EBX = ECX = 0;
-                EDX       = CPUID_FPU | CPUID_VME | CPUID_DE | CPUID_PSE | CPUID_TSC | CPUID_MSR | CPUID_PAE | CPUID_MCE | CPUID_CMPXCHG8B | CPUID_MMX | CPUID_MTRR | CPUID_PGE | CPUID_MCA | CPUID_SEP | CPUID_CMOV;
+                EDX       = CPUID_FPU | CPUID_VME | CPUID_DE | CPUID_PSE | CPUID_TSC | CPUID_MSR | CPUID_PAE | CPUID_MCE | CPUID_CMPXCHG8B | CPUID_APIC | CPUID_MMX | CPUID_MTRR | CPUID_PGE | CPUID_MCA | CPUID_SEP | CPUID_CMOV;
                 /*
                    Return anything non-zero in bits 32-63 of the BIOS signature MSR
                    to indicate there has been an update.
@@ -2520,7 +2528,7 @@ cpu_CPUID(void)
             } else if (EAX == 1) {
                 EAX = CPUID;
                 EBX = ECX = 0;
-                EDX       = CPUID_FPU | CPUID_VME | CPUID_DE | CPUID_PSE | CPUID_TSC | CPUID_MSR | CPUID_PAE | CPUID_MCE | CPUID_CMPXCHG8B | CPUID_MMX | CPUID_MTRR | CPUID_PGE | CPUID_MCA | CPUID_SEP | CPUID_FXSR | CPUID_CMOV | CPUID_PSE36;
+                EDX       = CPUID_FPU | CPUID_VME | CPUID_DE | CPUID_PSE | CPUID_TSC | CPUID_MSR | CPUID_PAE | CPUID_MCE | CPUID_CMPXCHG8B | CPUID_APIC | CPUID_MMX | CPUID_MTRR | CPUID_PGE | CPUID_MCA | CPUID_SEP | CPUID_FXSR | CPUID_CMOV | CPUID_PSE36;
                 /*
                    Return anything non-zero in bits 32-63 of the BIOS signature MSR
                    to indicate there has been an update.
@@ -3230,8 +3238,11 @@ pentium_invalid_rdmsr:
                     break;
                 /* IA32_APIC_BASE - APIC Base Address */
                 case 0x1B:
-                    EAX = msr.apic_base & 0xffffffff;
-                    EDX = msr.apic_base >> 32;
+                    {
+                        uint64_t apic_msr_val = apic_read_msr();
+                        EAX = apic_msr_val & 0xffffffff;
+                        EDX = apic_msr_val >> 32;
+                    }
                     cpu_log("APIC_BASE read : %08X%08X\n", EDX, EAX);
                     break;
                 /* Unknown (undocumented?) MSR used by the Hyper-V BIOS */
@@ -4036,9 +4047,7 @@ pentium_invalid_wrmsr:
                 /* IA32_APIC_BASE - APIC Base Address */
                 case 0x1b:
                     cpu_log("APIC_BASE write: %08X%08X\n", EDX, EAX);
-#if 0
-                    msr.apic_base = EAX | ((uint64_t) EDX << 32);
-#endif
+                    apic_write_msr(EAX | ((uint64_t) EDX << 32));
                     break;
                 /* Unknown (undocumented?) MSR used by the Hyper-V BIOS */
                 case 0x20:

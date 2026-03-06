@@ -24,6 +24,7 @@
 #include <86box/io.h>
 #include <86box/mem.h>
 #include <86box/nmi.h>
+#include <86box/apic.h>
 #include <86box/pic.h>
 #include <86box/timer.h>
 #include <86box/fdd.h>
@@ -368,7 +369,7 @@ exec386_dynarec_int(void)
             CPU_BLOCK_END();
         else if (nmi && nmi_enable && nmi_mask)
             CPU_BLOCK_END();
-        else if ((cpu_state.flags & I_FLAG) && pic.int_pending && !cpu_end_block_after_ins)
+        else if ((cpu_state.flags & I_FLAG) && (pic.int_pending || apic_int_pending()) && !cpu_end_block_after_ins)
             CPU_BLOCK_END();
     }
 
@@ -611,7 +612,7 @@ exec386_dynarec_dyn(void)
                 CPU_BLOCK_END();
             if (nmi && nmi_enable && nmi_mask)
                 CPU_BLOCK_END();
-            if ((cpu_state.flags & I_FLAG) && pic.int_pending && !cpu_end_block_after_ins)
+            if ((cpu_state.flags & I_FLAG) && (pic.int_pending || apic_int_pending()) && !cpu_end_block_after_ins)
                 CPU_BLOCK_END();
 
             if (cpu_end_block_after_ins) {
@@ -713,7 +714,7 @@ exec386_dynarec_dyn(void)
                 CPU_BLOCK_END();
             if (nmi && nmi_enable && nmi_mask)
                 CPU_BLOCK_END();
-            if ((cpu_state.flags & I_FLAG) && pic.int_pending && !cpu_end_block_after_ins)
+            if ((cpu_state.flags & I_FLAG) && (pic.int_pending || apic_int_pending()) && !cpu_end_block_after_ins)
                 CPU_BLOCK_END();
 
             if (cpu_end_block_after_ins) {
@@ -840,8 +841,22 @@ exec386_dynarec(int32_t cycs)
 #    else
                 nmi = 0;
 #    endif
-            } else if ((cpu_state.flags & I_FLAG) && pic.int_pending) {
-                vector = picinterrupt();
+            } else if (cpu_state.flags & I_FLAG) {
+                vector = -1;
+
+                /* Check APIC first if enabled. */
+                if (apic_enabled()) {
+                    /* Check for APIC-generated interrupts (timer, etc). */
+                    vector = apic_get_interrupt();
+                    if (vector == -1 && pic.int_pending) {
+                        /* Virtual wire mode: LINT0 as ExtINT passes PIC through. */
+                        vector = picinterrupt();
+                    }
+                } else if (pic.int_pending) {
+                    /* Legacy PIC path (APIC disabled). */
+                    vector = picinterrupt();
+                }
+
                 if (vector != -1) {
 #    ifndef USE_NEW_DYNAREC
                     oldcs = CS;
@@ -1047,8 +1062,18 @@ block_ended:
 #else
                 nmi = 0;
 #endif
-            } else if ((cpu_state.flags & I_FLAG) && pic.int_pending && !cpu_end_block_after_ins) {
-                vector = picinterrupt();
+            } else if ((cpu_state.flags & I_FLAG) && !cpu_end_block_after_ins) {
+                vector = -1;
+
+                /* Check APIC first if enabled. */
+                if (apic_enabled()) {
+                    vector = apic_get_interrupt();
+                    if (vector == -1 && pic.int_pending)
+                        vector = picinterrupt();
+                } else if (pic.int_pending) {
+                    vector = picinterrupt();
+                }
+
                 if (vector != -1) {
                     flags_rebuild();
                     if (msw & 1)
