@@ -527,6 +527,11 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
     smp_fine_slice_countdown = 5000;
     fprintf(stderr, "SMP: SIPI yield — BSP yielding, fine-slice enabled (5000 iters) for AP %d\n",
             cpu_id);
+
+    /* Activate AP instruction-level ring buffer trace. */
+    ap_trace_remaining = 500;
+    fprintf(stderr, "SMP: AP trace armed — capturing next %d AP instructions\n",
+            ap_trace_remaining);
 }
 
 /*
@@ -1556,4 +1561,21 @@ int
 apic_present(void)
 {
     return is_p6;
+}
+
+/* Accessors for opaque apic_t fields (used by AP trace). */
+uint32_t
+apic_get_id(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0xFFFFFFFF;
+    return apics[cpu_id]->id;
+}
+
+uint32_t
+apic_get_svr(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0;
+    return apics[cpu_id]->svr;
 }

@@ -994,6 +994,11 @@ extern cpu_context_t cpu_contexts[MAX_CPUS];
    until it reaches 0, then normal slicing resumes. */
 extern int smp_fine_slice_countdown;
 
+/* AP instruction-level ring buffer trace.
+   When > 0, exec386() captures AP state each instruction.
+   Set to 500 by SIPI delivery; decrements to 0, then flushes and goes to -1. */
+extern int ap_trace_remaining;
+
 /* SMP context switch functions. */
 extern void cpu_save_context(int cpu_id);
 extern void cpu_load_context(int cpu_id);

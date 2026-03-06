@@ -171,6 +171,10 @@ extern apic_t *apic;
 /* Array of per-CPU APIC states. */
 extern apic_t *apics[APIC_MAX_CPUS];
 
+/* Accessors for opaque apic_t fields (used by AP trace in 386_dynarec.c). */
+extern uint32_t apic_get_id(int cpu_id);
+extern uint32_t apic_get_svr(int cpu_id);
+
 #ifdef __cplusplus
 }
 #endif
