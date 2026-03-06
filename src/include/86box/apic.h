@@ -105,6 +105,10 @@ extern void apic_init_cpu(int cpu_id);
 /* Initialize the Local APIC for the BSP (backward compat wrapper). */
 extern void apic_init(void);
 
+/* Re-add the APIC MMIO mapping after mem_reset() has cleared it.
+   Must be called after mem_reset() for P6-class CPUs. */
+extern void apic_reset_mapping(void);
+
 /* Reset the Local APIC to power-on defaults. */
 extern void apic_reset(void);
 

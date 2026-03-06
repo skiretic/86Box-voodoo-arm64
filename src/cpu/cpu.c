@@ -4804,6 +4804,12 @@ cpu_smp_init(void)
     cpu_contexts[1].wait_for_sipi = 1;
     cpu_contexts[1].apic          = NULL;
 
+    /* Re-add the BSP's APIC MMIO mapping which was destroyed by
+       mem_reset() (called between cpu_set() and machine init).
+       This also sets _mem_state for the APIC address range to
+       INTERNAL so the memory system routes accesses correctly. */
+    apic_reset_mapping();
+
     /* Initialize a Local APIC for each AP so that apic_switch_cpu()
        has a valid APIC to switch to (even before the AP starts executing). */
     for (int i = 1; i < num_cpus; i++)

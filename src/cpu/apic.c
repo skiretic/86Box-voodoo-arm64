@@ -1043,6 +1043,54 @@ apic_init(void)
 }
 
 /*
+ * Re-add the APIC MMIO mapping after mem_reset().
+ *
+ * The BSP's APIC is initialized in cpu_set() -> apic_init() which runs
+ * BEFORE mem_reset(). mem_reset() zeroes the mapping linked list and
+ * _mem_state[] array, orphaning the APIC's mem_mapping_t. This function
+ * re-adds the mapping and marks the APIC address range as INTERNAL so
+ * the memory system routes CPU accesses to the APIC handlers.
+ *
+ * Must be called after mem_reset() — typically from cpu_smp_init() or
+ * machine init.
+ */
+void
+apic_reset_mapping(void)
+{
+    if (!apics[0])
+        return;
+
+    apic_t *dev = apics[0];
+
+    /* Mark the APIC MMIO range as INTERNAL in the memory state array.
+       Without this, the memory system will not route accesses at
+       0xFEE00000 to INTERNAL mappings (default after mem_reset is
+       all-external / zero). */
+    mem_set_mem_state_both(dev->base_addr, 0x1000,
+                           MEM_READ_INTERNAL | MEM_WRITE_INTERNAL);
+
+    /* Re-add the BSP's APIC MMIO mapping to the mapping linked list.
+       The apic_t struct and its mem_mapping_t still exist in heap, but
+       mem_reset() removed them from base_mapping/last_mapping and
+       cleared the read_mapping[]/write_mapping[] arrays. */
+    mem_mapping_add(&dev->mem_mapping,
+                    dev->base_addr,
+                    0x1000,
+                    apic_mem_readb,
+                    apic_mem_readw,
+                    apic_mem_readl,
+                    apic_mem_writeb,
+                    apic_mem_writew,
+                    apic_mem_writel,
+                    NULL,
+                    MEM_MAPPING_INTERNAL,
+                    dev);
+
+    fprintf(stderr, "SMP: APIC MMIO mapping re-added at %08X after mem_reset()\n",
+            dev->base_addr);
+}
+
+/*
  * Reset the Local APIC to power-on defaults.
  */
 void
