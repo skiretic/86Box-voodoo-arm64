@@ -36,6 +36,7 @@
 #include <86box/pic.h>
 #include <86box/nmi.h>
 #include <86box/apic.h>
+#include <86box/ioapic.h>
 #include <86box/plat_unused.h>
 #include "cpu.h"
 
@@ -448,6 +449,11 @@ apic_mem_writel(uint32_t addr, uint32_t val, void *priv)
                 if (highest >= 0) {
                     apic_log("APIC: EOI, clearing ISR bit %d\n", highest);
                     apic_clear_bit(dev->isr, highest);
+
+                    /* Notify the I/O APIC so it can clear Remote IRR
+                       for level-triggered interrupts and re-deliver
+                       if the line is still asserted. */
+                    ioapic_eoi(highest);
                 }
             }
             break;
