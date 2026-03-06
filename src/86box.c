@@ -2003,7 +2003,47 @@ pc_run(void)
 
     /* Run a block of code. */
     startblit();
-    cpu_exec((int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000));
+    if (num_cpus > 1) {
+        /* SMP: cooperative time-slicing across all CPUs. */
+        int32_t  total_cycles   = (int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000);
+        int32_t  cycles_per_cpu = total_cycles / num_cpus;
+
+        for (int i = 0; i < num_cpus; i++) {
+            cpu_switch_to(i);
+
+            /* AP waiting for Startup IPI — skip entirely. */
+            if (cpu_contexts[i].wait_for_sipi)
+                continue;
+
+            /* CPU is halted — skip unless there is a pending interrupt to wake it. */
+            if (cpu_contexts[i].halted && !cpu_has_pending_interrupt(i))
+                continue;
+
+            /* If halted but an interrupt is pending, clear the halt. */
+            if (cpu_contexts[i].halted)
+                cpu_contexts[i].halted = 0;
+
+            /* Track TSC before execution so we can compute the delta. */
+            uint64_t tsc_before = tsc;
+
+            cpu_exec(cycles_per_cpu);
+
+            /* Compute actual cycles consumed and save state. */
+            uint64_t tsc_delta = tsc - tsc_before;
+            cpu_save_context(i);
+
+            /* Advance other CPUs' TSCs by the same amount to keep
+               them roughly synchronized (wall-clock time passes
+               for all CPUs even when only one is executing). */
+            for (int j = 0; j < num_cpus; j++) {
+                if (j != i)
+                    cpu_contexts[j].tsc += tsc_delta;
+            }
+        }
+    } else {
+        /* Single-CPU fast path — no context switching overhead. */
+        cpu_exec((int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000));
+    }
     ack_pause();
 #ifdef USE_GDBSTUB /* avoid a KBC FIFO overflow when CPU emulation is stalled */
     if (gdbstub_step == GDBSTUB_EXEC) {

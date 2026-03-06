@@ -1874,6 +1874,16 @@ cpu_set(void)
         cpu_exec = execvx0;
     else
         cpu_exec = execx86;
+    /* SMP: force interpreter mode when running multiple CPUs.
+       The dynarec generates code with hardcoded offsets into the
+       global cpu_state, which is incompatible with context switching. */
+#if defined(USE_DYNAREC) && !defined(USE_GDBSTUB)
+    if (num_cpus > 1 && cpu_exec == exec386_dynarec) {
+        cpu_exec     = exec386;
+        cpu_use_exec = 1;
+    }
+#endif
+
     mmx_init();
     gdbstub_cpu_init();
 
@@ -4754,6 +4764,9 @@ cpu_switch_to(int cpu_id)
     /* Load the target CPU's state. */
     cpu_load_context(cpu_id);
 
+    /* Swap the APIC MMIO mapping so the new CPU accesses its own APIC. */
+    apic_switch_cpu(cpu_id);
+
     active_cpu = cpu_id;
 }
 
@@ -4790,4 +4803,19 @@ cpu_smp_close(void)
     /* Zero out the context array. */
     memset(cpu_contexts, 0, sizeof(cpu_contexts));
     active_cpu = 0;
+}
+
+/* Check if a specific CPU has a pending interrupt.
+   For CPU 0 (BSP), also checks the PIC (since the BSP receives
+   PIC interrupts via the APIC virtual wire or directly).
+   For all CPUs, checks their per-CPU APIC IRR vs PPR. */
+int
+cpu_has_pending_interrupt(int cpu_id)
+{
+    /* PIC interrupts only go to the BSP (CPU 0). */
+    if (cpu_id == 0 && pic.int_pending)
+        return 1;
+
+    /* Check the per-CPU APIC. */
+    return apic_int_pending_cpu(cpu_id);
 }

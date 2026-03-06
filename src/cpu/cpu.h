@@ -995,4 +995,8 @@ extern void cpu_smp_init(void);
 /* Clean up SMP state. */
 extern void cpu_smp_close(void);
 
+/* Check if a CPU has a pending interrupt (PIC or APIC).
+   Used by the SMP scheduler to decide whether to wake a halted CPU. */
+extern int cpu_has_pending_interrupt(int cpu_id);
+
 #endif /*EMU_CPU_H*/
