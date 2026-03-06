@@ -973,6 +973,10 @@ typedef struct cpu_context_t {
     /* APIC pointer for this CPU (opaque, set by APIC init). */
     void *apic;
 
+    /* Interrupt state. */
+    int nmi_pending;   /* NMI pending on this CPU */
+    int trap_pending;  /* TRAP flag pending on this CPU */
+
     /* SMP scheduling state. */
     int halted;        /* CPU is in HLT state */
     int wait_for_sipi; /* AP waiting for Startup IPI */

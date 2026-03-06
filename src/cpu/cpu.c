@@ -4649,6 +4649,10 @@ cpu_save_context(int cpu_id)
 
     /* Segment data temp. */
     memcpy(ctx->temp_seg_data, temp_seg_data, sizeof(temp_seg_data));
+
+    /* Interrupt state. */
+    ctx->nmi_pending  = nmi;
+    ctx->trap_pending = trap;
 }
 
 void
@@ -4744,6 +4748,14 @@ cpu_load_context(int cpu_id)
 
     /* Segment data temp. */
     memcpy(temp_seg_data, ctx->temp_seg_data, sizeof(temp_seg_data));
+
+    /* Interrupt state. */
+    nmi  = ctx->nmi_pending;
+    trap = ctx->trap_pending;
+
+    /* Re-derive use32/stack32 from cpu_cur_status (already loaded above). */
+    use32   = (cpu_cur_status & CPU_STATUS_USE32) ? 0x300 : 0;
+    stack32 = (cpu_cur_status & CPU_STATUS_STACK32) ? 1 : 0;
 }
 
 void
