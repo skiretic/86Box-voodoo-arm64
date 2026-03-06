@@ -2043,17 +2043,56 @@ pc_run(void)
             if (cpu_contexts[i].halted)
                 cpu_contexts[i].halted = 0;
 
+            /* Log first execution of CPU 1 after SIPI. */
+            static int cpu1_first_exec_logged = 0;
+            if (i == 1 && !cpu1_first_exec_logged) {
+                fprintf(stderr, "SMP: CPU 1 FIRST EXEC: pc=%08X cs_base=%08X cs_seg=%04X "
+                        "CR0=%08X flags=%08X eflags=%08X linear=%08X\n",
+                        cpu_state.pc, cpu_state.seg_cs.base, cpu_state.seg_cs.seg,
+                        cpu_state.CR0.l, cpu_state.flags, cpu_state.eflags,
+                        cpu_state.seg_cs.base + cpu_state.pc);
+                cpu1_first_exec_logged = 1;
+            }
+
             /* Track TSC before execution so we can compute the delta. */
             uint64_t tsc_before = tsc;
             uint32_t pc_before  = cpu_state.pc;
 
             cpu_exec(total_cycles);
 
+            /* One-time detailed dump when CPU gets stuck. */
+            static uint32_t last_pc[2] = {0xFFFFFFFF, 0xFFFFFFFF};
+            static int stuck_count[2] = {0, 0};
+            if (i < 2 && cpu_state.pc == last_pc[i]) {
+                stuck_count[i]++;
+                if (stuck_count[i] == 10) {
+                    uint32_t linear = cpu_state.seg_cs.base + cpu_state.pc;
+                    uint8_t bytes[16];
+                    for (int b = 0; b < 16; b++)
+                        bytes[b] = readmembl(linear + b);
+                    fprintf(stderr, "SMP: CPU %d STUCK at linear=%08X (cs:ip=%04X:%08X) "
+                            "flags=%08X eflags=%08X CR0=%08X IF=%d\n"
+                            "  bytes: %02X %02X %02X %02X %02X %02X %02X %02X "
+                            "%02X %02X %02X %02X %02X %02X %02X %02X\n",
+                            i, linear, cpu_state.seg_cs.seg, cpu_state.pc,
+                            cpu_state.flags, cpu_state.eflags, cpu_state.CR0.l,
+                            !!(cpu_state.flags & 0x200),
+                            bytes[0], bytes[1], bytes[2], bytes[3],
+                            bytes[4], bytes[5], bytes[6], bytes[7],
+                            bytes[8], bytes[9], bytes[10], bytes[11],
+                            bytes[12], bytes[13], bytes[14], bytes[15]);
+                }
+            } else if (i < 2) {
+                last_pc[i] = cpu_state.pc;
+                stuck_count[i] = 0;
+            }
+
             /* Log execution details for BSP every 1000th iteration,
                and CPU state every 10000th iteration. */
             if ((smp_iter_count % 1000) == 1) {
-                fprintf(stderr, "SMP: CPU %d exec: pc=%08X -> %08X, cycles=%d [iter %d]\n",
-                        i, pc_before, cpu_state.pc, cycles_per_cpu, smp_iter_count);
+                fprintf(stderr, "SMP: CPU %d exec: pc=%08X -> %08X, cs_base=%08X linear=%08X, cycles=%d [iter %d]\n",
+                        i, pc_before, cpu_state.pc, cpu_state.seg_cs.base,
+                        cpu_state.seg_cs.base + cpu_state.pc, cycles_per_cpu, smp_iter_count);
             }
             if (i == 0 && (smp_iter_count % 10000) == 1) {
                 fprintf(stderr, "SMP: CPU 0 state: CR0=%08X CS.base=%08X CS.limit=%08X flags=%08X\n",

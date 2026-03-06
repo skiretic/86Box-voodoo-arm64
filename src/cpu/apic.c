@@ -613,6 +613,8 @@ apic_mem_readl(uint32_t addr, UNUSED(void *priv))
     switch (offset) {
         case APIC_REG_ID:
             ret = dev->id;
+            fprintf(stderr, "SMP: APIC ID read: dev=%p id=%08X (active_cpu=%d)\n",
+                    (void *) dev, ret, active_cpu);
             break;
 
         case APIC_REG_VERSION:
