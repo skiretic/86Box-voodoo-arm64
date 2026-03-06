@@ -1874,15 +1874,8 @@ cpu_set(void)
         cpu_exec = execvx0;
     else
         cpu_exec = execx86;
-    /* SMP: force interpreter mode when running multiple CPUs.
-       The dynarec generates code with hardcoded offsets into the
-       global cpu_state, which is incompatible with context switching. */
-#if defined(USE_DYNAREC) && !defined(USE_GDBSTUB)
-    if (num_cpus > 1 && cpu_exec == exec386_dynarec) {
-        cpu_exec     = exec386;
-        cpu_use_exec = 1;
-    }
-#endif
+    /* NOTE: SMP dynarec override moved to cpu_smp_init() where num_cpus
+       is already set by machine init. */
 
     mmx_init();
     gdbstub_cpu_init();
@@ -4772,6 +4765,11 @@ cpu_switch_to(int cpu_id)
     /* Load the target CPU's state. */
     cpu_load_context(cpu_id);
 
+    /* Each CPU has its own CR3/page tables — flush TLB on switch
+       to prevent stale readlookup2/writelookup2 entries from the
+       previous CPU's address space being used. */
+    flushmmucache();
+
     /* Swap the APIC MMIO mapping so the new CPU accesses its own APIC. */
     apic_switch_cpu(cpu_id);
 
@@ -4787,6 +4785,19 @@ cpu_smp_init(void)
         fprintf(stderr, "SMP: cpu_smp_init() skipped (num_cpus <= 1)\n");
         return;
     }
+
+    /* SMP: force interpreter mode when running multiple CPUs.
+       The dynarec has file-static variables (cycles_main, cycles_old, tsc_old)
+       that are NOT saved/restored per-CPU and corrupt timing.
+       This override must be here (not in cpu_set()) because num_cpus is only
+       set to >1 by machine init, which runs AFTER cpu_set(). */
+#if defined(USE_DYNAREC) && !defined(USE_GDBSTUB)
+    if (cpu_exec == exec386_dynarec) {
+        fprintf(stderr, "SMP: Forcing interpreter mode (exec386) for multi-CPU\n");
+        cpu_exec     = exec386;
+        cpu_use_exec = 1;
+    }
+#endif
 
     /* Snapshot CPU 0 (BSP) state from the current globals.
        At this point cpu_set() has already initialized everything. */
