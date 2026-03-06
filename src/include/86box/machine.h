@@ -1328,6 +1328,7 @@ extern int machine_at_s370slm_init(const machine_t *);
 extern int machine_at_awo671r_init(const machine_t *);
 extern int machine_at_ambx133_init(const machine_t *);
 extern int machine_at_cubx_init(const machine_t *);
+extern int machine_at_bp6_init(const machine_t *);
 
 /* i440ZX */
 extern int machine_at_63a1_init(const machine_t *);
