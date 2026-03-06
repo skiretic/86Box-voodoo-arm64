@@ -71,6 +71,18 @@
 #define APIC_ICR_DM_SIPI   0x600
 #define APIC_ICR_DM_MASK   0x700
 
+/* ICR destination shorthand (bits 19:18). */
+#define APIC_ICR_DSH_NONE   0x00000 /* No shorthand. */
+#define APIC_ICR_DSH_SELF   0x40000 /* Self. */
+#define APIC_ICR_DSH_ALL    0x80000 /* All including self. */
+#define APIC_ICR_DSH_ALLNOT 0xC0000 /* All excluding self. */
+#define APIC_ICR_DSH_MASK   0xC0000
+
+/* ICR bits. */
+#define APIC_ICR_DESTMOD (1 << 11) /* Destination mode: 0=physical, 1=logical. */
+#define APIC_ICR_LEVEL   (1 << 14) /* Level: 0=de-assert, 1=assert. */
+#define APIC_ICR_TRIGGER (1 << 15) /* Trigger mode: 0=edge, 1=level. */
+
 /* IA32_APIC_BASE MSR bits. */
 #define APIC_MSR_BSP       (1 << 8)
 #define APIC_MSR_ENABLE    (1 << 11)
@@ -83,8 +95,14 @@ extern "C" {
 /* Forward declaration. */
 typedef struct apic_t apic_t;
 
-/* Initialize the Local APIC for the current CPU.
-   Called from cpu_set() when the CPU model supports APIC. */
+/* Maximum number of CPUs supported. */
+#define APIC_MAX_CPUS 2
+
+/* Initialize the Local APIC for a specific CPU.
+   cpu_id 0 = BSP; called from cpu_set() / cpu_smp_init(). */
+extern void apic_init_cpu(int cpu_id);
+
+/* Initialize the Local APIC for the BSP (backward compat wrapper). */
 extern void apic_init(void);
 
 /* Reset the Local APIC to power-on defaults. */
@@ -101,8 +119,12 @@ extern int apic_enabled(void);
    Returns the vector number (0-255) or -1 if none. */
 extern int apic_get_interrupt(void);
 
-/* Raise an interrupt in the APIC's IRR for the given vector. */
+/* Raise an interrupt in the APIC's IRR for the given vector (current CPU). */
 extern void apic_set_irr(int vector);
+
+/* Raise an interrupt in a specific CPU's APIC IRR.
+   Used by IPI delivery and I/O APIC routing. */
+extern void apic_set_irr_cpu(int cpu_id, int vector);
 
 /* Signal LINT0 (connected to PIC in virtual wire mode). */
 extern void apic_lint0_raise(void);
@@ -122,8 +144,28 @@ extern int apic_present(void);
    for block-end decisions in the execution loop). */
 extern int apic_int_pending(void);
 
-/* Pointer to the global APIC state (NULL if not present). */
+/* Returns non-zero if a specific CPU's APIC has a pending interrupt.
+   Used by the SMP scheduler to decide whether to wake a halted CPU. */
+extern int apic_int_pending_cpu(int cpu_id);
+
+/* Get the APIC state for a specific CPU.
+   Returns NULL if that CPU's APIC is not initialized. */
+extern apic_t *apic_get_cpu(int cpu_id);
+
+/* Check if a specific CPU's APIC matches the given logical destination.
+   Returns 1 if the APIC is a target for this logical destination.
+   Used by I/O APIC routing. */
+extern int apic_match_logical_dest(int cpu_id, uint8_t dest);
+
+/* Switch the active APIC MMIO mapping to the given CPU.
+   Called during context switch to ensure the correct APIC is mapped. */
+extern void apic_switch_cpu(int cpu_id);
+
+/* Pointer to the BSP's APIC state (backward compat; == apics[0]). */
 extern apic_t *apic;
+
+/* Array of per-CPU APIC states. */
+extern apic_t *apics[APIC_MAX_CPUS];
 
 #ifdef __cplusplus
 }

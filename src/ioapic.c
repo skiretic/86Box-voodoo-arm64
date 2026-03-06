@@ -96,24 +96,50 @@ ioapic_deliver(ioapic_t *dev, int irq)
     uint64_t redir   = dev->redir[irq];
     int      vector  = (int) (redir & IOAPIC_REDIR_VECTOR_MASK);
     int      delmod  = (int) ((redir >> IOAPIC_REDIR_DELMOD_SHIFT) & 7);
+    int      destmod = !!(redir & IOAPIC_REDIR_DESTMOD);
     int      trigger = !!(redir & IOAPIC_REDIR_TRIGGER);
     int      dest    = (int) ((redir >> IOAPIC_REDIR_DEST_SHIFT) & 0xFF);
 
-    ioapic_log("IOAPIC: Deliver IRQ %d -> vector %02X, delmod=%d, dest=%02X, trigger=%s\n",
-               irq, vector, delmod, dest, trigger ? "level" : "edge");
+    ioapic_log("IOAPIC: Deliver IRQ %d -> vector %02X, delmod=%d, dest=%02X, "
+               "destmod=%s, trigger=%s\n",
+               irq, vector, delmod, dest,
+               destmod ? "logical" : "physical",
+               trigger ? "level" : "edge");
 
     switch (delmod) {
         case IOAPIC_DELMOD_FIXED:
         case IOAPIC_DELMOD_LOWPRI:
             /* Fixed / Lowest Priority: deliver the vector to the target
-               Local APIC.  For Phase 2, we only have the BSP (CPU 0),
-               so just call apic_set_irr directly. */
+               Local APIC based on the destination field. */
             if (vector < 0x10) {
                 ioapic_log("IOAPIC: Invalid vector %02X for IRQ %d (must be >= 0x10)\n",
                            vector, irq);
                 return;
             }
-            apic_set_irr(vector);
+
+            /* Route to the target CPU(s) based on destination mode. */
+            if (!destmod) {
+                /* Physical mode: dest is an APIC ID.
+                   For dual-CPU, APIC ID matches cpu_id. */
+                if (dest == 0xFF) {
+                    /* Broadcast to all CPUs with APICs. */
+                    for (int i = 0; i < APIC_MAX_CPUS; i++) {
+                        if (apic_get_cpu(i))
+                            apic_set_irr_cpu(i, vector);
+                    }
+                } else if (dest < APIC_MAX_CPUS) {
+                    apic_set_irr_cpu(dest, vector);
+                } else {
+                    ioapic_log("IOAPIC: Invalid physical dest %02X for IRQ %d\n",
+                               dest, irq);
+                }
+            } else {
+                /* Logical mode: check each CPU's APIC LDR/DFR. */
+                for (int i = 0; i < APIC_MAX_CPUS; i++) {
+                    if (apic_match_logical_dest(i, (uint8_t) dest))
+                        apic_set_irr_cpu(i, vector);
+                }
+            }
 
             /* For level-triggered interrupts, set the Remote IRR bit.
                It will be cleared when the Local APIC sends an EOI. */

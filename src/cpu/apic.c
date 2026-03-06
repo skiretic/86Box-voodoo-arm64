@@ -13,9 +13,10 @@
  *          - APIC ID, Version, TPR, PPR, EOI
  *          - LDR, DFR, SVR (with enable bit)
  *          - ISR, TMR, IRR (256-bit interrupt vectors)
- *          - ICR (stubbed for Phase 1 -- full IPI in Phase 4)
+ *          - ICR with full IPI delivery (Fixed, NMI, INIT, SIPI)
  *          - LVT Timer, LINT0, LINT1, Error, Thermal, Perf
  *          - Timer with one-shot and periodic mode
+ *          - Per-CPU APIC instances for SMP support
  *
  *          Virtual wire mode: LINT0 as ExtINT (PIC pass-through),
  *          LINT1 as NMI.
@@ -113,7 +114,10 @@ struct apic_t {
     pc_timer_t timer;     /* 86Box timer. */
 };
 
-/* Global pointer to the APIC state. */
+/* Per-CPU APIC state array. */
+apic_t *apics[APIC_MAX_CPUS] = { NULL };
+
+/* Global pointer to the BSP's APIC state (backward compat). */
 apic_t *apic = NULL;
 
 /*
@@ -246,6 +250,321 @@ apic_timer_start(apic_t *dev)
              dev->timer_icr, dev->timer_div, period_us);
 
     timer_on_auto(&dev->timer, period_us);
+}
+
+/*
+ * Check if a given APIC ID matches the destination for an IPI.
+ *
+ * In physical mode (destmod=0): match if dest_id == apic_id.
+ *   Special case: dest_id 0xFF = broadcast.
+ *
+ * In logical mode (destmod=1): match using LDR/DFR.
+ *   Flat model (DFR = 0xFFFFFFFF): match if (LDR >> 24) & dest_id != 0.
+ *   Cluster model (DFR = 0x0FFFFFFF): match cluster + member bits.
+ */
+static int
+apic_match_dest(apic_t *target, int dest_id, int destmod)
+{
+    if (!target)
+        return 0;
+
+    if (!destmod) {
+        /* Physical mode. */
+        int target_id = (target->id >> 24) & 0x0F;
+        return (dest_id == 0xFF) || (target_id == dest_id);
+    } else {
+        /* Logical mode. */
+        uint8_t target_ldr = (target->ldr >> 24) & 0xFF;
+
+        if ((target->dfr & 0xF0000000) == 0xF0000000) {
+            /* Flat model: bitwise AND of destination and LDR. */
+            return !!(target_ldr & dest_id);
+        } else {
+            /* Cluster model: high 4 bits = cluster ID, low 4 bits = member mask. */
+            uint8_t dest_cluster = (dest_id >> 4) & 0x0F;
+            uint8_t dest_member  = dest_id & 0x0F;
+            uint8_t tgt_cluster  = (target_ldr >> 4) & 0x0F;
+            uint8_t tgt_member   = target_ldr & 0x0F;
+            return (dest_cluster == tgt_cluster) && (tgt_member & dest_member);
+        }
+    }
+}
+
+/*
+ * Deliver a Fixed or Lowest Priority IPI to a specific CPU's APIC.
+ * Sets the IRR bit and wakes the CPU if halted.
+ */
+static void
+apic_deliver_fixed(int cpu_id, int vector)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return;
+
+    apic_t *target = apics[cpu_id];
+    if (!target)
+        return;
+
+    if (vector < 0x10) {
+        apic_log("APIC: IPI vector %02X too low (must be >= 0x10)\n", vector);
+        return;
+    }
+
+    apic_log("APIC: Deliver Fixed IPI vector %02X to CPU %d\n", vector, cpu_id);
+    apic_set_bit(target->irr, vector);
+
+    /* Wake the CPU if it is halted. */
+    cpu_contexts[cpu_id].halted = 0;
+}
+
+/*
+ * Deliver an INIT IPI to a target CPU.
+ * This resets the target CPU to its power-on state and puts it
+ * in wait-for-SIPI mode.
+ */
+static void
+apic_deliver_init(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return;
+
+    apic_log("APIC: INIT IPI to CPU %d\n", cpu_id);
+
+    /* Reset the target CPU's context to power-on state. */
+    cpu_context_t *ctx        = &cpu_contexts[cpu_id];
+    void          *saved_apic = ctx->apic;
+
+    /* Zero all CPU state. */
+    memset(ctx, 0, sizeof(cpu_context_t));
+
+    /* Restore the APIC pointer (it persists across INIT). */
+    ctx->apic = saved_apic;
+
+    /* Set power-on reset state for the CPU. */
+    ctx->cpu_state.flags  = 0x0002;     /* Reserved bit 1 is always set. */
+    ctx->cpu_state.CR0.l  = 0x60000010; /* CD=1, NW=1, ET=1. */
+    ctx->cpu_state.eflags = 0x00000002;
+
+    /* CS:IP = F000:FFF0 (reset vector) — but for APs after INIT,
+       the CPU enters wait-for-SIPI and doesn't execute until SIPI. */
+    ctx->cpu_state.pc = 0x0000FFF0;
+
+    /* DFR defaults to all 1s. */
+    if (saved_apic)
+        ((apic_t *) saved_apic)->dfr = 0xFFFFFFFF;
+
+    /* Put CPU in wait-for-SIPI mode. */
+    ctx->halted        = 1;
+    ctx->wait_for_sipi = 1;
+}
+
+/*
+ * Deliver a Startup IPI (SIPI) to a target CPU.
+ * The vector field specifies the real-mode start address:
+ *   CS = vector << 8, IP = 0, CS base = vector * 0x1000.
+ */
+static void
+apic_deliver_sipi(int cpu_id, uint8_t vector)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return;
+
+    cpu_context_t *ctx = &cpu_contexts[cpu_id];
+
+    /* SIPI is only accepted when the CPU is waiting for SIPI. */
+    if (!ctx->wait_for_sipi) {
+        apic_log("APIC: SIPI to CPU %d ignored (not waiting for SIPI)\n", cpu_id);
+        return;
+    }
+
+    apic_log("APIC: SIPI to CPU %d, vector %02X (start at %05X:0000)\n",
+             cpu_id, vector, (uint32_t) vector << 8);
+
+    /* Clear wait-for-SIPI and halted flags. */
+    ctx->wait_for_sipi = 0;
+    ctx->halted        = 0;
+
+    /* Set up real-mode execution at the SIPI vector address.
+       CS selector = vector << 8, CS base = vector * 0x1000, IP = 0. */
+    ctx->cpu_state.pc = 0;
+
+    /* Set CS segment register in cpu_state.
+       The x86seg for CS is stored in cpu_state._seg[1] (CS = seg index 1).
+       We need to set base, limit, and access rights for real mode. */
+    ctx->cpu_state.seg_cs.base       = (uint32_t) vector * 0x1000;
+    ctx->cpu_state.seg_cs.seg        = (uint16_t) vector << 8;
+    ctx->cpu_state.seg_cs.limit      = 0xFFFF;
+    ctx->cpu_state.seg_cs.limit_low  = 0;
+    ctx->cpu_state.seg_cs.limit_high = 0xFFFF;
+    ctx->cpu_state.seg_cs.access     = 0x93; /* Present, DPL=0, code, readable. */
+    ctx->cpu_state.seg_cs.ar_high    = 0;
+
+    /* Real mode: CR0.PE = 0, rest of segments at their defaults. */
+    ctx->cpu_state.CR0.l = 0x60000010; /* CD=1, NW=1, ET=1, PE=0. */
+
+    /* Set default data segment registers (real mode). */
+    ctx->cpu_state.seg_ds.base       = 0;
+    ctx->cpu_state.seg_ds.seg        = 0;
+    ctx->cpu_state.seg_ds.limit      = 0xFFFF;
+    ctx->cpu_state.seg_ds.limit_low  = 0;
+    ctx->cpu_state.seg_ds.limit_high = 0xFFFF;
+    ctx->cpu_state.seg_ds.access     = 0x93;
+    ctx->cpu_state.seg_ds.ar_high    = 0;
+
+    ctx->cpu_state.seg_es = ctx->cpu_state.seg_ds;
+    ctx->cpu_state.seg_ss = ctx->cpu_state.seg_ds;
+
+    /* Stack pointer. */
+    ctx->cpu_state.regs[4].l = 0; /* ESP = 0. */
+
+    /* EDX = CPUID signature on reset (model-dependent, use 0 for now). */
+    ctx->cpu_state.regs[2].l = 0;
+
+    /* Flags: reserved bit 1 set. */
+    ctx->cpu_state.flags  = 0x0002;
+    ctx->cpu_state.eflags = 0x00000002;
+
+    /* Reset APIC state for the AP (SVR disabled, etc.). */
+    apic_t *ap_apic = apics[cpu_id];
+    if (ap_apic) {
+        /* Keep APIC ID but reset everything else. */
+        uint32_t saved_id = ap_apic->id;
+        ap_apic->tpr      = 0;
+        ap_apic->ldr      = 0;
+        ap_apic->dfr      = 0xFFFFFFFF;
+        ap_apic->svr      = 0xFF; /* Disabled. */
+        memset(ap_apic->isr, 0, sizeof(ap_apic->isr));
+        memset(ap_apic->tmr, 0, sizeof(ap_apic->tmr));
+        memset(ap_apic->irr, 0, sizeof(ap_apic->irr));
+        ap_apic->esr         = 0;
+        ap_apic->icr_low     = 0;
+        ap_apic->icr_high    = 0;
+        ap_apic->lvt_timer   = APIC_LVT_MASKED;
+        ap_apic->lvt_thermal = APIC_LVT_MASKED;
+        ap_apic->lvt_perf    = APIC_LVT_MASKED;
+        ap_apic->lvt_lint0   = APIC_LVT_MASKED | APIC_LVT_DM_EXTINT;
+        ap_apic->lvt_lint1   = APIC_LVT_MASKED | APIC_LVT_DM_NMI;
+        ap_apic->lvt_error   = APIC_LVT_MASKED;
+        ap_apic->timer_icr   = 0;
+        ap_apic->timer_ccr   = 0;
+        ap_apic->timer_dcr   = 0;
+        ap_apic->timer_div   = 2;
+        timer_disable(&ap_apic->timer);
+        ap_apic->id = saved_id;
+    }
+}
+
+/*
+ * Deliver an NMI IPI to a target CPU.
+ * For SMP, we set an NMI flag in the target CPU's context.
+ * For the active CPU, we can set the global nmi flag directly.
+ */
+static void
+apic_deliver_nmi(int cpu_id)
+{
+    apic_log("APIC: NMI IPI to CPU %d\n", cpu_id);
+
+    if (cpu_id == active_cpu) {
+        nmi = 1;
+    } else {
+        /* For the non-active CPU, set the NMI flag in its context.
+           The smi_latched field is the closest thing we have;
+           for now, we just note it and handle it when that CPU runs.
+           TODO: Add a proper per-CPU NMI pending flag. */
+        cpu_contexts[cpu_id].halted = 0;
+        nmi                         = 1; /* Will be processed when CPU switches. */
+    }
+}
+
+/*
+ * Process an ICR write — the core IPI delivery mechanism.
+ * Called when the CPU writes to ICR Low (offset 0x300).
+ * ICR High (offset 0x310) must be written first for the destination.
+ */
+static void
+apic_deliver_ipi(apic_t *dev)
+{
+    uint32_t icr_low  = dev->icr_low;
+    uint32_t icr_high = dev->icr_high;
+
+    int vector    = icr_low & 0xFF;
+    int delmod    = (icr_low >> 8) & 7;
+    int destmod   = !!(icr_low & APIC_ICR_DESTMOD);
+    int level     = !!(icr_low & APIC_ICR_LEVEL);
+    int shorthand = (icr_low >> 18) & 3;
+    int dest_id   = (icr_high >> 24) & 0xFF;
+
+    int src_cpu = -1;
+    for (int i = 0; i < APIC_MAX_CPUS; i++) {
+        if (apics[i] == dev) {
+            src_cpu = i;
+            break;
+        }
+    }
+
+    apic_log("APIC: IPI from CPU %d: vector=%02X delmod=%d destmod=%d "
+             "level=%d shorthand=%d dest=%02X\n",
+             src_cpu, vector, delmod, destmod, level, shorthand, dest_id);
+
+    /* INIT Level De-assert: special case, resets arbitration IDs.
+       Broadcast to all CPUs, no actual INIT reset. */
+    if (delmod == 5 && !level && (icr_low & APIC_ICR_TRIGGER)) {
+        apic_log("APIC: INIT Level De-assert (broadcast arb ID reset)\n");
+        return;
+    }
+
+    /* Build the list of target CPUs based on shorthand/destination. */
+    for (int cpu_id = 0; cpu_id < APIC_MAX_CPUS; cpu_id++) {
+        int deliver = 0;
+
+        if (cpu_id >= num_cpus)
+            continue;
+
+        switch (shorthand) {
+            case 0: /* No shorthand: use destination field. */
+                deliver = apic_match_dest(apics[cpu_id], dest_id, destmod);
+                break;
+            case 1: /* Self. */
+                deliver = (cpu_id == src_cpu);
+                break;
+            case 2: /* All including self. */
+                deliver = 1;
+                break;
+            case 3: /* All excluding self. */
+                deliver = (cpu_id != src_cpu);
+                break;
+        }
+
+        if (!deliver)
+            continue;
+
+        /* Deliver to this CPU based on delivery mode. */
+        switch (delmod) {
+            case 0: /* Fixed. */
+            case 1: /* Lowest Priority (treated as Fixed for now). */
+                apic_deliver_fixed(cpu_id, vector);
+                break;
+
+            case 2: /* SMI. */
+                apic_log("APIC: SMI IPI to CPU %d (stubbed)\n", cpu_id);
+                break;
+
+            case 4: /* NMI. */
+                apic_deliver_nmi(cpu_id);
+                break;
+
+            case 5: /* INIT. */
+                apic_deliver_init(cpu_id);
+                break;
+
+            case 6: /* Startup IPI (SIPI). */
+                apic_deliver_sipi(cpu_id, (uint8_t) vector);
+                break;
+
+            default:
+                apic_log("APIC: Unknown IPI delivery mode %d\n", delmod);
+                break;
+        }
+    }
 }
 
 /*
@@ -490,10 +809,10 @@ apic_mem_writel(uint32_t addr, uint32_t val, void *priv)
             break;
 
         case APIC_REG_ICR_LOW:
-            /* ICR Low: stub for Phase 1.
-               Store the value but don't deliver IPIs yet. */
+            /* ICR Low write triggers IPI delivery.
+               ICR High (destination) must be written first. */
             dev->icr_low = val;
-            apic_log("APIC: ICR Low write: %08X (IPI delivery stubbed)\n", val);
+            apic_deliver_ipi(dev);
             break;
 
         case APIC_REG_ICR_HIGH:
@@ -588,42 +907,120 @@ apic_mem_writel(uint32_t addr, uint32_t val, void *priv)
  * Initialize the Local APIC.
  * Called from cpu_set() when the CPU supports APIC (is_p6).
  */
+/*
+ * Initialize the Local APIC for a specific CPU.
+ * cpu_id 0 = BSP; cpu_id 1+ = APs.
+ * Called from cpu_set() (for BSP) or cpu_smp_init() (for APs).
+ */
+void
+apic_init_cpu(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return;
+
+    /* Free any existing APIC state for this CPU. */
+    if (apics[cpu_id]) {
+        mem_mapping_disable(&apics[cpu_id]->mem_mapping);
+        timer_disable(&apics[cpu_id]->timer);
+        free(apics[cpu_id]);
+        apics[cpu_id] = NULL;
+    }
+
+    apic_t *dev = (apic_t *) malloc(sizeof(apic_t));
+    memset(dev, 0, sizeof(apic_t));
+
+    apics[cpu_id] = dev;
+
+    /* Backward compat: apic global points to BSP's APIC. */
+    if (cpu_id == 0)
+        apic = dev;
+
+    /* Set default base address and MSR.
+       All CPUs share the same APIC MMIO page (0xFEE00000).
+       Only the BSP gets the BSP flag in its MSR. */
+    dev->base_addr = APIC_DEFAULT_BASE;
+    dev->msr       = APIC_DEFAULT_BASE | APIC_MSR_ENABLE;
+    if (cpu_id == 0)
+        dev->msr |= APIC_MSR_BSP;
+
+    /* APIC ID: bits 27:24, set to cpu_id. */
+    dev->id = (uint32_t) cpu_id << 24;
+
+    /* Initialize timer. */
+    timer_add(&dev->timer, apic_timer_callback, dev, 0);
+
+    /* Set up MMIO mapping.
+       All Local APICs share the same physical address (0xFEE00000).
+       Each CPU accesses "its own" APIC at this address.
+       In the cooperative model, only the active CPU's APIC is mapped.
+       For now, the BSP's mapping is the one that is active.
+       When we context-switch, we swap the mapping's priv pointer. */
+    if (cpu_id == 0) {
+        mem_mapping_add(&dev->mem_mapping,
+                        dev->base_addr,
+                        0x1000,
+                        apic_mem_readb,
+                        apic_mem_readw,
+                        apic_mem_readl,
+                        apic_mem_writeb,
+                        apic_mem_writew,
+                        apic_mem_writel,
+                        NULL,
+                        MEM_MAPPING_EXTERNAL,
+                        dev);
+    } else {
+        /* AP's APIC: create the mapping but disable it initially.
+           It will be enabled when we context-switch to this CPU. */
+        mem_mapping_add(&dev->mem_mapping,
+                        dev->base_addr,
+                        0x1000,
+                        apic_mem_readb,
+                        apic_mem_readw,
+                        apic_mem_readl,
+                        apic_mem_writeb,
+                        apic_mem_writew,
+                        apic_mem_writel,
+                        NULL,
+                        MEM_MAPPING_EXTERNAL,
+                        dev);
+        mem_mapping_disable(&dev->mem_mapping);
+    }
+
+    /* Set power-on defaults. */
+    dev->tpr = 0;
+    dev->ldr = 0;
+    dev->dfr = 0xFFFFFFFF;
+    dev->svr = 0xFF; /* Disabled. */
+    memset(dev->isr, 0, sizeof(dev->isr));
+    memset(dev->tmr, 0, sizeof(dev->tmr));
+    memset(dev->irr, 0, sizeof(dev->irr));
+    dev->esr         = 0;
+    dev->icr_low     = 0;
+    dev->icr_high    = 0;
+    dev->lvt_timer   = APIC_LVT_MASKED;
+    dev->lvt_thermal = APIC_LVT_MASKED;
+    dev->lvt_perf    = APIC_LVT_MASKED;
+    dev->lvt_lint0   = APIC_LVT_MASKED | APIC_LVT_DM_EXTINT;
+    dev->lvt_lint1   = APIC_LVT_MASKED | APIC_LVT_DM_NMI;
+    dev->lvt_error   = APIC_LVT_MASKED;
+    dev->timer_icr   = 0;
+    dev->timer_ccr   = 0;
+    dev->timer_dcr   = 0;
+    dev->timer_div   = 2;
+
+    /* Store the APIC pointer in the cpu_context. */
+    cpu_contexts[cpu_id].apic = dev;
+
+    apic_log("APIC: CPU %d APIC initialized, ID=%d, base=%08X%s\n",
+             cpu_id, cpu_id, dev->base_addr,
+             (cpu_id == 0) ? " (BSP)" : " (AP)");
+}
+
 void
 apic_init(void)
 {
-    /* Free any existing APIC state. */
-    if (apic)
-        apic_close();
-
-    apic = (apic_t *) malloc(sizeof(apic_t));
-    memset(apic, 0, sizeof(apic_t));
-
-    /* Set default base address and MSR.
-       BSP flag (bit 8) set, global enable (bit 11) set. */
-    apic->base_addr = APIC_DEFAULT_BASE;
-    apic->msr       = APIC_DEFAULT_BASE | APIC_MSR_ENABLE | APIC_MSR_BSP;
-
-    /* Initialize timer. */
-    timer_add(&apic->timer, apic_timer_callback, apic, 0);
-
-    /* Set up MMIO mapping. */
-    mem_mapping_add(&apic->mem_mapping,
-                    apic->base_addr,
-                    0x1000,
-                    apic_mem_readb,
-                    apic_mem_readw,
-                    apic_mem_readl,
-                    apic_mem_writeb,
-                    apic_mem_writew,
-                    apic_mem_writel,
-                    NULL,
-                    MEM_MAPPING_EXTERNAL,
-                    apic);
-
-    /* Reset to power-on defaults. */
-    apic_reset();
-
-    apic_log("APIC: Initialized at base %08X\n", apic->base_addr);
+    /* Initialize the BSP's APIC (CPU 0). */
+    apic_init_cpu(0);
 }
 
 /*
@@ -691,13 +1088,14 @@ apic_reset(void)
 void
 apic_close(void)
 {
-    if (!apic)
-        return;
-
-    mem_mapping_disable(&apic->mem_mapping);
-    timer_disable(&apic->timer);
-
-    free(apic);
+    for (int i = 0; i < APIC_MAX_CPUS; i++) {
+        if (apics[i]) {
+            mem_mapping_disable(&apics[i]->mem_mapping);
+            timer_disable(&apics[i]->timer);
+            free(apics[i]);
+            apics[i] = NULL;
+        }
+    }
     apic = NULL;
 }
 
@@ -758,6 +1156,67 @@ apic_set_irr(int vector)
         return;
 
     apic_set_bit(apic->irr, vector);
+}
+
+/*
+ * Raise an interrupt in a specific CPU's APIC IRR.
+ * Used by IPI delivery and I/O APIC routing.
+ */
+void
+apic_set_irr_cpu(int cpu_id, int vector)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return;
+
+    apic_t *target = apics[cpu_id];
+    if (!target || vector < 0 || vector > 255)
+        return;
+
+    apic_set_bit(target->irr, vector);
+
+    /* Wake the CPU if it is halted. */
+    cpu_contexts[cpu_id].halted = 0;
+}
+
+/*
+ * Get the APIC state for a specific CPU.
+ * Returns NULL if that CPU's APIC is not initialized.
+ */
+apic_t *
+apic_get_cpu(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return NULL;
+    return apics[cpu_id];
+}
+
+/*
+ * Check if a specific CPU's APIC matches a logical destination.
+ * Used by I/O APIC routing to determine which CPUs to deliver to.
+ */
+int
+apic_match_logical_dest(int cpu_id, uint8_t dest)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return 0;
+
+    apic_t *target = apics[cpu_id];
+    if (!target)
+        return 0;
+
+    uint8_t ldr_field = (target->ldr >> 24) & 0xFF;
+
+    if ((target->dfr & 0xF0000000) == 0xF0000000) {
+        /* Flat model: bitwise AND. */
+        return !!(ldr_field & dest);
+    } else {
+        /* Cluster model. */
+        uint8_t dest_cluster = (dest >> 4) & 0x0F;
+        uint8_t dest_member  = dest & 0x0F;
+        uint8_t tgt_cluster  = (ldr_field >> 4) & 0x0F;
+        uint8_t tgt_member   = ldr_field & 0x0F;
+        return (dest_cluster == tgt_cluster) && (tgt_member & dest_member);
+    }
 }
 
 /*
@@ -900,6 +1359,61 @@ apic_int_pending(void)
 
     uint32_t ppr = apic_get_ppr(apic);
     return (highest_irr & 0xF0) > (ppr & 0xF0);
+}
+
+/* Check if a specific CPU's APIC has a pending interrupt.
+   Unlike apic_int_pending() which uses the global 'apic' pointer,
+   this checks the APIC for a given cpu_id (used by SMP scheduler). */
+int
+apic_int_pending_cpu(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return 0;
+
+    apic_t *dev = apics[cpu_id];
+    if (!dev)
+        return 0;
+
+    /* Check if the APIC is globally enabled via MSR. */
+    if (!(dev->msr & APIC_MSR_ENABLE))
+        return 0;
+
+    /* Check if software-enabled via SVR. */
+    if (!(dev->svr & APIC_SVR_ENABLE))
+        return 0;
+
+    int highest_irr = apic_find_highest_bit(dev->irr);
+    if (highest_irr < 0)
+        return 0;
+
+    uint32_t ppr = apic_get_ppr(dev);
+    return (highest_irr & 0xF0) > (ppr & 0xF0);
+}
+
+/*
+ * Switch the active APIC MMIO mapping to the given CPU.
+ * Disables all other CPUs' APIC MMIO mappings and enables the target's.
+ * Called during context switch.
+ */
+void
+apic_switch_cpu(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
+        return;
+
+    for (int i = 0; i < APIC_MAX_CPUS; i++) {
+        if (apics[i]) {
+            if (i == cpu_id) {
+                mem_mapping_enable(&apics[i]->mem_mapping);
+            } else {
+                mem_mapping_disable(&apics[i]->mem_mapping);
+            }
+        }
+    }
+
+    /* Update the global `apic` pointer to point to the active CPU's APIC
+       so that existing code that references `apic` directly works correctly. */
+    apic = apics[cpu_id];
 }
 
 /*
