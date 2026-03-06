@@ -198,12 +198,14 @@ machine_at_bp6_init(const machine_t *model)
     if (bios_only || !ret)
         return ret;
 
+    /* SMP: set CPU count BEFORE common init so that cpu_set()
+       sees num_cpus > 1 and disables the dynarec. */
+    num_cpus = 2;
+
     machine_at_common_init(model);
 
-    /* SMP: dual Socket 370 — set CPU count before SMP init. */
-    num_cpus = 2;
+    /* SMP: initialize dual CPU contexts (must be after cpu_set()). */
     cpu_smp_init();
-    num_cpus = 2;
 
     fprintf(stderr, "SMP: BP6 num_cpus = %d after cpu_smp_init()\n", num_cpus);
 

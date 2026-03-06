@@ -597,9 +597,18 @@ apic_mem_readw(uint32_t addr, void *priv)
 static uint32_t
 apic_mem_readl(uint32_t addr, UNUSED(void *priv))
 {
+    static int apic_read_log_count = 0;
     apic_t  *dev    = apic; /* Use active CPU's APIC, not mapping's priv */
     uint32_t offset = addr & 0xFFF;
+
+    if (apic_read_log_count < 50) {
+        fprintf(stderr, "SMP: APIC read [%03X] addr=%08X\n", offset, addr);
+        apic_read_log_count++;
+    }
     uint32_t ret    = 0;
+
+    if (!dev)
+        return 0;
 
     switch (offset) {
         case APIC_REG_ID:
@@ -757,8 +766,14 @@ apic_mem_writew(uint32_t addr, uint16_t val, void *priv)
 static void
 apic_mem_writel(uint32_t addr, uint32_t val, UNUSED(void *priv))
 {
+    static int apic_write_log_count = 0;
     apic_t  *dev    = apic; /* Use active CPU's APIC, not mapping's priv */
     uint32_t offset = addr & 0xFFF;
+
+    if (apic_write_log_count < 50) {
+        fprintf(stderr, "SMP: APIC write [%03X] = %08X addr=%08X\n", offset, val, addr);
+        apic_write_log_count++;
+    }
 
     apic_log("APIC: Write [%03X] = %08X\n", offset, val);
 
@@ -928,6 +943,7 @@ apic_mem_writel(uint32_t addr, uint32_t val, UNUSED(void *priv))
 void
 apic_init_cpu(int cpu_id)
 {
+    fprintf(stderr, "SMP: apic_init_cpu(%d) called, is_p6=%d\n", cpu_id, is_p6);
     if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
         return;
 
@@ -979,8 +995,10 @@ apic_init_cpu(int cpu_id)
                         apic_mem_writew,
                         apic_mem_writel,
                         NULL,
-                        MEM_MAPPING_EXTERNAL,
+                        MEM_MAPPING_INTERNAL,
                         dev);
+        fprintf(stderr, "SMP: APIC MMIO mapping added at %08X for CPU %d\n",
+                dev->base_addr, cpu_id);
     } else {
         /* AP's APIC: no MMIO mapping needed — all CPUs share the BSP's
            mapping, and the handlers use the global `apic` pointer to
