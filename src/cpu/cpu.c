@@ -4802,7 +4802,12 @@ cpu_smp_init(void)
     cpu_contexts[1]               = cpu_contexts[0];
     cpu_contexts[1].halted        = 1;
     cpu_contexts[1].wait_for_sipi = 1;
-    cpu_contexts[1].apic          = NULL; /* Set later by apic_init(). */
+    cpu_contexts[1].apic          = NULL;
+
+    /* Initialize a Local APIC for each AP so that apic_switch_cpu()
+       has a valid APIC to switch to (even before the AP starts executing). */
+    for (int i = 1; i < num_cpus; i++)
+        apic_init_cpu(i);
 
     active_cpu = 0;
 

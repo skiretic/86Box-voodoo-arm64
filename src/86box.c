@@ -2047,7 +2047,7 @@ pc_run(void)
             uint64_t tsc_before = tsc;
             uint32_t pc_before  = cpu_state.pc;
 
-            cpu_exec(cycles_per_cpu);
+            cpu_exec(total_cycles);
 
             /* Log execution details for BSP every 1000th iteration,
                and CPU state every 10000th iteration. */

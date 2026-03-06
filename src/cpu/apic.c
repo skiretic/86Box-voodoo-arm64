@@ -595,9 +595,9 @@ apic_mem_readw(uint32_t addr, void *priv)
 }
 
 static uint32_t
-apic_mem_readl(uint32_t addr, void *priv)
+apic_mem_readl(uint32_t addr, UNUSED(void *priv))
 {
-    apic_t  *dev    = (apic_t *) priv;
+    apic_t  *dev    = apic; /* Use active CPU's APIC, not mapping's priv */
     uint32_t offset = addr & 0xFFF;
     uint32_t ret    = 0;
 
@@ -755,9 +755,9 @@ apic_mem_writew(uint32_t addr, uint16_t val, void *priv)
 }
 
 static void
-apic_mem_writel(uint32_t addr, uint32_t val, void *priv)
+apic_mem_writel(uint32_t addr, uint32_t val, UNUSED(void *priv))
 {
-    apic_t  *dev    = (apic_t *) priv;
+    apic_t  *dev    = apic; /* Use active CPU's APIC, not mapping's priv */
     uint32_t offset = addr & 0xFFF;
 
     apic_log("APIC: Write [%03X] = %08X\n", offset, val);
@@ -982,21 +982,9 @@ apic_init_cpu(int cpu_id)
                         MEM_MAPPING_EXTERNAL,
                         dev);
     } else {
-        /* AP's APIC: create the mapping but disable it initially.
-           It will be enabled when we context-switch to this CPU. */
-        mem_mapping_add(&dev->mem_mapping,
-                        dev->base_addr,
-                        0x1000,
-                        apic_mem_readb,
-                        apic_mem_readw,
-                        apic_mem_readl,
-                        apic_mem_writeb,
-                        apic_mem_writew,
-                        apic_mem_writel,
-                        NULL,
-                        MEM_MAPPING_EXTERNAL,
-                        dev);
-        mem_mapping_disable(&dev->mem_mapping);
+        /* AP's APIC: no MMIO mapping needed — all CPUs share the BSP's
+           mapping, and the handlers use the global `apic` pointer to
+           access the active CPU's APIC state. */
     }
 
     /* Set power-on defaults. */
@@ -1414,19 +1402,13 @@ apic_switch_cpu(int cpu_id)
     if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS)
         return;
 
-    for (int i = 0; i < APIC_MAX_CPUS; i++) {
-        if (apics[i]) {
-            if (i == cpu_id) {
-                mem_mapping_enable(&apics[i]->mem_mapping);
-            } else {
-                mem_mapping_disable(&apics[i]->mem_mapping);
-            }
-        }
-    }
-
-    /* Update the global `apic` pointer to point to the active CPU's APIC
-       so that existing code that references `apic` directly works correctly. */
-    apic = apics[cpu_id];
+    /* Only update the global pointer — do NOT touch mem_mappings.
+       All CPUs share the BSP's MMIO mapping; the handlers use the
+       global `apic` pointer to access the active CPU's state.
+       Disabling/enabling mappings on every context switch was causing
+       the BSP to hang during BIOS POST. */
+    if (apics[cpu_id])
+        apic = apics[cpu_id];
 }
 
 /*

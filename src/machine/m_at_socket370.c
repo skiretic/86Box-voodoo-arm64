@@ -203,6 +203,7 @@ machine_at_bp6_init(const machine_t *model)
     /* SMP: dual Socket 370 — set CPU count before SMP init. */
     num_cpus = 2;
     cpu_smp_init();
+    num_cpus = 2;
 
     fprintf(stderr, "SMP: BP6 num_cpus = %d after cpu_smp_init()\n", num_cpus);
 
