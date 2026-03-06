@@ -983,6 +983,13 @@ extern int           num_cpus;
 extern int           active_cpu;
 extern cpu_context_t cpu_contexts[MAX_CPUS];
 
+/* SMP fine-grained time slicing.
+   When > 0, the SMP execution loop uses small time slices (e.g. 1000 cycles)
+   instead of the normal large slices.  Set by SIPI delivery so the AP and BSP
+   interleave tightly during the boot handshake.  Decremented each iteration
+   until it reaches 0, then normal slicing resumes. */
+extern int smp_fine_slice_countdown;
+
 /* SMP context switch functions. */
 extern void cpu_save_context(int cpu_id);
 extern void cpu_load_context(int cpu_id);

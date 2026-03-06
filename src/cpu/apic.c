@@ -464,10 +464,19 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
        the current cpu_exec() call.  Zeroing both counters causes both
        the inner (cycles) and outer (cycles_main) loops to exit.
        cpu_block_end ends the current interpreter block in dynarec mode. */
-    cycles      = 0;
-    cycles_main = 0;
+    cycles        = 0;
+    cycles_main   = 0;
     cpu_block_end = 1;
-    fprintf(stderr, "SMP: SIPI yield — BSP yielding remaining time slice for AP %d\n",
+
+    /* Activate fine-grained time slicing for the next N iterations.
+       During the AP startup handshake, the BIOS expects BSP and AP
+       to interleave at close to instruction-level granularity.  With
+       the normal 100K-300K cycle slices, BSP exhausts its entire
+       polling loop in one slice before AP has a chance to respond.
+       Using 1000-cycle slices for ~5000 iterations (~5M total cycles)
+       allows the handshake to complete naturally. */
+    smp_fine_slice_countdown = 5000;
+    fprintf(stderr, "SMP: SIPI yield — BSP yielding, fine-slice enabled (5000 iters) for AP %d\n",
             cpu_id);
 }
 
@@ -520,7 +529,7 @@ apic_deliver_ipi(apic_t *dev)
     }
 
     fprintf(stderr, "SMP: IPI from CPU %d: vector=%02X delmod=%d destmod=%d "
-            "level=%d shorthand=%d dest=%02X\n",
+                    "level=%d shorthand=%d dest=%02X\n",
             src_cpu, vector, delmod, destmod, level, shorthand, dest_id);
 
     apic_log("APIC: IPI from CPU %d: vector=%02X delmod=%d destmod=%d "
@@ -610,14 +619,14 @@ static uint32_t
 apic_mem_readl(uint32_t addr, UNUSED(void *priv))
 {
     static int apic_read_log_count = 0;
-    apic_t  *dev    = apic; /* Use active CPU's APIC, not mapping's priv */
-    uint32_t offset = addr & 0xFFF;
+    apic_t    *dev                 = apic; /* Use active CPU's APIC, not mapping's priv */
+    uint32_t   offset              = addr & 0xFFF;
 
     if (apic_read_log_count < 50) {
         fprintf(stderr, "SMP: APIC read [%03X] addr=%08X\n", offset, addr);
         apic_read_log_count++;
     }
-    uint32_t ret    = 0;
+    uint32_t ret = 0;
 
     if (!dev)
         return 0;
@@ -781,8 +790,8 @@ static void
 apic_mem_writel(uint32_t addr, uint32_t val, UNUSED(void *priv))
 {
     static int apic_write_log_count = 0;
-    apic_t  *dev    = apic; /* Use active CPU's APIC, not mapping's priv */
-    uint32_t offset = addr & 0xFFF;
+    apic_t    *dev                  = apic; /* Use active CPU's APIC, not mapping's priv */
+    uint32_t   offset               = addr & 0xFFF;
 
     if (apic_write_log_count < 50) {
         fprintf(stderr, "SMP: APIC write [%03X] = %08X addr=%08X\n", offset, val, addr);

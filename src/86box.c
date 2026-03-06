@@ -1993,75 +1993,95 @@ pc_run(void)
         int32_t total_cycles   = (int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000);
         int32_t cycles_per_cpu = total_cycles / num_cpus;
 
-        for (int i = 0; i < num_cpus; i++) {
-            /* AP waiting for Startup IPI — skip entirely.
-               Don't even call cpu_switch_to() to avoid disturbing
-               BSP's global state (timers, cycles, etc.). */
-            if (cpu_contexts[i].wait_for_sipi) {
-                if ((smp_iter_count % 10000) == 1)
-                    fprintf(stderr, "SMP: CPU %d skipped (wait_for_sipi) [iter %d]\n", i, smp_iter_count);
-                continue;
-            }
+        /* Determine time slice granularity.
+           During fine-slice mode (after SIPI), use small 1000-cycle slices
+           so BSP and AP interleave tightly during the boot handshake.
+           Otherwise, give each CPU its full per-CPU budget in one go. */
+        int32_t slice_cycles;
+        int     num_sub_iters;
 
-            /* CPU is halted — skip unless there is a pending interrupt to wake it.
-               Don't switch context for halted CPUs to avoid overhead. */
-            if (cpu_contexts[i].halted && !cpu_has_pending_interrupt(i)) {
-                if ((smp_iter_count % 10000) == 1)
-                    fprintf(stderr, "SMP: CPU %d skipped (halted, no pending int) [iter %d]\n", i, smp_iter_count);
-                continue;
-            }
+        if (smp_fine_slice_countdown > 0) {
+            slice_cycles  = 1000;
+            num_sub_iters = cycles_per_cpu / slice_cycles;
+            if (num_sub_iters < 1)
+                num_sub_iters = 1;
+            smp_fine_slice_countdown--;
+            if (smp_fine_slice_countdown == 0)
+                fprintf(stderr, "SMP: fine-slice mode ended [iter %d]\n", smp_iter_count);
+        } else {
+            slice_cycles  = cycles_per_cpu;
+            num_sub_iters = 1;
+        }
 
-            cpu_switch_to(i);
+        for (int sub = 0; sub < num_sub_iters; sub++) {
+            for (int i = 0; i < num_cpus; i++) {
+                /* AP waiting for Startup IPI — skip entirely.
+                   Don't even call cpu_switch_to() to avoid disturbing
+                   BSP's global state (timers, cycles, etc.). */
+                if (cpu_contexts[i].wait_for_sipi) {
+                    if (sub == 0 && (smp_iter_count % 10000) == 1)
+                        fprintf(stderr, "SMP: CPU %d skipped (wait_for_sipi) [iter %d]\n", i, smp_iter_count);
+                    continue;
+                }
 
-            /* If halted but an interrupt is pending, clear the halt. */
-            if (cpu_contexts[i].halted)
-                cpu_contexts[i].halted = 0;
+                /* CPU is halted — skip unless there is a pending interrupt to wake it.
+                   Don't switch context for halted CPUs to avoid overhead. */
+                if (cpu_contexts[i].halted && !cpu_has_pending_interrupt(i)) {
+                    if (sub == 0 && (smp_iter_count % 10000) == 1)
+                        fprintf(stderr, "SMP: CPU %d skipped (halted, no pending int) [iter %d]\n", i, smp_iter_count);
+                    continue;
+                }
 
-            /* Log first execution of CPU 1 after SIPI. */
-            static int cpu1_first_exec_logged = 0;
-            if (i == 1 && !cpu1_first_exec_logged) {
-                fprintf(stderr, "SMP: CPU 1 FIRST EXEC: pc=%08X cs_base=%08X cs_seg=%04X "
-                                "CR0=%08X flags=%08X eflags=%08X linear=%08X\n",
-                        cpu_state.pc, cpu_state.seg_cs.base, cpu_state.seg_cs.seg,
-                        cpu_state.CR0.l, cpu_state.flags, cpu_state.eflags,
-                        cpu_state.seg_cs.base + cpu_state.pc);
-                cpu1_first_exec_logged = 1;
-            }
+                cpu_switch_to(i);
 
-            /* Track TSC before execution so we can compute the delta. */
-            uint64_t tsc_before = tsc;
-            uint32_t pc_before  = cpu_state.pc;
+                /* If halted but an interrupt is pending, clear the halt. */
+                if (cpu_contexts[i].halted)
+                    cpu_contexts[i].halted = 0;
 
-            cpu_exec(total_cycles);
+                /* Log first execution of CPU 1 after SIPI. */
+                static int cpu1_first_exec_logged = 0;
+                if (i == 1 && !cpu1_first_exec_logged) {
+                    fprintf(stderr, "SMP: CPU 1 FIRST EXEC: pc=%08X cs_base=%08X cs_seg=%04X "
+                                    "CR0=%08X flags=%08X eflags=%08X linear=%08X\n",
+                            cpu_state.pc, cpu_state.seg_cs.base, cpu_state.seg_cs.seg,
+                            cpu_state.CR0.l, cpu_state.flags, cpu_state.eflags,
+                            cpu_state.seg_cs.base + cpu_state.pc);
+                    cpu1_first_exec_logged = 1;
+                }
 
-            /* Stuck detection removed: readmembl()/readmemwl() calls
-               outside cpu_exec() modify 'cycles' and pollute the TLB. */
+                /* Track TSC before execution so we can compute the delta. */
+                uint64_t tsc_before = tsc;
+                uint32_t pc_before  = cpu_state.pc;
 
-            /* Log execution details for BSP every 1000th iteration,
-               and CPU state every 10000th iteration. */
-            if ((smp_iter_count % 1000) == 1) {
-                fprintf(stderr, "SMP: CPU %d exec: pc=%08X -> %08X, cs_base=%08X linear=%08X, cycles=%d [iter %d]\n",
-                        i, pc_before, cpu_state.pc, cpu_state.seg_cs.base,
-                        cpu_state.seg_cs.base + cpu_state.pc, cycles_per_cpu, smp_iter_count);
-            }
-            if (i == 0 && (smp_iter_count % 10000) == 1) {
-                fprintf(stderr, "SMP: CPU 0 state: CR0=%08X CS.base=%08X CS.limit=%08X flags=%08X\n",
-                        cpu_state.CR0.l,
-                        cpu_state.seg_cs.base,
-                        cpu_state.seg_cs.limit,
-                        cpu_state.flags);
-            }
+                cpu_exec(slice_cycles);
 
-            /* Compute actual cycles consumed and save state. */
-            uint64_t tsc_delta = tsc - tsc_before;
-            cpu_save_context(i);
+                /* Log execution details periodically (only on first sub-iteration). */
+                if (sub == 0 && (smp_iter_count % 1000) == 1) {
+                    fprintf(stderr, "SMP: CPU %d exec: pc=%08X -> %08X, cs_base=%08X linear=%08X, "
+                                    "slice=%d, fine=%d [iter %d]\n",
+                            i, pc_before, cpu_state.pc, cpu_state.seg_cs.base,
+                            cpu_state.seg_cs.base + cpu_state.pc, slice_cycles,
+                            smp_fine_slice_countdown, smp_iter_count);
+                }
+                if (sub == 0 && i == 0 && (smp_iter_count % 10000) == 1) {
+                    fprintf(stderr, "SMP: CPU 0 state: CR0=%08X CS.base=%08X CS.limit=%08X flags=%08X\n",
+                            cpu_state.CR0.l,
+                            cpu_state.seg_cs.base,
+                            cpu_state.seg_cs.limit,
+                            cpu_state.flags);
+                }
 
-            /* Advance other CPUs' TSCs by the same amount to keep
-               them roughly synchronized (wall-clock time passes
-               for all CPUs even when only one is executing). */
-            for (int j = 0; j < num_cpus; j++) {
-                if (j != i)
-                    cpu_contexts[j].tsc += tsc_delta;
+                /* Compute actual cycles consumed and save state. */
+                uint64_t tsc_delta = tsc - tsc_before;
+                cpu_save_context(i);
+
+                /* Advance other CPUs' TSCs by the same amount to keep
+                   them roughly synchronized (wall-clock time passes
+                   for all CPUs even when only one is executing). */
+                for (int j = 0; j < num_cpus; j++) {
+                    if (j != i)
+                        cpu_contexts[j].tsc += tsc_delta;
+                }
             }
         }
     } else {

@@ -97,6 +97,7 @@ uint32_t abrt_error;
 int           num_cpus   = 1;
 int           active_cpu = 0;
 cpu_context_t cpu_contexts[MAX_CPUS];
+int           smp_fine_slice_countdown = 0;
 
 #ifdef USE_DYNAREC
 const OpFn *x86_dynarec_opcodes;
@@ -4826,7 +4827,8 @@ cpu_smp_init(void)
     for (int i = 1; i < num_cpus; i++)
         apic_init_cpu(i);
 
-    active_cpu = 0;
+    active_cpu               = 0;
+    smp_fine_slice_countdown = 0;
 
     fprintf(stderr, "SMP: AP (CPU 1) context initialized, wait_for_sipi=1, active_cpu=%d\n", active_cpu);
 }
@@ -4840,7 +4842,8 @@ cpu_smp_close(void)
 
     /* Zero out the context array. */
     memset(cpu_contexts, 0, sizeof(cpu_contexts));
-    active_cpu = 0;
+    active_cpu               = 0;
+    smp_fine_slice_countdown = 0;
 }
 
 /* Check if a specific CPU has a pending interrupt.
