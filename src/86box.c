@@ -2009,7 +2009,11 @@ pc_run(void)
         static int smp_iter_count     = 0;
 
         if (!smp_logged_startup) {
-            fprintf(stderr, "SMP: SMP execution mode active, num_cpus=%d\n", num_cpus);
+            int32_t startup_total = (int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000);
+            int32_t startup_per   = startup_total / num_cpus;
+            fprintf(stderr, "SMP: SMP execution mode active, num_cpus=%d, rspeed=%d, "
+                    "total_cycles=%d, cycles_per_cpu=%d\n",
+                    num_cpus, (int) cpu_s->rspeed, startup_total, startup_per);
             smp_logged_startup = 1;
         }
 
@@ -2041,8 +2045,23 @@ pc_run(void)
 
             /* Track TSC before execution so we can compute the delta. */
             uint64_t tsc_before = tsc;
+            uint32_t pc_before  = cpu_state.pc;
 
             cpu_exec(cycles_per_cpu);
+
+            /* Log execution details for BSP every 1000th iteration,
+               and CPU state every 10000th iteration. */
+            if ((smp_iter_count % 1000) == 1) {
+                fprintf(stderr, "SMP: CPU %d exec: pc=%08X -> %08X, cycles=%d [iter %d]\n",
+                        i, pc_before, cpu_state.pc, cycles_per_cpu, smp_iter_count);
+            }
+            if (i == 0 && (smp_iter_count % 10000) == 1) {
+                fprintf(stderr, "SMP: CPU 0 state: CR0=%08X CS.base=%08X CS.limit=%08X flags=%08X\n",
+                        cpu_state.CR0.l,
+                        cpu_state.seg_cs.base,
+                        cpu_state.seg_cs.limit,
+                        cpu_state.flags);
+            }
 
             /* Compute actual cycles consumed and save state. */
             uint64_t tsc_delta = tsc - tsc_before;
