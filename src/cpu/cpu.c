@@ -4828,6 +4828,34 @@ cpu_smp_init(void)
     cpu_context_t *ap = &cpu_contexts[1];
     memset(ap, 0, sizeof(cpu_context_t));
 
+    /* Copy BSP's MSR state to AP.  The memset above zeroed everything,
+       but many MSR fields are CPU-model-dependent (MTRR capability,
+       CPUID-related values, etc.) and must match the BSP.  Copy the
+       whole struct, then adjust AP-specific values below. */
+    ap->msr = cpu_contexts[0].msr;
+
+    /* IA32_APIC_BASE (MSR 0x1B) in the msr_t struct: set the correct
+       value for an AP — same base address as BSP (0xFEE00000), APIC
+       globally enabled (bit 11), but BSP flag (bit 8) cleared.
+       Note: the actual RDMSR/WRMSR path for 0x1B uses apic->msr in the
+       apic_t struct (set by apic_init_cpu), but we keep msr.apic_base
+       consistent for diagnostic code and potential future use. */
+    ap->msr.apic_base = (ap->msr.apic_base & ~(1ULL << 8)) | (1ULL << 11);
+
+    /* Copy CR4 mask (CPU-model-dependent, determines valid CR4 bits). */
+    ap->cpu_CR4_mask = cpu_contexts[0].cpu_CR4_mask;
+
+    /* Clear per-CPU MSR state that should start at zero on AP:
+       SYSENTER (set up by OS per-CPU), performance counters, debug. */
+    ap->msr.sysenter_cs  = 0;
+    ap->msr.sysenter_esp = 0;
+    ap->msr.sysenter_eip = 0;
+    ap->msr.perfctr[0]   = 0;
+    ap->msr.perfctr[1]   = 0;
+    ap->msr.evntsel[0]   = 0;
+    ap->msr.evntsel[1]   = 0;
+    ap->msr.debug_ctl    = 0;
+
     /* EFLAGS: only reserved bit 1 is set. */
     ap->cpu_state.flags  = 0x0002;
     ap->cpu_state.eflags = 0x00000002;

@@ -332,15 +332,21 @@ apic_deliver_init(int cpu_id)
     fprintf(stderr, "SMP: INIT IPI delivered to CPU %d\n", cpu_id);
     apic_log("APIC: INIT IPI to CPU %d\n", cpu_id);
 
-    /* Reset the target CPU's context to power-on state. */
+    /* Reset the target CPU's context to power-on state.
+       Per Intel SDM Vol. 3A, Table 9-1: INIT preserves MSRs, the APIC
+       state, and the APIC pointer.  Save these before the memset. */
     cpu_context_t *ctx        = &cpu_contexts[cpu_id];
     void          *saved_apic = ctx->apic;
+    msr_t          saved_msr  = ctx->msr;
+    uint64_t       saved_cr4m = ctx->cpu_CR4_mask;
 
-    /* Zero all CPU state. */
+    /* Zero all CPU execution state. */
     memset(ctx, 0, sizeof(cpu_context_t));
 
-    /* Restore the APIC pointer (it persists across INIT). */
-    ctx->apic = saved_apic;
+    /* Restore state that persists across INIT. */
+    ctx->apic        = saved_apic;
+    ctx->msr         = saved_msr;
+    ctx->cpu_CR4_mask = saved_cr4m;
 
     /* EFLAGS: only reserved bit 1 is set. */
     ctx->cpu_state.flags  = 0x0002;
