@@ -120,12 +120,12 @@ enum {
 #define CPU_ALTERNATE_XTAL   4
 #define CPU_FIXED_MULTIPLIER 8
 
-#define CCR1_USE_SMI  (1 << 1)
-#define CCR1_SMAC     (1 << 2)
-#define CCR1_SM3      (1 << 7)
+#define CCR1_USE_SMI         (1 << 1)
+#define CCR1_SMAC            (1 << 2)
+#define CCR1_SM3             (1 << 7)
 
-#define CCR3_SMI_LOCK (1 << 0)
-#define CCR3_NMI_EN   (1 << 1)
+#define CCR3_SMI_LOCK        (1 << 0)
+#define CCR3_NMI_EN          (1 << 1)
 
 #if (defined __amd64__ || defined _M_X64)
 #    define LOOKUP_INV -1LL
@@ -291,7 +291,7 @@ typedef struct {
     uint64_t bios_updt; /* 0x00000079 */
 
     uint64_t bbl_cr_dx[4]; /* 0x00000088 - 0x0000008b */
-    uint64_t perfctr[2];  /* 0x000000c1, 0x000000c2 */
+    uint64_t perfctr[2];   /* 0x000000c1, 0x000000c2 */
     uint64_t mtrr_cap;     /* 0x000000fe */
 
     uint64_t bbl_cr_addr; /* 0x00000116 */
@@ -305,8 +305,8 @@ typedef struct {
     uint32_t sysenter_esp; /* 0x00000175 - Pentium II and later */
     uint32_t sysenter_eip; /* 0x00000176 - Pentium II and later */
 
-    uint64_t mcg_ctl;           /* 0x0000017b */
-    uint64_t evntsel[2];        /* 0x00000186, 0x00000187 */
+    uint64_t mcg_ctl;    /* 0x0000017b */
+    uint64_t evntsel[2]; /* 0x00000186, 0x00000187 */
 
     uint32_t debug_ctl;         /* 0x000001d9 */
     uint32_t rob_cr_bkuptmpdr6; /* 0x000001e0 */
@@ -334,7 +334,7 @@ typedef struct {
 
     uint8_t tag[8];
 
-    x86seg  *ea_seg;
+    x86seg *ea_seg;
     union {
         uint32_t eaaddr;
         uint16_t eaa16[2];
@@ -389,7 +389,7 @@ typedef struct {
     uint32_t new_fp_control;
 #    endif
 #    if defined __amd64__ || defined _M_X64
-    uint32_t trunc_fp_control;
+    uint32_t    trunc_fp_control;
 #    endif
 #else
     uint16_t old_npxc;
@@ -446,13 +446,11 @@ typedef struct {
 #    define CPU_STATUS_MASK      0xffff0000
 #endif
 
-
 #ifdef EXTREME_DEBUG
-#   define COMPILE_TIME_ASSERT(expr) typedef char COMP_TIME_ASSERT[(expr) ? 1 : 0];
+#    define COMPILE_TIME_ASSERT(expr) typedef char COMP_TIME_ASSERT[(expr) ? 1 : 0];
 #else
-#   define COMPILE_TIME_ASSERT(expr) /*nada*/
+#    define COMPILE_TIME_ASSERT(expr) /*nada*/
 #endif
-
 
 COMPILE_TIME_ASSERT(sizeof(cpu_state_t) <= 128)
 
@@ -495,10 +493,10 @@ COMPILE_TIME_ASSERT(sizeof(cpu_state_t) <= 128)
 /* Global variables. */
 extern cpu_state_t cpu_state;
 
-extern const cpu_family_t         cpu_families[];
-extern cpu_family_t              *cpu_f;
-extern CPU                       *cpu_s;
-extern int                        cpu_override;
+extern const cpu_family_t cpu_families[];
+extern cpu_family_t      *cpu_f;
+extern CPU               *cpu_s;
+extern int                cpu_override;
 
 extern int    cpu_isintel;
 extern int    cpu_iscyrix;
@@ -511,7 +509,7 @@ extern double fpu_multi;
 extern double cpu_busspeed;
 extern int    cpu_cyrix_alignment; /* Cyrix 5x86/6x86 only has data misalignment
                                       penalties when crossing 8-byte boundaries. */
-extern int    cpu_cpurst_on_sr;    /* SiS 551x and 5571: Issue CPURST on soft reset. */
+extern int cpu_cpurst_on_sr;       /* SiS 551x and 5571: Issue CPURST on soft reset. */
 
 extern int is8086;
 extern int is186;
@@ -586,8 +584,8 @@ extern uint32_t eip_msr;
 extern uint64_t amd_efer;
 extern uint64_t star;
 
-#define cr0                  cpu_state.CR0.l
-#define msw                  cpu_state.CR0.w
+#define cr0 cpu_state.CR0.l
+#define msw cpu_state.CR0.w
 extern uint32_t cr2;
 extern uint32_t cr3;
 extern uint32_t cr4;
@@ -824,10 +822,10 @@ extern void nmi_raise(void);
 extern MMX_REG  *MMP[8];
 extern uint16_t *MMEP[8];
 
-extern int  cpu_block_end;
+extern int cpu_block_end;
 
-extern int  cpu_force_interpreter;
-extern int  cpu_override_dynarec;
+extern int cpu_force_interpreter;
+extern int cpu_override_dynarec;
 
 extern void mmx_init(void);
 extern void prefetch_flush(void);
@@ -857,6 +855,41 @@ extern int      prefetch_queue_get_prefetching(void);
 extern int      prefetch_queue_get_size(void);
 
 #define prefetch_queue_set_suspended(s) prefetch_queue_set_prefetching(!s)
-#define prefetch_queue_get_suspended !prefetch_queue_get_prefetching
+#define prefetch_queue_get_suspended    !prefetch_queue_get_prefetching
+
+/* ============================================================
+ * SMP (Symmetric Multiprocessing) -- Dual CPU State Management
+ * ============================================================
+ *
+ * The context switch model copies all per-CPU globals in/out of
+ * a single set of globals (cpu_state, fpu_state, cr2, gdt, etc.)
+ * without changing any macros or dynarec offset calculations.
+ *
+ * cpu_context_t is fully defined in smp.h (needs fpu_state_t from
+ * x87_sf.h). Here we only expose the forward declaration and
+ * public API.
+ */
+
+#define MAX_CPUS 2
+
+/* Forward declaration -- full definition in smp.h. */
+struct cpu_context_t;
+
+/* SMP global variables. */
+extern int                  num_cpus;
+extern int                  active_cpu;
+extern struct cpu_context_t cpu_contexts[MAX_CPUS];
+
+/* SMP context switch functions. */
+extern void cpu_save_context(int cpu_id);
+extern void cpu_load_context(int cpu_id);
+extern void cpu_switch_to(int cpu_id);
+
+/* Initialize SMP contexts after cpu_set(). Call once during machine init.
+   CPU 0 (BSP) gets current globals. CPU 1 (AP) starts in wait-for-SIPI. */
+extern void cpu_smp_init(void);
+
+/* Clean up SMP state. */
+extern void cpu_smp_close(void);
 
 #endif /*EMU_CPU_H*/
