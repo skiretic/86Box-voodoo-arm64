@@ -535,7 +535,7 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
             cpu_id);
 
     /* Activate AP instruction-level ring buffer trace. */
-    ap_trace_remaining = 500;
+    ap_trace_remaining = 50000;
     fprintf(stderr, "SMP: AP trace armed — capturing next %d AP instructions\n",
             ap_trace_remaining);
 }

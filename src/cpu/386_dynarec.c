@@ -65,7 +65,7 @@ int cpu_end_block_after_ins = 0;
  * (AP).  Triggered by SIPI delivery; auto-flushes to stderr
  * after ap_trace_remaining instructions have been captured.
  * ============================================================ */
-#define AP_TRACE_SIZE 512
+#define AP_TRACE_SIZE 4096
 
 typedef struct {
     uint32_t linear_pc;
@@ -174,6 +174,23 @@ ap_trace_capture(void)
 
     ap_trace_head = (ap_trace_head + 1) % AP_TRACE_SIZE;
     ap_trace_count++;
+
+    /* Early dump: if AP reaches the watchdog reset area (F000:5B6x)
+       or the BIOS error halt area (F000:7DAx), dump the ring buffer
+       immediately — don't wait for ap_trace_remaining to reach 0.
+       This captures the instructions leading UP TO the failure. */
+    if (e->linear_pc >= 0x000F5B60 && e->linear_pc <= 0x000F5B70) {
+        fprintf(stderr, "\nAP TRACE: EARLY DUMP — AP reached watchdog at lin=%05X\n", e->linear_pc);
+        ap_trace_flush();
+        ap_trace_remaining = -1;
+        return;
+    }
+    if (e->linear_pc >= 0x000F7DA0 && e->linear_pc <= 0x000F7DB0) {
+        fprintf(stderr, "\nAP TRACE: EARLY DUMP — AP reached error halt at lin=%05X\n", e->linear_pc);
+        ap_trace_flush();
+        ap_trace_remaining = -1;
+        return;
+    }
 
     ap_trace_remaining--;
     if (ap_trace_remaining == 0) {
