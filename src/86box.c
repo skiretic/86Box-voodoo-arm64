@@ -1907,6 +1907,22 @@ pc_reset_hard(void)
     hard_reset_pending = 1;
 }
 
+#ifdef USE_NEW_DYNAREC
+static void
+log_new_dynarec_shutdown_summary(void)
+{
+    char summary[2048];
+
+    if (!new_dynarec_stats_logging_enabled())
+        return;
+
+    if (new_dynarec_format_stats_summary(summary, sizeof(summary), NULL) <= 0)
+        return;
+
+    always_log("CPU new dynarec stats [shutdown]: %s\n", summary);
+}
+#endif
+
 void
 pc_close(UNUSED(thread_t *ptr))
 {
@@ -1964,6 +1980,10 @@ pc_close(UNUSED(thread_t *ptr))
     scsi_disk_close();
 
     gdbstub_close();
+
+#ifdef USE_NEW_DYNAREC
+    log_new_dynarec_shutdown_summary();
+#endif
 
 }
 

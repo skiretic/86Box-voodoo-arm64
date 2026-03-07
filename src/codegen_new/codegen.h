@@ -301,7 +301,7 @@ extern void codegen_generate_call(uint8_t opcode, OpFn op, uint32_t fetchdat, ui
 extern void codegen_generate_seg_restore(void);
 extern void codegen_set_op32(void);
 extern void codegen_flush(void);
-extern void codegen_check_flush(struct page_t *page, uint64_t mask, uint32_t phys_addr);
+extern int codegen_check_flush(struct page_t *page, uint64_t mask, uint32_t phys_addr);
 struct ir_data_t;
 x86seg     *codegen_generate_ea(struct ir_data_t *ir, x86seg *op_ea_seg, uint32_t fetchdat, int op_ssegs, uint32_t *op_pc, uint32_t op_32, int stack_offset);
 extern void codegen_check_seg_read(codeblock_t *block, struct ir_data_t *ir, x86seg *seg);

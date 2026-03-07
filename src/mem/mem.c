@@ -1834,6 +1834,13 @@ mem_read_ram_2gbl(uint32_t addr, UNUSED(void *priv))
 }
 
 #ifdef USE_NEW_DYNAREC
+static inline void
+new_dynarec_note_write_overlap_left_off_list(page_t *page)
+{
+    if (!page_in_evict_list(page) && page_has_dirty_code_overlap(page))
+        new_dynarec_note_purgable_page_missed_write_enqueue_overlap();
+}
+
 void
 mem_write_ramb_page(uint32_t addr, uint8_t val, page_t *page)
 {
@@ -1851,11 +1858,18 @@ mem_write_ramb_page(uint32_t addr, uint8_t val, page_t *page)
 
         page->mem[addr & 0xfff] = val;
         page->dirty_mask |= mask;
-        if ((page->code_present_mask & mask) && !page_in_evict_list(page))
+        if ((page->code_present_mask & mask) && !page_in_evict_list(page)) {
+            new_dynarec_note_purgable_page_enqueued_write();
+            page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
             page_add_to_evict_list(page);
+        }
         page->byte_dirty_mask[byte_offset] |= byte_mask;
-        if ((page->byte_code_present_mask[byte_offset] & byte_mask) && !page_in_evict_list(page))
+        if ((page->byte_code_present_mask[byte_offset] & byte_mask) && !page_in_evict_list(page)) {
+            new_dynarec_note_purgable_page_enqueued_write();
+            page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
             page_add_to_evict_list(page);
+        }
+        new_dynarec_note_write_overlap_left_off_list(page);
     }
 }
 
@@ -1878,19 +1892,29 @@ mem_write_ramw_page(uint32_t addr, uint16_t val, page_t *page)
             mask |= (mask << 1);
         *(uint16_t *) &page->mem[addr & 0xfff] = val;
         page->dirty_mask |= mask;
-        if ((page->code_present_mask & mask) && !page_in_evict_list(page))
+        if ((page->code_present_mask & mask) && !page_in_evict_list(page)) {
+            new_dynarec_note_purgable_page_enqueued_write();
+            page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
             page_add_to_evict_list(page);
+        }
         if ((addr & PAGE_BYTE_MASK_MASK) == PAGE_BYTE_MASK_MASK) {
             page->byte_dirty_mask[byte_offset + 1] |= 1;
-            if ((page->byte_code_present_mask[byte_offset + 1] & 1) && !page_in_evict_list(page))
+            if ((page->byte_code_present_mask[byte_offset + 1] & 1) && !page_in_evict_list(page)) {
+                new_dynarec_note_purgable_page_enqueued_write();
+                page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
                 page_add_to_evict_list(page);
+            }
         } else
             byte_mask |= (byte_mask << 1);
 
         page->byte_dirty_mask[byte_offset] |= byte_mask;
 
-        if ((page->byte_code_present_mask[byte_offset] & byte_mask) && !page_in_evict_list(page))
+        if ((page->byte_code_present_mask[byte_offset] & byte_mask) && !page_in_evict_list(page)) {
+            new_dynarec_note_purgable_page_enqueued_write();
+            page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
             page_add_to_evict_list(page);
+        }
+        new_dynarec_note_write_overlap_left_off_list(page);
     }
 }
 
@@ -1914,15 +1938,22 @@ mem_write_raml_page(uint32_t addr, uint32_t val, page_t *page)
         *(uint32_t *) &page->mem[addr & 0xfff] = val;
         page->dirty_mask |= mask;
         page->byte_dirty_mask[byte_offset] |= byte_mask;
-        if (!page_in_evict_list(page) && ((page->code_present_mask & mask) || (page->byte_code_present_mask[byte_offset] & byte_mask)))
+        if (!page_in_evict_list(page) && ((page->code_present_mask & mask) || (page->byte_code_present_mask[byte_offset] & byte_mask))) {
+            new_dynarec_note_purgable_page_enqueued_write();
+            page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
             page_add_to_evict_list(page);
+        }
         if ((addr & PAGE_BYTE_MASK_MASK) > (PAGE_BYTE_MASK_MASK - 3)) {
             uint32_t byte_mask_2 = 0xf >> (4 - (addr & 3));
 
             page->byte_dirty_mask[byte_offset + 1] |= byte_mask_2;
-            if ((page->byte_code_present_mask[byte_offset + 1] & byte_mask_2) && !page_in_evict_list(page))
+            if ((page->byte_code_present_mask[byte_offset + 1] & byte_mask_2) && !page_in_evict_list(page)) {
+                new_dynarec_note_purgable_page_enqueued_write();
+                page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
                 page_add_to_evict_list(page);
+            }
         }
+        new_dynarec_note_write_overlap_left_off_list(page);
     }
 }
 #else
@@ -2173,8 +2204,9 @@ mem_invalidate_range(uint32_t start_addr, uint32_t end_addr)
             if ((page->mem != page_ff) && page->byte_dirty_mask)
                 memset(page->byte_dirty_mask, 0xff, 64 * sizeof(uint64_t));
 
-            if (!page_in_evict_list(page))
-                page_add_to_evict_list(page);
+            if (page_enqueue_if_reclaimable_with_source(page, PAGE_EVICT_ENQUEUE_SOURCE_BULK_DIRTY)) {
+                new_dynarec_note_purgable_page_enqueued_bulk_dirty();
+            }
         }
     }
 #else

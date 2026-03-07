@@ -62,6 +62,22 @@ static uint16_t block_free_list;
 static void     delete_block(codeblock_t *block);
 static void     delete_dirty_block(codeblock_t *block);
 
+static void
+new_dynarec_log_runtime_summary(const char *reason, uint32_t detail)
+{
+    char                summary[2048];
+    new_dynarec_stats_t snapshot;
+
+    if (!new_dynarec_stats_logging_enabled())
+        return;
+
+    new_dynarec_stats_snapshot(&snapshot);
+    if (new_dynarec_format_stats_summary(summary, sizeof(summary), &snapshot) <= 0)
+        return;
+
+    always_log("CPU new dynarec stats [%s detail=%08x]: %s\n", reason, detail, summary);
+}
+
 /*Temporary list of code blocks that have recently been evicted. This allows for
   some historical state to be kept when a block is the target of self-modifying
   code.
@@ -161,21 +177,57 @@ block_dirty_list_remove(codeblock_t *block)
     block->flags &= ~CODEBLOCK_IN_DIRTY_LIST;
 }
 
+static int
+block_reuse_oldest_dirty_block(void)
+{
+    codeblock_t *block;
+
+    if (!block_dirty_list_tail)
+        return 0;
+
+#ifndef RELEASE_BUILD
+    if (dirty_list_size <= 0)
+        fatal("get - dirty_list_size <= 0!\n");
+#endif
+
+    block = &codeblock[block_dirty_list_tail];
+
+    block_dirty_list_tail = block->prev;
+    if (block->prev == BLOCK_INVALID)
+        block_dirty_list_head = BLOCK_INVALID;
+    else
+        codeblock[block->prev].next = BLOCK_INVALID;
+    dirty_list_size--;
+    block->flags &= ~CODEBLOCK_IN_DIRTY_LIST;
+    delete_dirty_block(block);
+    block_free_list = get_block_nr(block);
+    return 1;
+}
+
 int
 codegen_purge_purgable_list(void)
 {
-    if (!purgable_page_list_is_empty()) {
-        page_t *page = &pages[purgable_page_list_head];
+    while (!purgable_page_list_is_empty()) {
+        page_t *page;
 
         new_dynarec_note_purgable_flush_attempt();
-        if (page->code_present_mask & page->dirty_mask) {
-            codegen_check_flush(page, page->dirty_mask, purgable_page_list_head << 12);
 
-            if (block_free_list) {
-                new_dynarec_note_purgable_flush_success();
-                return 1;
-            }
+        page = page_get_next_reclaimable_evict_page();
+        if (!page) {
+            new_dynarec_note_purgable_flush_no_overlap();
+            break;
         }
+
+        if (!codegen_check_flush(page, page->dirty_mask, purgable_page_list_head << 12))
+            new_dynarec_note_purgable_flush_no_blocks();
+
+        if (block_free_list) {
+            new_dynarec_note_purgable_flush_success();
+            new_dynarec_log_runtime_summary("purgable-flush-success", purgable_page_list_head);
+            return 1;
+        }
+
+        new_dynarec_note_purgable_flush_no_free_block();
     }
     return 0;
 }
@@ -186,29 +238,28 @@ block_free_list_get(void)
     codeblock_t *block = NULL;
 
     while (!block_free_list) {
-        new_dynarec_note_allocator_pressure(purgable_page_list_head);
-        /*Free list is empty, check the dirty list*/
-        if (block_dirty_list_tail) {
-#ifndef RELEASE_BUILD
-            if (dirty_list_size <= 0)
-                fatal("get - dirty_list_size <= 0!\n");
-#endif
-            /*Reuse oldest block*/
-            block = &codeblock[block_dirty_list_tail];
+        new_dynarec_post_purge_state_t post_purge_state;
 
-            block_dirty_list_tail = block->prev;
-            if (block->prev == BLOCK_INVALID)
-                block_dirty_list_head = BLOCK_INVALID;
-            else
-                codeblock[block->prev].next = BLOCK_INVALID;
-            dirty_list_size--;
-            block->flags &= ~CODEBLOCK_IN_DIRTY_LIST;
-            delete_dirty_block(block);
-            block_free_list = get_block_nr(block);
+        new_dynarec_note_allocator_pressure(purgable_page_list_head);
+        if (purgable_page_list_is_empty())
+            new_dynarec_note_allocator_pressure_empty_purgable_list();
+        new_dynarec_log_runtime_summary("allocator-pressure", purgable_page_list_head);
+        /*Free list is empty, check the dirty list*/
+        if (block_reuse_oldest_dirty_block())
             break;
-        }
+
         /*Free list is empty - free up a block*/
-        if (!codegen_purge_purgable_list())
+        if (codegen_purge_purgable_list())
+            continue;
+
+        post_purge_state = new_dynarec_classify_post_purge_state(block_free_list != BLOCK_INVALID, block_dirty_list_tail);
+        if (post_purge_state == NEW_DYNAREC_POST_PURGE_RETRY_DIRTY_LIST) {
+            new_dynarec_note_purgable_flush_dirty_list_reuse();
+            if (block_reuse_oldest_dirty_block())
+                break;
+        }
+
+        if (post_purge_state == NEW_DYNAREC_POST_PURGE_RANDOM_EVICTION)
             codegen_delete_random_block(0);
     }
 
@@ -345,8 +396,10 @@ remove_from_block_list(codeblock_t *block, UNUSED(uint32_t pc))
         pages[block->phys >> 12].block = block->next;
         if (block->next)
             codeblock[block->next].prev = BLOCK_INVALID;
-        else
+        else {
             mem_flush_write_page(block->phys, 0);
+            page_clear_code_presence_if_no_blocks(&pages[block->phys >> 12]);
+        }
     }
 
     if (!(block->flags & CODEBLOCK_HAS_PAGE2)) {
@@ -366,8 +419,10 @@ remove_from_block_list(codeblock_t *block, UNUSED(uint32_t pc))
         pages[block->phys_2 >> 12].block_2 = block->next_2;
         if (block->next_2)
             codeblock[block->next_2].prev_2 = BLOCK_INVALID;
-        else
+        else {
             mem_flush_write_page(block->phys_2, 0);
+            page_clear_code_presence_if_no_blocks(&pages[block->phys_2 >> 12]);
+        }
     }
 }
 
@@ -449,6 +504,7 @@ codegen_delete_random_block(int required_mem_block)
 
             if (block->pc != BLOCK_PC_INVALID && (!required_mem_block || block->head_mem_block)) {
                 new_dynarec_note_random_eviction(block->pc, block->phys, block->flags);
+                new_dynarec_log_runtime_summary("random-eviction", block->phys);
                 delete_block(block);
                 return;
             }
@@ -457,11 +513,11 @@ codegen_delete_random_block(int required_mem_block)
     }
 }
 
-void
+int
 codegen_check_flush(page_t *page, UNUSED(uint64_t mask), UNUSED(uint32_t phys_addr))
 {
-    uint16_t block_nr               = page->block;
-    int      remove_from_evict_list = 0;
+    uint16_t block_nr = page->block;
+    int      invalidated_blocks = 0;
 
     while (block_nr) {
         codeblock_t *block      = &codeblock[block_nr];
@@ -469,6 +525,7 @@ codegen_check_flush(page_t *page, UNUSED(uint64_t mask), UNUSED(uint32_t phys_ad
 
         if (*block->dirty_mask & block->page_mask) {
             invalidate_block(block);
+            invalidated_blocks++;
         }
 #ifndef RELEASE_BUILD
         if (block_nr == next_block)
@@ -485,6 +542,7 @@ codegen_check_flush(page_t *page, UNUSED(uint64_t mask), UNUSED(uint32_t phys_ad
 
         if (*block->dirty_mask2 & block->page_mask2) {
             invalidate_block(block);
+            invalidated_blocks++;
         }
 #ifndef RELEASE_BUILD
         if (block_nr == next_block)
@@ -493,19 +551,8 @@ codegen_check_flush(page_t *page, UNUSED(uint64_t mask), UNUSED(uint32_t phys_ad
         block_nr = next_block;
     }
 
-    if (page->code_present_mask & page->dirty_mask)
-        remove_from_evict_list = 1;
-    page->code_present_mask &= ~page->dirty_mask;
-    page->dirty_mask = 0;
-
-    for (uint8_t c = 0; c < 64; c++) {
-        if (page->byte_code_present_mask[c] & page->byte_dirty_mask[c])
-            remove_from_evict_list = 0;
-        page->byte_code_present_mask[c] &= ~page->byte_dirty_mask[c];
-        page->byte_dirty_mask[c] = 0;
-    }
-    if (remove_from_evict_list)
-        page_remove_from_evict_list(page);
+    page_complete_dirty_code_flush(page);
+    return invalidated_blocks;
 }
 
 void
@@ -642,8 +689,11 @@ codegen_block_generate_end_mask_recompile(void)
     } else
         p->code_present_mask |= block->page_mask;
 
-    if ((*(block->dirty_mask) & block->page_mask) && !page_in_evict_list(p))
+    if ((*(block->dirty_mask) & block->page_mask) && !page_in_evict_list(p)) {
+        new_dynarec_note_purgable_page_enqueued_codegen();
+        page_set_evict_enqueue_source(p, PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN);
         page_add_to_evict_list(p);
+    }
 
     block->phys_2 = -1;
     block->next_2 = block->prev_2 = BLOCK_INVALID;
@@ -661,8 +711,11 @@ codegen_block_generate_end_mask_recompile(void)
                 page_2->code_present_mask |= block->page_mask2;
                 block->dirty_mask2 = &page_2->dirty_mask;
             }
-            if (((*block->dirty_mask2) & block->page_mask2) && !page_in_evict_list(page_2))
+            if (((*block->dirty_mask2) & block->page_mask2) && !page_in_evict_list(page_2)) {
+                new_dynarec_note_purgable_page_enqueued_codegen();
+                page_set_evict_enqueue_source(page_2, PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN);
                 page_add_to_evict_list(page_2);
+            }
 
             if (!pages[block->phys_2 >> 12].block_2)
                 mem_flush_write_page(block->phys_2, codegen_endpc);
@@ -716,8 +769,11 @@ codegen_block_generate_end_mask_mark(void)
 
     p = &pages[block->phys >> 12];
     p->code_present_mask |= block->page_mask;
-    if ((p->dirty_mask & block->page_mask) && !page_in_evict_list(p))
+    if ((p->dirty_mask & block->page_mask) && !page_in_evict_list(p)) {
+        new_dynarec_note_purgable_page_enqueued_codegen();
+        page_set_evict_enqueue_source(p, PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN);
         page_add_to_evict_list(p);
+    }
 
     block->phys_2     = -1;
     block->page_mask2 = 0;
@@ -733,8 +789,11 @@ codegen_block_generate_end_mask_mark(void)
                 block->page_mask2 |= ((uint64_t) 1 << start_pc);
 
             page_2->code_present_mask |= block->page_mask2;
-            if ((page_2->dirty_mask & block->page_mask2) && !page_in_evict_list(page_2))
+            if ((page_2->dirty_mask & block->page_mask2) && !page_in_evict_list(page_2)) {
+                new_dynarec_note_purgable_page_enqueued_codegen();
+                page_set_evict_enqueue_source(page_2, PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN);
                 page_add_to_evict_list(page_2);
+            }
 
             if (!pages[block->phys_2 >> 12].block_2)
                 mem_flush_write_page(block->phys_2, codegen_endpc);
