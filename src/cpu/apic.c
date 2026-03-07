@@ -25,6 +25,7 @@
  *
  *          Copyright 2026 skiretic.
  */
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -204,6 +205,15 @@ static void
 apic_timer_callback(void *priv)
 {
     apic_t *dev = (apic_t *) priv;
+    static int apic_timer_log_count = 0;
+    int        cpu_id = -1;
+
+    for (int i = 0; i < APIC_MAX_CPUS; i++) {
+        if (apics[i] == dev) {
+            cpu_id = i;
+            break;
+        }
+    }
 
     if (!(dev->svr & APIC_SVR_ENABLE))
         return;
@@ -211,8 +221,17 @@ apic_timer_callback(void *priv)
     /* Fire the timer interrupt if not masked. */
     if (!(dev->lvt_timer & APIC_LVT_MASKED)) {
         int vector = dev->lvt_timer & 0xFF;
+        if (apic_timer_log_count < 200) {
+            apic_timer_log_count++;
+            fprintf(stderr,
+                    "APIC-TIMER[%d]: cpu=%d vector=%02X active_cpu=%d svr=%08X lvt=%08X icr=%08X tsc=%" PRIu64 "\n",
+                    apic_timer_log_count, cpu_id, vector, active_cpu, dev->svr, dev->lvt_timer,
+                    dev->timer_icr, tsc);
+        }
         apic_log("APIC: Timer interrupt, vector %02X\n", vector);
         apic_set_bit(dev->irr, vector);
+        if (cpu_id >= 0)
+            cpu_contexts[cpu_id].halted = 0;
     }
 
     /* In periodic mode, restart the timer. */
@@ -235,6 +254,16 @@ apic_timer_callback(void *priv)
 static void
 apic_timer_start(apic_t *dev)
 {
+    static int apic_timer_start_log_count = 0;
+    int        cpu_id = -1;
+
+    for (int i = 0; i < APIC_MAX_CPUS; i++) {
+        if (apics[i] == dev) {
+            cpu_id = i;
+            break;
+        }
+    }
+
     if (dev->timer_icr == 0) {
         timer_disable(&dev->timer);
         return;
@@ -246,6 +275,13 @@ apic_timer_start(apic_t *dev)
     double period_us = ((double) dev->timer_icr * (double) dev->timer_div)
         / (cpu_busspeed / 1000000.0);
 
+    if (apic_timer_start_log_count < 100) {
+        apic_timer_start_log_count++;
+        fprintf(stderr,
+                "APIC-TIMER-START[%d]: cpu=%d icr=%08X div=%d lvt=%08X svr=%08X period_us=%.2f active_cpu=%d\n",
+                apic_timer_start_log_count, cpu_id, dev->timer_icr, dev->timer_div,
+                dev->lvt_timer, dev->svr, period_us, active_cpu);
+    }
     apic_log("APIC: Timer start, ICR=%08X div=%d period=%.2f us\n",
              dev->timer_icr, dev->timer_div, period_us);
 
@@ -565,6 +601,24 @@ apic_deliver_nmi(int cpu_id)
 }
 
 /*
+ * Deliver an SMI IPI to a target CPU.
+ * SMM state is stored in cpu_state, so inactive CPUs can be primed by
+ * updating their saved context and waking them if they were halted.
+ */
+static void
+apic_deliver_smi(int cpu_id)
+{
+    apic_log("APIC: SMI IPI to CPU %d\n", cpu_id);
+
+    if (cpu_id == active_cpu) {
+        smi_line = 1;
+    } else {
+        cpu_contexts[cpu_id].cpu_state._smi_line = 1;
+        cpu_contexts[cpu_id].halted              = 0;
+    }
+}
+
+/*
  * Process an ICR write — the core IPI delivery mechanism.
  * Called when the CPU writes to ICR Low (offset 0x300).
  * ICR High (offset 0x310) must be written first for the destination.
@@ -639,7 +693,7 @@ apic_deliver_ipi(apic_t *dev)
                 break;
 
             case 2: /* SMI. */
-                apic_log("APIC: SMI IPI to CPU %d (stubbed)\n", cpu_id);
+                apic_deliver_smi(cpu_id);
                 break;
 
             case 4: /* NMI. */

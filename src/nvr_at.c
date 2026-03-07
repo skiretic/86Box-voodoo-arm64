@@ -450,9 +450,16 @@ timer_update_irq(nvr_t *nvr)
 {
     local_t *local = (local_t *) nvr->data;
     uint8_t irq = (nvr->regs[RTC_REGB] & nvr->regs[RTC_REGC]) & (REGB_UIE | REGB_AIE | REGB_PIE);
+    static int rtc_irq_log_count = 0;
 
     if (irq || (local->irq_state != !!irq)) {
         if (irq) {
+            if (rtc_irq_log_count < 200) {
+                rtc_irq_log_count++;
+                fprintf(stderr,
+                        "RTC-IRQ8[%d]: raise flags=%02X regb=%02X regc=%02X active_cpu=%d tsc=%" PRIu64 "\n",
+                        rtc_irq_log_count, irq, nvr->regs[RTC_REGB], nvr->regs[RTC_REGC], active_cpu, tsc);
+            }
             nvr->regs[RTC_REGC] |= REGC_IRQF;
             picintlevel(1 << nvr->irq, &local->irq_state);
             if (local->smi_enable) {
@@ -460,6 +467,12 @@ timer_update_irq(nvr_t *nvr)
                 local->smi_status = 1;
             }
         } else {
+            if (rtc_irq_log_count < 200) {
+                rtc_irq_log_count++;
+                fprintf(stderr,
+                        "RTC-IRQ8[%d]: clear regb=%02X regc=%02X active_cpu=%d tsc=%" PRIu64 "\n",
+                        rtc_irq_log_count, nvr->regs[RTC_REGB], nvr->regs[RTC_REGC], active_cpu, tsc);
+            }
             nvr->regs[RTC_REGC] &= ~REGC_IRQF;
             picintclevel(1 << nvr->irq, &local->irq_state);
         }

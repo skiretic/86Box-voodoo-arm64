@@ -118,6 +118,34 @@
 #    endif
 #endif
 
+static void
+smp_advance_timers_while_idle(int32_t delta_cycles)
+{
+    static int idle_advance_log_count = 0;
+
+    if (delta_cycles <= 0)
+        return;
+
+    if (idle_advance_log_count < 100) {
+        idle_advance_log_count++;
+        fprintf(stderr,
+                "SMP-IDLE-ADVANCE[%d]: delta=%d active_cpu=%d tsc_before=%" PRIu64 " target=%" PRIu64 "\n",
+                idle_advance_log_count, delta_cycles, active_cpu, tsc, timer_target);
+    }
+
+    tsc += (uint64_t) delta_cycles;
+
+    for (int i = 0; i < num_cpus; i++) {
+        if (i != active_cpu)
+            cpu_contexts[i].tsc += (uint64_t) delta_cycles;
+    }
+
+    cpu_contexts[active_cpu].tsc = tsc;
+
+    while (TIMER_VAL_LESS_THAN_VAL(timer_target, (uint64_t) tsc))
+        timer_process();
+}
+
 /* Stuff that used to be globally declared in plat.h but is now extern there
    and declared here instead. */
 int          dopause = 1; /* system is paused */
@@ -2073,6 +2101,8 @@ pc_run(void)
         }
 
         for (int sub = 0; sub < num_sub_iters; sub++) {
+            int ran_cpu = 0;
+
             for (int i = 0; i < num_cpus; i++) {
                 /* AP waiting for Startup IPI — skip entirely.
                    Don't even call cpu_switch_to() to avoid disturbing
@@ -2091,6 +2121,7 @@ pc_run(void)
                     continue;
                 }
 
+                ran_cpu = 1;
                 cpu_switch_to(i);
 
                 /* If halted but an interrupt is pending, clear the halt. */
@@ -2389,10 +2420,16 @@ pc_run(void)
                                             cpu_state.regs[0].l, cpu_state.regs[1].l,
                                             cpu_state.flags);
                                     fprintf(stderr, "=== END AP TRANSITION ===\n");
-                                }
-                            }
-                        }
                     }
+                }
+            }
+
+            /* All CPUs may legally sit in HLT while waiting for timer-driven
+               work. The machine clock still needs to advance in that case so
+               PIT/RTC/APIC timers can fire and wake a halted CPU. */
+            if (!ran_cpu)
+                smp_advance_timers_while_idle(slice_cycles);
+        }
 
                     /* One-shot detailed dump at START of fine-slice (first iteration after SIPI). */
                     if (smp_fine_slice_countdown > 0 && !diag_fine_logged && sub == 0 && i == 0) {
