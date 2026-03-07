@@ -66,8 +66,8 @@ mem_mapping_t ram_split_mapping;
 mem_mapping_t bios_mapping;
 mem_mapping_t bios_high_mapping;
 
-page_t  *pages;       /* RAM page table */
-uint32_t pages_sz;    /* #pages in table */
+page_t  *pages;    /* RAM page table */
+uint32_t pages_sz; /* #pages in table */
 
 uint8_t *ram;  /* the virtual RAM */
 uint8_t *ram2; /* the virtual RAM */
@@ -82,18 +82,17 @@ uint32_t biosaddr;
 uint32_t pccache;
 uint8_t *pccache2;
 
-int        readlnext;
-int        readlookup[256];
-uintptr_t  old_rl2;
-uint8_t    uncached = 0;
-int        writelnext;
-int        writelookup[256];
+int       readlnext;
+int       readlookup[256];
+uintptr_t old_rl2;
+uint8_t   uncached = 0;
+int       writelnext;
+int       writelookup[256];
 
 /* The lookup tables. */
-page_t *page_lookup[1048576] = { 0 };
-uintptr_t readlookup2[1048576] = { 0 };
+page_t   *page_lookup[1048576]  = { 0 };
+uintptr_t readlookup2[1048576]  = { 0 };
 uintptr_t writelookup2[1048576] = { 0 };
-
 
 uint32_t mem_logical_addr;
 
@@ -117,28 +116,28 @@ int mmuflush = 0;
 uint64_t *byte_dirty_mask;
 uint64_t *byte_code_present_mask;
 
-uint32_t purgable_page_list_head = 0;
+uint32_t purgable_page_list_head = EVICT_LINK_NULL;
 int      purgeable_page_count    = 0;
 #endif
 
 uint8_t high_page = 0; /* if a high (> 4 gb) page was detected */
 
-mem_mapping_t        *read_mapping[MEM_MAPPINGS_NO];
-mem_mapping_t        *write_mapping[MEM_MAPPINGS_NO];
+mem_mapping_t *read_mapping[MEM_MAPPINGS_NO];
+mem_mapping_t *write_mapping[MEM_MAPPINGS_NO];
 
-uint8_t              *_mem_exec[MEM_MAPPINGS_NO];
+uint8_t *_mem_exec[MEM_MAPPINGS_NO];
 
 static mem_mapping_t *base_mapping;
 static mem_mapping_t *last_mapping;
 static mem_mapping_t *read_mapping_bus[MEM_MAPPINGS_NO];
 static mem_mapping_t *write_mapping_bus[MEM_MAPPINGS_NO];
-static uint8_t       _mem_wp[MEM_MAPPINGS_NO];
-static uint8_t       _mem_wp_bus[MEM_MAPPINGS_NO];
+static uint8_t        _mem_wp[MEM_MAPPINGS_NO];
+static uint8_t        _mem_wp_bus[MEM_MAPPINGS_NO];
 static uint8_t        ff_pccache[4] = { 0xff, 0xff, 0xff, 0xff };
 static mem_state_t    _mem_state[MEM_MAPPINGS_NO];
 static uint32_t       remap_start_addr;
 static uint32_t       remap_start_addr2;
-static size_t ram_size = 0;
+static size_t         ram_size = 0;
 
 #ifdef ENABLE_MEM_LOG
 int mem_do_log = ENABLE_MEM_LOG;
@@ -163,8 +162,7 @@ mem_addr_is_ram(uint32_t addr)
 {
     const mem_mapping_t *mapping = read_mapping[addr >> MEM_GRANULARITY_BITS];
 
-    return (mapping == &ram_low_mapping) || (mapping == &ram_high_mapping) || (mapping == &ram_mid_mapping) ||
-           (mapping == &ram_mid_mapping2) || (mapping == &ram_remapped_mapping);
+    return (mapping == &ram_low_mapping) || (mapping == &ram_high_mapping) || (mapping == &ram_mid_mapping) || (mapping == &ram_mid_mapping2) || (mapping == &ram_remapped_mapping);
 }
 
 void
@@ -618,7 +616,7 @@ addwritelookup(uint32_t virt, uint32_t phys)
     if (pages[phys >> 12].block[0] || pages[phys >> 12].block[1] || pages[phys >> 12].block[2] || pages[phys >> 12].block[3]) {
 #    endif
 #endif
-        page_lookup[virt >> 12]  = &pages[phys >> 12];
+        page_lookup[virt >> 12] = &pages[phys >> 12];
     } else {
 
         writelookup2[virt >> 12] = (uintptr_t) &ram[(uintptr_t) (phys & ~0xFFF) - (uintptr_t) (virt & ~0xfff)];
@@ -668,7 +666,7 @@ uint8_t
 read_mem_b(uint32_t addr)
 {
     mem_mapping_t *map;
-    uint8_t        ret        = 0xff;
+    uint8_t        ret = 0xff;
 
     mem_logical_addr = addr;
     addr &= rammask;
@@ -684,7 +682,7 @@ uint16_t
 read_mem_w(uint32_t addr)
 {
     mem_mapping_t *map;
-    uint16_t       ret        = 0xffff;
+    uint16_t       ret = 0xffff;
 
     mem_logical_addr = addr;
     addr &= rammask;
@@ -1437,24 +1435,13 @@ readmemql(uint32_t addr)
     map = read_mapping[addr >> MEM_GRANULARITY_BITS];
 
     if (map && map->read_l)
-        return map->read_l(addr, map->priv) |
-               ((uint64_t) map->read_l(addr + 4, map->priv) << 32);
+        return map->read_l(addr, map->priv) | ((uint64_t) map->read_l(addr + 4, map->priv) << 32);
 
     if (map && map->read_w)
-        return map->read_w(addr, map->priv) |
-               ((uint64_t) map->read_w(addr + 2, map->priv) << 16) |
-               ((uint64_t) map->read_w(addr + 4, map->priv) << 32) |
-               ((uint64_t) map->read_w(addr + 6, map->priv) << 48);
+        return map->read_w(addr, map->priv) | ((uint64_t) map->read_w(addr + 2, map->priv) << 16) | ((uint64_t) map->read_w(addr + 4, map->priv) << 32) | ((uint64_t) map->read_w(addr + 6, map->priv) << 48);
 
     if (map && map->read_b)
-        return map->read_b(addr, map->priv) |
-               ((uint64_t) map->read_b(addr + 1, map->priv) << 8) |
-               ((uint64_t) map->read_b(addr + 2, map->priv) << 16) |
-               ((uint64_t) map->read_b(addr + 3, map->priv) << 24) |
-               ((uint64_t) map->read_b(addr + 4, map->priv) << 32) |
-               ((uint64_t) map->read_b(addr + 5, map->priv) << 40) |
-               ((uint64_t) map->read_b(addr + 6, map->priv) << 48) |
-               ((uint64_t) map->read_b(addr + 7, map->priv) << 56);
+        return map->read_b(addr, map->priv) | ((uint64_t) map->read_b(addr + 1, map->priv) << 8) | ((uint64_t) map->read_b(addr + 2, map->priv) << 16) | ((uint64_t) map->read_b(addr + 3, map->priv) << 24) | ((uint64_t) map->read_b(addr + 4, map->priv) << 32) | ((uint64_t) map->read_b(addr + 5, map->priv) << 40) | ((uint64_t) map->read_b(addr + 6, map->priv) << 48) | ((uint64_t) map->read_b(addr + 7, map->priv) << 56);
 
     return 0xffffffffffffffffULL;
 }
@@ -1563,7 +1550,7 @@ void
 do_mmutranslate(uint32_t addr, uint32_t *a64, int num, int write)
 {
     int      i;
-    int      cond = 1;
+    int      cond      = 1;
     uint32_t last_addr = addr + (num - 1);
     uint64_t a         = 0x0000000000000000ULL;
 #ifdef USE_DEBUG_REGS_486
@@ -1572,40 +1559,41 @@ do_mmutranslate(uint32_t addr, uint32_t *a64, int num, int write)
     for (i = 0; i < num; i++)
         a64[i] = (uint64_t) addr;
 
-    if (cr0 >> 31)  for (i = 0; i < num; i++) {
-        if (write && ((i == 0) || !(addr & 0xfff)))
-            cond = (!page_lookup[addr >> 12] || !page_lookup[addr >> 12]->write_b);
+    if (cr0 >> 31)
+        for (i = 0; i < num; i++) {
+            if (write && ((i == 0) || !(addr & 0xfff)))
+                cond = (!page_lookup[addr >> 12] || !page_lookup[addr >> 12]->write_b);
 
-        if (cond) {
-            /* If we have encountered at least one page fault, mark all subsequent addresses as
-               having page faulted, prevents false negatives in readmem*l_no_mmut. */
-            if ((i > 0) && cpu_state.abrt && !high_page)
-                a64[i] = a64[i - 1];
-            /* If we are on the same page, there is no need to translate again, as we can just
-               reuse the previous result. */
-            else if (i == 0) {
-                a      = mmutranslatereal(addr, write);
-                a64[i] = (uint32_t) a;
+            if (cond) {
+                /* If we have encountered at least one page fault, mark all subsequent addresses as
+                   having page faulted, prevents false negatives in readmem*l_no_mmut. */
+                if ((i > 0) && cpu_state.abrt && !high_page)
+                    a64[i] = a64[i - 1];
+                /* If we are on the same page, there is no need to translate again, as we can just
+                   reuse the previous result. */
+                else if (i == 0) {
+                    a      = mmutranslatereal(addr, write);
+                    a64[i] = (uint32_t) a;
 
-                high_page = high_page || (!cpu_state.abrt && (a > 0xffffffffULL));
-            } else if (!(addr & 0xfff)) {
-                a      = mmutranslatereal(last_addr, write);
-                a64[i] = (uint32_t) a;
+                    high_page = high_page || (!cpu_state.abrt && (a > 0xffffffffULL));
+                } else if (!(addr & 0xfff)) {
+                    a      = mmutranslatereal(last_addr, write);
+                    a64[i] = (uint32_t) a;
 
-                high_page = high_page || (!cpu_state.abrt && (a64[i] > 0xffffffffULL));
+                    high_page = high_page || (!cpu_state.abrt && (a64[i] > 0xffffffffULL));
 
-                if (!cpu_state.abrt) {
+                    if (!cpu_state.abrt) {
+                        a      = (a & 0xfffffffffffff000ULL) | ((uint64_t) (addr & 0xfff));
+                        a64[i] = (uint32_t) a;
+                    }
+                } else {
                     a      = (a & 0xfffffffffffff000ULL) | ((uint64_t) (addr & 0xfff));
                     a64[i] = (uint32_t) a;
                 }
-            } else {
-                a      = (a & 0xfffffffffffff000ULL) | ((uint64_t) (addr & 0xfff));
-                a64[i] = (uint32_t) a;
             }
-        }
 
-        addr++;
-    }
+            addr++;
+        }
 }
 
 uint8_t
@@ -1846,37 +1834,6 @@ mem_read_ram_2gbl(uint32_t addr, UNUSED(void *priv))
 }
 
 #ifdef USE_NEW_DYNAREC
-static inline int
-page_index(page_t *page)
-{
-    return ((uintptr_t) page - (uintptr_t) pages) / sizeof(page_t);
-}
-
-void
-page_add_to_evict_list(page_t *page)
-{
-    pages[purgable_page_list_head].evict_prev = page_index(page);
-    page->evict_next                          = purgable_page_list_head;
-    page->evict_prev                          = 0;
-    purgable_page_list_head                   = pages[purgable_page_list_head].evict_prev;
-    purgeable_page_count++;
-}
-
-void
-page_remove_from_evict_list(page_t *page)
-{
-    if (!page_in_evict_list(page))
-        fatal("page_remove_from_evict_list: not in evict list!\n");
-    if (page->evict_prev)
-        pages[page->evict_prev].evict_next = page->evict_next;
-    else
-        purgable_page_list_head = page->evict_next;
-    if (page->evict_next)
-        pages[page->evict_next].evict_prev = page->evict_prev;
-    page->evict_prev = EVICT_NOT_IN_LIST;
-    purgeable_page_count--;
-}
-
 void
 mem_write_ramb_page(uint32_t addr, uint8_t val, page_t *page)
 {
@@ -2293,81 +2250,62 @@ mem_mapping_recalc(uint64_t base, uint64_t size)
     /* Walk mapping list. */
     while (map != NULL) {
         /* In range? */
-        if (map->enable && (uint64_t) map->base < ((uint64_t) base + (uint64_t) size) &&
-            ((uint64_t) map->base + (uint64_t) map->size) > (uint64_t) base) {
+        if (map->enable && (uint64_t) map->base < ((uint64_t) base + (uint64_t) size) && ((uint64_t) map->base + (uint64_t) map->size) > (uint64_t) base) {
             uint64_t i_a   = ((~map->base_ignore) & 0xffffffffULL) + 0x00000001ULL;
             uint64_t i_s   = 0x00000000ULL;
             uint64_t i_e   = map->base_ignore;
             uint64_t i_c   = 0x00000000ULL;
             uint64_t start = (map->base < base) ? map->base : base;
-            uint64_t end   = (((uint64_t) map->base + (uint64_t) map->size) < (base + size)) ?
-                             ((uint64_t) map->base + (uint64_t) map->size) : (base + size);
+            uint64_t end   = (((uint64_t) map->base + (uint64_t) map->size) < (base + size)) ? ((uint64_t) map->base + (uint64_t) map->size) : (base + size);
             if (start < map->base)
                 start = map->base;
 
             if (i_e == 0x00000000ULL) {
                 for (c = start; c < end; c += MEM_GRANULARITY_SIZE) {
                     /* CPU */
-                    n = !!in_smm;
+                    n  = !!in_smm;
                     wp = _mem_wp[c >> MEM_GRANULARITY_BITS];
 
-                    if (map->exec && mem_mapping_access_allowed(map->flags,
-                                     _mem_state[c >> MEM_GRANULARITY_BITS].states[n].x))
+                    if (map->exec && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].x))
                         _mem_exec[c >> MEM_GRANULARITY_BITS] = map->exec + (c - map->base);
-                    if (!wp && (map->write_b || map->write_w || map->write_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
+                    if (!wp && (map->write_b || map->write_w || map->write_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
                         write_mapping[c >> MEM_GRANULARITY_BITS] = map;
-                    if ((map->read_b || map->read_w || map->read_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
+                    if ((map->read_b || map->read_w || map->read_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
                         read_mapping[c >> MEM_GRANULARITY_BITS] = map;
 
                     /* Bus */
                     n |= STATE_BUS;
                     wp = _mem_wp_bus[c >> MEM_GRANULARITY_BITS];
 
-                    if (!wp && (map->write_b || map->write_w || map->write_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
+                    if (!wp && (map->write_b || map->write_w || map->write_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
                         write_mapping_bus[c >> MEM_GRANULARITY_BITS] = map;
-                    if ((map->read_b || map->read_w || map->read_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
+                    if ((map->read_b || map->read_w || map->read_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
                         read_mapping_bus[c >> MEM_GRANULARITY_BITS] = map;
                 }
-            } else  for (i_c = i_s; i_c <= i_e; i_c += i_a) {
-                for (c = (start + i_c); c < (end + i_c); c += MEM_GRANULARITY_SIZE) {
-                    /* CPU */
-                    n = (!!in_smm) || (is_cxsmm && (ccr1 & CCR1_SMAC));
-                    wp = _mem_wp[c >> MEM_GRANULARITY_BITS];
+            } else
+                for (i_c = i_s; i_c <= i_e; i_c += i_a) {
+                    for (c = (start + i_c); c < (end + i_c); c += MEM_GRANULARITY_SIZE) {
+                        /* CPU */
+                        n  = (!!in_smm) || (is_cxsmm && (ccr1 & CCR1_SMAC));
+                        wp = _mem_wp[c >> MEM_GRANULARITY_BITS];
 
-                    if (map->exec && mem_mapping_access_allowed(map->flags,
-                                                                _mem_state[c >> MEM_GRANULARITY_BITS].states[n].x))
-                        _mem_exec[c >> MEM_GRANULARITY_BITS] = map->exec + (c - map->base);
-                    if (!wp && (map->write_b || map->write_w || map->write_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
-                        write_mapping[c >> MEM_GRANULARITY_BITS] = map;
-                    if ((map->read_b || map->read_w || map->read_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
-                        read_mapping[c >> MEM_GRANULARITY_BITS] = map;
+                        if (map->exec && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].x))
+                            _mem_exec[c >> MEM_GRANULARITY_BITS] = map->exec + (c - map->base);
+                        if (!wp && (map->write_b || map->write_w || map->write_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
+                            write_mapping[c >> MEM_GRANULARITY_BITS] = map;
+                        if ((map->read_b || map->read_w || map->read_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
+                            read_mapping[c >> MEM_GRANULARITY_BITS] = map;
 
-                    /* Bus */
-                    n |= STATE_BUS;
-                    wp = _mem_wp_bus[c >> MEM_GRANULARITY_BITS];
+                        /* Bus */
+                        n |= STATE_BUS;
+                        wp = _mem_wp_bus[c >> MEM_GRANULARITY_BITS];
 
-                    if (!wp && (map->write_b || map->write_w || map->write_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
-                        write_mapping_bus[c >> MEM_GRANULARITY_BITS] = map;
-                    if ((map->read_b || map->read_w || map->read_l) &&
-                        mem_mapping_access_allowed(map->flags,
-                                                   _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
-                        read_mapping_bus[c >> MEM_GRANULARITY_BITS] = map;
+                        if (!wp && (map->write_b || map->write_w || map->write_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].w))
+                            write_mapping_bus[c >> MEM_GRANULARITY_BITS] = map;
+                        if ((map->read_b || map->read_w || map->read_l) && mem_mapping_access_allowed(map->flags, _mem_state[c >> MEM_GRANULARITY_BITS].states[n].r))
+                            read_mapping_bus[c >> MEM_GRANULARITY_BITS] = map;
+                    }
                 }
-            }
         }
         map = map->next;
     }
@@ -2380,23 +2318,23 @@ mem_mapping_recalc(uint64_t base, uint64_t size)
     for (c = 0; c < (sizeof(write_mapping) / sizeof(write_mapping[0])); c++) {
         if ((write_mapping[c] == write) && (read_mapping[c] == read) && (write_mapping_bus[c] == write_bus) && (read_mapping_bus[c] == read_bus))
             continue;
-        write = write_mapping[c];
-        read = read_mapping[c];
+        write     = write_mapping[c];
+        read      = read_mapping[c];
         write_bus = write_mapping_bus[c];
-        read_bus = read_mapping_bus[c];
+        read_bus  = read_mapping_bus[c];
 
         pclog("%08X | ", c << MEM_GRANULARITY_BITS);
         if (read) {
             pclog("R%c%c%c %08X+% 8X",
-                read->read_b ? 'b' : ' ', read->read_w ? 'w' : ' ', read->read_l ? 'l' : ' ',
-                read->base, read->size);
+                  read->read_b ? 'b' : ' ', read->read_w ? 'w' : ' ', read->read_l ? 'l' : ' ',
+                  read->base, read->size);
         } else {
             pclog("                      ");
         }
         if (write) {
             pclog(" | W%c%c%c %08X+% 8X",
-                write->write_b ? 'b' : ' ', write->write_w ? 'w' : ' ', write->write_l ? 'l' : ' ',
-                write->base, write->size);
+                  write->write_b ? 'b' : ' ', write->write_w ? 'w' : ' ', write->write_l ? 'l' : ' ',
+                  write->base, write->size);
         } else {
             pclog(" |                       ");
         }
@@ -2406,15 +2344,15 @@ mem_mapping_recalc(uint64_t base, uint64_t size)
             pclog("   ^ bus | ");
             if (read_bus) {
                 pclog("R%c%c%c %08X+% 8X",
-                    read_bus->read_b ? 'b' : ' ', read_bus->read_w ? 'w' : ' ', read_bus->read_l ? 'l' : ' ',
-                    read_bus->base, read_bus->size);
+                      read_bus->read_b ? 'b' : ' ', read_bus->read_w ? 'w' : ' ', read_bus->read_l ? 'l' : ' ',
+                      read_bus->base, read_bus->size);
             } else {
                 pclog("                      ");
             }
             if (write_bus) {
                 pclog(" | W%c%c%c %08X+% 8X",
-                    write_bus->write_b ? 'b' : ' ', write_bus->write_w ? 'w' : ' ', write_bus->write_l ? 'l' : ' ',
-                    write_bus->base, write_bus->size);
+                      write_bus->write_b ? 'b' : ' ', write_bus->write_w ? 'w' : ' ', write_bus->write_l ? 'l' : ' ',
+                      write_bus->base, write_bus->size);
             } else {
                 pclog(" |                       ");
             }
@@ -2428,8 +2366,8 @@ mem_mapping_recalc(uint64_t base, uint64_t size)
 void
 mem_set_wp(uint64_t base, uint64_t size, uint8_t flags, uint8_t wp)
 {
-    uint64_t       c;
-    uint64_t       end = base + size;
+    uint64_t c;
+    uint64_t end = base + size;
 
     for (c = base; c < end; c += MEM_GRANULARITY_SIZE) {
         if (flags & ACCESS_BUS)
@@ -2582,7 +2520,7 @@ void
 mem_mapping_set_base_ignore(mem_mapping_t *map, uint32_t base_ignore)
 {
     /* Remove old mapping. */
-    map->enable      = 0;
+    map->enable = 0;
     mem_mapping_recalc(map->base, map->size);
 
     /* Set new mapping. */
@@ -2634,7 +2572,7 @@ void
 mem_set_access(uint8_t bitmap, int mode, uint32_t base, uint32_t size, uint16_t access)
 {
     uint16_t       mask;
-    uint16_t       smstate = 0x0000;
+    uint16_t       smstate     = 0x0000;
     const uint16_t smstates[4] = { 0x0000, (MEM_READ_SMRAM | MEM_WRITE_SMRAM),
                                    MEM_READ_SMRAM_EX, (MEM_READ_DISABLED_EX | MEM_WRITE_DISABLED_EX) };
 
@@ -2682,7 +2620,7 @@ mem_a20_init(void)
 {
     if (is286) {
         mem_a20_key = mem_a20_alt = mem_a20_state = 0;
-        rammask = cpu_16bitbus ? 0xffffff : 0xffffffff;
+        rammask                                   = cpu_16bitbus ? 0xffffff : 0xffffffff;
         if (is6117)
             rammask |= 0x03000000;
         flushmmucache();
@@ -2770,7 +2708,7 @@ mem_reset(void)
 
     ram_size = m;
     /* Allocate 16 extra bytes of RAM to mitigate some dynarec recompiler memory access quirks. */
-    ram      = (uint8_t *) plat_mmap(ram_size + 16, 0); /* allocate and clear the RAM block */
+    ram = (uint8_t *) plat_mmap(ram_size + 16, 0); /* allocate and clear the RAM block */
     if (ram == NULL) {
         fatal("Failed to allocate RAM block. Make sure you have enough RAM available.\n");
         return;
@@ -2832,6 +2770,7 @@ mem_reset(void)
         }
 #ifdef USE_NEW_DYNAREC
         pages[c].evict_prev             = EVICT_NOT_IN_LIST;
+        pages[c].evict_next             = EVICT_LINK_NULL;
         pages[c].byte_dirty_mask        = &byte_dirty_mask[c * 64];
         pages[c].byte_code_present_mask = &byte_code_present_mask[c * 64];
 #endif
@@ -2859,7 +2798,7 @@ mem_reset(void)
         else if (cpu_16bitbus && is6117 && mem_size > 65408)
             mem_init_ram_mapping(&ram_high_mapping, 0x100000, (65408 - 1024) * 1024);
         else {
-           mem_init_ram_mapping(&ram_high_mapping, 0x100000, (mem_size - 1024) * 1024);
+            mem_init_ram_mapping(&ram_high_mapping, 0x100000, (mem_size - 1024) * 1024);
         }
     }
 
@@ -2886,7 +2825,7 @@ mem_reset(void)
     mem_a20_init();
 
 #ifdef USE_NEW_DYNAREC
-    purgable_page_list_head = 0;
+    purgable_page_list_head = EVICT_LINK_NULL;
     purgeable_page_count    = 0;
 #endif
 }
@@ -2906,12 +2845,12 @@ umc_page_recalc(uint32_t c, uint32_t phys, int set)
     uint32_t target = set ? phys : c;
 
     if (set) {
-        pages[c].mem = &ram[(target & 0xff) << 12];
+        pages[c].mem     = &ram[(target & 0xff) << 12];
         pages[c].write_b = mem_write_ramb_page;
         pages[c].write_w = mem_write_ramw_page;
         pages[c].write_l = mem_write_raml_page;
     } else {
-        pages[c].mem = page_ff;
+        pages[c].mem     = page_ff;
         pages[c].write_b = NULL;
         pages[c].write_w = NULL;
         pages[c].write_l = NULL;
@@ -2919,6 +2858,7 @@ umc_page_recalc(uint32_t c, uint32_t phys, int set)
 
 #ifdef USE_NEW_DYNAREC
     pages[c].evict_prev             = EVICT_NOT_IN_LIST;
+    pages[c].evict_next             = EVICT_LINK_NULL;
     pages[c].byte_dirty_mask        = &byte_dirty_mask[(target & 0xff) * 64];
     pages[c].byte_code_present_mask = &byte_code_present_mask[(target & 0xff) * 64];
 #endif
@@ -2936,12 +2876,12 @@ mem_remap_top_ex_common(int kb, uint32_t start, int mid)
 {
     uint32_t   c;
     int        offset;
-    int        size = mem_size - 640;
+    int        size       = mem_size - 640;
     int        set        = 1;
     static int old_kb     = 0;
     int        sis_mode   = 0;
     uint32_t   start_addr = 0;
-    uint32_t   addr = 0;
+    uint32_t   addr       = 0;
 
     mem_log("MEM: remapping top %iKB (mem=%i)\n", kb, mem_size);
     if (mem_size <= 640)
@@ -2986,6 +2926,7 @@ mem_remap_top_ex_common(int kb, uint32_t start, int mid)
         pages[c].write_l = set ? mem_write_raml_page : NULL;
 #ifdef USE_NEW_DYNAREC
         pages[c].evict_prev             = EVICT_NOT_IN_LIST;
+        pages[c].evict_next             = EVICT_LINK_NULL;
         pages[c].byte_dirty_mask        = &byte_dirty_mask[(addr >> 12) * 64];
         pages[c].byte_code_present_mask = &byte_code_present_mask[(addr >> 12) * 64];
 #endif
@@ -3013,6 +2954,7 @@ mem_remap_top_ex_common(int kb, uint32_t start, int mid)
         }
 #ifdef USE_NEW_DYNAREC
         pages[c].evict_prev             = EVICT_NOT_IN_LIST;
+        pages[c].evict_next             = EVICT_LINK_NULL;
         pages[c].byte_dirty_mask        = &byte_dirty_mask[c * 64];
         pages[c].byte_code_present_mask = &byte_code_present_mask[c * 64];
 #endif

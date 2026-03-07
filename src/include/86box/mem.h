@@ -156,9 +156,9 @@
     mem_set_access((smm ? ACCESS_BUS_SMM : ACCESS_BUS), 1, base, size, is_smram)
 
 typedef struct state_t {
-    uint16_t x : 5;
-    uint16_t w : 5;
-    uint16_t r : 5;
+    uint16_t x   : 5;
+    uint16_t w   : 5;
+    uint16_t r   : 5;
     uint16_t pad : 1;
 } state_t;
 
@@ -203,7 +203,8 @@ extern uint64_t *byte_code_present_mask;
 #    define PAGE_BYTE_MASK_OFFSET_MASK 63
 #    define PAGE_BYTE_MASK_MASK        63
 
-#    define EVICT_NOT_IN_LIST          ((uint32_t) -1)
+#    define EVICT_LINK_NULL            ((uint32_t) -1)
+#    define EVICT_NOT_IN_LIST          ((uint32_t) -2)
 typedef struct page_t {
     void (*write_b)(uint32_t addr, uint8_t val, struct page_t *page);
     void (*write_w)(uint32_t addr, uint16_t val, struct page_t *page);
@@ -227,10 +228,16 @@ typedef struct page_t {
 } page_t;
 
 extern uint32_t purgable_page_list_head;
+extern int      purgeable_page_count;
 __attribute__((always_inline)) static inline int
 page_in_evict_list(page_t *page)
 {
     return (page->evict_prev != EVICT_NOT_IN_LIST);
+}
+__attribute__((always_inline)) static inline int
+purgable_page_list_is_empty(void)
+{
+    return (purgable_page_list_head == EVICT_LINK_NULL);
 }
 void page_remove_from_evict_list(page_t *page);
 void page_add_to_evict_list(page_t *page);
@@ -261,15 +268,15 @@ extern uint8_t *rom;
 extern uint32_t biosmask;
 extern uint32_t biosaddr;
 
-extern int        readlookup[256];
-extern uintptr_t  old_rl2;
-extern uint8_t    uncached;
-extern int        readlnext;
-extern int        writelookup[256];
+extern int       readlookup[256];
+extern uintptr_t old_rl2;
+extern uint8_t   uncached;
+extern int       readlnext;
+extern int       writelookup[256];
 
-extern int        writelnext;
-extern uint32_t   ram_mapped_addr[64];
-extern uint8_t    page_ff[4096];
+extern int      writelnext;
+extern uint32_t ram_mapped_addr[64];
+extern uint8_t  page_ff[4096];
 
 extern mem_mapping_t ram_low_mapping;
 extern mem_mapping_t ram_mid_mapping;
@@ -281,10 +288,10 @@ extern mem_mapping_t bios_high_mapping;
 
 extern uint32_t mem_logical_addr;
 
-extern page_t  *pages;
+extern page_t *pages;
 
 /* The lookup tables. */
-extern page_t *page_lookup[1048576];
+extern page_t   *page_lookup[1048576];
 extern uintptr_t readlookup2[1048576];
 extern uintptr_t writelookup2[1048576];
 
@@ -349,7 +356,7 @@ extern void     writememwl_no_mmut_2386(uint32_t addr, uint32_t *a64, uint16_t v
 extern uint32_t readmemll_no_mmut_2386(uint32_t addr, uint32_t *a64);
 extern void     writememll_no_mmut_2386(uint32_t addr, uint32_t *a64, uint32_t val);
 
-extern void     do_mmutranslate_2386(uint32_t addr, uint32_t *a64, int num, int write);
+extern void do_mmutranslate_2386(uint32_t addr, uint32_t *a64, int num, int write);
 
 extern uint8_t *getpccache(uint32_t a);
 extern uint64_t mmutranslatereal(uint32_t addr, int rw);

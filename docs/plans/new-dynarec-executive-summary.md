@@ -15,7 +15,7 @@ Last updated: 2026-03-07
 |---|---|---:|---|
 | Investigation and architecture review | Complete | 100% | Detailed report written and saved |
 | Implementation work | In progress | 20% | Phase 0 core counters and trace hooks landed |
-| Correctness risk mitigation | Not started | 0% | Highest-risk invalidation issues still open |
+| Correctness risk mitigation | In progress | 15% | Page-0 evict-list sentinel bug fixed and regression-tested |
 | Coverage closure | Not started | 0% | REP, softfloat, arm64 parity gaps remain |
 | Observability and validation tooling | In progress | 45% | Core CPU dynarec counters, trace hook API, and a focused API test are in tree |
 | Performance optimization | Not started | 0% | Deferred until correctness + observability |
@@ -23,7 +23,8 @@ Last updated: 2026-03-07
 ## Current executive readout
 
 - Phase 0 implementation has started with low-overhead CPU dynarec observability hooks.
-- The highest-priority issue is the purgeable-page evict-list design, especially the page-0 sentinel collision.
+- The page-0 purgeable-page evict-list sentinel collision is now fixed and covered by a focused regression test.
+- The highest-priority remaining correctness issue is the byte-mask dirty-page reclaim path.
 - CPU dynarec now exposes counters for block mark/recompile activity, direct-vs-helper fallback behavior, invalidations, block degradation, and allocator pressure, plus a structured trace-hook API for rare events.
 - Direct-recompile coverage is materially incomplete in REP, softfloat, and arm64 MMX/3DNow paths.
 - Full verify-mode and dynarec-vs-interpreter reproducibility tooling are still not implemented.
@@ -35,28 +36,35 @@ Last updated: 2026-03-07
 |---|---|---|---:|---|
 | WS0: Investigation | Capture architecture, risks, gaps, and plan | Complete | 100% | Report accepted as planning baseline |
 | WS1: Observability | Add counters, traces, and verify hooks | In progress | 45% | Core counters and trace hooks are in; verify mode and runtime reporting remain |
-| WS2: Invalidation and reclamation | Fix page-list correctness and dirty-page reclaim behavior | Not started | 0% | No list corruption and no random eviction caused by stale reclaim state |
+| WS2: Invalidation and reclamation | Fix page-list correctness and dirty-page reclaim behavior | In progress | 15% | Page-list sentinel bug fixed; dirty-page reclaim behavior still open |
 | WS3: Coverage closure | Reduce silent helper-path and unsupported direct coverage gaps | Not started | 0% | Direct support matrix is explicit and top fallback clusters are addressed |
 | WS4: Backend parity | Close meaningful arm64 vs x86-64 CPU dynarec deltas | Not started | 0% | Backend differences are intentional, measured, and documented |
 | WS5: Performance | Improve warmup, eviction policy, and hot-path code quality | Not started | 0% | Performance work is guided by instrumentation and benchmark baselines |
 | WS6: Validation and benchmarking | Add regression corpus and benchmark gates | Not started | 0% | Reproducible correctness and performance checks exist |
 
-## Phase tracker
+## Phase progress charts
 
-| Phase | Theme | Status | Progress | Key deliverables |
+Scale: 20 slots per phase. `#` = completed progress, `-` = remaining work.
+
+| Phase | Status | Chart | Progress | Current readout |
 |---|---|---|---:|---|
-| Phase 0 | Observability and reproducibility | In progress | 45% | Counters and structured trace hooks landed; selective dynarec-vs-interpretation checks still open |
-| Phase 1 | Invalidation and reclamation hardening | Not started | 0% | Page-0 list fix, byte-mask reclaim fix, targeted invalidation tests |
-| Phase 2 | Coverage closure and policy | Not started | 0% | Backend support matrix, REP policy, bailout reduction plan |
-| Phase 3 | Backend performance work | Not started | 0% | Eviction-policy improvements, arm64 optimization pass, reciprocal/rsqrt cleanup |
-| Phase 4 | Release-quality validation | Not started | 0% | Benchmark corpus, scripted sweeps, threshold-based regression checks |
+| Phase 0: Observability and reproducibility | In progress | `[#########-----------]` | 45% | Core counters and structured trace hooks landed; selective dynarec-vs-interpreter checks still open |
+| Phase 1: Invalidation and reclamation hardening | In progress | `[###-----------------]` | 15% | Page-0 list fix landed; byte-mask reclaim fix and targeted invalidation tests remain |
+| Phase 2: Coverage closure and policy | Not started | `[--------------------]` | 0% | Backend support matrix, REP policy, and bailout reduction plan not started |
+| Phase 3: Backend performance work | Not started | `[--------------------]` | 0% | Eviction-policy work, arm64 optimization pass, and reciprocal/rsqrt cleanup not started |
+| Phase 4: Release-quality validation | Not started | `[--------------------]` | 0% | Benchmark corpus, scripted sweeps, and threshold-based regression checks not started |
+
+### Phase 0 chart basis
+
+- Completed slice: counter surface, trace-hook surface, direct-vs-helper fallback accounting, invalidation/degradation accounting, allocator-pressure/random-eviction accounting, focused API verification.
+- Remaining slice: selective dynarec-vs-interpreter verification, runtime reporting/consumers, reproducibility matrix, benchmark-backed validation.
 
 ## Top risks tracker
 
 | Rank | Risk | Severity | Current status | Planned response |
 |---|---|---|---|---|
-| 1 | Purgeable-page list collides with page 0 | Critical | Open | Fix sentinel/list design first |
-| 2 | Byte-mask dirty pages likely not reclaimed through purge path | High | Open | Rework reclaim flow and add focused tests |
+| 1 | Byte-mask dirty pages likely not reclaimed through purge path | High | Open | Rework reclaim flow and add focused tests |
+| 2 | Purgeable-page list collides with page 0 | Critical | Closed | Distinct evict-list sentinels implemented and regression-tested |
 | 3 | REP / softfloat / arm64 3DNow coverage cliffs | High | Open | Build explicit support matrix and prioritize high-value gaps |
 | 4 | Known direct-recompile correctness regressions | High | Open | Reproduce and track guest-facing failures separately |
 | 5 | No CPU dynarec observability or verify tooling | High | In progress | Core counters + trace hooks landed; selective A/B validation still needed |
@@ -67,7 +75,8 @@ Last updated: 2026-03-07
 - [x] Write detailed investigation report
 - [x] Set up executive summary / progress tracker
 - [x] Define and implement the first CPU dynarec observability package for Phase 0
-- [ ] Define focused invalidation/reclamation test matrix
+- [x] Fix the page-0 evict-list sentinel collision with a focused regression test
+- [ ] Define focused invalidation/reclamation test matrix for byte-mask reclaim behavior
 - [ ] Decide explicit policy for REP, softfloat, and arm64 parity gaps
 - [ ] Define initial benchmark workload set
 
@@ -79,6 +88,7 @@ Last updated: 2026-03-07
 | Executive summary / tracker | Complete | `docs/plans/new-dynarec-executive-summary.md` |
 | Running changelog | Complete | `docs/plans/new-dynarec-changelog.md` |
 | Phase 0 core instrumentation | Complete | `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `src/codegen_new/codegen.c`, `src/codegen_new/codegen_block.c`, `src/cpu/386_dynarec.c` |
+| Phase 1 page-list sentinel fix | Complete | `src/include/86box/mem.h`, `src/mem/mem_evict_list.c`, `src/mem/mem.c`, `src/mem/row.c`, `tests/mem_evict_list_test.c` |
 | Validation matrix | Not started | TBD |
 | Benchmark plan | Not started | TBD |
 
@@ -94,6 +104,7 @@ Last updated: 2026-03-07
 When updating this document:
 
 - Keep the status snapshot and workstream tracker current.
+- Keep the phase progress charts aligned with the current percentages and phase readouts.
 - Update progress percentages conservatively.
 - Mark risks closed only when the fix is implemented and validated.
 - Add new deliverables rather than rewriting history.

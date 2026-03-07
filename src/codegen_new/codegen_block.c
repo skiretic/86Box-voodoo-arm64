@@ -164,7 +164,7 @@ block_dirty_list_remove(codeblock_t *block)
 int
 codegen_purge_purgable_list(void)
 {
-    if (purgable_page_list_head) {
+    if (!purgable_page_list_is_empty()) {
         page_t *page = &pages[purgable_page_list_head];
 
         new_dynarec_note_purgable_flush_attempt();

@@ -20,6 +20,7 @@ add_library(mem OBJECT
     i2c_eeprom.c
     intel_flash.c
     mem.c
+    mem_evict_list.c
     mmu_2386.c
     nmc93cxx.c
     rom.c
