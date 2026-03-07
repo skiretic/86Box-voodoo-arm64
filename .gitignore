@@ -76,4 +76,4 @@ riva128-nv3-port/feasibility-study.md
 scripts/analyze-jit-log
 roms/machines/bp6/
 videocommon-plan/
-secretproject/
+secretproject/*.bin

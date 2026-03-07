@@ -1203,12 +1203,16 @@ nvr_at_init(const device_t *info)
     local->cent         = (info->local >> 16) & 0xff;
     local->default_addr = (info->local >> 24) & 0xffff;
     local->def          = (local->flags & FLAG_ZERO_DEFAULT) ? 0x00 : 0xff;
-    nvr->irq            = (info->local >> 40) & 0xff;
+    {
+        const uint8_t raw_irq = (info->local >> 40) & 0xff;
 
-    if (nvr->irq == 0xff)
-        nvr->irq = -1;
-    else if (nvr->irq == 0xfe)
-        nvr->irq = device_get_config_int("irq");
+        if (raw_irq == 0xff)
+            nvr->irq = -1;
+        else if (raw_irq == 0xfe)
+            nvr->irq = device_get_config_int("irq");
+        else
+            nvr->irq = raw_irq;
+    }
 
     if (local->default_addr == 0xfffe)
         local->default_addr = device_get_config_hex16("base");
