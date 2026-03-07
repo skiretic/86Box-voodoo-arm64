@@ -83,8 +83,8 @@ typedef struct {
 } ap_trace_entry_t;
 
 static ap_trace_entry_t ap_trace_buf[AP_TRACE_SIZE];
-static int              ap_trace_head  = 0;
-static int              ap_trace_count = 0;
+static int              ap_trace_head      = 0;
+static int              ap_trace_count     = 0;
 int                     ap_trace_remaining = 0;
 
 static void
@@ -98,7 +98,7 @@ ap_trace_flush(void)
     fprintf(stderr, "\n=== AP TRACE DUMP (%d entries) ===\n", count);
 
     for (int i = 0; i < count; i++) {
-        idx = (start + i) % AP_TRACE_SIZE;
+        idx                 = (start + i) % AP_TRACE_SIZE;
         ap_trace_entry_t *e = &ap_trace_buf[idx];
 
         fprintf(stderr,
@@ -135,33 +135,33 @@ ap_trace_capture(void)
 {
     ap_trace_entry_t *e = &ap_trace_buf[ap_trace_head];
 
-    e->linear_pc = cpu_state.seg_cs.base + cpu_state.pc;
-    e->cs_sel    = cpu_state.seg_cs.seg;
-    e->ds_sel    = cpu_state.seg_ds.seg;
-    e->es_sel    = cpu_state.seg_es.seg;
-    e->ss_sel    = cpu_state.seg_ss.seg;
-    e->cs_base   = cpu_state.seg_cs.base;
-    e->ds_base   = cpu_state.seg_ds.base;
-    e->es_base   = cpu_state.seg_es.base;
-    e->ss_base   = cpu_state.seg_ss.base;
-    e->reg_cr0   = cpu_state.CR0.l;
-    e->reg_cr3   = cr3;
-    e->reg_cr4   = cr4;
+    e->linear_pc  = cpu_state.seg_cs.base + cpu_state.pc;
+    e->cs_sel     = cpu_state.seg_cs.seg;
+    e->ds_sel     = cpu_state.seg_ds.seg;
+    e->es_sel     = cpu_state.seg_es.seg;
+    e->ss_sel     = cpu_state.seg_ss.seg;
+    e->cs_base    = cpu_state.seg_cs.base;
+    e->ds_base    = cpu_state.seg_ds.base;
+    e->es_base    = cpu_state.seg_es.base;
+    e->ss_base    = cpu_state.seg_ss.base;
+    e->reg_cr0    = cpu_state.CR0.l;
+    e->reg_cr3    = cr3;
+    e->reg_cr4    = cr4;
     e->gdtr_base  = gdt.base;
     e->gdtr_limit = (uint16_t) gdt.limit;
     e->idtr_base  = idt.base;
     e->idtr_limit = (uint16_t) idt.limit;
-    e->eax = cpu_state.regs[0].l;
-    e->ebx = cpu_state.regs[3].l;
-    e->ecx = cpu_state.regs[1].l;
-    e->edx = cpu_state.regs[2].l;
-    e->esi = cpu_state.regs[6].l;
-    e->edi = cpu_state.regs[7].l;
-    e->esp = cpu_state.regs[4].l;
-    e->ebp = cpu_state.regs[5].l;
-    e->mem_0500 = mem_readb_phys(0x0500);
-    e->mem_0501 = mem_readb_phys(0x0501);
-    e->mem_05ff = mem_readb_phys(0x05FF);
+    e->eax        = cpu_state.regs[0].l;
+    e->ebx        = cpu_state.regs[3].l;
+    e->ecx        = cpu_state.regs[1].l;
+    e->edx        = cpu_state.regs[2].l;
+    e->esi        = cpu_state.regs[6].l;
+    e->edi        = cpu_state.regs[7].l;
+    e->esp        = cpu_state.regs[4].l;
+    e->ebp        = cpu_state.regs[5].l;
+    e->mem_0500   = mem_readb_phys(0x0500);
+    e->mem_0501   = mem_readb_phys(0x0501);
+    e->mem_05ff   = mem_readb_phys(0x05FF);
     e->eflags_val = ((uint32_t) cpu_state.eflags << 16) | (uint32_t) cpu_state.flags;
 
     /* APIC data -- use accessors since apic_t is opaque. */
@@ -529,11 +529,11 @@ block_ended:
     cpu_end_block_after_ins = 0;
 }
 
-#if defined(__linux__) && !defined(__clang__) && defined(USE_NEW_DYNAREC)
+#    if defined(__linux__) && !defined(__clang__) && defined(USE_NEW_DYNAREC)
 static inline void __attribute__((optimize("O2")))
-#else
+#    else
 static __inline void
-#endif
+#    endif
 exec386_dynarec_dyn(void)
 {
     uint32_t start_pc  = 0;
@@ -564,8 +564,7 @@ exec386_dynarec_dyn(void)
             int      byte_offset = (phys_addr >> PAGE_BYTE_MASK_SHIFT) & PAGE_BYTE_MASK_OFFSET_MASK;
             uint64_t byte_mask   = 1ULL << (phys_addr & PAGE_BYTE_MASK_MASK);
 
-            if ((page->code_present_mask & mask) ||
-                ((page->mem != page_ff) && (page->byte_code_present_mask[byte_offset] & byte_mask)))
+            if ((page->code_present_mask & mask) || ((page->mem != page_ff) && (page->byte_code_present_mask[byte_offset] & byte_mask)))
 #    else
             if (page->code_present_mask[(phys_addr >> PAGE_MASK_INDEX_SHIFT) & PAGE_MASK_INDEX_MASK] & mask)
 #    endif
@@ -731,10 +730,10 @@ exec386_dynarec_dyn(void)
                 cpu_state.pc &= 0xffff;
 #    endif
 
-                /* Cap source code at 4000 bytes per block; this
-                   will prevent any block from spanning more than
-                   2 pages. In practice this limit will never be
-                   hit, as host block size is only 2kB*/
+            /* Cap source code at 4000 bytes per block; this
+               will prevent any block from spanning more than
+               2 pages. In practice this limit will never be
+               hit, as host block size is only 2kB*/
 #    ifdef USE_NEW_DYNAREC
             if (((cs + cpu_state.pc) - start_pc) >= max_block_size)
 #    else
@@ -833,10 +832,10 @@ exec386_dynarec_dyn(void)
                 cpu_state.pc &= 0xffff;
 #    endif
 
-                /* Cap source code at 4000 bytes per block; this
-                   will prevent any block from spanning more than
-                   2 pages. In practice this limit will never be
-                   hit, as host block size is only 2kB */
+            /* Cap source code at 4000 bytes per block; this
+               will prevent any block from spanning more than
+               2 pages. In practice this limit will never be
+               hit, as host block size is only 2kB */
 #    ifdef USE_NEW_DYNAREC
             if (((cs + cpu_state.pc) - start_pc) >= max_block_size)
 #    else
@@ -921,7 +920,7 @@ exec386_dynarec(int32_t cycs)
             cycles_old       = cycles;
             oldtsc           = tsc;
             tsc_old          = tsc;
-            if (cpu_force_interpreter || cpu_override_dynarec ||  (!CACHE_ON())) /*Interpret block*/
+            if (cpu_force_interpreter || cpu_override_dynarec || (!CACHE_ON())) /*Interpret block*/
             {
                 exec386_dynarec_int();
             } else {
@@ -961,7 +960,7 @@ exec386_dynarec(int32_t cycs)
                 oldcs = CS;
 #    endif
                 cpu_state.oldpc = cpu_state.pc;
-                new_ne = 0;
+                new_ne          = 0;
                 x86_int(16);
             }
 
@@ -1139,7 +1138,7 @@ exec386(int32_t cycs)
 block_ended:
 #endif
             if (cpu_state.abrt) {
-                uint8_t oop    = opcode;
+                uint8_t oop = opcode;
                 flags_rebuild();
                 tempi          = cpu_state.abrt & ABRT_MASK;
                 cpu_state.abrt = 0;
@@ -1164,7 +1163,7 @@ block_ended:
                 }
 
 #ifdef USE_DEBUG_REGS_486
-                if (is386 && !x86_was_reset  && ins_fetch_fault)
+                if (is386 && !x86_was_reset && ins_fetch_fault)
                     x86gen();
 #endif
             } else if (new_ne) {
@@ -1179,8 +1178,10 @@ block_ended:
             } else if (trap) {
                 flags_rebuild();
 #ifdef USE_DEBUG_REGS_486
-                if (trap & 2) dr[6] |= 0x8000;
-                if (trap & 1) dr[6] |= 0x4000;
+                if (trap & 2)
+                    dr[6] |= 0x8000;
+                if (trap & 1)
+                    dr[6] |= 0x4000;
 #endif
                 trap = 0;
 #ifndef USE_NEW_DYNAREC

@@ -4840,7 +4840,7 @@ cpu_smp_init(void)
        Note: the actual RDMSR/WRMSR path for 0x1B uses apic->msr in the
        apic_t struct (set by apic_init_cpu), but we keep msr.apic_base
        consistent for diagnostic code and potential future use. */
-    ap->msr.apic_base = (ap->msr.apic_base & ~(1ULL << 8)) | (1ULL << 11);
+    ap->msr.apic_base = APIC_DEFAULT_BASE | APIC_MSR_ENABLE;
 
     /* Copy CR4 mask (CPU-model-dependent, determines valid CR4 bits). */
     ap->cpu_CR4_mask = cpu_contexts[0].cpu_CR4_mask;
@@ -4856,23 +4856,24 @@ cpu_smp_init(void)
     ap->msr.evntsel[1]   = 0;
     ap->msr.debug_ctl    = 0;
 
-    /* EFLAGS: only reserved bit 1 is set. */
+    /* FLAGS bit 1 is set after reset; the upper EFLAGS half must stay clear.
+       Setting cpu_state.eflags bit 1 would incorrectly enable VM86 mode. */
     ap->cpu_state.flags  = 0x0002;
-    ap->cpu_state.eflags = 0x00000002;
+    ap->cpu_state.eflags = 0x00000000;
 
     /* CR0: CD=1, NW=1, ET=1 (bits 30, 29, 4).  PE=0 = real mode. */
     ap->cpu_state.CR0.l = 0x60000010;
 
     /* CS:IP = F000:FFF0 (standard reset vector).
        SIPI will override CS:IP when it arrives. */
-    ap->cpu_state.pc               = 0x0000FFF0;
-    ap->cpu_state.seg_cs.base      = 0xFFFF0000;
-    ap->cpu_state.seg_cs.seg       = 0xF000;
-    ap->cpu_state.seg_cs.limit     = 0xFFFF;
-    ap->cpu_state.seg_cs.limit_low = 0;
+    ap->cpu_state.pc                = 0x0000FFF0;
+    ap->cpu_state.seg_cs.base       = 0xFFFF0000;
+    ap->cpu_state.seg_cs.seg        = 0xF000;
+    ap->cpu_state.seg_cs.limit      = 0xFFFF;
+    ap->cpu_state.seg_cs.limit_low  = 0;
     ap->cpu_state.seg_cs.limit_high = 0xFFFF;
-    ap->cpu_state.seg_cs.access    = 0x82;
-    ap->cpu_state.seg_cs.ar_high   = 0x10;
+    ap->cpu_state.seg_cs.access     = 0x82;
+    ap->cpu_state.seg_cs.ar_high    = 0x10;
 
     /* DS/ES/SS/FS/GS: base=0, selector=0, limit=0xFFFF, real-mode access. */
     x86seg seg_default;
@@ -4930,7 +4931,8 @@ cpu_smp_init(void)
     smp_fine_slice_countdown = 0;
 
     fprintf(stderr, "SMP: AP (CPU 1) context initialized with x86 reset state, "
-                    "wait_for_sipi=1, active_cpu=%d\n", active_cpu);
+                    "wait_for_sipi=1, active_cpu=%d\n",
+            active_cpu);
 }
 
 void

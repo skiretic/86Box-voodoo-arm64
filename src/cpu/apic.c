@@ -344,13 +344,14 @@ apic_deliver_init(int cpu_id)
     memset(ctx, 0, sizeof(cpu_context_t));
 
     /* Restore state that persists across INIT. */
-    ctx->apic        = saved_apic;
-    ctx->msr         = saved_msr;
+    ctx->apic         = saved_apic;
+    ctx->msr          = saved_msr;
     ctx->cpu_CR4_mask = saved_cr4m;
 
-    /* EFLAGS: only reserved bit 1 is set. */
+    /* FLAGS bit 1 is set after reset; the upper EFLAGS half must stay clear.
+       Setting cpu_state.eflags bit 1 would incorrectly enable VM86 mode. */
     ctx->cpu_state.flags  = 0x0002;
-    ctx->cpu_state.eflags = 0x00000002;
+    ctx->cpu_state.eflags = 0x00000000;
 
     /* CR0: CD=1, NW=1, ET=1.  PE=0 = real mode. */
     ctx->cpu_state.CR0.l = 0x60000010;
@@ -476,9 +477,10 @@ apic_deliver_sipi(int cpu_id, uint8_t vector)
     /* EDX = CPUID signature on reset (model-dependent, use 0 for now). */
     ctx->cpu_state.regs[2].l = 0;
 
-    /* Flags: reserved bit 1 set. */
+    /* FLAGS bit 1 is set after SIPI; the upper EFLAGS half must stay clear.
+       Setting cpu_state.eflags bit 1 would incorrectly enable VM86 mode. */
     ctx->cpu_state.flags  = 0x0002;
-    ctx->cpu_state.eflags = 0x00000002;
+    ctx->cpu_state.eflags = 0x00000000;
 
     /* Ensure IDTR is set for real-mode IVT (base=0, limit=0x3FF). */
     ctx->idt.base  = 0;
@@ -1054,6 +1056,10 @@ apic_init_cpu(int cpu_id)
     dev->msr       = APIC_DEFAULT_BASE | APIC_MSR_ENABLE;
     if (cpu_id == 0)
         dev->msr |= APIC_MSR_BSP;
+
+    /* Keep msr_t.apic_base consistent with the authoritative apic_t.msr
+       so diagnostic/trace code reads the correct value. */
+    cpu_contexts[cpu_id].msr.apic_base = dev->msr;
 
     /* APIC ID: bits 27:24, set to cpu_id. */
     dev->id = (uint32_t) cpu_id << 24;
