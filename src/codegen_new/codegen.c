@@ -12,6 +12,7 @@
 
 #include "386_common.h"
 
+#include "codegen_public.h"
 #include "codegen_accumulate.h"
 #include "codegen_allocator.h"
 #include "codegen_backend.h"
@@ -383,21 +384,22 @@ static uint8_t opcode_0f_modrm[256] = {
 void
 codegen_generate_call(uint8_t opcode, OpFn op, uint32_t fetchdat, uint32_t new_pc, uint32_t old_pc)
 {
-    codeblock_t *block              = &codeblock[block_current];
-    ir_data_t   *ir                 = codegen_get_ir_data();
-    uint32_t     op_pc              = new_pc;
-    const OpFn  *op_table           = x86_dynarec_opcodes;
-    RecompOpFn  *recomp_op_table    = recomp_opcodes;
-    int          opcode_shift       = 0;
-    int          opcode_mask        = 0x3ff;
-    uint32_t     recomp_opcode_mask = 0x1ff;
-    uint32_t     op_32              = use32;
-    int          over               = 0;
-    int          test_modrm         = 1;
-    int          pc_off             = 0;
-    int          in_lock            = 0;
-    uint32_t     next_pc            = 0;
-    uint16_t     op87               = 0x0000;
+    codeblock_t                         *block                  = &codeblock[block_current];
+    ir_data_t                           *ir                     = codegen_get_ir_data();
+    uint32_t                             op_pc                  = new_pc;
+    const OpFn                          *op_table               = x86_dynarec_opcodes;
+    RecompOpFn                          *recomp_op_table        = recomp_opcodes;
+    int                                  opcode_shift           = 0;
+    int                                  opcode_mask            = 0x3ff;
+    uint32_t                             recomp_opcode_mask     = 0x1ff;
+    uint32_t                             op_32                  = use32;
+    int                                  over                   = 0;
+    int                                  test_modrm             = 1;
+    int                                  pc_off                 = 0;
+    int                                  in_lock                = 0;
+    uint32_t                             next_pc                = 0;
+    uint16_t                             op87                   = 0x0000;
+    new_dynarec_helper_fallback_reason_t helper_fallback_reason = NEW_DYNAREC_HELPER_FALLBACK_NONE;
 #ifdef DEBUG_EXTRA
     uint8_t last_prefix = 0;
 #endif
@@ -557,7 +559,7 @@ codegen_generate_call(uint8_t opcode, OpFn op, uint32_t fetchdat, uint32_t new_p
                 break;
 
             case 0xf0: /*LOCK*/
-                in_lock         = 1;
+                in_lock = 1;
                 break;
 
             case 0xf2: /*REPNE*/
@@ -682,6 +684,7 @@ generate_call:
     if (recomp_op_table && recomp_op_table[(opcode | op_32) & recomp_opcode_mask]) {
         uint32_t new_pc = recomp_op_table[(opcode | op_32) & recomp_opcode_mask](block, ir, opcode, fetchdat, op_32, op_pc);
         if (new_pc) {
+            new_dynarec_note_direct_recompiled_instruction();
             if (new_pc != -1)
                 uop_MOV_IMM(ir, IREG_pc, new_pc);
 
@@ -694,9 +697,14 @@ generate_call:
 
             return;
         }
+        helper_fallback_reason = NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT;
+    } else {
+        helper_fallback_reason = NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL;
     }
 
 codegen_skip:
+    new_dynarec_note_helper_call_fallback(helper_fallback_reason);
+
     if ((op_table == x86_dynarec_opcodes_REPNE || op_table == x86_dynarec_opcodes_REPE) && !op_table[opcode | op_32]) {
         op_table        = x86_dynarec_opcodes;
         recomp_op_table = recomp_opcodes;

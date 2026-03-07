@@ -18,6 +18,7 @@
 #include "386_common.h"
 
 #include "codegen.h"
+#include "codegen_public.h"
 #include "codegen_accumulate.h"
 #include "codegen_allocator.h"
 #include "codegen_backend.h"
@@ -166,11 +167,14 @@ codegen_purge_purgable_list(void)
     if (purgable_page_list_head) {
         page_t *page = &pages[purgable_page_list_head];
 
+        new_dynarec_note_purgable_flush_attempt();
         if (page->code_present_mask & page->dirty_mask) {
             codegen_check_flush(page, page->dirty_mask, purgable_page_list_head << 12);
 
-            if (block_free_list)
+            if (block_free_list) {
+                new_dynarec_note_purgable_flush_success();
                 return 1;
+            }
         }
     }
     return 0;
@@ -182,6 +186,7 @@ block_free_list_get(void)
     codeblock_t *block = NULL;
 
     while (!block_free_list) {
+        new_dynarec_note_allocator_pressure(purgable_page_list_head);
         /*Free list is empty, check the dirty list*/
         if (block_dirty_list_tail) {
 #ifndef RELEASE_BUILD
@@ -377,6 +382,7 @@ invalidate_block(codeblock_t *block)
     if (block->pc == BLOCK_PC_INVALID)
         fatal("Invalidating deleted block\n");
 #endif
+    new_dynarec_note_block_invalidated(block->pc, block->phys, block->flags);
     remove_from_block_list(block, old_pc);
     block_dirty_list_add(block);
     if (block->head_mem_block)
@@ -442,6 +448,7 @@ codegen_delete_random_block(int required_mem_block)
             codeblock_t *block = &codeblock[block_nr];
 
             if (block->pc != BLOCK_PC_INVALID && (!required_mem_block || block->head_mem_block)) {
+                new_dynarec_note_random_eviction(block->pc, block->phys, block->flags);
                 delete_block(block);
                 return;
             }
@@ -759,6 +766,7 @@ codegen_block_end(void)
 
     codegen_block_generate_end_mask_mark();
     add_to_block_list(block);
+    new_dynarec_note_block_marked(block->pc, block->phys, block->ins);
 }
 
 void
@@ -781,6 +789,7 @@ codegen_block_end_recompile(codeblock_t *block)
 
     codegen_accumulate_flush(ir_data);
     codegen_ir_compile(ir_data, block);
+    new_dynarec_note_block_recompiled(block->pc, block->phys, block->ins);
 }
 
 void

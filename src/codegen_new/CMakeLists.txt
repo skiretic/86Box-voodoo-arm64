@@ -21,6 +21,7 @@ if(DYNAREC)
         codegen_accumulate.c
         codegen_allocator.c
         codegen_block.c
+        codegen_observability.c
         codegen_ir.c
         codegen_ops.c
         codegen_ops_3dnow.c
