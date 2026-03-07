@@ -174,6 +174,14 @@ extern apic_t *apics[APIC_MAX_CPUS];
 /* Accessors for opaque apic_t fields (used by AP trace in 386_dynarec.c). */
 extern uint32_t apic_get_id(int cpu_id);
 extern uint32_t apic_get_svr(int cpu_id);
+extern uint32_t apic_get_tpr(int cpu_id);
+extern uint32_t apic_get_lvt_lint0(int cpu_id);
+extern uint32_t apic_get_lvt_lint1(int cpu_id);
+extern uint32_t apic_get_icr_low(int cpu_id);
+extern uint32_t apic_get_icr_high(int cpu_id);
+extern uint64_t apic_get_msr_value(int cpu_id);
+extern int      apic_get_highest_irr(int cpu_id);
+extern int      apic_get_highest_isr(int cpu_id);
 
 #ifdef __cplusplus
 }

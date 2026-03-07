@@ -1298,6 +1298,16 @@ apic_get_interrupt(void)
     apic_clear_bit(apic->irr, highest_irr);
     apic_set_bit(apic->isr, highest_irr);
 
+    /* SMP DIAG: Log APIC interrupt delivery. */
+    {
+        static int apic_deliver_count = 0;
+        if (apic_deliver_count < 100) {
+            apic_deliver_count++;
+            fprintf(stderr, "APIC-DELIVER[%d]: vector=%02X, cpu=%d, ppr=%02X\n",
+                    apic_deliver_count, highest_irr, active_cpu, ppr);
+        }
+    }
+
     apic_log("APIC: Delivering vector %02X\n", highest_irr);
     return highest_irr;
 }
@@ -1329,6 +1339,16 @@ apic_set_irr_cpu(int cpu_id, int vector)
         return;
 
     apic_set_bit(target->irr, vector);
+
+    /* SMP DIAG: Log APIC IRR set from I/O APIC. */
+    {
+        static int apic_irr_log_count = 0;
+        if (apic_irr_log_count < 100) {
+            apic_irr_log_count++;
+            fprintf(stderr, "APIC-IRR-SET[%d]: cpu=%d, vector=%02X (active_cpu=%d)\n",
+                    apic_irr_log_count, cpu_id, vector, active_cpu);
+        }
+    }
 
     /* Wake the CPU if it is halted. */
     cpu_contexts[cpu_id].halted = 0;
@@ -1590,4 +1610,68 @@ apic_get_svr(int cpu_id)
     if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
         return 0;
     return apics[cpu_id]->svr;
+}
+
+uint32_t
+apic_get_tpr(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0;
+    return apics[cpu_id]->tpr;
+}
+
+uint32_t
+apic_get_lvt_lint0(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0;
+    return apics[cpu_id]->lvt_lint0;
+}
+
+uint32_t
+apic_get_lvt_lint1(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0;
+    return apics[cpu_id]->lvt_lint1;
+}
+
+uint32_t
+apic_get_icr_low(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0;
+    return apics[cpu_id]->icr_low;
+}
+
+uint32_t
+apic_get_icr_high(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0;
+    return apics[cpu_id]->icr_high;
+}
+
+uint64_t
+apic_get_msr_value(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return 0;
+    return apics[cpu_id]->msr;
+}
+
+int
+apic_get_highest_irr(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return -1;
+    return apic_find_highest_bit(apics[cpu_id]->irr);
+}
+
+int
+apic_get_highest_isr(int cpu_id)
+{
+    if (cpu_id < 0 || cpu_id >= APIC_MAX_CPUS || apics[cpu_id] == NULL)
+        return -1;
+    return apic_find_highest_bit(apics[cpu_id]->isr);
 }

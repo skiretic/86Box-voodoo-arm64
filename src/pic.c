@@ -767,6 +767,15 @@ picint_common(uint16_t num, int level, int set, uint8_t *irq_state)
                     ioapic_handled |= (1 << i);
             }
         }
+        /* SMP DIAG: Log IRQ 14 routing path. */
+        if (num & (1 << 14)) {
+            static int irq14_log_count = 0;
+            if (irq14_log_count < 50) {
+                irq14_log_count++;
+                fprintf(stderr, "SMP-IRQ14[%d]: set=%d, ioapic_handled=%04X, remaining=%04X (cpu=%d)\n",
+                        irq14_log_count, set, ioapic_handled, num & ~ioapic_handled, active_cpu);
+            }
+        }
         num &= ~ioapic_handled;
     }
 

@@ -320,6 +320,45 @@ cpu_log(const char *fmt, ...)
 #    define cpu_log(fmt, ...)
 #endif
 
+void
+cpu_log_smp_reset_state(const char *tag)
+{
+    FILE *f = fopen("/tmp/86box_smp.log", "a");
+    if (!f)
+        return;
+
+    fprintf(f,
+            "[SMP_RESET] %s: active_cpu=%d num_cpus=%d cpu0.halted=%d cpu1.halted=%d cpu1.wait_for_sipi=%d\n",
+            tag,
+            active_cpu,
+            num_cpus,
+            cpu_contexts[0].halted,
+            cpu_contexts[1].halted,
+            cpu_contexts[1].wait_for_sipi);
+
+    for (int cpu_id = 0; cpu_id < APIC_MAX_CPUS; cpu_id++) {
+        fprintf(f,
+                "[SMP_RESET] %s: cpu%d.apic id=%08X svr=%08X tpr=%08X lvt0=%08X lvt1=%08X "
+                "icr=%08X/%08X msr=%016" PRIX64 " hi_irr=%d hi_isr=%d\n",
+                tag,
+                cpu_id,
+                apic_get_id(cpu_id),
+                apic_get_svr(cpu_id),
+                apic_get_tpr(cpu_id),
+                apic_get_lvt_lint0(cpu_id),
+                apic_get_lvt_lint1(cpu_id),
+                apic_get_icr_high(cpu_id),
+                apic_get_icr_low(cpu_id),
+                apic_get_msr_value(cpu_id),
+                apic_get_highest_irr(cpu_id),
+                apic_get_highest_isr(cpu_id));
+    }
+
+    fprintf(f, "[SMP_RESET] %s: smp_fine_slice_countdown=%d\n",
+            tag, smp_fine_slice_countdown);
+    fclose(f);
+}
+
 int
 cpu_has_feature(int feature)
 {
@@ -4796,6 +4835,7 @@ cpu_smp_init(void)
 
     if (num_cpus <= 1) {
         fprintf(stderr, "SMP: cpu_smp_init() skipped (num_cpus <= 1)\n");
+        cpu_log_smp_reset_state("cpu_smp_init:end");
         return;
     }
 
@@ -4933,6 +4973,7 @@ cpu_smp_init(void)
     fprintf(stderr, "SMP: AP (CPU 1) context initialized with x86 reset state, "
                     "wait_for_sipi=1, active_cpu=%d\n",
             active_cpu);
+    cpu_log_smp_reset_state("cpu_smp_init:end");
 }
 
 void

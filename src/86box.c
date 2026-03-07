@@ -326,6 +326,10 @@ int title_update;
 int framecountx        = 0;
 int hard_reset_pending = 0;
 
+/* SMP diagnostics: incremented on each hard reset so pc_run() can detect
+   when to reset its static-local diagnostic state. */
+static int smp_boot_generation = 0;
+
 #if 0
 int unscaled_size_x = SCREEN_RES_X; /* current unscaled size X */
 int unscaled_size_y = SCREEN_RES_Y; /* current unscaled size Y */
@@ -1876,6 +1880,7 @@ update_mouse_msg(void)
 void
 pc_reset_hard(void)
 {
+    cpu_log_smp_reset_state("pc_reset_hard:request");
     hard_reset_pending = 1;
 }
 
@@ -1957,17 +1962,49 @@ ack_pause(void)
 }
 
 void
+pc_process_hard_reset_pending(void)
+{
+    if (!hard_reset_pending)
+        return;
+
+    hard_reset_pending = 0;
+    smp_boot_generation++;
+    cpu_log_smp_reset_state("pc_reset_hard:start");
+    {
+        FILE *f = fopen("/tmp/86box_smp_boot.log", "a");
+        if (f) {
+            fprintf(f, "\n[SMP_BOOT] === HARD RESET STARTING (gen=%d) ===\n",
+                    smp_boot_generation);
+            fprintf(f, "[SMP_BOOT] pre-reset: active_cpu=%d num_cpus=%d\n",
+                    active_cpu, num_cpus);
+            fclose(f);
+        }
+    }
+    pc_reset_hard_close();
+    pc_reset_hard_init();
+    {
+        FILE *f = fopen("/tmp/86box_smp_boot.log", "a");
+        if (f) {
+            fprintf(f, "[SMP_BOOT] post-reset: active_cpu=%d num_cpus=%d\n",
+                    active_cpu, num_cpus);
+            fprintf(f, "[SMP_BOOT] cpu_contexts[0].halted=%d wait_for_sipi=%d\n",
+                    cpu_contexts[0].halted, cpu_contexts[0].wait_for_sipi);
+            if (num_cpus > 1)
+                fprintf(f, "[SMP_BOOT] cpu_contexts[1].halted=%d wait_for_sipi=%d\n",
+                        cpu_contexts[1].halted, cpu_contexts[1].wait_for_sipi);
+            fclose(f);
+        }
+    }
+}
+
+void
 pc_run(void)
 {
     int     mouse_msg_idx;
     wchar_t temp[200];
 
     /* Trigger a hard reset if one is pending. */
-    if (hard_reset_pending) {
-        hard_reset_pending = 0;
-        pc_reset_hard_close();
-        pc_reset_hard_init();
-    }
+    pc_process_hard_reset_pending();
 
     /* Update the guest-CPU independent timer for devices with independent clock speed */
     rivatimer_update_all();
@@ -1976,8 +2013,30 @@ pc_run(void)
     startblit();
     if (num_cpus > 1) {
         /* SMP: cooperative time-slicing across all CPUs. */
-        static int smp_logged_startup = 0;
-        static int smp_iter_count     = 0;
+        static int smp_logged_startup  = 0;
+        static int smp_iter_count      = 0;
+        static int smp_last_generation = -1;
+
+        /* Reset all static diagnostic state when a hard reset has occurred. */
+        if (smp_last_generation != smp_boot_generation) {
+            smp_last_generation  = smp_boot_generation;
+            smp_logged_startup   = 0;
+            smp_iter_count       = 0;
+            /* Log the start of this boot's SMP execution. */
+            FILE *f = fopen("/tmp/86box_smp_boot.log", "a");
+            if (f) {
+                fprintf(f, "[SMP_BOOT] SMP loop starting (gen=%d): active_cpu=%d num_cpus=%d\n",
+                        smp_boot_generation, active_cpu, num_cpus);
+                fprintf(f, "[SMP_BOOT] cpu_contexts[0].halted=%d wait_for_sipi=%d apic=%p\n",
+                        cpu_contexts[0].halted, cpu_contexts[0].wait_for_sipi,
+                        (void *) cpu_contexts[0].apic);
+                if (num_cpus > 1)
+                    fprintf(f, "[SMP_BOOT] cpu_contexts[1].halted=%d wait_for_sipi=%d apic=%p\n",
+                            cpu_contexts[1].halted, cpu_contexts[1].wait_for_sipi,
+                            (void *) cpu_contexts[1].apic);
+                fclose(f);
+            }
+        }
 
         if (!smp_logged_startup) {
             int32_t startup_total = (int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000);
@@ -2039,7 +2098,12 @@ pc_run(void)
                     cpu_contexts[i].halted = 0;
 
                 /* Log first execution of CPU 1 after SIPI — detailed dump. */
-                static int cpu1_first_exec_logged = 0;
+                static int cpu1_first_exec_logged         = 0;
+                static int cpu1_first_exec_logged_gen     = -1;
+                if (cpu1_first_exec_logged_gen != smp_boot_generation) {
+                    cpu1_first_exec_logged_gen = smp_boot_generation;
+                    cpu1_first_exec_logged     = 0;
+                }
                 if (i == 1 && !cpu1_first_exec_logged) {
                     uint32_t ap_lin = cpu_state.seg_cs.base + cpu_state.pc;
                     fprintf(stderr, "\n=== SMP DIAG: AP (CPU1) FIRST EXEC ===\n");
@@ -2067,6 +2131,9 @@ pc_run(void)
                 /* Track TSC before execution so we can compute the delta. */
                 uint64_t tsc_before = tsc;
                 uint32_t pc_before  = cpu_state.pc;
+                uint32_t cs_before  = cpu_state.seg_cs.seg;
+                uint32_t ds_before  = cpu_state.seg_ds.seg;
+                uint32_t lin_before = cpu_state.seg_cs.base + pc_before;
 
                 /* One-shot PRE-EXEC dump: BSP state right before first fine-slice exec */
                 {
@@ -2151,14 +2218,101 @@ pc_run(void)
                     }
                 }
 
-                cpu_exec(slice_cycles);
+                int32_t exec_cycles = slice_cycles;
+                int     bios_step_trace = 0;
+                int     bios_step_index = 0;
+
+                {
+                    static int bios_step_gen   = -1;
+                    static int bios_step_count = 0;
+
+                    if (bios_step_gen != smp_boot_generation) {
+                        bios_step_gen   = smp_boot_generation;
+                        bios_step_count = 0;
+                    }
+
+                    /* Narrow diagnostic for the first divergent BP6 BIOS window.
+                       Shrink CPU0's slice only while it is executing the ROM region
+                       around F000:7B05 so we can resolve the branch path without
+                       slowing the entire boot. */
+                    if (i == 0
+                        && smp_fine_slice_countdown == 0
+                        && (((lin_before >= 0x000F7AF0) && (lin_before < 0x000F7DB0))
+                            || ((lin_before >= 0x000FF500) && (lin_before < 0x000FF540)))
+                        && bios_step_count < 512) {
+                        exec_cycles = ((lin_before >= 0x000FF500) && (lin_before < 0x000FF540)) ? 1 : 32;
+                        bios_step_trace = 1;
+                        bios_step_index = ++bios_step_count;
+                    }
+                }
+
+                cpu_exec(exec_cycles);
+
+                /* Early-boot trace (CPU0 only): capture first slices after reset.
+                   This helps compare good vs black boots before APIC setup. */
+                {
+                    static int early_trace_gen   = -1;
+                    static int early_trace_count = 0;
+                    if (early_trace_gen != smp_boot_generation) {
+                        early_trace_gen   = smp_boot_generation;
+                        early_trace_count = 0;
+                    }
+
+                    if (i == 0 && sub == 0 && early_trace_count < 64) {
+                        early_trace_count++;
+                        uint32_t pc_after  = cpu_state.pc;
+                        uint32_t lin_after = cpu_state.seg_cs.base + pc_after;
+                        fprintf(stderr,
+                                "SMP-EARLY[%d]: CS:IP %04X:%04X (%08X) -> %04X:%04X (%08X) "
+                                "DS=%04X->%04X ES=%04X AX=%04X BX=%04X CX=%04X DX=%04X "
+                                "flags=%04X CR0=%08X [0472]=%02X%02X [05FF]=%02X\n",
+                                early_trace_count,
+                                cs_before, pc_before, lin_before,
+                                cpu_state.seg_cs.seg, pc_after, lin_after,
+                                ds_before, cpu_state.seg_ds.seg, cpu_state.seg_es.seg,
+                                cpu_state.regs[0].w, cpu_state.regs[3].w,
+                                cpu_state.regs[1].w, cpu_state.regs[2].w,
+                                cpu_state.flags, cpu_state.CR0.l,
+                                mem_readb_phys(0x473), mem_readb_phys(0x472),
+                                mem_readb_phys(0x05FF));
+                    }
+                }
+
+                if (bios_step_trace) {
+                    uint32_t pc_after  = cpu_state.pc;
+                    uint32_t lin_after = cpu_state.seg_cs.base + pc_after;
+                    fprintf(stderr,
+                            "SMP-BIOS-STEP[%d]: %08X -> %08X "
+                            "CS=%04X DS=%04X ES=%04X AX=%04X BX=%04X CX=%04X DX=%04X "
+                            "flags=%04X bytes=%02X %02X %02X %02X %02X %02X\n",
+                            bios_step_index,
+                            lin_before, lin_after,
+                            cpu_state.seg_cs.seg, cpu_state.seg_ds.seg, cpu_state.seg_es.seg,
+                            cpu_state.regs[0].w, cpu_state.regs[3].w,
+                            cpu_state.regs[1].w, cpu_state.regs[2].w,
+                            cpu_state.flags,
+                            mem_readb_phys(lin_before + 0),
+                            mem_readb_phys(lin_before + 1),
+                            mem_readb_phys(lin_before + 2),
+                            mem_readb_phys(lin_before + 3),
+                            mem_readb_phys(lin_before + 4),
+                            mem_readb_phys(lin_before + 5));
+                }
 
                 /* === DIAGNOSTIC: detailed SMP fine-slice logging === */
                 {
-                    static int  diag_fine_logged   = 0;
-                    static int  diag_bsp_stuck_cnt = 0;
-                    static uint32_t diag_bsp_last_pc = 0xFFFFFFFF;
-                    static int  diag_trace_count   = 0;
+                    static int      diag_fine_logged     = 0;
+                    static int      diag_bsp_stuck_cnt   = 0;
+                    static uint32_t diag_bsp_last_pc     = 0xFFFFFFFF;
+                    static int      diag_trace_count     = 0;
+                    static int      diag_fine_gen        = -1;
+                    if (diag_fine_gen != smp_boot_generation) {
+                        diag_fine_gen       = smp_boot_generation;
+                        diag_fine_logged    = 0;
+                        diag_bsp_stuck_cnt  = 0;
+                        diag_bsp_last_pc    = 0xFFFFFFFF;
+                        diag_trace_count    = 0;
+                    }
 
                     /* Trace FIRST 500 sub-iterations after SIPI for BSP.
                        This captures the delay loop, the [05FF] check, and whatever happens next.
@@ -2186,8 +2340,14 @@ pc_run(void)
                     }
                     /* Also trace first 200 AP sub-iterations */
                     {
-                        static int diag_ap_trace = 0;
-                        static int ap_code_dumped = 0;
+                        static int diag_ap_trace    = 0;
+                        static int ap_code_dumped   = 0;
+                        static int diag_ap_gen      = -1;
+                        if (diag_ap_gen != smp_boot_generation) {
+                            diag_ap_gen     = smp_boot_generation;
+                            diag_ap_trace   = 0;
+                            ap_code_dumped  = 0;
+                        }
                         if (smp_fine_slice_countdown > 0 && i == 1 && diag_ap_trace < 200) {
                             diag_ap_trace++;
                             uint32_t lin_after = cpu_state.seg_cs.base + cpu_state.pc;
@@ -2361,7 +2521,13 @@ pc_run(void)
 
                     /* Error halt detection: EB FE (JMP $) in BIOS area */
                     {
-                        static int diag_halt_logged[2] = {0, 0};
+                        static int diag_halt_logged[2]     = {0, 0};
+                        static int diag_halt_logged_gen     = -1;
+                        if (diag_halt_logged_gen != smp_boot_generation) {
+                            diag_halt_logged_gen   = smp_boot_generation;
+                            diag_halt_logged[0]    = 0;
+                            diag_halt_logged[1]    = 0;
+                        }
                         if (i < 2 && !diag_halt_logged[i]) {
                             uint32_t lin = cpu_state.seg_cs.base + cpu_state.pc;
                             uint8_t b0 = mem_readb_phys(lin);
@@ -2433,6 +2599,23 @@ pc_run(void)
                 for (int j = 0; j < num_cpus; j++) {
                     if (j != i)
                         cpu_contexts[j].tsc += tsc_delta;
+                }
+            }
+        }
+
+        /* SMP DIAG: Periodic PIC state dump for interrupt debugging. */
+        {
+            static int irq_diag_count = 0;
+            if ((smp_iter_count % 5000) == 1) {
+                irq_diag_count++;
+                if (irq_diag_count <= 30) {
+                    extern pic_t pic, pic2;
+                    fprintf(stderr, "SMP-IRQ-STATE[%d] iter=%d: "
+                            "PIC1: irr=%02X imr=%02X isr=%02X int_pending=%d | "
+                            "PIC2: irr=%02X imr=%02X isr=%02X int_pending=%d\n",
+                            irq_diag_count, smp_iter_count,
+                            pic.irr, pic.imr, pic.isr, pic.int_pending,
+                            pic2.irr, pic2.imr, pic2.isr, pic2.int_pending);
                 }
             }
         }

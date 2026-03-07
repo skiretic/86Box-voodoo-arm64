@@ -1003,6 +1003,7 @@ extern int ap_trace_remaining;
 extern void cpu_save_context(int cpu_id);
 extern void cpu_load_context(int cpu_id);
 extern void cpu_switch_to(int cpu_id);
+extern void cpu_log_smp_reset_state(const char *tag);
 
 /* Initialize SMP contexts after cpu_set(). Call once during machine init.
    CPU 0 (BSP) gets current globals. CPU 1 (AP) starts in wait-for-SIPI. */
