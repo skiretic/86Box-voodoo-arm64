@@ -224,8 +224,12 @@ ropRET_imm_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(
 uint32_t
 ropRETF_16(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), UNUSED(uint32_t op_pc))
 {
-    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG))
-        return 0;
+    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG)) {
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        uop_LOAD_FUNC_ARG_IMM(ir, 0, 0);
+        uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_retf_w);
+        return -1;
+    }
 
     uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
 
@@ -247,8 +251,12 @@ ropRETF_16(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UN
 uint32_t
 ropRETF_32(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), UNUSED(uint32_t op_pc))
 {
-    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG))
-        return 0;
+    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG)) {
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        uop_LOAD_FUNC_ARG_IMM(ir, 0, 0);
+        uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_retf_l);
+        return -1;
+    }
 
     uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
 
@@ -273,10 +281,15 @@ ropRETF_imm_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED
 {
     uint16_t offset;
 
-    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG))
-        return 0;
-
     offset = fastreadw(cs + op_pc);
+    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG)) {
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        uop_LOAD_FUNC_ARG_IMM(ir, 0, offset);
+        uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_retf_w);
+        codegen_mark_code_present(block, cs + op_pc, 2);
+        return -1;
+    }
+
     uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
 
     if (stack32) {
@@ -300,10 +313,15 @@ ropRETF_imm_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED
 {
     uint16_t offset;
 
-    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG))
-        return 0;
-
     offset = fastreadw(cs + op_pc);
+    if ((msw & 1) && !(cpu_state.eflags & VM_FLAG)) {
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        uop_LOAD_FUNC_ARG_IMM(ir, 0, offset);
+        uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_retf_l);
+        codegen_mark_code_present(block, cs + op_pc, 2);
+        return -1;
+    }
+
     uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
 
     if (stack32) {

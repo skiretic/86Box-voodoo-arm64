@@ -1375,6 +1375,20 @@ codegen_callf_l(uint16_t seg, uint32_t pc, uint32_t old_pc)
 
     return cpu_state.pc;
 }
+
+uint32_t
+codegen_retf_w(uint16_t off)
+{
+    op_pmoderetf(0, off);
+    return cpu_state.pc;
+}
+
+uint32_t
+codegen_retf_l(uint16_t off)
+{
+    op_pmoderetf(1, off);
+    return cpu_state.pc;
+}
 #endif
 
 void

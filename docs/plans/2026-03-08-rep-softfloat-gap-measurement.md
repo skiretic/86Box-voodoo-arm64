@@ -153,4 +153,15 @@ Expected: signature replaced successfully.
   - a confirming 3DMark99 rerun for that step shows the shutdown family line `base=19132 0f=6897 x87=1671 rep=9029 3dnow=0`
   - that same shutdown base-opcode report no longer contains `0x9a`
   - the measured remaining hotspot list is now `0xca`, `0xcb`, `0xf7`, and `0xff`
-  - protected-mode follow-up is now explicitly in scope, while softfloat / x87 remains intentionally out of the near-term batch discussion
+  - the next measured branch-point is now resolved in favor of the protected-mode far-return pair (`0xca`, `0xcb`) because it stays inside one far-return semantic family and only needs the protected-mode helper-backed completion path on top of already-direct real/V86 handling, unlike the broader mixed-group bailout pair (`0xf7`, `0xff`)
+  - that far-return pair is now implemented in tree with focused coverage-policy assertions, fresh standalone verification, a rebuild, and a re-sign
+  - a confirming guest rerun logged to `/tmp/new_dynarec_retf_validation.log` reached shutdown with `base=10076 0f=6801 x87=1595 rep=9191 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0xca` or `0xcb`
+  - the first follow-up rerun for that next pair logged to `/tmp/new_dynarec_f7_ff_validation.log` reached shutdown with `base=6475 0f=6805 x87=1421 rep=9092 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0xf7`, while `0xff` still remains
+  - the follow-up narrow fix pair then added direct `0xf6` byte-group arithmetic and completed the remaining `0xff` indirect far-call path
+  - the confirming rerun logged to `/tmp/new_dynarec_f6_ff_validation.log` reached shutdown with `base=5142 0f=6906 x87=1607 rep=9182 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0xf6` or `0xff`
+  - the old mixed-group hotspot sequence on this CPU mix is therefore now closed through `0xf7`, `0xf6`, and `0xff`
+  - protected-mode follow-up remains explicitly in scope, while softfloat / x87 remains intentionally out of the near-term batch discussion
+  - the next measured base-opcode target should now be chosen only after re-baselining on the planned MMX-only CPU configuration

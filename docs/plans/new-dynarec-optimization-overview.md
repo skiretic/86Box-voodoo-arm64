@@ -67,24 +67,32 @@ These opcodes have direct CPU new dynarec coverage in tree and have dropped out 
 - non-protected follow-up batch: `0xa5`, `0x6b`
 - low-risk sibling cleanup: `0x69`, `0xa4`
 - first protected-mode far-transfer slice: `0x9a`
+- protected-mode far return pair: `0xca`, `0xcb`
+- mixed-group / adjacent helper-bailout cleanup: `0xf7`, `0xf6`, `0xff`
 
-Latest confirming 3DMark99 shutdown log:
+Latest confirming shutdown logs:
 
-- `/tmp/new_dynarec_callf_3dmark_validation.log`
-- fallback families: `base=19132`, `0f=6897`, `x87=1671`, `rep=9029`, `3dnow=0`
-- `0x9a` is absent from the shutdown base-fallback report
+- `/tmp/new_dynarec_retf_validation.log`
+- fallback families: `base=10076`, `0f=6801`, `x87=1595`, `rep=9191`, `3dnow=0`
+- `0xca` and `0xcb` are absent from the shutdown base-fallback report
+- `/tmp/new_dynarec_f7_ff_validation.log`
+- fallback families: `base=6475`, `0f=6805`, `x87=1421`, `rep=9092`, `3dnow=0`
+- `0xf7` is absent from the shutdown base-fallback report
+- `/tmp/new_dynarec_f6_ff_validation.log`
+- fallback families: `base=5142`, `0f=6906`, `x87=1607`, `rep=9182`, `3dnow=0`
+- `0xf6` and `0xff` are absent from the shutdown base-fallback report
 
 ### Still pending from the measured hotspot list
 
-The measured remaining base-opcode hotspots are now:
+The old measured mixed-group hotspot cluster is now closed on this CPU mix:
 
-- protected-mode far return: `0xca`, `0xcb`
-- mixed-group bailout cluster: `0xf7`, `0xff`
+- `0xf7`
+- `0xf6`
+- `0xff`
 
 Current batching guidance:
 
-- highest-impact coherent batch: `0xca` + `0xcb`
-- next alternative batch: `0xf7` + `0xff`
+- the next base-opcode target should be chosen from a fresh MMX-only CPU re-baseline
 - REP remains secondary to those measured base-opcode hotspots
 - softfloat / x87 follow-up is not a near-term batch priority for this branch pass
 
@@ -1033,6 +1041,66 @@ Interpretation:
 - softfloat / x87 remains intentionally out of the near-term batch discussion
 - the next highest-impact coherent batch is the far-return pair (`0xca`, `0xcb`) before the mixed-group bailout pair (`0xf7`, `0xff`)
 
+### 25. Protected-mode far return follow-up: RETF (`0xca`, `0xcb`)
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- protected-mode `RETF` now uses helper-backed direct CPU dynarec paths in both operand sizes while preserving the already-direct real-mode and V86 handling
+- the focused coverage-policy test now asserts direct support for `0xca` and `0xcb`
+
+Why it was needed:
+
+- after `0x9a`, the remaining measured choice was between the protected-mode far-return pair and the broader mixed-group bailout surface
+- `0xca` and `0xcb` were the highest-impact coherent batch because they stayed inside one far-return semantic family and only needed the protected-mode completion path
+
+What evidence confirmed it:
+
+- the three required standalone tests pass, `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds after the build
+- the confirming guest rerun logged to `/tmp/new_dynarec_retf_validation.log` reached shutdown with:
+  - fallback families at shutdown: `base=10076`, `0f=6801`, `x87=1595`, `rep=9191`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0xca` or `0xcb`
+
+### 26. Mixed-group and adjacent helper-bailout cleanup: `0xf7`, `0xf6`, `0xff`
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- `0xf7` now covers its arithmetic half through helper-backed terminal direct paths for `MUL` / `IMUL` / `DIV` / `IDIV`
+- `0xff` now includes indirect far `CALL` through helper-backed direct handling in both operand sizes
+- `0xf6` now covers the byte-group `MUL` / `IMUL` / `DIV` / `IDIV` forms through zero-extended helper-backed direct paths
+- the ARM64 helper ABI now accepts register-backed `LOAD_FUNC_ARG1`, which the indirect far-call path requires
+
+Why it was needed:
+
+- once `0xca` and `0xcb` were closed, the remaining measured helper-bailout pressure was concentrated in `0xf7` and `0xff`
+- the first rerun showed that `0xf7` closed cleanly but `0xff` still remained, and the resulting narrower view exposed the adjacent byte-group bailout `0xf6`
+- fixing `0xff` and `0xf6` together was the narrowest coherent follow-up after that partial result
+
+What evidence confirmed it:
+
+- the three required standalone tests pass, `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds after the build
+- the first mixed-group rerun logged to `/tmp/new_dynarec_f7_ff_validation.log` reached shutdown with:
+  - fallback families at shutdown: `base=6475`, `0f=6805`, `x87=1421`, `rep=9092`, `3dnow=0`
+  - no shutdown `0xf7` entry
+  - shutdown `0xff helper_bailout=1103` still present
+- the follow-up rerun logged to `/tmp/new_dynarec_f6_ff_validation.log` then reached shutdown with:
+  - fallback families at shutdown: `base=5142`, `0f=6906`, `x87=1607`, `rep=9182`, `3dnow=0`
+  - no shutdown `0xf6` entry
+  - no shutdown `0xff` entry
+
+Interpretation:
+
+- the old measured mixed-group hotspot sequence on this CPU mix is now closed
+- the next base-opcode target should be chosen only after a fresh MMX-only CPU re-baseline
+- softfloat / x87 still remains intentionally out of the near-term batch discussion
+
 ## What should be kept vs what could be trimmed later
 
 Keep:
@@ -1065,7 +1133,7 @@ If work continues, it should be framed explicitly as one of:
 
 - allocator/reclaim policy work
 - broader performance work
-- coverage closure
+- coverage closure after an MMX-only CPU re-baseline
 - deeper verification infrastructure only if Phase 2 uncovers a concrete correctness gap
 
 ## Update instructions

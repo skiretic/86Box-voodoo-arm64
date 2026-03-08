@@ -15,6 +15,19 @@
 #include "codegen_ops_helpers.h"
 #include "codegen_ops_misc.h"
 
+static uint32_t codegen_f7_mul_16(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f7_imul_16(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f7_div_16(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f7_idiv_16(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f6_mul(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f6_imul(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f6_div(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f6_idiv(uint16_t dst, uint32_t next_pc);
+static uint32_t codegen_f7_mul_32(uint32_t dst, uint32_t next_pc);
+static uint32_t codegen_f7_imul_32(uint32_t dst, uint32_t next_pc);
+static uint32_t codegen_f7_div_32(uint32_t dst, uint32_t next_pc);
+static uint32_t codegen_f7_idiv_32(uint32_t dst, uint32_t next_pc);
+
 uint32_t
 ropLEA_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
@@ -50,9 +63,6 @@ ropF6(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchd
     x86seg *target_seg = NULL;
     uint8_t imm_data;
     int     reg;
-
-    if (fetchdat & 0x20)
-        return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0)
@@ -109,6 +119,38 @@ ropF6(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchd
             codegen_flags_changed = 1;
             return op_pc + 1;
 
+        case 0x20: /*MUL*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_temp1_W, reg);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f6_mul);
+            return -1;
+
+        case 0x28: /*IMUL*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_temp1_W, reg);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f6_imul);
+            return -1;
+
+        case 0x30: /*DIV*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_temp1_W, reg);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f6_div);
+            return -1;
+
+        case 0x38: /*IDIV*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_MOVZX(ir, IREG_temp1_W, reg);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f6_idiv);
+            return -1;
+
         default:
             break;
     }
@@ -120,9 +162,6 @@ ropF7_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
     x86seg  *target_seg = NULL;
     uint16_t imm_data;
     int      reg;
-
-    if (fetchdat & 0x20)
-        return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0)
@@ -179,6 +218,34 @@ ropF7_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
             codegen_flags_changed = 1;
             return op_pc + 1;
 
+        case 0x20: /*MUL*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_mul_16);
+            return -1;
+
+        case 0x28: /*IMUL*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_imul_16);
+            return -1;
+
+        case 0x30: /*DIV*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_div_16);
+            return -1;
+
+        case 0x38: /*IDIV*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_idiv_16);
+            return -1;
+
         default:
             break;
     }
@@ -190,9 +257,6 @@ ropF7_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
     x86seg  *target_seg = NULL;
     uint32_t imm_data;
     int      reg;
-
-    if (fetchdat & 0x20)
-        return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0)
@@ -248,6 +312,34 @@ ropF7_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
             codegen_flags_changed = 1;
             return op_pc + 1;
 
+        case 0x20: /*MUL*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_mul_32);
+            return -1;
+
+        case 0x28: /*IMUL*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_imul_32);
+            return -1;
+
+        case 0x30: /*DIV*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_div_32);
+            return -1;
+
+        case 0x38: /*IDIV*/
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_f7_idiv_32);
+            return -1;
+
         default:
             break;
     }
@@ -280,6 +372,256 @@ rebuild_c(ir_data_t *ir)
     }
 }
 
+static uint32_t
+codegen_f6_exec(uint16_t dst, uint32_t next_pc, uint32_t subop)
+{
+    int      tempws  = 0;
+    int      tempws2 = 0;
+    uint16_t tempw   = 0;
+    uint16_t src16;
+    int8_t   temps;
+
+    switch (subop) {
+        case 0x20:
+            AX = AL * (dst & 0xff);
+            flags_rebuild();
+            if (AH)
+                cpu_state.flags |= (C_FLAG | V_FLAG);
+            else
+                cpu_state.flags &= ~(C_FLAG | V_FLAG);
+            break;
+
+        case 0x28:
+            tempws = (int) ((int8_t) AL) * (int) ((int8_t) dst);
+            AX     = tempws & 0xffff;
+            flags_rebuild();
+            if (((int16_t) AX >> 7) != 0 && ((int16_t) AX >> 7) != -1)
+                cpu_state.flags |= (C_FLAG | V_FLAG);
+            else
+                cpu_state.flags &= ~(C_FLAG | V_FLAG);
+            break;
+
+        case 0x30:
+            src16 = AX;
+            if (dst)
+                tempw = src16 / (dst & 0xff);
+            if (dst && !(tempw & 0xff00)) {
+                AH = src16 % (dst & 0xff);
+                AL = (src16 / (dst & 0xff)) & 0xff;
+                if (!cpu_iscyrix && !is6117) {
+                    flags_rebuild();
+                    cpu_state.flags |= 0x8D5;
+                    cpu_state.flags &= ~1;
+                }
+            } else
+                x86_int(0);
+            break;
+
+        case 0x38:
+            tempws = (int) (int16_t) AX;
+            if (dst != 0)
+                tempws2 = tempws / (int) ((int8_t) dst);
+            temps = tempws2 & 0xff;
+            if (dst && ((int) temps == tempws2)) {
+                AH = (tempws % (int) ((int8_t) dst)) & 0xff;
+                AL = tempws2 & 0xff;
+                if (!cpu_iscyrix && !is6117) {
+                    flags_rebuild();
+                    cpu_state.flags |= 0x8D5;
+                    cpu_state.flags &= ~1;
+                }
+            } else
+                x86_int(0);
+            break;
+
+        default:
+            return 0;
+    }
+
+    if (!cpu_state.abrt)
+        cpu_state.pc = next_pc;
+    return cpu_state.pc;
+}
+
+static uint32_t
+codegen_f6_mul(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f6_exec(dst, next_pc, 0x20);
+}
+
+static uint32_t
+codegen_f6_imul(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f6_exec(dst, next_pc, 0x28);
+}
+
+static uint32_t
+codegen_f6_div(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f6_exec(dst, next_pc, 0x30);
+}
+
+static uint32_t
+codegen_f6_idiv(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f6_exec(dst, next_pc, 0x38);
+}
+
+static uint32_t
+codegen_f7_16_exec(uint32_t subop, uint16_t dst, uint32_t next_pc)
+{
+    uint32_t templ;
+    uint32_t templ2 = 0;
+    int      tempws;
+    int      tempws2 = 1;
+    int16_t  temps16;
+
+    switch (subop) {
+        case 0x20:
+            templ = AX * dst;
+            AX    = templ & 0xffff;
+            DX    = templ >> 16;
+            flags_rebuild();
+            if (DX)
+                cpu_state.flags |= (C_FLAG | V_FLAG);
+            else
+                cpu_state.flags &= ~(C_FLAG | V_FLAG);
+            break;
+        case 0x28:
+            templ = (int) ((int16_t) AX) * (int) ((int16_t) dst);
+            AX    = templ & 0xffff;
+            DX    = templ >> 16;
+            flags_rebuild();
+            if (((int32_t) templ >> 15) != 0 && ((int32_t) templ >> 15) != -1)
+                cpu_state.flags |= (C_FLAG | V_FLAG);
+            else
+                cpu_state.flags &= ~(C_FLAG | V_FLAG);
+            break;
+        case 0x30:
+            templ = ((uint32_t) DX << 16) | AX;
+            if (dst)
+                templ2 = templ / dst;
+            if (dst && !(templ2 & 0xffff0000)) {
+                DX = templ % dst;
+                AX = (templ / dst) & 0xffff;
+                if (!cpu_iscyrix && !is6117)
+                    setznp16(AX);
+            } else
+                x86_int(0);
+            break;
+        case 0x38:
+            tempws = (int) (((uint32_t) DX << 16) | AX);
+            if (dst)
+                tempws2 = tempws / (int) ((int16_t) dst);
+            temps16 = tempws2 & 0xffff;
+            if ((dst != 0) && ((int) temps16 == tempws2)) {
+                DX = tempws % (int) ((int16_t) dst);
+                AX = tempws2 & 0xffff;
+                if (!cpu_iscyrix && !is6117)
+                    setznp16(AX);
+            } else
+                x86_int(0);
+            break;
+        default:
+            break;
+    }
+
+    if (!cpu_state.abrt)
+        cpu_state.pc = next_pc;
+    return cpu_state.pc;
+}
+
+static uint32_t
+codegen_f7_32_exec(uint32_t subop, uint32_t dst, uint32_t next_pc)
+{
+    uint64_t temp64;
+
+    switch (subop) {
+        case 0x20:
+            temp64 = (uint64_t) EAX * (uint64_t) dst;
+            EAX    = temp64 & 0xffffffff;
+            EDX    = temp64 >> 32;
+            flags_rebuild();
+            if (EDX)
+                cpu_state.flags |= (C_FLAG | V_FLAG);
+            else
+                cpu_state.flags &= ~(C_FLAG | V_FLAG);
+            break;
+        case 0x28:
+            temp64 = (int64_t) (int32_t) EAX * (int64_t) (int32_t) dst;
+            EAX    = temp64 & 0xffffffff;
+            EDX    = temp64 >> 32;
+            flags_rebuild();
+            if (((int64_t) temp64 >> 31) != 0 && ((int64_t) temp64 >> 31) != -1)
+                cpu_state.flags |= (C_FLAG | V_FLAG);
+            else
+                cpu_state.flags &= ~(C_FLAG | V_FLAG);
+            break;
+        case 0x30:
+            if (!divl(dst) && !cpu_iscyrix && !is6117)
+                setznp32(EAX);
+            break;
+        case 0x38:
+            if (!idivl((int32_t) dst) && !cpu_iscyrix && !is6117)
+                setznp32(EAX);
+            break;
+        default:
+            break;
+    }
+
+    if (!cpu_state.abrt)
+        cpu_state.pc = next_pc;
+    return cpu_state.pc;
+}
+
+static uint32_t
+codegen_f7_mul_16(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f7_16_exec(0x20, dst, next_pc);
+}
+
+static uint32_t
+codegen_f7_imul_16(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f7_16_exec(0x28, dst, next_pc);
+}
+
+static uint32_t
+codegen_f7_div_16(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f7_16_exec(0x30, dst, next_pc);
+}
+
+static uint32_t
+codegen_f7_idiv_16(uint16_t dst, uint32_t next_pc)
+{
+    return codegen_f7_16_exec(0x38, dst, next_pc);
+}
+
+static uint32_t
+codegen_f7_mul_32(uint32_t dst, uint32_t next_pc)
+{
+    return codegen_f7_32_exec(0x20, dst, next_pc);
+}
+
+static uint32_t
+codegen_f7_imul_32(uint32_t dst, uint32_t next_pc)
+{
+    return codegen_f7_32_exec(0x28, dst, next_pc);
+}
+
+static uint32_t
+codegen_f7_div_32(uint32_t dst, uint32_t next_pc)
+{
+    return codegen_f7_32_exec(0x30, dst, next_pc);
+}
+
+static uint32_t
+codegen_f7_idiv_32(uint32_t dst, uint32_t next_pc)
+{
+    return codegen_f7_32_exec(0x38, dst, next_pc);
+}
+
 uint32_t
 ropFF_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
@@ -287,12 +629,12 @@ ropFF_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
     int     src_reg;
     int     sp_reg;
 
-    if ((fetchdat & 0x38) != 0x00 && (fetchdat & 0x38) != 0x08 && (fetchdat & 0x38) != 0x10 && (fetchdat & 0x38) != 0x20 && (fetchdat & 0x38) != 0x28 && (fetchdat & 0x38) != 0x30)
+    if ((fetchdat & 0x38) != 0x00 && (fetchdat & 0x38) != 0x08 && (fetchdat & 0x38) != 0x10 && (fetchdat & 0x38) != 0x18 && (fetchdat & 0x38) != 0x20 && (fetchdat & 0x38) != 0x28 && (fetchdat & 0x38) != 0x30)
         return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0) {
-        if ((fetchdat & 0x38) == 0x28)
+        if ((fetchdat & 0x38) == 0x18 || (fetchdat & 0x38) == 0x28)
             return 0;
         src_reg = IREG_16(fetchdat & 7);
     } else {
@@ -356,6 +698,14 @@ ropFF_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
             uop_MOVZX(ir, IREG_pc, src_reg);
             return -1;
 
+        case 0x18: /*CALL far*/
+            uop_MEM_LOAD_REG_OFFSET(ir, IREG_temp1_W, ireg_seg_base(target_seg), IREG_eaaddr, 2);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+            uop_LOAD_FUNC_ARG_REG(ir, 1, src_reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 2, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_callf_w);
+            return -1;
+
         case 0x20: /*JMP*/
             uop_MOVZX(ir, IREG_pc, src_reg);
             return -1;
@@ -389,12 +739,12 @@ ropFF_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
     int     src_reg;
     int     sp_reg;
 
-    if ((fetchdat & 0x38) != 0x00 && (fetchdat & 0x38) != 0x08 && (fetchdat & 0x38) != 0x10 && (fetchdat & 0x38) != 0x20 && (fetchdat & 0x38) != 0x28 && (fetchdat & 0x38) != 0x30)
+    if ((fetchdat & 0x38) != 0x00 && (fetchdat & 0x38) != 0x08 && (fetchdat & 0x38) != 0x10 && (fetchdat & 0x38) != 0x18 && (fetchdat & 0x38) != 0x20 && (fetchdat & 0x38) != 0x28 && (fetchdat & 0x38) != 0x30)
         return 0;
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) == 0xc0) {
-        if ((fetchdat & 0x38) == 0x28)
+        if ((fetchdat & 0x38) == 0x18 || (fetchdat & 0x38) == 0x28)
             return 0;
         src_reg = IREG_32(fetchdat & 7);
     } else {
@@ -456,6 +806,14 @@ ropFF_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
             uop_MEM_STORE_IMM_32(ir, IREG_SS_base, sp_reg, op_pc + 1);
             SUB_SP(ir, 4);
             uop_MOV(ir, IREG_pc, src_reg);
+            return -1;
+
+        case 0x18: /*CALL far*/
+            uop_MEM_LOAD_REG_OFFSET(ir, IREG_temp1_W, ireg_seg_base(target_seg), IREG_eaaddr, 4);
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+            uop_LOAD_FUNC_ARG_REG(ir, 1, src_reg);
+            uop_LOAD_FUNC_ARG_IMM(ir, 2, op_pc + 1);
+            uop_CALL_FUNC_RESULT(ir, IREG_pc, codegen_callf_l);
             return -1;
 
         case 0x20: /*JMP*/
