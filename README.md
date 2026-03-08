@@ -1,5 +1,5 @@
-86Box — Voodoo ARM64 JIT Fork
-=============================
+86Box — CPU New Dynarec ARM64 Fork
+==================================
 
 ## Branch Focus
 
@@ -22,9 +22,9 @@ The Voodoo ARM64 JIT work remains part of the fork history and codebase, but for
 
 ---
 
-This fork adds a **JIT compiler for the 3dfx Voodoo GPU pixel pipeline on ARM64 (AArch64)**. The upstream 86Box Voodoo emulation uses an x86-64 JIT that generates native machine code for the pixel pipeline at runtime. On ARM64 hosts (Apple Silicon, Raspberry Pi 5, Snapdragon), that JIT is unavailable and the emulator falls back to a C interpreter, which is significantly slower.
+This fork is currently focused on **CPU new dynarec (NDR) work on ARM64 (AArch64)**. The active branch work is reducing measured CPU dynarec fallback hotspots, keeping the ARM backend within an **ARMv8.0-A** ceiling, and improving observability, regression coverage, and guest-visible validation for direct recompilation changes.
 
-This fork ports the Voodoo JIT to ARM64, generating native AArch64 instructions for each pixel pipeline configuration — depth test, texture fetch, color/alpha combine, fog, alpha blend, dithering, and framebuffer write. The result is the same runtime code generation approach as x86-64, targeting ARMv8.0-A baseline (compatible with all 64-bit ARM devices).
+The repository still contains earlier **Voodoo ARM64 JIT** work from the fork history, but that is not the active focus of the current `cpu-optimizations` branch.
 
 ### What's included
 
