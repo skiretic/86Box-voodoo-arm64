@@ -131,4 +131,12 @@ Expected: signature replaced successfully.
   - the first landed batch took the narrowest string-op slice from that cluster: non-REP `STOS`/`LODS` (`0xaa`, `0xab`, `0xac`, `0xad`)
   - a confirming 3DMark99 rerun with fallback-family and base-opcode logging shows the shutdown family line `base=31127 0f=4880 x87=319 rep=6818 3dnow=0`
   - that same shutdown base-opcode report no longer contains `0xaa`, `0xab`, `0xac`, or `0xad`
-  - the next measured base-opcode subset is now clearly `0x9a`, `0xca`, `0xc8`, `0x9d`, `0xcb`, followed by `0xa5`, `0xf7`, `0x6b`, and `0xff`
+  - the next measured base-opcode subset was therefore the far control / frame cluster `0x9a`, `0xca`, `0xc8`, `0x9d`, `0xcb`
+  - the first landed slice from that cluster is `ENTER` (`0xc8`), chosen ahead of `0x9a`, `0xca`, `0x9d`, and `0xcb` because it is the only remaining table hole in that cluster without protected-mode far-transfer or `POPF` privilege semantics
+  - a guest-visible rerun after `ENTER` confirmed that `0xc8` dropped out of the shutdown base-fallback report, with the family line `base=28738 0f=4886 x87=410 rep=6700 3dnow=0`
+  - the next landed slice from that same cluster is `POPF` (`0x9d`), implemented as a legality-first non-V86 direct path while preserving fallback for the V86-sensitive path
+  - the first `POPF` guest run crashed due to a mixed-width IR bug in the new upper-EFLAGS merge sequence; the follow-up fix corrected that backend-illegal form
+  - the confirming post-fix 3DMark99 rerun shows the shutdown family line `base=25331 0f=4672 x87=451 rep=6754 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0xc8` or `0x9d`
+  - the remaining measured base-opcode list is now `0x9a`, `0xca`, `0xf7`, `0xcb`, `0xa5`, `0x6b`, and `0xff`
+  - the next measured choice is now between the remaining protected-mode far-transfer subset (`0x9a`, `0xca`, `0xcb`) and the safer non-far `MOVS` (`0xa5`) follow-up

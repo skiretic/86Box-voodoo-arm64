@@ -1,5 +1,7 @@
 # 2026-03-07 New Dynarec Investigation
 
+> Historical baseline note (updated 2026-03-08): this document is the original investigation snapshot from 2026-03-07. Later branch work has already closed the page-0 sentinel bug, Phase 1 invalidation/reclamation hardening, arm64 `PMADDWD` parity, direct 3DNow table enable, the remaining direct 3DNow generator gap, the first measured non-REP `STOS`/`LODS` batch, and the first two far-control/frame legality-first slices (`ENTER` / `0xc8`, `POPF` / `0x9d`). For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+
 ## Scope and method
 
 This investigation is planning-only. No source changes were made.
@@ -27,7 +29,7 @@ The new dynarec is a hybrid CPU execution pipeline: it marks blocks on first enc
 
 The highest-value problems are not missing backend uOP handlers. The backend uOP tables are structurally in parity, but the system has more serious issues in invalidation/reclamation, unsupported direct-recompile coverage, and missing observability. The most severe concrete risk is that the purgeable-page evict list uses real page 0 as its sentinel, which makes page 0 unrepresentable in the list and corrupts page-0 list metadata (`src/include/86box/mem.h:206-234`, `src/mem/mem.c:1855-1863`).
 
-Coverage is materially incomplete. REP-prefixed instructions are never directly recompiled (`src/codegen_new/codegen.c:563-576`), softfloat mode drops `0F` direct coverage to 56/512 entries and disables direct recompilation for all `D8-DF` FPU escape tables (`src/codegen_new/codegen.c:411-417`, `src/codegen_new/codegen.c:452-557`, `src/cpu/cpu.c:607-645`, `src/config.c:489-492`), and arm64 has no direct 3DNow coverage and misses at least `PMADDWD` that x86-64 supports (`src/codegen_new/codegen_ops.c:100-104`, `src/codegen_new/codegen_ops.c:126-130`, `src/codegen_new/codegen_ops.c:182-207`).
+Coverage is materially incomplete. REP-prefixed instructions are never directly recompiled (`src/codegen_new/codegen.c:563-576`), softfloat mode drops `0F` direct coverage to 56/512 entries and disables direct recompilation for all `D8-DF` FPU escape tables (`src/codegen_new/codegen.c:411-417`, `src/codegen_new/codegen.c:452-557`, `src/cpu/cpu.c:607-645`, `src/config.c:489-492`), and at investigation time arm64 still lacked direct 3DNow coverage and missed at least `PMADDWD` that x86-64 supported (`src/codegen_new/codegen_ops.c:100-104`, `src/codegen_new/codegen_ops.c:126-130`, `src/codegen_new/codegen_ops.c:182-207`).
 
 The current codebase also lacks the tooling needed to close these gaps safely. CPU dynarec logging is compile-time-only (`src/cpu/386_dynarec.c:60-75`), there are no repo-visible runtime counters or verify mode hooks for the CPU dynarec, and the repo contains Voodoo JIT verification/analyzer tooling that has no CPU dynarec equivalent (`scripts/README-jit-analyzer.md:1-104`, `scripts/analyze-jit-log.c`, `scripts/analyze-jit-log.py`, `scripts/test-with-vm.sh:1-18`).
 
@@ -157,7 +159,7 @@ Important interpretation:
 - Base integer coverage is incomplete but substantial.
 - Extended opcode coverage is still sparse.
 - Softfloat mode is a major direct-coverage cliff.
-- arm64 lacks all direct 3DNow support and misses some MMX coverage present on x86-64.
+- At investigation time, arm64 lacked all direct 3DNow support and missed some MMX coverage present on x86-64. That specific parity gap has since been closed on this branch.
 
 #### REP-prefixed instructions are helper-call only
 
@@ -222,7 +224,7 @@ Interpretation:
   - backend-specific optimizations
   - backend-specific code quality
 
-#### 2. arm64 has no direct 3DNow coverage and misses at least `PMADDWD`
+#### 2. Investigation-time arm64 3DNow / `PMADDWD` parity gap
 
 Evidence:
 
@@ -230,10 +232,14 @@ Evidence:
 - `PMADDWD` is present in x86-64 `0F` tables but compiled out on arm64 (`src/codegen_new/codegen_ops.c:100-104`, `src/codegen_new/codegen_ops.c:126-130`).
 - `src/cpu/cpu.c:1625-1629` still routes K6-2+/K6-3+ CPUs to enhanced 3DNow dynarec opcode tables on the CPU side.
 
-Impact:
+Impact at the time:
 
-- Backend feature parity is materially worse for AMD/K6-era MMX/3DNow workloads on arm64.
-- Some guest CPU models advertise front-end coverage that the arm64 direct recompiler does not actually match.
+- Backend feature parity was materially worse for AMD/K6-era MMX/3DNow workloads on arm64.
+- Some guest CPU models advertised front-end coverage that the arm64 direct recompiler did not actually match.
+
+Follow-up status on this branch:
+
+- This parity gap is now closed; the branch has direct arm64 `PMADDWD` parity, direct 3DNow table enable, and the remaining direct 3DNow generator batch in tree.
 
 #### 3. x86-64 has a backend-only `MOV_IMM` optimization that arm64 lacks
 
@@ -370,7 +376,7 @@ Current behavior progressively shrinks block size, disables unrolling, and event
 |---|---|---|---|
 | 1 | Correctness / stability | Evict-list sentinel collides with page 0 | Concrete metadata corruption and inability to represent page 0 correctly |
 | 2 | Correctness / performance | Byte-mask dirty pages are likely not reclaimed through the purgeable list | Can leave stale dirty pages queued and force random block eviction |
-| 3 | Coverage / performance | REP paths, softfloat paths, and arm64 3DNow/MMX gaps | Large direct-recompile blind spots on real workloads |
+| 3 | Coverage / performance | REP paths, softfloat paths, and investigation-time arm64 3DNow/MMX gaps | Large direct-recompile blind spots on real workloads |
 | 4 | Correctness | Known direct-recompile regressions remain in tree | Existing guest-visible bugs already acknowledged in source |
 | 5 | Observability / testing | No CPU verify mode, counters, or analyzer | Makes every future coverage or perf change riskier and slower to validate |
 | 6 | Architectural debt | Fixed executable pool and random eviction | Likely churn and noisy performance under pressure |
@@ -439,7 +445,7 @@ Work:
 - Tackle the most valuable direct-coverage gaps first:
   - REP string paths
   - known `return 0` bailout clusters
-  - arm64 `PMADDWD` / 3DNow parity or explicit disable policy
+  - at investigation time, arm64 `PMADDWD` / 3DNow parity or explicit disable policy
 
 Exit criteria:
 

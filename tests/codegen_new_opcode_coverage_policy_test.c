@@ -39,7 +39,10 @@ main(void)
     assert(new_dynarec_has_direct_3dnow_opcode_recompile(0x91) == 0);
     assert(new_dynarec_has_direct_3dnow_opcode_recompile(0xbe) == 0);
     assert(new_dynarec_has_direct_base_opcode_recompile(0x9a) == 0);
-    assert(new_dynarec_has_direct_base_opcode_recompile(0xc8) == 0);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0xc8) == 1);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0x9d) == 1);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0xca) == 0);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0xcb) == 0);
 
     return 0;
 }

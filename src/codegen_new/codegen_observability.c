@@ -519,6 +519,8 @@ int
 new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode)
 {
     switch (opcode) {
+        case 0x9d:
+        case 0xc8:
         case 0xaa:
         case 0xab:
         case 0xac:

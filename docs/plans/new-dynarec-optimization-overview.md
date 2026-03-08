@@ -676,6 +676,92 @@ Interpretation:
 - `MOVS` (`0xa5`) is still the next string-op follow-up after that
 - REP, `0F`, x87, and more 3DNow work remain behind those for this workload set
 
+### 19. First far control / frame follow-up slice: ENTER
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- the next landed batch after non-REP `STOS`/`LODS` is the narrowest legality-safe member of the measured far control / frame bucket: `ENTER` (`0xc8`)
+- direct CPU dynarec handlers now exist for operand-size 16 and operand-size 32 `ENTER`
+- the new handlers keep the interpreter-visible frame-chain behavior by pushing the previous frame pointer, copying nested frame links when the immediate nesting count is non-zero, then installing the new frame pointer and subtracting the immediate stack allocation
+- the standalone coverage-policy test now asserts that `0xc8` direct-recompiles while `0x9a`, `0x9d`, `0xca`, and `0xcb` remain out of scope for this batch
+
+Why it was needed:
+
+- measured prioritization said the next work after the first string slice should stay inside the far control / frame hotspot cluster
+- `0xc8` was the best first member of that cluster because it was still a direct-table hole and it does not require segment-load or privilege-sensitive protected-mode far-transfer behavior
+- `0x9a`, `0xca`, and `0xcb` all cross into far call / far return semantics, and `0x9d` adds `POPF` permission and VME handling, so landing `0xc8` first keeps the batch minimal and systematic
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now asserts that `0xc8` direct-recompiles while the rest of the far control / frame subset still does not
+- the three required standalone tests pass, `cmake --build build --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep build/src/86Box.app` succeeds after the build
+- the prior 3DMark99 rerun remains the confirming baseline for the measured ordering that this batch follows:
+  - fallback families at shutdown: `base=31127`, `0f=4880`, `x87=319`, `rep=6818`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0xaa`, `0xab`, `0xac`, or `0xad`
+
+What remains from the measured hotspot list now:
+
+- far control / frame / flags:
+  - `0x9a`, `0xca`, `0x9d`, `0xcb`
+- string:
+  - `0xa5`
+- smaller bailout cluster:
+  - `0xf7`, `0x6b`, `0xff`
+
+Interpretation:
+
+- measured prioritization is still being followed; the batch simply entered that far control / frame cluster through its safest remaining table hole
+- `0x9d` is now the next defensible legality-first follow-up inside the same cluster
+- `0x9a`, `0xca`, and `0xcb` remain plausible payoff candidates, but they should be treated as a separate protected-mode far-transfer step rather than folded into another low-risk batch by default
+
+### 20. Second far control / frame legality-first slice: POPF
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- the next landed batch after `ENTER` keeps the same measured-cluster strategy but takes the next smallest legality-first member: `POPF` (`0x9d`)
+- direct CPU dynarec handlers now exist for operand-size 16 and operand-size 32 `POPF`, covering the common non-V86 path while still falling back when V86 permission-sensitive behavior is in play
+- the new handlers update low flags directly, preserve the architectural reserved bits that the interpreter keeps, and mark the flag state unknown for later consumers
+- the standalone coverage-policy test now asserts that `0x9d` direct-recompiles while `0x9a`, `0xca`, and `0xcb` remain out of scope for this batch
+
+Why it was needed:
+
+- measured prioritization still pointed at the far control / frame cluster after `ENTER`
+- `0x9d` was the best next member because it does not require segment-load or gate-transfer handling like `0x9a`, `0xca`, and `0xcb`
+- the legality-first approach remains intact because the V86-sensitive path still falls back instead of pretending the full protected/VME semantics are already covered
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now asserts that `0x9d` direct-recompiles while `0x9a`, `0xca`, and `0xcb` still do not
+- the three required standalone tests pass, `cmake --build build --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep build/src/86Box.app` succeeds after the build
+- the first guest-visible runtime attempt exposed a real backend legality bug in the new EFLAGS-merge IR sequence; that mixed-width `AND_IMM` path is now fixed
+- a follow-up 3DMark99 rerun with `86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES=1` and `86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS=1` confirmed the corrected guest-visible effect:
+  - fallback families at shutdown: `base=25331`, `0f=4672`, `x87=451`, `rep=6754`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0x9d`
+  - `0xc8` also remains absent from that shutdown base-opcode report
+
+What remains from the measured hotspot list now:
+
+- far control / frame / flags:
+  - `0x9a`, `0xca`, `0xcb`
+- string:
+  - `0xa5`
+- smaller bailout cluster:
+  - `0xf7`, `0x6b`, `0xff`
+
+Interpretation:
+
+- the measured hotspot list is still being worked in order; the branch has now removed the two lowest-risk members of the far control / frame cluster first
+- the remaining far-transfer subset should be treated as its own protected-mode semantics batch, not as a casual extension of the `ENTER`/`POPF` work
+- if the next step should stay low-risk, `MOVS` (`0xa5`) is now the safer measured follow-up
+
 ## What is still considered open
 
 These are not closed by the work above:
@@ -683,7 +769,7 @@ These are not closed by the work above:
 - REP direct recompilation coverage
 - softfloat direct-coverage cliffs
 - hot base-opcode fallback reduction, starting from the measured string/far-control cluster
-- the remaining measured post-`STOS`/`LODS` base-opcode list: `0x9a`, `0xca`, `0xc8`, `0xf7`, `0x9d`, `0xcb`, `0xa5`, `0x6b`, and `0xff`
+- the remaining measured post-`POPF` base-opcode list: `0x9a`, `0xca`, `0xf7`, `0xcb`, `0xa5`, `0x6b`, and `0xff`
 - broader guest-visible coverage for the still-unhit direct 3DNow suffixes
 - a possible future full CPU shadow-execution verify tier
 - allocator/reclaim policy work to reduce structurally high random eviction under pressure
