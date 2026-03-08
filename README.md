@@ -1,5 +1,5 @@
-86Box — CPU New Dynarec ARM64 Fork
-==================================
+86Box — CPU New Dynarec Fork
+============================
 
 ## Branch Focus
 
@@ -22,7 +22,9 @@ The Voodoo ARM64 JIT work remains part of the fork history and codebase, but for
 
 ---
 
-This fork is currently focused on **CPU new dynarec (NDR) work on ARM64 (AArch64)**. The active branch work is reducing measured CPU dynarec fallback hotspots, keeping the ARM backend within an **ARMv8.0-A** ceiling, and improving observability, regression coverage, and guest-visible validation for direct recompilation changes.
+This fork is currently focused on **CPU new dynarec (NDR)** work. The active branch work is reducing measured CPU dynarec fallback hotspots, improving shared frontend correctness and observability, and landing targeted backend fixes where needed.
+
+That includes changes that affect both **x86-64** and **ARM64** when the code is shared, plus ARM64-specific backend work where required. ARM code in this branch remains constrained to an **ARMv8.0-A** ceiling. In this environment, guest-visible validation is strongest on ARM64.
 
 The repository still contains earlier **Voodoo ARM64 JIT** work from the fork history, but that is not the active focus of the current `cpu-optimizations` branch.
 
