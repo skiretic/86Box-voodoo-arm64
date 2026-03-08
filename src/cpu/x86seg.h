@@ -33,6 +33,8 @@ extern void loadcscall_2386(uint16_t seg, uint32_t old_pc);
 extern void loadcscall_2386(uint16_t seg);
 #endif
 extern void pmoderetf_2386(int is32, uint16_t off);
+extern uint32_t codegen_callf_w(uint16_t seg, uint16_t pc, uint32_t old_pc);
+extern uint32_t codegen_callf_l(uint16_t seg, uint32_t pc, uint32_t old_pc);
 extern void pmodeint_2386(int num, int soft);
 extern void pmodeiret_2386(int is32);
 extern void taskswitch286_2386(uint16_t seg, uint16_t *segdat, int is32);
@@ -67,6 +69,8 @@ extern void loadcscall(uint16_t seg, uint32_t old_pc);
 extern void loadcscall(uint16_t seg);
 #endif
 extern void pmoderetf(int is32, uint16_t off);
+extern uint32_t codegen_callf_w(uint16_t seg, uint16_t pc, uint32_t old_pc);
+extern uint32_t codegen_callf_l(uint16_t seg, uint32_t pc, uint32_t old_pc);
 /* The prototype of pmodeint_2386() is needed here for 386_common.c interrupts. */
 extern void pmodeint_2386(int num, int soft);
 extern void pmodeint(int num, int soft);

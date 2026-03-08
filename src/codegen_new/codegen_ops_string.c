@@ -136,6 +136,12 @@ ropLODSB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint3
 }
 
 uint32_t
+ropMOVSB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
+{
+    return ropMOVS_common(block, ir, IREG_temp0_B, 1, op_32, op_pc);
+}
+
+uint32_t
 ropMOVSW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
 {
     return ropMOVS_common(block, ir, IREG_temp0_W, 2, op_32, op_pc);

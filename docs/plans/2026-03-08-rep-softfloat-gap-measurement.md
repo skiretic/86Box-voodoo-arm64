@@ -146,4 +146,11 @@ Expected: signature replaced successfully.
   - the next low-risk sibling choice then took `IMUL r, r/m, imm16/32` (`0x69`) ahead of `MOVSB` (`0xa4`) because it reuses the already validated `0x6b` helper/result/flags structure without reopening byte-string move semantics
   - the confirming 3DMark99 rerun shows the shutdown family line `base=21172 0f=4693 x87=478 rep=6794 3dnow=0`
   - that same shutdown base-opcode report no longer contains `0x69`
-  - the measured remaining hotspot list is still led by `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`, with `0xa4` now the remaining lower-risk sibling if the next step stays non-protected
+  - a follow-up low-risk sibling cleanup then took `MOVSB` (`0xa4`) once code inspection confirmed `0x69` was already in tree for this branch state
+  - the confirming 3DMark99 rerun for that step shows the shutdown family line `base=32181 0f=7533 x87=717 rep=11137 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0xa4`
+  - the next measured protected-mode follow-up then took immediate far call (`0x9a`) as the narrowest remaining true table hole ahead of the far-return pair (`0xca`, `0xcb`) and the mixed-group bailout pair (`0xf7`, `0xff`)
+  - a confirming 3DMark99 rerun for that step shows the shutdown family line `base=19132 0f=6897 x87=1671 rep=9029 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0x9a`
+  - the measured remaining hotspot list is now `0xca`, `0xcb`, `0xf7`, and `0xff`
+  - protected-mode follow-up is now explicitly in scope, while softfloat / x87 remains intentionally out of the near-term batch discussion

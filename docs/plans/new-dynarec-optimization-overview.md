@@ -51,6 +51,95 @@ That means future work to reduce the remaining random eviction rate should be tr
 
 The current active implementation track is now coverage closure, starting with the smallest parity gap that already had backend support in place.
 
+## Current opcode status
+
+This section is the short current-state view for opcode-related NDR closure work. It is split into:
+
+- the measured base-opcode fallback-reduction campaign
+- other opcode-family coverage already landed on the branch
+
+### Measured base-opcode closures
+
+These opcodes have direct CPU new dynarec coverage in tree and have dropped out of the shutdown base-fallback report in guest validation:
+
+- non-REP `STOS` / `LODS`: `0xaa`, `0xab`, `0xac`, `0xad`
+- far-control / frame legality-first slices: `0xc8`, `0x9d`
+- non-protected follow-up batch: `0xa5`, `0x6b`
+- low-risk sibling cleanup: `0x69`, `0xa4`
+- first protected-mode far-transfer slice: `0x9a`
+
+Latest confirming 3DMark99 shutdown log:
+
+- `/tmp/new_dynarec_callf_3dmark_validation.log`
+- fallback families: `base=19132`, `0f=6897`, `x87=1671`, `rep=9029`, `3dnow=0`
+- `0x9a` is absent from the shutdown base-fallback report
+
+### Still pending from the measured hotspot list
+
+The measured remaining base-opcode hotspots are now:
+
+- protected-mode far return: `0xca`, `0xcb`
+- mixed-group bailout cluster: `0xf7`, `0xff`
+
+Current batching guidance:
+
+- highest-impact coherent batch: `0xca` + `0xcb`
+- next alternative batch: `0xf7` + `0xff`
+- REP remains secondary to those measured base-opcode hotspots
+- softfloat / x87 follow-up is not a near-term batch priority for this branch pass
+
+Project-scope note:
+
+- protected-mode work is in scope for NDR follow-up batches
+
+### Other opcode-family coverage already landed
+
+The measured base-opcode list above is not the full opcode story for this branch. Other already-landed opcode-family work includes:
+
+- arm64 direct `PMADDWD`
+- direct 3DNow table enable on arm64
+- the remaining direct 3DNow / 3DNowE generator batch:
+  - `PI2FW`, `PF2IW`, `PFNACC`, `PFPNACC`, `PFACC`, `PMULHRW`, `PSWAPD`, `PAVGUSB`
+- guest-visible direct 3DNow hit validation across Windows 98 + 3DMark99 and longer mixed runs for:
+  - `0x0d`, `0x1d`, `0x90`, `0x94`, `0x96`, `0x97`, `0x9a`, `0x9e`, `0xa0`, `0xa4`, `0xa6`, `0xaa`, `0xae`, `0xb0`, `0xb4`, `0xb6`
+
+Interpretation:
+
+- the measured base-opcode closure list is intentionally narrow
+- it shows the exact opcodes that were selected from the shutdown fallback reports and then verified out of those reports
+- it does not try to restate every direct opcode that already existed in NDR before this hotspot campaign
+
+## Other major completed NDR work
+
+The opcode list above is not the whole branch status. Other major completed CPU new dynarec work already in tree includes:
+
+- Phase 1 invalidation / reclamation hardening:
+  - page-0 evict-list sentinel fix
+  - byte-mask reclaim hardening
+  - stale-head purge pruning
+  - post-purge dirty-list reuse
+  - stale code-mask cleanup
+  - bulk-dirty overlap-gated enqueue
+- Observability and validation surface:
+  - runtime/shutdown dynarec stats summaries
+  - fallback-family shutdown logging
+  - base-opcode fallback shutdown logging
+  - selective verify sampling
+  - focused standalone regression coverage for the retained observability APIs
+- Coverage closure outside the current base-opcode list:
+  - arm64 direct `PMADDWD`
+  - direct 3DNow table enable on arm64
+  - remaining direct 3DNow / 3DNowE generator coverage
+  - guest-visible 3DNow direct-path validation
+- Allocator / reclaim policy experiments:
+  - initial cold-block mark-deferral work landed and is stable
+  - this line of work is currently paused after low-yield 3DMark99 results
+
+Short version:
+
+- the branch is well past “just a few opcodes”
+- the remaining measured hotspot discussion is specifically about the current highest-payoff base-opcode follow-ups, not the total amount of landed NDR work
+
 ## Optimization map
 
 ### 1. Phase 0 dynarec observability surface
@@ -863,6 +952,86 @@ Interpretation:
 - measured prioritization was followed exactly: the branch stayed non-protected for one more batch and took the narrower coherent sibling first
 - the next low-risk measured subset should now be `MOVSB` (`0xa4`) if the goal is to keep grinding down non-protected fallbacks before touching the protected-mode far-transfer cluster
 - if payoff now matters more than risk, the next step should instead return to `0x9a`, `0xca`, and `0xcb` as a distinct protected-mode semantics batch
+
+### 23. Next low-risk sibling follow-up: MOVSB (`0xa4`)
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- code inspection for this session confirmed the earlier `0x69` step was already in tree, so `MOVSB` (`0xa4`) became the remaining narrow non-protected sibling
+- the existing direct non-REP `MOVS` path now covers the byte-stride case as well through a dedicated `ropMOVSB` entry
+- the focused coverage-policy test now asserts that `0xa4` direct-recompiles, increasing the tracked direct base-string subset from 5 opcodes to 6
+
+Why it was needed:
+
+- measured prioritization for this session was still to stay non-protected and take the narrowest coherent subset
+- with `0x69` already implemented, `0xa4` was the only remaining low-risk sibling from the measured pair
+- this was smaller and safer than switching immediately to the protected-mode far-transfer subset (`0x9a`, `0xca`, `0xcb`) or the mixed-group bailout pair (`0xf7`, `0xff`)
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now asserts direct support for `0xa4`
+- the three required standalone tests pass, `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds after the build
+- a confirming 3DMark99 rerun with `86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES=1` and `86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS=1` reached clean shutdown with:
+  - fallback families at shutdown: `base=32181`, `0f=7533`, `x87=717`, `rep=11137`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0xa4`
+
+What remains from the measured hotspot list now:
+
+- protected-mode far control / return:
+  - `0x9a`, `0xca`, `0xcb`
+- mixed-group bailout cluster:
+  - `0xf7`, `0xff`
+
+Interpretation:
+
+- measured prioritization was still followed: the branch stayed non-protected for one more narrow cleanup after confirming `0x69` was already complete
+- the low-risk sibling pair is now closed
+- the next measured subset should return to the higher-payoff far-transfer batch (`0x9a`, `0xca`, `0xcb`) unless new evidence makes the mixed-group bailout pair (`0xf7`, `0xff`) more attractive
+
+### 24. First protected-mode far-transfer follow-up: CALLF (`0x9a`)
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- the next measured step returned to the protected-mode far-transfer cluster with the narrowest remaining true base-table hole
+- immediate far call (`0x9a`) now direct-recompiles through helper-backed `ropCALL_far_16` / `ropCALL_far_32` entries instead of falling through a `NULL` base-opcode table slot
+- the new direct path reuses dedicated helper entry points in `src/cpu/x86seg.c` so the segment-load and stack-update semantics stay centralized and consistent with existing CPU handling
+- the focused coverage-policy test now asserts that `0x9a` direct-recompiles while `0xca` and `0xcb` remain intentionally out of scope for this batch
+
+Why it was needed:
+
+- measured prioritization had already closed the non-protected sibling pair, so the branch had reached the next real branch point between the protected-mode far-transfer cluster and the mixed-group bailout cluster
+- `0x9a` was the hottest remaining true table hole, making it the narrowest coherent protected-mode step with immediate guest-visible payoff
+- taking `0x9a` first avoided mixing far-return semantics (`0xca`, `0xcb`) or the broader grouped bailout surface (`0xf7`, `0xff`) into the same batch
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now asserts direct support for `0x9a` while `0xca` and `0xcb` still stay out of scope
+- the three required standalone tests pass, `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds after the build
+- a confirming 3DMark99 rerun with `86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES=1` and `86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS=1` reached shutdown with:
+  - fallback families at shutdown: `base=19132`, `0f=6897`, `x87=1671`, `rep=9029`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0x9a`
+  - the remaining measured hotspots in that report are `0xca`, `0xcb`, `0xf7`, and `0xff`
+
+What remains from the measured hotspot list now:
+
+- protected-mode far return:
+  - `0xca`, `0xcb`
+- mixed-group bailout cluster:
+  - `0xf7`, `0xff`
+
+Interpretation:
+
+- measured prioritization was still followed, but the branch has now crossed into protected-mode work because the payoff is higher than continuing to avoid that surface
+- softfloat / x87 remains intentionally out of the near-term batch discussion
+- the next highest-impact coherent batch is the far-return pair (`0xca`, `0xcb`) before the mixed-group bailout pair (`0xf7`, `0xff`)
 
 ## What should be kept vs what could be trimmed later
 

@@ -1267,6 +1267,116 @@ loadcscall(uint16_t seg)
     }
 }
 
+#ifndef OPS_286_386
+uint32_t
+codegen_callf_w(uint16_t seg, uint16_t pc, uint32_t old_pc)
+{
+    uint32_t old_cs;
+
+    old_cs       = CS;
+    cpu_state.pc = pc;
+    optype       = CALL;
+    cgate16 = cgate32 = 0;
+    if (msw & 1)
+        op_loadcscall(seg, old_pc);
+    else {
+        op_loadcs(seg);
+        cycles -= timing_call_rm;
+    }
+    optype = 0;
+    if (cpu_state.abrt) {
+        cgate16 = cgate32 = 0;
+        return cpu_state.pc;
+    }
+
+    if (cgate32) {
+        uint32_t old_esp = ESP;
+        PUSHL(old_cs);
+        if (cpu_state.abrt) {
+            CS = old_cs;
+            cgate16 = cgate32 = 0;
+            return cpu_state.pc;
+        }
+        PUSHL(old_pc);
+        if (cpu_state.abrt) {
+            CS  = old_cs;
+            ESP = old_esp;
+            return cpu_state.pc;
+        }
+    } else {
+        uint32_t old_esp = ESP;
+        PUSHW(old_cs);
+        if (cpu_state.abrt) {
+            CS = old_cs;
+            cgate16 = cgate32 = 0;
+            return cpu_state.pc;
+        }
+        PUSHW(old_pc);
+        if (cpu_state.abrt) {
+            CS  = old_cs;
+            ESP = old_esp;
+            return cpu_state.pc;
+        }
+    }
+
+    return cpu_state.pc;
+}
+
+uint32_t
+codegen_callf_l(uint16_t seg, uint32_t pc, uint32_t old_pc)
+{
+    uint32_t old_cs;
+
+    old_cs       = CS;
+    cpu_state.pc = pc;
+    optype       = CALL;
+    cgate16 = cgate32 = 0;
+    if (msw & 1)
+        op_loadcscall(seg, old_pc);
+    else {
+        op_loadcs(seg);
+        cycles -= timing_call_rm;
+    }
+    optype = 0;
+    if (cpu_state.abrt) {
+        cgate16 = cgate32 = 0;
+        return cpu_state.pc;
+    }
+
+    if (cgate16) {
+        uint32_t old_esp = ESP;
+        PUSHW(old_cs);
+        if (cpu_state.abrt) {
+            CS = old_cs;
+            cgate16 = cgate32 = 0;
+            return cpu_state.pc;
+        }
+        PUSHW(old_pc);
+        if (cpu_state.abrt) {
+            CS  = old_cs;
+            ESP = old_esp;
+            return cpu_state.pc;
+        }
+    } else {
+        uint32_t old_esp = ESP;
+        PUSHL(old_cs);
+        if (cpu_state.abrt) {
+            CS = old_cs;
+            cgate16 = cgate32 = 0;
+            return cpu_state.pc;
+        }
+        PUSHL(old_pc);
+        if (cpu_state.abrt) {
+            CS  = old_cs;
+            ESP = old_esp;
+            return cpu_state.pc;
+        }
+    }
+
+    return cpu_state.pc;
+}
+#endif
+
 void
 #ifdef OPS_286_386
 pmoderetf_2386(int is32, uint16_t off)

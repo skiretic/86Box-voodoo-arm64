@@ -9,6 +9,7 @@ uint32_t ropSTOSB(codeblock_t *block, struct ir_data_t *ir, uint8_t opcode, uint
 uint32_t ropSTOSW(codeblock_t *block, struct ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
 uint32_t ropSTOSL(codeblock_t *block, struct ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
 
+uint32_t ropMOVSB(codeblock_t *block, struct ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
 uint32_t ropMOVSW(codeblock_t *block, struct ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
 uint32_t ropMOVSL(codeblock_t *block, struct ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
 
