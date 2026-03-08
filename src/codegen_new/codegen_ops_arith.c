@@ -49,6 +49,34 @@ codegen_imul32_ib_flag_mask(uint32_t src, uint32_t imm)
     return ((result >> 31) != 0 && (result >> 31) != -1) ? (C_FLAG | V_FLAG) : 0;
 }
 
+static uint32_t
+codegen_imul16_iw_result(uint32_t src, uint32_t imm)
+{
+    return (uint16_t) (((int32_t) (int16_t) src) * ((int32_t) (int16_t) imm));
+}
+
+static uint32_t
+codegen_imul16_iw_flag_mask(uint32_t src, uint32_t imm)
+{
+    const int32_t result = ((int32_t) (int16_t) src) * ((int32_t) (int16_t) imm);
+
+    return ((result >> 15) != 0 && (result >> 15) != -1) ? (C_FLAG | V_FLAG) : 0;
+}
+
+static uint32_t
+codegen_imul32_il_result(uint32_t src, uint32_t imm)
+{
+    return (uint32_t) (((int64_t) (int32_t) src) * ((int64_t) (int32_t) imm));
+}
+
+static uint32_t
+codegen_imul32_il_flag_mask(uint32_t src, uint32_t imm)
+{
+    const int64_t result = ((int64_t) (int32_t) src) * ((int64_t) (int32_t) imm);
+
+    return ((result >> 31) != 0 && (result >> 31) != -1) ? (C_FLAG | V_FLAG) : 0;
+}
+
 uint32_t
 ropADC_AL_imm(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
 {
@@ -2292,6 +2320,71 @@ rop83_l(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetc
     codegen_flags_changed = 1;
     codegen_mark_code_present(block, cs + op_pc + 1, 1);
     return op_pc + 2;
+}
+
+uint32_t
+ropIMUL_w_iw(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+{
+    const int dest_reg = (fetchdat >> 3) & 7;
+    uint16_t  imm_data;
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    if ((fetchdat & 0xc0) == 0xc0) {
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_16(fetchdat & 7));
+    } else {
+        x86seg *target_seg;
+
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+        codegen_check_seg_read(block, ir, target_seg);
+        uop_MEM_LOAD_REG(ir, IREG_temp0_W, ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0_W);
+    }
+
+    imm_data = fastreadw(cs + op_pc + 1);
+    uop_LOAD_FUNC_ARG_IMM(ir, 1, imm_data);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, codegen_imul16_iw_result);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp1, codegen_imul16_iw_flag_mask);
+    uop_MOV(ir, IREG_16(dest_reg), IREG_temp0_W);
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_AND_IMM(ir, IREG_flags, IREG_flags, ~(C_FLAG | V_FLAG));
+    uop_OR(ir, IREG_flags, IREG_flags, IREG_temp1_W);
+
+    codegen_flags_changed = 1;
+    codegen_mark_code_present(block, cs + op_pc + 1, 2);
+    return op_pc + 3;
+}
+
+uint32_t
+ropIMUL_l_il(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+{
+    const int dest_reg = (fetchdat >> 3) & 7;
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    if ((fetchdat & 0xc0) == 0xc0) {
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_32(fetchdat & 7));
+    } else {
+        x86seg *target_seg;
+
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+        codegen_check_seg_read(block, ir, target_seg);
+        uop_MEM_LOAD_REG(ir, IREG_temp0, ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0);
+    }
+
+    fetchdat = fastreadl(cs + op_pc + 1);
+    uop_LOAD_FUNC_ARG_IMM(ir, 1, fetchdat);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, codegen_imul32_il_result);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp1, codegen_imul32_il_flag_mask);
+    uop_MOV(ir, IREG_32(dest_reg), IREG_temp0);
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_AND_IMM(ir, IREG_flags, IREG_flags, ~(C_FLAG | V_FLAG));
+    uop_OR(ir, IREG_flags, IREG_flags, IREG_temp1_W);
+
+    codegen_flags_changed = 1;
+    codegen_mark_code_present(block, cs + op_pc + 1, 4);
+    return op_pc + 5;
 }
 
 uint32_t

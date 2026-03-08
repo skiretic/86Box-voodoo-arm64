@@ -821,6 +821,49 @@ Interpretation:
 - `0x69` and `0xa4` are now the clearest low-risk cleanup candidates if the next step should stay non-protected
 - if payoff now matters more than risk, the branch should return to the far-transfer subset (`0x9a`, `0xca`, `0xcb`) as a separate semantics-heavy batch
 
+### 22. Next low-risk sibling follow-up: IMUL r, r/m, imm16/32 (`0x69`)
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- the next low-risk non-protected follow-up chose `0x69` ahead of `0xa4`
+- direct CPU dynarec handlers now exist for `IMUL r, r/m, imm16/32` (`0x69`) in 16-bit and 32-bit operand-size forms
+- the new handlers deliberately mirror the existing `0x6b` structure: the source operand still comes from the same ModRM decode path, and helper-backed result/overflow-mask calculation still preserves interpreter-visible `CF` / `OF` behavior
+- the focused coverage-policy test now asserts that `0x69` direct-recompiles while `0xa4` remains open
+
+Why it was needed:
+
+- measured prioritization was still to stay non-protected for one more batch unless new evidence justified taking `0x9a` / `0xca` / `0xcb`
+- between the two low-risk siblings, `0x69` was narrower and more coherent because it is the exact immediate-width sibling of the already validated `0x6b` path
+- `0xa4` remained lower risk than the protected-mode far-transfer batch, but it would still reopen byte-string move handling as a separate string-op variant instead of extending the already-proven IMUL helper pattern
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now asserts that `0x69` direct-recompiles and still keeps `0xa4` on the fallback side
+- the three required standalone tests pass, `cmake --build build --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep build/src/86Box.app` succeeds after the build
+- a confirming 3DMark99 rerun with `86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES=1` and `86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS=1` reached clean shutdown with:
+  - fallback families at shutdown: `base=21172`, `0f=4693`, `x87=478`, `rep=6794`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0x69`
+  - `0xa4` remains present as `helper_table_null=148`
+
+What remains from the measured hotspot list now:
+
+- protected-mode far control / return:
+  - `0x9a`, `0xca`, `0xcb`
+- mixed-group bailout cluster:
+  - `0xf7`, `0xff`
+- remaining low-risk non-protected sibling:
+  - `0xa4`
+
+Interpretation:
+
+- measured prioritization was followed exactly: the branch stayed non-protected for one more batch and took the narrower coherent sibling first
+- the next low-risk measured subset should now be `MOVSB` (`0xa4`) if the goal is to keep grinding down non-protected fallbacks before touching the protected-mode far-transfer cluster
+- if payoff now matters more than risk, the next step should instead return to `0x9a`, `0xca`, and `0xcb` as a distinct protected-mode semantics batch
+
 ## What should be kept vs what could be trimmed later
 
 Keep:

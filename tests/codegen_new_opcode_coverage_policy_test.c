@@ -28,6 +28,7 @@ main(void)
     assert(new_dynarec_has_direct_base_opcode_recompile(0xac) == 1);
     assert(new_dynarec_has_direct_base_opcode_recompile(0xad) == 1);
     assert(new_dynarec_has_direct_base_opcode_recompile(0xa5) == 1);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0x69) == 1);
     assert(new_dynarec_has_direct_base_opcode_recompile(0x6b) == 1);
 
     assert(new_dynarec_has_direct_base_opcode_recompile(0xa4) == 0);

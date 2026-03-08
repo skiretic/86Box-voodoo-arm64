@@ -143,4 +143,7 @@ Expected: signature replaced successfully.
   - the first `0x6b` guest run crashed due to an invalid `W <- W` `MOVZX` in the helper-backed IMUL flag-mask path; the follow-up fix removed that backend-illegal form
   - the confirming post-fix 3DMark99 rerun shows the shutdown family line `base=19237 0f=4063 x87=231 rep=5626 3dnow=0`
   - that same shutdown base-opcode report no longer contains `0xa5` or `0x6b`
-  - the measured remaining hotspot list is now `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`, with smaller newly exposed siblings `0x69` and `0xa4`
+  - the next low-risk sibling choice then took `IMUL r, r/m, imm16/32` (`0x69`) ahead of `MOVSB` (`0xa4`) because it reuses the already validated `0x6b` helper/result/flags structure without reopening byte-string move semantics
+  - the confirming 3DMark99 rerun shows the shutdown family line `base=21172 0f=4693 x87=478 rep=6794 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0x69`
+  - the measured remaining hotspot list is still led by `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`, with `0xa4` now the remaining lower-risk sibling if the next step stays non-protected

@@ -39,6 +39,7 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 ## 2026-03-08
 
 ### Added
+- Added the next measured low-risk non-protected follow-up after the `0xa5` / `0x6b` batch: `IMUL r, r/m, imm16/32` (`0x69`) now has direct CPU dynarec handlers in 16-bit and 32-bit operand-size forms, with focused coverage-policy assertions for that exact sibling step.
 - Added the second measured far control / frame legality-first slice after `ENTER`: `POPF` (`0x9d`) now has direct CPU dynarec handlers for the non-V86 path, with focused coverage-policy assertions for that exact one-opcode follow-up.
 - Added the first far control / frame follow-up after the measured non-REP `STOS`/`LODS` batch: `ENTER` (`0xc8`) now has direct CPU dynarec handlers in both operand-size modes, with focused coverage-policy assertions for that exact one-opcode slice.
 - Added an explicit pivot note across the Phase docs recording that allocator/reclaim policy experiments are paused after stable but low-yield 3DMark99 results, and that active implementation has moved to CPU dynarec coverage closure.
@@ -53,6 +54,7 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - Added an explicit Phase 1 closeout pass across the executive summary, changelog, and optimization overview so the remaining Windows 98 + 3DMark99 allocator-pressure behavior is documented as expected scarcity for this workload rather than an open Phase 1 bug.
 
 ### Changed
+- Changed the next low-risk non-protected implementation choice from the open sibling pair (`0x69`, `0xa4`) to `0x69` first because it is the exact immediate-width sibling of the already guest-validated `0x6b` path, while `0xa4` would reopen byte-string move semantics separately.
 - Changed the next far-control/frame implementation choice again from the remaining mixed cluster to a second legality-first slice: `0x9d` landed ahead of `0x9a`, `0xca`, and `0xcb` because it avoids far-transfer segment/gate semantics and can still fall back in the V86-sensitive path.
 - Changed the next far-control/frame implementation choice from the full five-opcode bucket to a legality-first slice: `0xc8` landed ahead of `0x9a`, `0xca`, `0x9d`, and `0xcb` because it is the only remaining table hole in that cluster that does not require protected-mode far-transfer or `POPF` privilege semantics.
 - Fixed the first `0x9d` implementation attempt by correcting the IR-width mix in the upper-EFLAGS combine path, which had produced an unsupported backend `AND_IMM` form and an immediate guest crash on the first logged runtime attempt.
@@ -72,6 +74,8 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - Simplified the purgeable-page list bookkeeping by removing the last-dequeue-reason state that only existed to feed the temporary re-enqueue probes.
 
 ### Validated
+- Confirmed a red/green cycle for the narrowed low-risk sibling coverage-policy test after asserting direct `0x69` support while keeping `0xa4` open, then reran the three focused standalone tests, rebuilt `86Box`, `cpu`, `dynarec`, and `mem` successfully, and re-signed `build/src/86Box.app`; the only build noise remained the pre-existing macOS/Homebrew deployment-target linker warnings.
+- Confirmed the 3DMark99 rerun with `/tmp/new_dynarec_imul_iw_validation.log` reached clean shutdown with fallback families `base=21172`, `0f=4693`, `x87=478`, `rep=6794`, and `3dnow=0`, and the shutdown base-opcode report no longer contained `0x69` while `0xa4` remained present.
 - Confirmed a red/green cycle for the narrowed non-protected coverage-policy test after moving `0xa5` and `0x6b`, then reran the three focused standalone tests, rebuilt `86Box`, `cpu`, `dynarec`, and `mem` successfully, and re-signed `build/src/86Box.app`; the only build noise remained the pre-existing macOS/Homebrew deployment-target linker warnings.
 - Confirmed the first `0x6b` guest-visible runtime crash with `MOVZX 113 113`, then traced it to an invalid `W <- W` `MOVZX` in the new helper-backed IMUL flag-mask path and removed that backend-illegal form.
 - Confirmed the post-fix 3DMark99 rerun with `/tmp/new_dynarec_movs_imul_validation.log` reached clean shutdown with fallback families `base=19237`, `0f=4063`, `x87=231`, `rep=5626`, and `3dnow=0`, and the shutdown base-opcode report no longer contained `0xa5`, `0x6b`, `0x9d`, or `0xc8`.
@@ -103,7 +107,7 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 ### Open
 - There is still no full CPU shadow-execution verify mode or benchmark corpus, but the minimal selective sampling surface needed before Phase 2 is now present.
 - The allocator-policy path is paused, not closed permanently. It should be revisited later if coverage work changes the hot-path mix or exposes a better eviction/admission lever.
-- Larger coverage gaps remain: the narrowed base-opcode list is now led by `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`; low-risk siblings `0x69` and `0xa4` are also now visible after the `0xa5` / `0x6b` batch. Within the far control/frame cluster, `0x9a`, `0xca`, and `0xcb` still carry the protected-mode far-transfer risk. REP and `0F` still trail behind that as measured secondary targets, and broader guest-visible workload coverage for the still-unhit direct 3DNow suffixes (`0x0c`, `0x1c`, `0x8a`, `0x8e`, `0xa7`, `0xb7`, `0xbb`, `0xbf`) is still open.
+- Larger coverage gaps remain: the narrowed base-opcode list is still led by `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`; among the lower-risk siblings, `0x69` is now closed and `0xa4` remains open. Within the far control/frame cluster, `0x9a`, `0xca`, and `0xcb` still carry the protected-mode far-transfer risk. REP and `0F` still trail behind that as measured secondary targets, and broader guest-visible workload coverage for the still-unhit direct 3DNow suffixes (`0x0c`, `0x1c`, `0x8a`, `0x8e`, `0xa7`, `0xb7`, `0xbb`, `0xbf`) is still open.
 
 ## 2026-03-07
 
