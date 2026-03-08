@@ -17,9 +17,24 @@
 #include "codegen_ops_mov.h"
 
 static int
+CF_SET_01(void)
+{
+    return CF_SET() ? 1 : 0;
+}
+static int
+ZF_SET_01(void)
+{
+    return ZF_SET() ? 1 : 0;
+}
+static int
 NF_SET_01(void)
 {
     return NF_SET() ? 1 : 0;
+}
+static int
+PF_SET_01(void)
+{
+    return PF_SET() ? 1 : 0;
 }
 static int
 VF_SET_01(void)
@@ -32,34 +47,34 @@ ropSETcc_compute(ir_data_t *ir, uint8_t opcode)
 {
     switch (opcode & 0x0f) {
         case 0x0: /*SETO*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, VF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, VF_SET_01);
             break;
         case 0x1: /*SETNO*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, VF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, VF_SET_01);
             uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
             break;
         case 0x2: /*SETB*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET_01);
             break;
         case 0x3: /*SETNB*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET_01);
             uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
             break;
         case 0x4: /*SETE*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, ZF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, ZF_SET_01);
             break;
         case 0x5: /*SETNE*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, ZF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, ZF_SET_01);
             uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
             break;
         case 0x6: /*SETBE*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
-            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET_01);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET_01);
             uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
             break;
         case 0x7: /*SETNBE*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
-            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET_01);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET_01);
             uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
             uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
             break;
@@ -71,10 +86,10 @@ ropSETcc_compute(ir_data_t *ir, uint8_t opcode)
             uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
             break;
         case 0xa: /*SETP*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, PF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, PF_SET_01);
             break;
         case 0xb: /*SETNP*/
-            uop_CALL_FUNC_RESULT(ir, IREG_temp0, PF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, PF_SET_01);
             uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
             break;
         case 0xc: /*SETL*/
@@ -92,14 +107,14 @@ ropSETcc_compute(ir_data_t *ir, uint8_t opcode)
             uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
             uop_CALL_FUNC_RESULT(ir, IREG_temp1, VF_SET_01);
             uop_XOR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
-            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET_01);
             uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
             break;
         case 0xf: /*SETNLE*/
             uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
             uop_CALL_FUNC_RESULT(ir, IREG_temp1, VF_SET_01);
             uop_XOR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
-            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET_01);
             uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
             uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
             break;

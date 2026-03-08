@@ -198,8 +198,11 @@ Current batching guidance:
 - the narrow `0x0f 0xaf` trial was also backed out after guest boot failure
 - the next safe multi-op `0F` batch is the `BSWAP` row (`0xc8`-`0xcf`): register-only, no flags, no memory forms, and no protected-mode rules
 - the logged `BSWAP` rerun is now complete too: `0f` fell to `6633`, and there are no remaining shutdown `0xc8`-`0xcf` fallback entries in `/tmp/new_dynarec_0f_bswap_validation.log`
-- the next low-risk ring-3-safe `0F` candidate after `BSWAP` is the `BSF` / `BSR` pair (`0xbc`, `0xbd`)
-- future low-risk `0F` follow-ups should use a host-side synthetic semantics harness first, then one logged guest confirmation run afterward
+- the first host-harness follow-up after `BSWAP` was the `BSF` / `BSR` pair (`0xbc`, `0xbd`), but the first guest-visible attempt is not stable enough to keep enabled
+- the guest-debugging pass found two real bugs in that combined `9c77c0fa6` state: generic `SETcc` was incorrectly normalizing raw flag masks as boolean values, and `BSF` / `BSR` reused stale helper arguments for the ZF-mask helper
+- after fixing the `SETcc` bug, guest boot progressed further but still failed during Windows 98 `IOS` initialization until direct `BSF` / `BSR` table dispatch was removed again
+- the current stable state is therefore: `SETcc` enabled with corrected boolean normalization, `BSWAP` enabled and guest-validated, host-side `BSF` / `BSR` harness support retained, but direct guest dispatch for `0xbc` / `0xbd` disabled pending further debugging
+- future low-risk `0F` follow-ups should still use a host-side synthetic semantics harness first, then one logged guest confirmation run afterward, but a failed guest run should revert only the new table dispatch instead of leaving the unstable direct path enabled
 - if a generic base-only follow-up is needed in parallel or afterward, `0xd0`-`0xd3` is now the clearest coherent base batch
 - REP is still the hottest family overall, but it is a separate non-MMX campaign and no longer blocks doing the MMX-only `0F` follow-up first
 - softfloat / x87 follow-up is not a near-term batch priority for this branch pass

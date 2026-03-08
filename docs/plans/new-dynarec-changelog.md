@@ -36,6 +36,25 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-08 (`0F` `BSF` / `BSR` guest backout after harness-first trial)
+
+### Added
+- Added a host-side synthetic semantics harness for the `BSF` / `BSR` pair (`0x0f 0xbc`, `0x0f 0xbd`) alongside the earlier `BSWAP` harness coverage.
+- Added a guest-visible regression note for the first harness-first `BSF` / `BSR` landing attempt: the initial local `9c77c0fa6` batch had two real correctness bugs outside the standalone harness signal, one in generic `SETcc` boolean normalization and one in `BSF` / `BSR` helper-argument reuse.
+
+### Changed
+- Changed the stable branch state after guest retest: `SETcc` stays enabled with corrected boolean handling, `BSWAP` stays enabled, but direct `BSF` / `BSR` table dispatch is disabled again pending further debugging.
+- Changed the interpretation of the harness-first workflow from "host harness plus one guest run is enough to keep the batch" to "host harness is a gate for attempting the guest run, but guest-visible failures still force the exact new opcode path back out."
+
+### Validated
+- Confirmed the `SETcc` boolean-normalization fix and the `BSF` / `BSR` helper-argument fix both moved the failure later in guest boot: the VM progressed from an early hang to a Windows 98 protection error during `IOS` initialization.
+- Confirmed the exact isolation build with the `SETcc` fix retained, `BSWAP` retained, and only direct `BSF` / `BSR` dispatch removed boots cleanly to the Windows 98 desktop.
+- Confirmed the remaining unstable surface in the `9c77c0fa6` landing is therefore the direct `BSF` / `BSR` guest path, not `BSWAP`.
+
+### Open
+- `BSF` / `BSR` should not be treated as landed even though the host harness and generator code are in tree; only the host-side semantics path is currently trusted.
+- The next `0F` follow-up should start from the restored stable state (`SETcc` fixed, `BSWAP` enabled, `BSF` / `BSR` disabled) instead of assuming the first harness-first `BSF` / `BSR` attempt is shippable.
+
 ## 2026-03-08 (`0F` `BSWAP` row landing)
 
 ### Added
@@ -52,7 +71,7 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 
 ### Open
 - `0xaf`, `0x02`, `0x03`, and the bit-test family still need a stricter opcode-level trial plan than the `BSWAP` row required.
-- `0xbc` / `0xbd` (`BSF` / `BSR`) are the next ring-3-safe row candidate to move under the new host-side semantics harness.
+- `0xbc` / `0xbd` (`BSF` / `BSR`) moved under the new host-side semantics harness, but the first guest-visible trial is not stable enough to keep enabled yet.
 
 ## 2026-03-08 (`0F` `IMUL` follow-up backout)
 

@@ -88,6 +88,7 @@ ropBS_common(codeblock_t *block, ir_data_t *ir, uint32_t fetchdat, uint32_t op_3
             target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
             codegen_check_seg_read(block, ir, target_seg);
             uop_MEM_LOAD_REG(ir, IREG_temp0_W, ireg_seg_base(target_seg), IREG_eaaddr);
+            uop_MOV(ir, IREG_temp1_W, IREG_temp0_W);
             uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp0_W);
         }
 
@@ -95,6 +96,10 @@ ropBS_common(codeblock_t *block, ir_data_t *ir, uint32_t fetchdat, uint32_t op_3
             uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsr16_result);
         else
             uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsf16_result);
+        if ((fetchdat & 0xc0) == 0xc0)
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_16(fetchdat & 7));
+        else
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
         uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_bitscan16_zflag_mask);
         uop_MOV(ir, IREG_16(dest_reg), IREG_temp0_W);
     } else {
@@ -108,6 +113,7 @@ ropBS_common(codeblock_t *block, ir_data_t *ir, uint32_t fetchdat, uint32_t op_3
             target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
             codegen_check_seg_read(block, ir, target_seg);
             uop_MEM_LOAD_REG(ir, IREG_temp0, ireg_seg_base(target_seg), IREG_eaaddr);
+            uop_MOV(ir, IREG_temp1, IREG_temp0);
             uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp0);
         }
 
@@ -115,6 +121,10 @@ ropBS_common(codeblock_t *block, ir_data_t *ir, uint32_t fetchdat, uint32_t op_3
             uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsr32_result);
         else
             uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsf32_result);
+        if ((fetchdat & 0xc0) == 0xc0)
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_32(fetchdat & 7));
+        else
+            uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1);
         uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_bitscan32_zflag_mask);
         uop_MOV(ir, IREG_32(dest_reg), IREG_temp0);
     }
