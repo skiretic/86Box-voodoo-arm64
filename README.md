@@ -1,6 +1,22 @@
 86Box — Voodoo ARM64 JIT Fork
 =============================
 
+## Branch Focus
+
+The active development focus on the `cpu-optimizations` branch is the **CPU new dynarec (NDR)**, not new Voodoo JIT feature work.
+
+Current branch work is centered on:
+
+- reducing CPU new dynarec fallback hotspots with measured opcode-by-opcode follow-ups
+- keeping ARM code at an **ARMv8.0-A** ceiling
+- adding focused observability, regression coverage, and guest-visible validation for CPU dynarec changes
+
+The Voodoo ARM64 JIT work remains part of the fork history and codebase, but for current branch status and planning, use:
+
+- `docs/plans/new-dynarec-executive-summary.md`
+- `docs/plans/new-dynarec-changelog.md`
+- `docs/plans/new-dynarec-optimization-overview.md`
+
 ## ⚠️ AI Disclosure
 **This fork was developed with the assistance of AI.**
 
