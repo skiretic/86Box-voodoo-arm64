@@ -1,6 +1,6 @@
 # 2026-03-07 New Dynarec Investigation
 
-> Historical baseline note (updated 2026-03-08): this document is the original investigation snapshot from 2026-03-07. Later branch work has already closed the page-0 sentinel bug, Phase 1 invalidation/reclamation hardening, arm64 `PMADDWD` parity, direct 3DNow table enable, the remaining direct 3DNow generator gap, the first measured non-REP `STOS`/`LODS` batch, and the first two far-control/frame legality-first slices (`ENTER` / `0xc8`, `POPF` / `0x9d`). For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+> Historical baseline note (updated 2026-03-08): this document is the original investigation snapshot from 2026-03-07. Later branch work has already closed the page-0 sentinel bug, Phase 1 invalidation/reclamation hardening, arm64 `PMADDWD` parity, direct 3DNow table enable, the remaining direct 3DNow generator gap, the first measured non-REP `STOS`/`LODS` batch, the first two far-control/frame legality-first slices (`ENTER` / `0xc8`, `POPF` / `0x9d`), and the next non-protected measured batch (`MOVS` / `0xa5`, `IMUL r, r/m, imm8` / `0x6b`). For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
 
 ## Scope and method
 

@@ -39,12 +39,12 @@ RecompOpFn recomp_opcodes[512] = {
 
 /*40*/  ropINC_r16,     ropINC_r16,     ropINC_r16,     ropINC_r16,     ropINC_r16,     ropINC_r16,     ropINC_r16,     ropINC_r16,     ropDEC_r16,     ropDEC_r16,     ropDEC_r16,     ropDEC_r16,     ropDEC_r16,     ropDEC_r16,     ropDEC_r16,     ropDEC_r16,
 /*50*/  ropPUSH_r16,    ropPUSH_r16,    ropPUSH_r16,    ropPUSH_r16,    ropPUSH_r16,    ropPUSH_r16,    ropPUSH_r16,    ropPUSH_r16,    ropPOP_r16,     ropPOP_r16,     ropPOP_r16,     ropPOP_r16,     ropPOP_r16,     ropPOP_r16,     ropPOP_r16,     ropPOP_r16,
-/*60*/  ropPUSHA_16,    ropPOPA_16,     NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           ropPUSH_imm_16, NULL,           ropPUSH_imm_16_8,NULL,           NULL,           NULL,           NULL,           NULL,
+/*60*/  ropPUSHA_16,    ropPOPA_16,     NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           ropPUSH_imm_16, NULL,           ropPUSH_imm_16_8,ropIMUL_w_ib,   NULL,           NULL,           NULL,           NULL,
 /*70*/  ropJO_8,        ropJNO_8,       ropJB_8,        ropJNB_8,       ropJE_8,        ropJNE_8,       ropJBE_8,       ropJNBE_8,      ropJS_8,        ropJNS_8,       ropJP_8,        ropJNP_8,       ropJL_8,        ropJNL_8,       ropJLE_8,       ropJNLE_8,
 
 /*80*/  rop80,          rop81_w,        rop80,          rop83_w,        ropTEST_b_rm,   ropTEST_w_rm,   ropXCHG_8,      ropXCHG_16,     ropMOV_b_r,     ropMOV_w_r,     ropMOV_r_b,     ropMOV_r_w,     ropMOV_w_seg,   ropLEA_16,      ropMOV_seg_w,   ropPOP_W,
 /*90*/  ropNOP,         ropXCHG_AX,     ropXCHG_AX,     ropXCHG_AX,     ropXCHG_AX,     ropXCHG_AX,     ropXCHG_AX,     ropXCHG_AX,     ropCBW,         ropCWD,         NULL,           NULL,           ropPUSHF,       ropPOPF,        NULL,           NULL,
-/*a0*/  ropMOV_AL_abs,  ropMOV_AX_abs,  ropMOV_abs_AL,  ropMOV_abs_AX,  NULL,           NULL,           NULL,           NULL,           ropTEST_AL_imm, ropTEST_AX_imm, ropSTOSB,       ropSTOSW,       ropLODSB,       ropLODSW,       NULL,           NULL,
+/*a0*/  ropMOV_AL_abs,  ropMOV_AX_abs,  ropMOV_abs_AL,  ropMOV_abs_AX,  NULL,           ropMOVSW,       NULL,           NULL,           ropTEST_AL_imm, ropTEST_AX_imm, ropSTOSB,       ropSTOSW,       ropLODSB,       ropLODSW,       NULL,           NULL,
 /*b0*/  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rw_imm,  ropMOV_rw_imm,  ropMOV_rw_imm,  ropMOV_rw_imm,  ropMOV_rw_imm,  ropMOV_rw_imm,  ropMOV_rw_imm,  ropMOV_rw_imm,
 
 /*c0*/  ropC0,          ropC1_w,        ropRET_imm_16,  ropRET_16,      ropLES_16,      ropLDS_16,      ropMOV_b_imm,   ropMOV_w_imm,   ropENTER_16,    ropLEAVE_16,    ropRETF_imm_16, ropRETF_16,     NULL,           NULL,           NULL,           NULL,
@@ -61,12 +61,12 @@ RecompOpFn recomp_opcodes[512] = {
 
 /*40*/  ropINC_r32,     ropINC_r32,     ropINC_r32,     ropINC_r32,     ropINC_r32,     ropINC_r32,     ropINC_r32,     ropINC_r32,     ropDEC_r32,     ropDEC_r32,     ropDEC_r32,     ropDEC_r32,     ropDEC_r32,     ropDEC_r32,     ropDEC_r32,     ropDEC_r32,
 /*50*/  ropPUSH_r32,    ropPUSH_r32,    ropPUSH_r32,    ropPUSH_r32,    ropPUSH_r32,    ropPUSH_r32,    ropPUSH_r32,    ropPUSH_r32,    ropPOP_r32,     ropPOP_r32,     ropPOP_r32,     ropPOP_r32,     ropPOP_r32,     ropPOP_r32,     ropPOP_r32,     ropPOP_r32,
-/*60*/  ropPUSHA_32,    ropPOPA_32,     NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           ropPUSH_imm_32, NULL,           ropPUSH_imm_32_8,NULL,           NULL,           NULL,           NULL,           NULL,
+/*60*/  ropPUSHA_32,    ropPOPA_32,     NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           ropPUSH_imm_32, NULL,           ropPUSH_imm_32_8,ropIMUL_l_ib,   NULL,           NULL,           NULL,           NULL,
 /*70*/  ropJO_8,        ropJNO_8,       ropJB_8,        ropJNB_8,       ropJE_8,        ropJNE_8,       ropJBE_8,       ropJNBE_8,      ropJS_8,        ropJNS_8,       ropJP_8,        ropJNP_8,       ropJL_8,        ropJNL_8,       ropJLE_8,       ropJNLE_8,
 
 /*80*/  rop80,          rop81_l,        rop80,          rop83_l,        ropTEST_b_rm,   ropTEST_l_rm,   ropXCHG_8,      ropXCHG_32,     ropMOV_b_r,     ropMOV_l_r,     ropMOV_r_b,     ropMOV_r_l,     ropMOV_l_seg,   ropLEA_32,      ropMOV_seg_w,   ropPOP_L,
 /*90*/  ropNOP,         ropXCHG_EAX,    ropXCHG_EAX,    ropXCHG_EAX,    ropXCHG_EAX,    ropXCHG_EAX,    ropXCHG_EAX,    ropXCHG_EAX,    ropCWDE,        ropCDQ,         NULL,           NULL,           ropPUSHFD,      ropPOPFD,       NULL,           NULL,
-/*a0*/  ropMOV_AL_abs,  ropMOV_EAX_abs, ropMOV_abs_AL,  ropMOV_abs_EAX, NULL,           NULL,           NULL,           NULL,           ropTEST_AL_imm, ropTEST_EAX_imm,ropSTOSB,       ropSTOSL,       ropLODSB,       ropLODSL,       NULL,           NULL,
+/*a0*/  ropMOV_AL_abs,  ropMOV_EAX_abs, ropMOV_abs_AL,  ropMOV_abs_EAX, NULL,           ropMOVSL,       NULL,           NULL,           ropTEST_AL_imm, ropTEST_EAX_imm,ropSTOSB,       ropSTOSL,       ropLODSB,       ropLODSL,       NULL,           NULL,
 /*b0*/  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rb_imm,  ropMOV_rl_imm,  ropMOV_rl_imm,  ropMOV_rl_imm,  ropMOV_rl_imm,  ropMOV_rl_imm,  ropMOV_rl_imm,  ropMOV_rl_imm,  ropMOV_rl_imm,
 
 /*c0*/  ropC0,          ropC1_l,        ropRET_imm_32,  ropRET_32,      ropLES_32,      ropLDS_32,      ropMOV_b_imm,   ropMOV_l_imm,   ropENTER_32,    ropLEAVE_32,    ropRETF_imm_32, ropRETF_32,     NULL,           NULL,           NULL,           NULL,

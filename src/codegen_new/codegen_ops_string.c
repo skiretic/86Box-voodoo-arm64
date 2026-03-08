@@ -84,6 +84,33 @@ ropLODS_common(codeblock_t *block, ir_data_t *ir, int value_reg, int stride, uin
     return op_pc;
 }
 
+static uint32_t
+ropMOVS_common(codeblock_t *block, ir_data_t *ir, int value_reg, int stride, uint32_t op_32, uint32_t op_pc)
+{
+    const int src_addr32    = (op_32 & 0x200) ? 1 : 0;
+    const int src_index_reg = src_addr32 ? IREG_ESI : IREG_SI;
+    const int dst_index_reg = src_addr32 ? IREG_EDI : IREG_DI;
+    int       src_addr_reg;
+    int       dst_addr_reg;
+
+    uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+    codegen_check_seg_read(block, ir, op_ea_seg);
+    codegen_check_seg_write(block, ir, &cpu_state.seg_es);
+
+    src_addr_reg = codegen_string_addr_reg(ir, src_addr32, src_index_reg);
+    CHECK_SEG_LIMITS(block, ir, op_ea_seg, src_addr_reg, stride - 1);
+    uop_MEM_LOAD_REG(ir, value_reg, ireg_seg_base(op_ea_seg), src_addr_reg);
+
+    dst_addr_reg = codegen_string_addr_reg(ir, src_addr32, dst_index_reg);
+    CHECK_SEG_LIMITS(block, ir, &cpu_state.seg_es, dst_addr_reg, stride - 1);
+    uop_MEM_STORE_REG(ir, IREG_ES_base, dst_addr_reg, value_reg);
+
+    codegen_adjust_string_index(ir, src_index_reg, stride, src_addr32);
+    codegen_adjust_string_index(ir, dst_index_reg, stride, src_addr32);
+
+    return op_pc;
+}
+
 uint32_t
 ropSTOSB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
 {
@@ -106,6 +133,18 @@ uint32_t
 ropLODSB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
 {
     return ropLODS_common(block, ir, IREG_AL, 1, op_32, op_pc);
+}
+
+uint32_t
+ropMOVSW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
+{
+    return ropMOVS_common(block, ir, IREG_temp0_W, 2, op_32, op_pc);
+}
+
+uint32_t
+ropMOVSL(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
+{
+    return ropMOVS_common(block, ir, IREG_temp0, 4, op_32, op_pc);
 }
 
 uint32_t

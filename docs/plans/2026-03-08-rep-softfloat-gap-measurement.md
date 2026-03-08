@@ -138,5 +138,9 @@ Expected: signature replaced successfully.
   - the first `POPF` guest run crashed due to a mixed-width IR bug in the new upper-EFLAGS merge sequence; the follow-up fix corrected that backend-illegal form
   - the confirming post-fix 3DMark99 rerun shows the shutdown family line `base=25331 0f=4672 x87=451 rep=6754 3dnow=0`
   - that same shutdown base-opcode report no longer contains `0xc8` or `0x9d`
-  - the remaining measured base-opcode list is now `0x9a`, `0xca`, `0xf7`, `0xcb`, `0xa5`, `0x6b`, and `0xff`
-  - the next measured choice is now between the remaining protected-mode far-transfer subset (`0x9a`, `0xca`, `0xcb`) and the safer non-far `MOVS` (`0xa5`) follow-up
+  - the remaining measured base-opcode list at that point was `0x9a`, `0xca`, `0xf7`, `0xcb`, `0xa5`, `0x6b`, and `0xff`
+  - the next landed non-protected measured batch then took `MOVS` word/dword (`0xa5`) plus `IMUL r, r/m, imm8` (`0x6b`) together, leaving the protected-mode far-transfer subset untouched
+  - the first `0x6b` guest run crashed due to an invalid `W <- W` `MOVZX` in the helper-backed IMUL flag-mask path; the follow-up fix removed that backend-illegal form
+  - the confirming post-fix 3DMark99 rerun shows the shutdown family line `base=19237 0f=4063 x87=231 rep=5626 3dnow=0`
+  - that same shutdown base-opcode report no longer contains `0xa5` or `0x6b`
+  - the measured remaining hotspot list is now `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`, with smaller newly exposed siblings `0x69` and `0xa4`

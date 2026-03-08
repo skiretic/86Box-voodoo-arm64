@@ -769,10 +769,57 @@ These are not closed by the work above:
 - REP direct recompilation coverage
 - softfloat direct-coverage cliffs
 - hot base-opcode fallback reduction, starting from the measured string/far-control cluster
-- the remaining measured post-`POPF` base-opcode list: `0x9a`, `0xca`, `0xf7`, `0xcb`, `0xa5`, `0x6b`, and `0xff`
+- the remaining measured post-`MOVS`/`IMUL imm8` base-opcode list: `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`
+- lower-risk sibling cleanup that is now easier to justify separately: `0x69` and `0xa4`
 - broader guest-visible coverage for the still-unhit direct 3DNow suffixes
 - a possible future full CPU shadow-execution verify tier
 - allocator/reclaim policy work to reduce structurally high random eviction under pressure
+
+### 21. Next non-protected measured batch: MOVS (`0xa5`) and IMUL r, r/m, imm8 (`0x6b`)
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- the next landed batch after the far-control/frame legality-first pause stays on the measured base-opcode list but avoids protected-mode far-transfer work
+- direct CPU dynarec handlers now exist for `MOVS` word/dword (`0xa5`) in both address-size modes, reusing the existing string-op addressing and direction-flag machinery to move from `ea_seg:SI/ESI` to `ES:DI/EDI`
+- direct CPU dynarec handlers now also exist for `IMUL r, r/m, imm8` (`0x6b`) in 16-bit and 32-bit operand-size forms, using helper-backed result/overflow-mask calculation while keeping the interpreter-visible `CF`/`OF` outcome
+- the focused coverage-policy test now asserts that both `0xa5` and `0x6b` direct-recompile
+
+Why it was needed:
+
+- measured prioritization after `POPF` still pointed at the same remaining base-opcode hotspot list, but the remaining far-transfer subset (`0x9a`, `0xca`, `0xcb`) was still higher-risk protected-mode work
+- `0xa5` was the cleanest next string-op follow-up because it extends the earlier `STOS`/`LODS` batch without taking on REP, `CMPS`, or `SCAS` flag semantics
+- `0x6b` was the cleanest arithmetic follow-up because it is a standalone immediate-8 IMUL form rather than a mixed-group bailout bucket like `0xf7` or `0xff`
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now asserts that both `0xa5` and `0x6b` direct-recompile
+- the three required standalone tests pass, `cmake --build build --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep build/src/86Box.app` succeeds after the build
+- the first guest runtime attempt exposed a real backend legality bug: `MOVZX 113 113` from an invalid `W <- W` `MOVZX` in the new `0x6b` flag-mask path; that form is now removed
+- a follow-up 3DMark99 rerun with `86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES=1` and `86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS=1` confirmed the corrected guest-visible effect:
+  - fallback families at shutdown: `base=19237`, `0f=4063`, `x87=231`, `rep=5626`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0xa5`
+  - the shutdown base-opcode report no longer contains `0x6b`
+  - `0x9d` and `0xc8` also remain absent
+
+What remains from the measured hotspot list now:
+
+- protected-mode far control / return:
+  - `0x9a`, `0xca`, `0xcb`
+- mixed-group bailout cluster:
+  - `0xf7`, `0xff`
+- lower-risk siblings newly exposed after this batch:
+  - `0x69`
+  - `0xa4`
+
+Interpretation:
+
+- measured prioritization was still followed; the branch just took the best non-protected subset available while leaving the protected-mode far-transfer work untouched
+- `0x69` and `0xa4` are now the clearest low-risk cleanup candidates if the next step should stay non-protected
+- if payoff now matters more than risk, the branch should return to the far-transfer subset (`0x9a`, `0xca`, `0xcb`) as a separate semantics-heavy batch
 
 ## What should be kept vs what could be trimmed later
 

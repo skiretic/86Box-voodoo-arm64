@@ -72,6 +72,9 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - Simplified the purgeable-page list bookkeeping by removing the last-dequeue-reason state that only existed to feed the temporary re-enqueue probes.
 
 ### Validated
+- Confirmed a red/green cycle for the narrowed non-protected coverage-policy test after moving `0xa5` and `0x6b`, then reran the three focused standalone tests, rebuilt `86Box`, `cpu`, `dynarec`, and `mem` successfully, and re-signed `build/src/86Box.app`; the only build noise remained the pre-existing macOS/Homebrew deployment-target linker warnings.
+- Confirmed the first `0x6b` guest-visible runtime crash with `MOVZX 113 113`, then traced it to an invalid `W <- W` `MOVZX` in the new helper-backed IMUL flag-mask path and removed that backend-illegal form.
+- Confirmed the post-fix 3DMark99 rerun with `/tmp/new_dynarec_movs_imul_validation.log` reached clean shutdown with fallback families `base=19237`, `0f=4063`, `x87=231`, `rep=5626`, and `3dnow=0`, and the shutdown base-opcode report no longer contained `0xa5`, `0x6b`, `0x9d`, or `0xc8`.
 - Confirmed a red/green cycle for the narrowed far-control/frame coverage-policy test after moving `0x9d`, then reran the three focused standalone tests, rebuilt `86Box`, `cpu`, `dynarec`, and `mem` successfully, and re-signed `build/src/86Box.app`; the only build noise remained the pre-existing macOS/Homebrew deployment-target linker warnings.
 - Confirmed guest-visible `ENTER` payoff with `/tmp/new_dynarec_enter_validation.log`: the shutdown fallback-family summary reached `base=28738`, `0f=4886`, `x87=410`, `rep=6700`, and `3dnow=0`, and the shutdown base-opcode report no longer contained `0xc8`.
 - Confirmed the first `POPF` runtime crash reproduced with `/tmp/new_dynarec_popf_validation.log`, then traced it to the unsupported mixed-width `AND_IMM` / `OR` sequence in the new upper-EFLAGS merge logic.
@@ -100,7 +103,7 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 ### Open
 - There is still no full CPU shadow-execution verify mode or benchmark corpus, but the minimal selective sampling surface needed before Phase 2 is now present.
 - The allocator-policy path is paused, not closed permanently. It should be revisited later if coverage work changes the hot-path mix or exposes a better eviction/admission lever.
-- Larger coverage gaps remain: the narrowed base-opcode list now includes `0x9a`, `0xca`, `0xf7`, `0xcb`, `0xa5`, `0x6b`, and `0xff`; within the far control/frame cluster, `0x9a`, `0xca`, and `0xcb` still carry the protected-mode far-transfer risk, while `0xa5` is the safer non-far measured follow-up. REP and `0F` still trail behind that as measured secondary targets, and broader guest-visible workload coverage for the still-unhit direct 3DNow suffixes (`0x0c`, `0x1c`, `0x8a`, `0x8e`, `0xa7`, `0xb7`, `0xbb`, `0xbf`) is still open.
+- Larger coverage gaps remain: the narrowed base-opcode list is now led by `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`; low-risk siblings `0x69` and `0xa4` are also now visible after the `0xa5` / `0x6b` batch. Within the far control/frame cluster, `0x9a`, `0xca`, and `0xcb` still carry the protected-mode far-transfer risk. REP and `0F` still trail behind that as measured secondary targets, and broader guest-visible workload coverage for the still-unhit direct 3DNow suffixes (`0x0c`, `0x1c`, `0x8a`, `0x8e`, `0xa7`, `0xb7`, `0xbb`, `0xbf`) is still open.
 
 ## 2026-03-07
 
