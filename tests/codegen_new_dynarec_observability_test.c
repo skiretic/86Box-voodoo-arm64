@@ -86,6 +86,14 @@ assert_no_base_fallback_summary(uint8_t opcode)
     assert(new_dynarec_format_base_fallback_summary(summary, sizeof(summary), opcode) == 0);
 }
 
+static void
+assert_no_0f_fallback_summary(uint8_t opcode)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_0f_fallback_summary(summary, sizeof(summary), opcode) == 0);
+}
+
 int
 main(void)
 {
@@ -105,6 +113,8 @@ main(void)
     assert_no_fallback_family_summary();
     assert_no_base_fallback_summary(0x90);
     assert_no_base_fallback_summary(0xec);
+    assert_no_0f_fallback_summary(0x6f);
+    assert_no_0f_fallback_summary(0xef);
 
     new_dynarec_set_trace_hook(capture_trace, &trace_capture);
 
@@ -185,6 +195,9 @@ main(void)
     new_dynarec_note_base_fallback_opcode_hit(0x90, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
     new_dynarec_note_base_fallback_opcode_hit(0x90, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
     new_dynarec_note_base_fallback_opcode_hit(0xec, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    new_dynarec_note_0f_fallback_opcode_hit(0x6f, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    new_dynarec_note_0f_fallback_opcode_hit(0x6f, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+    new_dynarec_note_0f_fallback_opcode_hit(0xef, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
     assert(new_dynarec_classify_post_purge_state(1, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_HAVE_FREE_BLOCK);
     assert(new_dynarec_classify_post_purge_state(0, 7) == NEW_DYNAREC_POST_PURGE_RETRY_DIRTY_LIST);
     assert(new_dynarec_classify_post_purge_state(0, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_RANDOM_EVICTION);
@@ -283,6 +296,19 @@ main(void)
     assert(strstr(summary, "helper_table_null=1"));
     assert(strstr(summary, "helper_bailout=0"));
     assert_no_base_fallback_summary(0x91);
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_0f_fallback_summary(summary, sizeof(summary), 0x6f) > 0);
+    assert(strstr(summary, "opcode=0x6f"));
+    assert(strstr(summary, "helper_table_null=1"));
+    assert(strstr(summary, "helper_bailout=1"));
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_0f_fallback_summary(summary, sizeof(summary), 0xef) > 0);
+    assert(strstr(summary, "opcode=0xef"));
+    assert(strstr(summary, "helper_table_null=1"));
+    assert(strstr(summary, "helper_bailout=0"));
+    assert_no_0f_fallback_summary(0x70);
 
     new_dynarec_note_block_became_no_immediates(0x1040, 0x2040, 0xa0);
     new_dynarec_stats_snapshot(&snapshot);

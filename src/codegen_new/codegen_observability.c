@@ -21,6 +21,8 @@ static uint64_t                   new_dynarec_softfloat_x87_gap_hits;
 static uint64_t                   new_dynarec_fallback_family_hits[6];
 static uint64_t                   new_dynarec_base_fallback_table_null_hits[256];
 static uint64_t                   new_dynarec_base_fallback_bailout_hits[256];
+static uint64_t                   new_dynarec_0f_fallback_table_null_hits[256];
+static uint64_t                   new_dynarec_0f_fallback_bailout_hits[256];
 
 static void
 new_dynarec_emit_trace(new_dynarec_trace_kind_t kind, uint32_t pc, uint32_t phys, uint32_t detail, uint16_t flags)
@@ -98,6 +100,8 @@ new_dynarec_stats_reset(void)
     memset(new_dynarec_fallback_family_hits, 0, sizeof(new_dynarec_fallback_family_hits));
     memset(new_dynarec_base_fallback_table_null_hits, 0, sizeof(new_dynarec_base_fallback_table_null_hits));
     memset(new_dynarec_base_fallback_bailout_hits, 0, sizeof(new_dynarec_base_fallback_bailout_hits));
+    memset(new_dynarec_0f_fallback_table_null_hits, 0, sizeof(new_dynarec_0f_fallback_table_null_hits));
+    memset(new_dynarec_0f_fallback_bailout_hits, 0, sizeof(new_dynarec_0f_fallback_bailout_hits));
 }
 
 void
@@ -172,6 +176,20 @@ new_dynarec_base_fallback_logging_enabled(void)
 
     if (enabled == -1) {
         const char *value = getenv("86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+int
+new_dynarec_0f_fallback_logging_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_0F_FALLBACKS");
 
         enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
     }
@@ -333,6 +351,26 @@ new_dynarec_format_base_fallback_summary(char *buffer, size_t size, uint8_t opco
                     opcode, helper_table_null_hits, helper_bailout_hits);
 }
 
+int
+new_dynarec_format_0f_fallback_summary(char *buffer, size_t size, uint8_t opcode)
+{
+    uint64_t helper_table_null_hits;
+    uint64_t helper_bailout_hits;
+
+    if (!buffer || !size)
+        return 0;
+
+    helper_table_null_hits = new_dynarec_0f_fallback_table_null_hits[opcode];
+    helper_bailout_hits    = new_dynarec_0f_fallback_bailout_hits[opcode];
+
+    if (!(helper_table_null_hits || helper_bailout_hits))
+        return 0;
+
+    return snprintf(buffer, size,
+                    "opcode=0x%02x helper_table_null=%" PRIu64 " helper_bailout=%" PRIu64,
+                    opcode, helper_table_null_hits, helper_bailout_hits);
+}
+
 void
 new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque)
 {
@@ -445,6 +483,15 @@ new_dynarec_note_base_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_out
         new_dynarec_base_fallback_table_null_hits[opcode]++;
     else if (outcome == NEW_DYNAREC_VERIFY_HELPER_BAILOUT)
         new_dynarec_base_fallback_bailout_hits[opcode]++;
+}
+
+void
+new_dynarec_note_0f_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome)
+{
+    if (outcome == NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL)
+        new_dynarec_0f_fallback_table_null_hits[opcode]++;
+    else if (outcome == NEW_DYNAREC_VERIFY_HELPER_BAILOUT)
+        new_dynarec_0f_fallback_bailout_hits[opcode]++;
 }
 
 int

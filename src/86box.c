@@ -1951,14 +1951,23 @@ done_gap_family:
     always_log("CPU new dynarec fallback families [shutdown]: %s\n", summary);
 
 done_fallback_families:
-    if (!new_dynarec_base_fallback_logging_enabled())
+    if (new_dynarec_base_fallback_logging_enabled()) {
+        for (opcode = 0; opcode <= 0xff; opcode++) {
+            if (new_dynarec_format_base_fallback_summary(summary, sizeof(summary), (uint8_t) opcode) <= 0)
+                continue;
+
+            always_log("CPU new dynarec base fallbacks [shutdown]: %s\n", summary);
+        }
+    }
+
+    if (!new_dynarec_0f_fallback_logging_enabled())
         return;
 
     for (opcode = 0; opcode <= 0xff; opcode++) {
-        if (new_dynarec_format_base_fallback_summary(summary, sizeof(summary), (uint8_t) opcode) <= 0)
+        if (new_dynarec_format_0f_fallback_summary(summary, sizeof(summary), (uint8_t) opcode) <= 0)
             continue;
 
-        always_log("CPU new dynarec base fallbacks [shutdown]: %s\n", summary);
+        always_log("CPU new dynarec 0F fallbacks [shutdown]: %s\n", summary);
     }
 }
 #endif

@@ -165,3 +165,15 @@ Expected: signature replaced successfully.
   - the old mixed-group hotspot sequence on this CPU mix is therefore now closed through `0xf7`, `0xf6`, and `0xff`
   - protected-mode follow-up remains explicitly in scope, while softfloat / x87 remains intentionally out of the near-term batch discussion
   - the next measured base-opcode target should now be chosen only after re-baselining on the planned MMX-only CPU configuration
+  - that MMX-only re-baseline is now complete with `/tmp/new_dynarec_mmx_only_validation.log`, which reached shutdown with `base=5004 0f=6455 x87=2124 rep=9343 3dnow=0`
+  - this materially changed the prior ordering: REP is now hottest overall, `0F` is second, and plain base opcodes are third instead of first
+  - the new exact base-opcode report is led by `0xd1` (719), `0xd3` (605), `0xee` (592), `0xcd` (518), `0xe6` (400), `0xcf` (334), `0xec` (314), `0x8e` (259), `0xd0` (244), and `0x9b` (204)
+  - the missing observability for choosing an MMX subset is now explicit: current shutdown logging still does not expose exact `0F` fallback opcodes, only the family total
+  - the next measurement pass should add exact `0F` shutdown fallback logging with the same `helper_table_null` / `helper_bailout` split already used for plain base opcodes
+  - that `0F` logging should also make MMX-visible ranking possible, either by exact secondary opcode or by an extra MMX/non-MMX derived summary
+  - that observability step is now complete: `/tmp/new_dynarec_mmx_only_0f_validation.log` records exact `0F` fallback opcodes for the longer MMX-only run
+  - the longer-run family line is `base=7881 0f=11311 x87=4001 rep=15503 3dnow=0`, which preserves the same `rep > 0f > base > x87` ordering under a much larger sample
+  - the longest-run exact `0F` ranking is now led by `0xaf` (3416), `0xba` (2108), `0x94` (914), `0x95` (828), `0x02` (585), `0xc8` (500), `0xb3` (368), `0xab` (336), `0xa3` (330), and `0x03` (299)
+  - those `0F` hotspots are all `helper_table_null` hits, not `helper_bailout` hits
+  - the clearest next generic base-opcode batch from that MMX-only report is the shift/rotate bailout family `0xd0`-`0xd3`
+  - the clearest overall next batch after the longer MMX-only run is now a first exact `0F` coverage slice chosen from those ranked opcodes, with `0xaf`, `0xba`, `0x94`, and `0x95` as the best initial candidate group pending instruction-family mapping

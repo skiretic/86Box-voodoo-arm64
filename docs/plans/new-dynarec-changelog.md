@@ -36,6 +36,26 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-08 (MMX-only re-baseline update)
+
+### Added
+- Added the MMX-only Windows 98 Low End re-baseline log at `/tmp/new_dynarec_mmx_only_validation.log`, which records shutdown fallback families `base=5004`, `0f=6455`, `x87=2124`, `rep=9343`, and `3dnow=0` after the older mixed-CPU hotspot sequence had already been closed through `0xf7`, `0xf6`, and `0xff`.
+- Added the first MMX-only post-closure base-opcode ranking from that rerun: `0xd1`, `0xd3`, `0xee`, `0xcd`, `0xe6`, `0xcf`, `0xec`, `0x8e`, `0xd0`, and `0x9b` now lead the remaining plain base bucket.
+- Added the exact `0F` shutdown fallback log for the longer MMX-only rerun at `/tmp/new_dynarec_mmx_only_0f_validation.log`, including per-opcode `helper_table_null` / `helper_bailout` splits.
+- Added the first exact long-run `0F` ranking from that new log: `0xaf`, `0xba`, `0x94`, `0x95`, `0x02`, `0xc8`, `0xb3`, `0xab`, `0xa3`, and `0x03` now lead the `0F` bucket, all as `helper_table_null` hits.
+
+### Changed
+- Changed the next-batch recommendation after the longer MMX-only rerun from “add `0F` observability first” to “use the new exact `0F` ranking to choose the first coherent `0F` coverage slice”, because that logging is now in tree and the longer sample preserved the same `rep > 0f > base > x87` ordering.
+- Changed the generic base-opcode recommendation from "choose after MMX-only re-baseline" to a concrete secondary batch candidate: the shift/rotate bailout family `0xd0`-`0xd3` is now the clearest next generic base-opcode slice if a non-`0F` follow-up is needed.
+
+### Validated
+- Confirmed the MMX-only validation run used the rebuilt app bundle from `out/build/llvm-macos-aarch64.cmake`, the exact logfile path `/tmp/new_dynarec_mmx_only_validation.log`, and the Windows 98 Low End VM path `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 Low End copy`.
+- Confirmed the three required standalone compile-and-run checks still pass, `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds before the MMX-only guest rerun.
+- Confirmed the exact `0F` fallback observability path with the updated focused observability test, then rebuilt and re-signed the app before the longer MMX-only runtime rerun.
+
+### Open
+- The remaining gap is no longer raw `0F` observability; it is instruction-family mapping and batching. The next session should map the hottest exact `0F` opcodes from `/tmp/new_dynarec_mmx_only_0f_validation.log` to their instruction families, choose the tightest coherent first slice, and only then implement.
+
 ## 2026-03-08
 
 ### Added

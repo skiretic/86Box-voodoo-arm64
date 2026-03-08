@@ -82,6 +82,60 @@ Latest confirming shutdown logs:
 - fallback families: `base=5142`, `0f=6906`, `x87=1607`, `rep=9182`, `3dnow=0`
 - `0xf6` and `0xff` are absent from the shutdown base-fallback report
 
+### MMX-only re-baseline
+
+The fresh MMX-only Windows 98 Low End rerun is now in hand:
+
+- `/tmp/new_dynarec_mmx_only_validation.log`
+- fallback families: `base=5004`, `0f=6455`, `x87=2124`, `rep=9343`, `3dnow=0`
+- `/tmp/new_dynarec_mmx_only_0f_validation.log`
+- longer-run fallback families: `base=7881`, `0f=11311`, `x87=4001`, `rep=15503`, `3dnow=0`
+
+This changes the prioritization materially relative to the older mixed-CPU hotspot ordering:
+
+- REP is now the hottest remaining family overall
+- `0F` is now the hottest non-REP family and sits well above the remaining plain base bucket
+- plain base opcodes are now third, not first
+
+The shutdown base-opcode report from the same MMX-only run is now led by:
+
+- `0xd1` = 719
+- `0xd3` = 605
+- `0xee` = 592
+- `0xcd` = 518
+- `0xe6` = 400
+- `0xcf` = 334
+- `0xec` = 314
+- `0x8e` = 259
+- `0xd0` = 244
+- `0x9b` = 204
+
+Interpretation:
+
+- the old mixed-CPU string/far-control closure campaign did its job; those older leaders are gone from the base report
+- the remaining generic base bucket is now dominated by shift/rotate bailouts, I/O opcodes, and interrupt/control opcodes
+- the MMX-only signal is now strong enough to move `0F`/MMX work ahead of another generic base-first batch
+- the new exact `0F` shutdown report closes the observability gap that blocked MMX-only ranking
+
+The longest-run exact `0F` report is now led by:
+
+- `0xaf` = 3416
+- `0xba` = 2108
+- `0x94` = 914
+- `0x95` = 828
+- `0x02` = 585
+- `0xc8` = 500
+- `0xb3` = 368
+- `0xab` = 336
+- `0xa3` = 330
+- `0x03` = 299
+
+Interpretation of the new `0F` report:
+
+- these are all `helper_table_null` hits, not `helper_bailout` hits
+- the new priority is therefore missing direct `0F` coverage, not fixing unstable existing `0F` handlers
+- the next decision point is no longer “what observability is missing?” but “which of these opcodes form the tightest coherent implementation slice after instruction-family mapping?”
+
 ### Still pending from the measured hotspot list
 
 The old measured mixed-group hotspot cluster is now closed on this CPU mix:
@@ -92,8 +146,11 @@ The old measured mixed-group hotspot cluster is now closed on this CPU mix:
 
 Current batching guidance:
 
-- the next base-opcode target should be chosen from a fresh MMX-only CPU re-baseline
-- REP remains secondary to those measured base-opcode hotspots
+- the next primary batch should be a `0F`-family follow-up on the MMX-only CPU path
+- the first step in that batch is now to map the hottest exact opcodes from `/tmp/new_dynarec_mmx_only_0f_validation.log` to instruction families and select the tightest coherent first implementation slice
+- the best first candidate set from the current longer run is `0xaf`, `0xba`, `0x94`, and `0x95`
+- if a generic base-only follow-up is needed in parallel or afterward, `0xd0`-`0xd3` is now the clearest coherent base batch
+- REP is still the hottest family overall, but it is a separate non-MMX campaign and no longer blocks doing the MMX-only `0F` follow-up first
 - softfloat / x87 follow-up is not a near-term batch priority for this branch pass
 
 Project-scope note:

@@ -783,6 +783,11 @@ codegen_skip:
                 new_dynarec_note_base_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
             else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT)
                 new_dynarec_note_base_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+        } else if (fallback_family == NEW_DYNAREC_FALLBACK_FAMILY_0F) {
+            if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL)
+                new_dynarec_note_0f_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+            else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT)
+                new_dynarec_note_0f_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
         }
     }
     new_dynarec_note_helper_call_fallback(helper_fallback_reason);
