@@ -179,6 +179,10 @@ extern int  new_dynarec_has_direct_pmaddwd_recompile(void);
 extern int  new_dynarec_has_direct_3dnow_recompile(void);
 extern int  new_dynarec_has_direct_3dnow_opcode_recompile(uint8_t opcode);
 extern int  new_dynarec_direct_3dnow_opcode_count(void);
+extern int  new_dynarec_has_direct_0f_opcode_recompile(uint8_t opcode);
+extern int  new_dynarec_direct_0f_setcc_opcode_count(void);
+extern int  new_dynarec_direct_0f_bswap_opcode_count(void);
+extern int  new_dynarec_direct_0f_bitscan_opcode_count(void);
 extern int  new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode);
 extern int  new_dynarec_direct_base_string_opcode_count(void);
 

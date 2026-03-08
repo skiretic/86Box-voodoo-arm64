@@ -15,9 +15,9 @@ Last updated: 2026-03-08
 | Area | Status | Progress | Notes |
 |---|---|---:|---|
 | Investigation and architecture review | Complete | 100% | Detailed report written and saved |
-| Implementation work | In progress | 89% | Phase 1 invalidation/reclamation hardening is complete; durable Phase 0/1 observability remains in tree, allocator-policy experiments are paused, and active implementation has now moved the measured protected-mode and mixed-group hotspot sequence out of the shutdown base-fallback report through `0x9a`, `0xca`, `0xcb`, `0xf7`, `0xf6`, and `0xff` |
+| Implementation work | In progress | 90% | Phase 1 invalidation/reclamation hardening is complete; durable Phase 0/1 observability remains in tree, allocator-policy experiments are paused, the measured protected-mode and mixed-group hotspot sequence is closed through `0x9a`, `0xca`, `0xcb`, `0xf7`, `0xf6`, and `0xff`, and the first coherent MMX-only `0F` batch is now in tree as the full `SETcc` row (`0x90`-`0x9f`) |
 | Correctness risk mitigation | Complete | 100% | Phase 1 is closed: page-0 sentinel, stale-head purge churn, post-purge dirty-list reuse, stale code-presence state, and bogus bulk-dirty enqueue churn were fixed and validated; remaining high random eviction is treated as reclaimable-page scarcity for this workload |
-| Coverage closure | In progress | 78% | REP remains open and softfloat/x87 follow-up is intentionally deferred for now, but the direct 3DNow/3DNowE generator gap is now closed with cumulative regression coverage, a legality gate for 3DNowE-only suffixes, initial guest-visible direct-path validation, a measured fallback priority order, the protected-mode far-transfer / far-return sequence (`0x9a`, `0xca`, `0xcb`), and the mixed-group cleanup sequence (`0xf7`, `0xf6`, `0xff`) now guest-validated |
+| Coverage closure | In progress | 80% | REP remains open and softfloat/x87 follow-up is intentionally deferred for now, but the direct 3DNow/3DNowE generator gap is now closed with cumulative regression coverage, a legality gate for 3DNowE-only suffixes, initial guest-visible direct-path validation, a measured fallback priority order, the protected-mode far-transfer / far-return sequence (`0x9a`, `0xca`, `0xcb`), the mixed-group cleanup sequence (`0xf7`, `0xf6`, `0xff`), and the first MMX-only `0F` row batch (`0x90`-`0x9f` `SETcc`) are now in tree |
 | Observability and validation tooling | In progress | 90% | Core CPU dynarec counters, runtime summary logging, purge failure-mode counters, empty-purge accounting, purge-list lifecycle counters, selective verify sampling, per-hit 3DNow shutdown logging, fallback-family logging, base-opcode fallback logging, and Phase 2 mark-deferral accounting are in tree; temporary scarcity-boundary probes were retired after Phase 1 closure |
 | Performance optimization | Paused | 8% | Initial allocator/reclaim policy experiments were stable but low-yield on the 3DMark99 workload, so this track is paused while coverage work proceeds |
 
@@ -209,6 +209,13 @@ Scale: 20 slots per phase. `#` = completed progress, `-` = remaining work.
 - The next measured choice between the far-return pair and the mixed-group bailout pair is now fully closed: `0xca` / `0xcb` dropped out first, then `0xf7`, `0xf6`, and `0xff` also dropped out on the follow-up reruns.
 - The fresh MMX-only CPU re-baseline is now complete, and it changed the ordering materially: `rep=9343`, `0f=6455`, `base=5004`, `x87=2124`, `3dnow=0`.
 - The next measured subset should now come from that MMX-only result, not the older mixed-CPU hotspot list.
+- The exact MMX-only `0F` mapping pass is now complete too: the hottest ranked opcodes split into a coherent `SETcc` row candidate, a higher-payoff but higher-risk bit-test family, and a less-coherent protected/data-path remainder.
+- The first selected larger `0F` batch is the full `SETcc` row (`0x90`-`0x9f`), chosen over the hotter bit-test family because it reuses the existing condition-evaluation machinery and keeps backend/validation risk materially lower for a same-session landing.
+- The attempted direct bit-test-family follow-up was backed out after guest-visible Windows 98 protection errors, so that family is no longer the safest near-term path despite its higher raw count.
+- The attempted `0xaf` (`IMUL r16/32, r/m16/32`) follow-up was also backed out after guest boot failure.
+- The next safe multi-op `0F` follow-up is now the full `BSWAP` row (`0xc8`-`0xcf`), because it is register-only and has no flags, memory, or protected-mode semantics.
+- That `BSWAP` row is now guest-validated: the latest logged shutdown report has `base=7072 0f=6633 x87=2982 rep=12579 3dnow=0`, and no `0xc8`-`0xcf` `0F` fallback entries remain.
+- The next low-risk ring-3-safe follow-up is the `BSF` / `BSR` pair (`0xbc`, `0xbd`), and future low-risk `0F` work should start with a host-side synthetic semantics harness before one logged guest confirmation run.
 - What guest workload set will be the standing regression corpus for CPU dynarec changes?
 
 ## Update instructions

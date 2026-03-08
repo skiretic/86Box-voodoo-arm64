@@ -27,6 +27,107 @@ VF_SET_01(void)
     return VF_SET() ? 1 : 0;
 }
 
+static void
+ropSETcc_compute(ir_data_t *ir, uint8_t opcode)
+{
+    switch (opcode & 0x0f) {
+        case 0x0: /*SETO*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, VF_SET);
+            break;
+        case 0x1: /*SETNO*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, VF_SET);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+        case 0x2: /*SETB*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
+            break;
+        case 0x3: /*SETNB*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+        case 0x4: /*SETE*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, ZF_SET);
+            break;
+        case 0x5: /*SETNE*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, ZF_SET);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+        case 0x6: /*SETBE*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            break;
+        case 0x7: /*SETNBE*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, CF_SET);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+        case 0x8: /*SETS*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
+            break;
+        case 0x9: /*SETNS*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+        case 0xa: /*SETP*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, PF_SET);
+            break;
+        case 0xb: /*SETNP*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, PF_SET);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+        case 0xc: /*SETL*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, VF_SET_01);
+            uop_XOR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            break;
+        case 0xd: /*SETNL*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, VF_SET_01);
+            uop_XOR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+        case 0xe: /*SETLE*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, VF_SET_01);
+            uop_XOR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            break;
+        case 0xf: /*SETNLE*/
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, NF_SET_01);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, VF_SET_01);
+            uop_XOR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            uop_CALL_FUNC_RESULT(ir, IREG_temp1, ZF_SET);
+            uop_OR(ir, IREG_temp0, IREG_temp0, IREG_temp1);
+            uop_XOR_IMM(ir, IREG_temp0, IREG_temp0, 1);
+            break;
+    }
+
+    uop_AND_IMM(ir, IREG_temp0, IREG_temp0, 1);
+}
+
+uint32_t
+ropSETcc(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+{
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    ropSETcc_compute(ir, opcode);
+
+    if ((fetchdat & 0xc0) == 0xc0) {
+        uop_MOV(ir, IREG_8(fetchdat & 7), IREG_temp0_B);
+    } else {
+        x86seg *target_seg;
+
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+        codegen_check_seg_write(block, ir, target_seg);
+        uop_MEM_STORE_REG(ir, ireg_seg_base(target_seg), IREG_eaaddr, IREG_temp0_B);
+    }
+
+    return op_pc + 1;
+}
+
 static int
 ropJO_common(UNUSED(codeblock_t *block), ir_data_t *ir, uint32_t dest_addr, UNUSED(uint32_t next_pc))
 {

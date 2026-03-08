@@ -36,6 +36,56 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-08 (`0F` `BSWAP` row landing)
+
+### Added
+- Added direct CPU dynarec coverage for the full `0x0f 0xc8`-`0x0f 0xcf` `BSWAP r32` row with one shared register-only handler.
+- Added focused policy-surface coverage for the row through `new_dynarec_direct_0f_bswap_opcode_count()` and explicit coverage-policy assertions for all eight `BSWAP` opcodes.
+
+### Changed
+- Changed the next safe multi-op `0F` follow-up from speculative single-op retries to the `BSWAP` row, because it avoids the backend and semantic risks that already broke the bit-test-family and `0xaf` attempts.
+- Changed the validation approach for future low-risk `0F` follow-ups: start moving ring-3-safe families onto a host-side synthetic semantics harness before doing logged guest confirmation runs.
+
+### Validated
+- Confirmed the logged `BSWAP` rerun at `/tmp/new_dynarec_0f_bswap_validation.log` completed with a normal shutdown profile: `base=7072 0f=6633 x87=2982 rep=12579 3dnow=0`.
+- Confirmed there were no remaining shutdown `0F` fallback entries for `0xc8`-`0xcf`, so the full `BSWAP` row is now taking the direct path in guest execution.
+
+### Open
+- `0xaf`, `0x02`, `0x03`, and the bit-test family still need a stricter opcode-level trial plan than the `BSWAP` row required.
+- `0xbc` / `0xbd` (`BSF` / `BSR`) are the next ring-3-safe row candidate to move under the new host-side semantics harness.
+
+## 2026-03-08 (`0F` `IMUL` follow-up backout)
+
+### Changed
+- Reverted the first direct CPU dynarec attempt for `0x0f 0xaf` (`IMUL r16/32, r/m16/32`) after the guest stopped booting on the logged validation run.
+- Restored the exact `0F` direct-coverage policy surface and opcode tables to the last known-good `SETcc`-only state.
+
+### Validated
+- The failed guest boot produced only a short shutdown log (`0f=157`) instead of a normal Windows 98 run, confirming that the `0xaf` landing is not safe enough to keep.
+
+### Open
+- The next exact-hotspot `0F` step needs a stricter trial plan; `0xaf`, `0x02`, `0x03`, and `0xc8` remain separate candidates, while the bit-test family is still paused after its earlier protection-error backout.
+
+## 2026-03-08 (`0F` `SETcc` first-batch landing)
+
+### Added
+- Added the exact opcode-to-instruction mapping for the longest-run MMX-only `0F` leaders in the maintained overview: `0x0f 0xaf = IMUL`, `0x0f 0xba = BT/BTS/BTR/BTC imm8 group`, `0x0f 0x94/0x95 = SETE/SETNE`, `0x0f 0x02/0x03 = LAR/LSL`, `0x0f 0xc8 = BSWAP EAX`, and `0x0f 0xa3/0xab/0xb3 = BT/BTS/BTR`.
+- Added the first explicit larger-batch comparison for the MMX-only `0F` follow-up: the full `SETcc` row (`0x90`-`0x9f`) versus the bit-test family (`0xa3`, `0xab`, `0xb3`, `0xba`), including measured payoff, code-reuse, backend-risk, and validation-scope tradeoffs.
+- Added direct CPU dynarec coverage for the full `0x0f 0x90`-`0x0f 0x9f` `SETcc` row with a shared `ropSETcc` handler in `src/codegen_new/codegen_ops_branch.c`.
+- Added focused policy-surface visibility for this decision through `new_dynarec_has_direct_0f_opcode_recompile()` and `new_dynarec_direct_0f_setcc_opcode_count()`, and extended the standalone coverage-policy test to lock the full 16-opcode `SETcc` row.
+
+### Changed
+- Changed the first MMX-only `0F` implementation recommendation from the provisional mixed candidate set (`0xaf`, `0xba`, `0x94`, `0x95`) to the full `SETcc` row (`0x90`-`0x9f`) after code inspection showed that the row can reuse the existing condition-evaluation helper surface while the hotter bit-test family still needs fresh dynamic bit-addressing and RMW handling.
+- Changed the next remaining coherent `0F` candidate after this landing to the bit-test family (`0xa3`, `0xab`, `0xb3`, `0xba`).
+
+### Validated
+- Confirmed the red phase for the updated policy test first failed at link with missing `new_dynarec_has_direct_0f_opcode_recompile()` and `new_dynarec_direct_0f_setcc_opcode_count()` symbols.
+- Confirmed the focused coverage-policy compile-and-run check passes after the `SETcc` row implementation and policy-surface wiring.
+
+### Open
+- The highest-payoff remaining coherent `0F` batch is now the bit-test family (`0xa3`, `0xab`, `0xb3`, `0xba`).
+- `0x0f 0xaf`, `0x0f 0x02`, `0x0f 0x03`, and `0x0f 0xc8` remain outside that family and should not be mixed back into a less-coherent first follow-up batch.
+
 ## 2026-03-08 (MMX-only re-baseline update)
 
 ### Added

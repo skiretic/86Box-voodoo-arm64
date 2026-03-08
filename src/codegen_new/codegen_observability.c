@@ -563,6 +563,60 @@ new_dynarec_direct_3dnow_opcode_count(void)
 }
 
 int
+new_dynarec_has_direct_0f_opcode_recompile(uint8_t opcode)
+{
+    switch (opcode) {
+        case 0x90:
+        case 0x91:
+        case 0x92:
+        case 0x93:
+        case 0x94:
+        case 0x95:
+        case 0x96:
+        case 0x97:
+        case 0x98:
+        case 0x99:
+        case 0x9a:
+        case 0x9b:
+        case 0x9c:
+        case 0x9d:
+        case 0x9e:
+        case 0x9f:
+        case 0xc8:
+        case 0xc9:
+        case 0xca:
+        case 0xcb:
+        case 0xcc:
+        case 0xcd:
+        case 0xce:
+        case 0xcf:
+        case 0xbc:
+        case 0xbd:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+int
+new_dynarec_direct_0f_setcc_opcode_count(void)
+{
+    return 16;
+}
+
+int
+new_dynarec_direct_0f_bswap_opcode_count(void)
+{
+    return 8;
+}
+
+int
+new_dynarec_direct_0f_bitscan_opcode_count(void)
+{
+    return 2;
+}
+
+int
 new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode)
 {
     switch (opcode) {

@@ -3,6 +3,11 @@
 
 #include "codegen_public.h"
 
+extern int new_dynarec_has_direct_0f_opcode_recompile(uint8_t opcode);
+extern int new_dynarec_direct_0f_setcc_opcode_count(void);
+extern int new_dynarec_direct_0f_bswap_opcode_count(void);
+extern int new_dynarec_direct_0f_bitscan_opcode_count(void);
+
 int
 main(void)
 {
@@ -36,6 +41,39 @@ main(void)
     assert(new_dynarec_has_direct_base_opcode_recompile(0xa7) == 0);
     assert(new_dynarec_has_direct_base_opcode_recompile(0xae) == 0);
     assert(new_dynarec_has_direct_base_opcode_recompile(0xaf) == 0);
+    assert(new_dynarec_direct_0f_setcc_opcode_count() == 16);
+    assert(new_dynarec_direct_0f_bswap_opcode_count() == 8);
+    assert(new_dynarec_direct_0f_bitscan_opcode_count() == 2);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x90) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x91) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x92) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x93) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x94) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x95) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x96) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x97) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x98) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x99) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x9a) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x9b) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x9c) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x9d) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x9e) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x9f) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xc8) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xc9) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xca) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xcb) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xcc) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xcd) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xce) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xcf) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xbc) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xbd) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0x8f) == 0);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xa0) == 0);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xc7) == 0);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xd0) == 0);
 
     assert(new_dynarec_has_direct_3dnow_opcode_recompile(0x00) == 0);
     assert(new_dynarec_has_direct_3dnow_opcode_recompile(0x91) == 0);

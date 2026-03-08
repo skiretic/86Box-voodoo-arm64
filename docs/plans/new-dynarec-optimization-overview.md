@@ -130,11 +130,57 @@ The longest-run exact `0F` report is now led by:
 - `0xa3` = 330
 - `0x03` = 299
 
+Exact opcode-to-instruction mapping for that hottest set in this codebase:
+
+- `0x0f 0xaf` = `IMUL r16/32, r/m16/32` (`opIMUL_*`, still `NULL` in `recomp_opcodes_0f`)
+- `0x0f 0xba` = Group 8 immediate bit-test family (`BT/BTS/BTR/BTC r/m16/32, imm8`, selected by ModRM `/4`-`/7`)
+- `0x0f 0x94` = `SETE r/m8`
+- `0x0f 0x95` = `SETNE r/m8`
+- `0x0f 0x02` = `LAR r16/32, r/m16/32`
+- `0x0f 0xc8` = `BSWAP EAX` (`0xc8`-`0xcf` are the `BSWAP r32` row)
+- `0x0f 0xb3` = `BTR r/m16/32, r16/32`
+- `0x0f 0xab` = `BTS r/m16/32, r16/32`
+- `0x0f 0xa3` = `BT r/m16/32, r16/32`
+- `0x0f 0x03` = `LSL r16/32, r/m16/32`
+
 Interpretation of the new `0F` report:
 
 - these are all `helper_table_null` hits, not `helper_bailout` hits
 - the new priority is therefore missing direct `0F` coverage, not fixing unstable existing `0F` handlers
 - the next decision point is no longer “what observability is missing?” but “which of these opcodes form the tightest coherent implementation slice after instruction-family mapping?”
+
+### First coherent `0F` batch comparison
+
+Two plausible larger first batches came out of the mapping pass:
+
+1. Full `SETcc` row: `0x90`-`0x9f`
+   - Measured current-run payoff from the observed hot subset: `0x92` + `0x93` + `0x94` + `0x95` + `0x97` + `0x9c` + `0x9d` + `0x9e` + `0x9f` = `2215`
+   - Code reuse: one shared decode shape (`r/m8` destination), one shared result shape (`0` or `1`), and direct reuse of the existing condition-evaluation helpers already used by `ropJcc_common`
+   - Backend risk: low, because the direct path only computes a boolean and stores one byte; no new MMX state, bit-addressing, or protected-mode rules
+   - Validation scope: one focused policy test can lock the whole row
+
+2. Bit-test family: `0xa3`, `0xab`, `0xb3`, `0xba`
+   - Measured current-run payoff: `330 + 336 + 368 + 2108 = 3142`
+   - Code reuse: coherent semantic family, but it needs new dynamic bit-index handling, memory element selection beyond the base EA, and read-modify-write support for the mutating variants
+   - Backend risk: materially higher than `SETcc`, especially on the memory forms and `0x0f 0xba` subgroup decode
+   - Validation scope: broader, because both register and memory forms plus the ModRM `/4`-`/7` subgroup need focused coverage
+
+Selected first batch:
+
+- full `0x0f 0x90`-`0x0f 0x9f` `SETcc`
+
+Why it beat the alternatives:
+
+- it is the largest low-risk row-sized batch in the exact ranking, rather than another one-opcode slice
+- it removes a whole coherent decoder row and captures the currently hot `SETE` / `SETNE` traffic immediately
+- it reuses existing branch-condition helper logic instead of introducing new address-crossing or bit-RMW machinery
+- it keeps validation tight enough for this session while leaving the higher-payoff but higher-risk bit-test family as the next obvious `0F` follow-up
+
+Implementation now in tree:
+
+- `recomp_opcodes_0f` and `recomp_opcodes_0f_no_mmx` now direct-cover the full `0x90`-`0x9f` row with a shared `ropSETcc` handler
+- the shared handler lives in `src/codegen_new/codegen_ops_branch.c` and computes the condition through the existing `CF_SET` / `ZF_SET` / `PF_SET` / `NF_SET_01` / `VF_SET_01` helper surface before storing a byte result
+- the focused coverage-policy surface now exposes `new_dynarec_has_direct_0f_opcode_recompile()` and `new_dynarec_direct_0f_setcc_opcode_count()`, and the standalone policy test locks the full 16-opcode `SETcc` row
 
 ### Still pending from the measured hotspot list
 
@@ -147,8 +193,13 @@ The old measured mixed-group hotspot cluster is now closed on this CPU mix:
 Current batching guidance:
 
 - the next primary batch should be a `0F`-family follow-up on the MMX-only CPU path
-- the first step in that batch is now to map the hottest exact opcodes from `/tmp/new_dynarec_mmx_only_0f_validation.log` to instruction families and select the tightest coherent first implementation slice
-- the best first candidate set from the current longer run is `0xaf`, `0xba`, `0x94`, and `0x95`
+- the mapping pass is now complete, and the first landed `0F` slice is the full `SETcc` row (`0x90`-`0x9f`)
+- the failed direct bit-test-family attempt showed that `0xa3` / `0xab` / `0xb3` / `0xba` are not a safe near-term batch without tighter opcode-level runtime validation
+- the narrow `0x0f 0xaf` trial was also backed out after guest boot failure
+- the next safe multi-op `0F` batch is the `BSWAP` row (`0xc8`-`0xcf`): register-only, no flags, no memory forms, and no protected-mode rules
+- the logged `BSWAP` rerun is now complete too: `0f` fell to `6633`, and there are no remaining shutdown `0xc8`-`0xcf` fallback entries in `/tmp/new_dynarec_0f_bswap_validation.log`
+- the next low-risk ring-3-safe `0F` candidate after `BSWAP` is the `BSF` / `BSR` pair (`0xbc`, `0xbd`)
+- future low-risk `0F` follow-ups should use a host-side synthetic semantics harness first, then one logged guest confirmation run afterward
 - if a generic base-only follow-up is needed in parallel or afterward, `0xd0`-`0xd3` is now the clearest coherent base batch
 - REP is still the hottest family overall, but it is a separate non-MMX campaign and no longer blocks doing the MMX-only `0F` follow-up first
 - softfloat / x87 follow-up is not a near-term batch priority for this branch pass

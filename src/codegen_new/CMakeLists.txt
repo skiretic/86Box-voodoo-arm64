@@ -24,6 +24,7 @@ if(DYNAREC)
         codegen_observability.c
         codegen_ir.c
         codegen_ops.c
+        codegen_test_support.c
         codegen_ops_3dnow.c
         codegen_ops_branch.c
         codegen_ops_arith.c

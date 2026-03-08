@@ -14,6 +14,7 @@
 #include "codegen_ops.h"
 #include "codegen_ops_helpers.h"
 #include "codegen_ops_misc.h"
+#include "codegen_test_support.h"
 
 static uint32_t codegen_f7_mul_16(uint16_t dst, uint32_t next_pc);
 static uint32_t codegen_f7_imul_16(uint16_t dst, uint32_t next_pc);
@@ -55,6 +56,87 @@ ropLEA_32(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fe
     uop_MOV(ir, IREG_32(dest_reg), IREG_eaaddr);
 
     return op_pc + 1;
+}
+
+uint32_t
+ropBSWAP(codeblock_t *block, ir_data_t *ir, uint8_t opcode, UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    const int reg = opcode & 7;
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_32(reg));
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bswap32_result);
+    uop_MOV(ir, IREG_32(reg), IREG_temp0);
+
+    return op_pc;
+}
+
+static uint32_t
+ropBS_common(codeblock_t *block, ir_data_t *ir, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc, int reverse)
+{
+    const int dest_reg = (fetchdat >> 3) & 7;
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    if (op_32 & 0x100) {
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_16(dest_reg));
+        if ((fetchdat & 0xc0) == 0xc0) {
+            uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_16(fetchdat & 7));
+        } else {
+            x86seg *target_seg;
+
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+            codegen_check_seg_read(block, ir, target_seg);
+            uop_MEM_LOAD_REG(ir, IREG_temp0_W, ireg_seg_base(target_seg), IREG_eaaddr);
+            uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp0_W);
+        }
+
+        if (reverse)
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsr16_result);
+        else
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsf16_result);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_bitscan16_zflag_mask);
+        uop_MOV(ir, IREG_16(dest_reg), IREG_temp0_W);
+    } else {
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_32(dest_reg));
+        if ((fetchdat & 0xc0) == 0xc0) {
+            uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_32(fetchdat & 7));
+        } else {
+            x86seg *target_seg;
+
+            uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+            target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+            codegen_check_seg_read(block, ir, target_seg);
+            uop_MEM_LOAD_REG(ir, IREG_temp0, ireg_seg_base(target_seg), IREG_eaaddr);
+            uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp0);
+        }
+
+        if (reverse)
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsr32_result);
+        else
+            uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_bsf32_result);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_bitscan32_zflag_mask);
+        uop_MOV(ir, IREG_32(dest_reg), IREG_temp0);
+    }
+
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_AND_IMM(ir, IREG_flags, IREG_flags, ~Z_FLAG);
+    uop_OR(ir, IREG_flags, IREG_flags, IREG_temp1_W);
+
+    codegen_flags_changed = 1;
+    return op_pc + 1;
+}
+
+uint32_t
+ropBSF(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+{
+    return ropBS_common(block, ir, fetchdat, op_32, op_pc, 0);
+}
+
+uint32_t
+ropBSR(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+{
+    return ropBS_common(block, ir, fetchdat, op_32, op_pc, 1);
 }
 
 uint32_t
