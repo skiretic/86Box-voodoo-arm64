@@ -12,6 +12,10 @@ static new_dynarec_trace_hook_t new_dynarec_trace_hook;
 static void                    *new_dynarec_trace_hook_opaque;
 static new_dynarec_verify_config_t new_dynarec_verify_config;
 static int                        new_dynarec_verify_config_initialized;
+static uint32_t                   new_dynarec_mark_deferral_budget;
+static uint64_t                   new_dynarec_3dnow_direct_hits[256];
+static uint64_t                   new_dynarec_3dnow_helper_table_null_hits[256];
+static uint64_t                   new_dynarec_3dnow_helper_bailout_hits[256];
 
 static void
 new_dynarec_emit_trace(new_dynarec_trace_kind_t kind, uint32_t pc, uint32_t phys, uint32_t detail, uint16_t flags)
@@ -80,6 +84,10 @@ void
 new_dynarec_stats_reset(void)
 {
     memset(&new_dynarec_stats, 0, sizeof(new_dynarec_stats));
+    new_dynarec_mark_deferral_budget = 0;
+    memset(new_dynarec_3dnow_direct_hits, 0, sizeof(new_dynarec_3dnow_direct_hits));
+    memset(new_dynarec_3dnow_helper_table_null_hits, 0, sizeof(new_dynarec_3dnow_helper_table_null_hits));
+    memset(new_dynarec_3dnow_helper_bailout_hits, 0, sizeof(new_dynarec_3dnow_helper_bailout_hits));
 }
 
 void
@@ -106,6 +114,20 @@ new_dynarec_stats_logging_enabled(void)
 }
 
 int
+new_dynarec_3dnow_hit_logging_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_3DNOW_HITS");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+int
 new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_stats_t *stats)
 {
     new_dynarec_stats_t snapshot;
@@ -120,6 +142,7 @@ new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_st
 
     return snprintf(buffer, size,
                     "blocks_marked=%" PRIu64
+                    " deferred_block_marks=%" PRIu64
                     " blocks_recompiled=%" PRIu64
                     " direct_recompiled_instructions=%" PRIu64
                     " helper_call_fallbacks=%" PRIu64
@@ -149,6 +172,7 @@ new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_st
                     " verify_helper_table_null_samples=%" PRIu64
                     " verify_helper_bailout_samples=%" PRIu64,
                     snapshot.blocks_marked,
+                    snapshot.deferred_block_marks,
                     snapshot.blocks_recompiled,
                     snapshot.direct_recompiled_instructions,
                     snapshot.helper_call_fallbacks,
@@ -177,6 +201,28 @@ new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_st
                     snapshot.verify_direct_samples,
                     snapshot.verify_helper_table_null_samples,
                     snapshot.verify_helper_bailout_samples);
+}
+
+int
+new_dynarec_format_3dnow_hit_summary(char *buffer, size_t size, uint8_t opcode)
+{
+    uint64_t direct_hits;
+    uint64_t helper_table_null_hits;
+    uint64_t helper_bailout_hits;
+
+    if (!buffer || !size)
+        return 0;
+
+    direct_hits            = new_dynarec_3dnow_direct_hits[opcode];
+    helper_table_null_hits = new_dynarec_3dnow_helper_table_null_hits[opcode];
+    helper_bailout_hits    = new_dynarec_3dnow_helper_bailout_hits[opcode];
+
+    if (!(direct_hits || helper_table_null_hits || helper_bailout_hits))
+        return 0;
+
+    return snprintf(buffer, size,
+                    "opcode=0x%02x direct=%" PRIu64 " helper_table_null=%" PRIu64 " helper_bailout=%" PRIu64,
+                    opcode, direct_hits, helper_table_null_hits, helper_bailout_hits);
 }
 
 void
@@ -243,10 +289,111 @@ new_dynarec_note_verify_sample(uint32_t pc, uint16_t opcode, new_dynarec_verify_
 }
 
 void
+new_dynarec_note_3dnow_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome)
+{
+    switch (outcome) {
+        case NEW_DYNAREC_VERIFY_DIRECT:
+            new_dynarec_3dnow_direct_hits[opcode]++;
+            break;
+        case NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL:
+            new_dynarec_3dnow_helper_table_null_hits[opcode]++;
+            break;
+        case NEW_DYNAREC_VERIFY_HELPER_BAILOUT:
+            new_dynarec_3dnow_helper_bailout_hits[opcode]++;
+            break;
+        default:
+            break;
+    }
+}
+
+int
+new_dynarec_should_defer_marking_new_block(void)
+{
+    if (!new_dynarec_mark_deferral_budget)
+        return 0;
+
+    new_dynarec_mark_deferral_budget--;
+    return 1;
+}
+
+int
+new_dynarec_should_remove_aborted_mark_block(int mark_block_initialized, int unexpected_abrt)
+{
+    return mark_block_initialized && unexpected_abrt;
+}
+
+int
+new_dynarec_has_direct_pmaddwd_recompile(void)
+{
+    return 1;
+}
+
+int
+new_dynarec_has_direct_3dnow_recompile(void)
+{
+    return 1;
+}
+
+int
+new_dynarec_has_direct_3dnow_opcode_recompile(uint8_t opcode)
+{
+    switch (opcode) {
+        case 0x0c:
+        case 0x0d:
+        case 0x1c:
+        case 0x1d:
+        case 0x8a:
+        case 0x8e:
+        case 0x90:
+        case 0x94:
+        case 0x96:
+        case 0x97:
+        case 0x9a:
+        case 0x9e:
+        case 0xa0:
+        case 0xa4:
+        case 0xa6:
+        case 0xa7:
+        case 0xaa:
+        case 0xae:
+        case 0xb0:
+        case 0xb4:
+        case 0xb6:
+        case 0xb7:
+        case 0xbb:
+        case 0xbf:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+int
+new_dynarec_direct_3dnow_opcode_count(void)
+{
+    return 24;
+}
+
+void
+new_dynarec_note_allocator_pressure_empty_purgable_list(void)
+{
+    new_dynarec_stats.allocator_pressure_empty_purgable_list++;
+    if (!new_dynarec_mark_deferral_budget)
+        new_dynarec_mark_deferral_budget = NEW_DYNAREC_RANDOM_EVICTION_MARK_DEFERRAL_BUDGET;
+}
+
+void
 new_dynarec_note_block_marked(uint32_t pc, uint32_t phys, uint32_t detail)
 {
     new_dynarec_stats.blocks_marked++;
     new_dynarec_emit_trace(NEW_DYNAREC_TRACE_BLOCK_MARKED, pc, phys, detail, 0);
+}
+
+void
+new_dynarec_note_deferred_block_mark(uint32_t pc, uint32_t phys)
+{
+    new_dynarec_stats.deferred_block_marks++;
+    new_dynarec_emit_trace(NEW_DYNAREC_TRACE_BLOCK_MARK_DEFERRED, pc, phys, 0, 0);
 }
 
 void
@@ -288,6 +435,7 @@ void
 new_dynarec_note_random_eviction(uint32_t pc, uint32_t phys, uint16_t flags)
 {
     new_dynarec_stats.random_evictions++;
+    new_dynarec_mark_deferral_budget = NEW_DYNAREC_RANDOM_EVICTION_MARK_DEFERRAL_BUDGET;
     new_dynarec_emit_trace(NEW_DYNAREC_TRACE_RANDOM_EVICTION, pc, phys, 0, flags);
 }
 

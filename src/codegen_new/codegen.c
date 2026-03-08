@@ -31,6 +31,21 @@ static struct {
     int      TOP;
 } codegen_instructions[MAX_INSTRUCTION_COUNT];
 
+static int
+codegen_3dnow_opcode_requires_3dnowe(uint8_t opcode)
+{
+    switch (opcode) {
+        case 0x0c:
+        case 0x1c:
+        case 0x8a:
+        case 0x8e:
+        case 0xbb:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 int
 codegen_get_instruction_uop(codeblock_t *block, uint32_t pc, int *first_instruction, int *TOP)
 {
@@ -659,7 +674,8 @@ generate_call:
         }
 
         opcode_3dnow = fastreadb(cs + opcode_pc);
-        if (!fpu_softfloat && recomp_opcodes_3DNOW[opcode_3dnow]) {
+        if (!fpu_softfloat && recomp_opcodes_3DNOW[opcode_3dnow]
+            && (!codegen_3dnow_opcode_requires_3dnowe(opcode_3dnow) || x86_dynarec_opcodes_3DNOW == dynarec_ops_3DNOWE)) {
             next_pc = opcode_pc + 1;
 
             op_table           = x86_dynarec_opcodes_3DNOW;
@@ -686,6 +702,8 @@ generate_call:
         if (new_pc) {
             new_dynarec_note_direct_recompiled_instruction();
             new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_DIRECT);
+            if (op_table == x86_dynarec_opcodes_3DNOW)
+                new_dynarec_note_3dnow_opcode_hit(opcode, NEW_DYNAREC_VERIFY_DIRECT);
             if (new_pc != -1)
                 uop_MOV_IMM(ir, IREG_pc, new_pc);
 
@@ -704,10 +722,15 @@ generate_call:
     }
 
 codegen_skip:
-    if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL)
+    if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL) {
         new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
-    else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT)
+        if (op_table == x86_dynarec_opcodes_3DNOW)
+            new_dynarec_note_3dnow_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    } else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT) {
         new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+        if (op_table == x86_dynarec_opcodes_3DNOW)
+            new_dynarec_note_3dnow_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+    }
     new_dynarec_note_helper_call_fallback(helper_fallback_reason);
 
     if ((op_table == x86_dynarec_opcodes_REPNE || op_table == x86_dynarec_opcodes_REPE) && !op_table[opcode | op_32]) {

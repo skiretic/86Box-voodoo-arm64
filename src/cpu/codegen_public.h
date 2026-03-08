@@ -50,9 +50,11 @@
 #ifdef USE_NEW_DYNAREC
 #    define BLOCK_PC_INVALID 0xffffffff
 #    define BLOCK_INVALID    0
+#    define NEW_DYNAREC_RANDOM_EVICTION_MARK_DEFERRAL_BUDGET 8
 
 typedef struct new_dynarec_stats_t {
     uint64_t blocks_marked;
+    uint64_t deferred_block_marks;
     uint64_t blocks_recompiled;
     uint64_t direct_recompiled_instructions;
     uint64_t helper_call_fallbacks;
@@ -91,6 +93,7 @@ typedef enum new_dynarec_post_purge_state_t {
 
 typedef enum new_dynarec_trace_kind_t {
     NEW_DYNAREC_TRACE_BLOCK_MARKED,
+    NEW_DYNAREC_TRACE_BLOCK_MARK_DEFERRED,
     NEW_DYNAREC_TRACE_BLOCK_RECOMPILED,
     NEW_DYNAREC_TRACE_BLOCK_INVALIDATED,
     NEW_DYNAREC_TRACE_BLOCK_BECAME_BYTE_MASK,
@@ -135,18 +138,29 @@ extern new_dynarec_stats_t new_dynarec_stats;
 extern void new_dynarec_stats_reset(void);
 extern void new_dynarec_stats_snapshot(new_dynarec_stats_t *out);
 extern int  new_dynarec_stats_logging_enabled(void);
+extern int  new_dynarec_3dnow_hit_logging_enabled(void);
 extern int  new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_stats_t *stats);
+extern int  new_dynarec_format_3dnow_hit_summary(char *buffer, size_t size, uint8_t opcode);
 extern void new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque);
 extern void new_dynarec_set_verify_config(const new_dynarec_verify_config_t *config);
 extern void new_dynarec_get_verify_config(new_dynarec_verify_config_t *out);
 extern int  new_dynarec_note_verify_sample(uint32_t pc, uint16_t opcode, new_dynarec_verify_outcome_t outcome);
+extern void new_dynarec_note_3dnow_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome);
+extern int  new_dynarec_should_defer_marking_new_block(void);
+extern int  new_dynarec_should_remove_aborted_mark_block(int mark_block_initialized, int unexpected_abrt);
+extern int  new_dynarec_has_direct_pmaddwd_recompile(void);
+extern int  new_dynarec_has_direct_3dnow_recompile(void);
+extern int  new_dynarec_has_direct_3dnow_opcode_recompile(uint8_t opcode);
+extern int  new_dynarec_direct_3dnow_opcode_count(void);
 
 extern void new_dynarec_note_block_marked(uint32_t pc, uint32_t phys, uint32_t detail);
+extern void new_dynarec_note_deferred_block_mark(uint32_t pc, uint32_t phys);
 extern void new_dynarec_note_block_recompiled(uint32_t pc, uint32_t phys, uint32_t detail);
 extern void new_dynarec_note_block_invalidated(uint32_t pc, uint32_t phys, uint16_t flags);
 extern void new_dynarec_note_block_became_byte_mask(uint32_t pc, uint32_t phys, uint16_t flags);
 extern void new_dynarec_note_block_became_no_immediates(uint32_t pc, uint32_t phys, uint16_t flags);
 extern void new_dynarec_note_allocator_pressure(uint32_t detail);
+extern void new_dynarec_note_allocator_pressure_empty_purgable_list(void);
 extern void new_dynarec_note_random_eviction(uint32_t pc, uint32_t phys, uint16_t flags);
 extern new_dynarec_post_purge_state_t new_dynarec_classify_post_purge_state(int free_list_nonempty, uint16_t dirty_list_tail);
 
@@ -203,12 +217,6 @@ static inline void
 new_dynarec_note_purgable_flush_dirty_list_reuse(void)
 {
     new_dynarec_stats.purgable_flush_dirty_list_reuses++;
-}
-
-static inline void
-new_dynarec_note_allocator_pressure_empty_purgable_list(void)
-{
-    new_dynarec_stats.allocator_pressure_empty_purgable_list++;
 }
 
 static inline void

@@ -41,10 +41,15 @@ The current stopping point is:
 
 - Phase 1 is complete
 - minimal Phase 0 observability/reproducibility work is now in place for targeted repro runs
+- Phase 0 is now effectively complete enough for Phase 2 allocator/reclaim policy entry
+- initial allocator/reclaim policy experiments are now paused after stable but low-yield 3DMark99 results
+- active implementation has moved to coverage closure work
 - remaining high random eviction under the Windows 98 + 3DMark99 workload is now best explained by scarcity of reclaimable pages
 - not another confirmed Phase 1 reclamation correctness bug
 
 That means future work to reduce the remaining random eviction rate should be treated as allocator/reclaim policy work, not as more Phase 1 bug fixing unless new evidence appears.
+
+The current active implementation track is now coverage closure, starting with the smallest parity gap that already had backend support in place.
 
 ## Optimization map
 
@@ -416,13 +421,184 @@ Key files:
 - `src/codegen_new/codegen.c`
 - `tests/codegen_new_dynarec_observability_test.c`
 
+### 12. Phase 2 cold-block mark deferral under scarcity pressure
+
+Status:
+- paused
+- kept as the first allocator/reclaim policy experiment
+
+What changed:
+
+- after a random eviction, the next 8 first-hit mark opportunities are interpreted without allocating a new mark-only block
+- the policy does not change the recompile path or the Phase 1 reclaim path
+- the runtime summary now counts those skipped first-hit marks as `deferred_block_marks`
+
+Why it was needed:
+
+- Phase 1 evidence showed that the dominant remaining signature is empty purge list under allocator pressure
+- that makes demand reduction the narrowest defensible next lever
+- a first-hit mark-only block is the lowest-value resident under that signature because it occupies a block slot before it has produced direct code
+
+What evidence confirmed it:
+
+- focused standalone policy coverage now checks that a random eviction arms a fixed deferral window and that the window is consumed exactly once per skipped mark
+- the observability test now checks that deferred marks are counted and traced through the same retained summary surface used for the rest of Phase 0/1
+
+Interpretation:
+
+- this is intentionally a small Phase 2 admission-policy experiment, not a claim that Phase 1 was incomplete
+- the crash path discovered during the first real 3DMark99 run is now fixed: deferred mark-only passes no longer try to delete a block that was never allocated
+- a follow-up stronger trigger that arms the same window on empty-purge allocator pressure was also stable, but neither version showed a clear enough workload win to justify more immediate tuning
+- this work is therefore paused rather than extended, and the project is pivoting to coverage closure before revisiting allocator-policy ideas later
+
+### 13. Arm64 direct `PMADDWD` parity
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- arm64 no longer forces `PMADDWD` through helper fallback in the `recomp_opcodes_0f` table
+- the same direct recompiler entry is now used on arm64 and x86-64 for that opcode
+
+Why it was needed:
+
+- this was a narrow, explicit frontend-table parity gap
+- the shared MMX frontend recompiler already existed
+- the arm64 backend already had `UOP_PMADDWD` support, so this was a table-level closure step rather than a new backend implementation
+
+What evidence confirmed it:
+
+- a focused standalone coverage-policy test now asserts that direct `PMADDWD` recompilation is enabled
+- the target build for `86Box`, `cpu`, `dynarec`, and `mem` still succeeds after the table change
+
+Interpretation:
+
+- this is a better first post-pivot coverage target than broad 3DNow work because it closes a concrete arm64 parity gap with minimal surface area
+- it also serves as a template for future table-level parity closures where backend support already exists
+
+Key files:
+
+- `src/codegen_new/codegen_ops.c`
+- `src/cpu/codegen_public.h`
+- `src/codegen_new/codegen_observability.c`
+- `tests/codegen_new_opcode_coverage_policy_test.c`
+
+### 14. Arm64 direct 3DNow table enable
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- arm64 no longer compiles `recomp_opcodes_3DNOW` to an all-zero table
+- the existing shared non-`NULL` direct 3DNow entries are now available on arm64 as well as x86-64
+
+Why it was needed:
+
+- after the `PMADDWD` parity fix, the next smallest concrete arm64 frontend gap was the table-level 3DNow disable
+- the arm64 backend already had the relevant 3DNow uOP handlers, so the remaining block was the frontend table gate rather than missing backend machinery
+
+What evidence confirmed it:
+
+- the focused coverage-policy test still passes after the table change
+- the target build for `86Box`, `cpu`, `dynarec`, and `mem` still succeeds
+
+Interpretation:
+
+- this does not close all 3DNow work, but it removes the artificial "arm64 gets zero direct 3DNow entries" policy
+- future 3DNow work should now focus on guest-visible validation and any remaining missing generator entries, not this backend-wide table gate
+
+Key files:
+
+- `src/codegen_new/codegen_ops.c`
+- `src/cpu/codegen_public.h`
+- `src/codegen_new/codegen_observability.c`
+- `tests/codegen_new_opcode_coverage_policy_test.c`
+
+### 15. Remaining direct 3DNow generator batch
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- the remaining direct CPU dynarec 3DNow/3DNowE generators are now implemented: `PI2FW`, `PF2IW`, `PFNACC`, `PFPNACC`, `PFACC`, `PMULHRW`, `PSWAPD`, and `PAVGUSB`
+- the exact direct 3DNow support surface is now asserted cumulatively by test as a 24-opcode matrix rather than a boolean capability bit
+- `src/codegen_new/codegen.c` now gates the Enhanced 3DNow-only suffixes so they only direct-compile when the active dynarec opcode table is `dynarec_ops_3DNOWE`
+
+Why it was needed:
+
+- after the arm64 table gate was removed, the remaining 3DNow work was no longer "arm64 has no direct path"; it was a concrete finite set of missing generators
+- leaving those suffixes outside the direct path would keep helper-path coverage cliffs and make future regressions hard to see because the previous test only checked for any 3DNow support at all
+- the smallest coherent batch was therefore the entire remaining generator gap rather than another series of tiny table toggles
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now passes while asserting the complete 24-suffix direct 3DNow set
+- the focused allocator-pressure and observability standalone tests still pass unchanged
+- `cmake --build build --target 86Box cpu dynarec mem -j4` still succeeds, with only the pre-existing macOS/Homebrew deployment-target linker warnings
+
+Interpretation:
+
+- the direct generator gap is now closed, but this is not the same thing as guest-visible validation being complete
+- some of the newly covered ops are lowered through existing IR composition, while the hardest pair (`PMULHRW` and `PAVGUSB`) use dedicated uOPs that lower through backend helper calls rather than reopening the old direct-vs-helper dispatch path
+- the next 3DNow task is therefore runtime validation of the new suffixes under guest workloads, not more generator-table expansion
+
+Key files:
+
+- `src/codegen_new/codegen.c`
+- `src/codegen_new/codegen_ops.c`
+- `src/codegen_new/codegen_ops_3dnow.c`
+- `src/codegen_new/codegen_backend_arm64_uops.c`
+- `src/codegen_new/codegen_backend_x86-64_uops.c`
+- `src/cpu/codegen_public.h`
+- `src/codegen_new/codegen_observability.c`
+- `tests/codegen_new_opcode_coverage_policy_test.c`
+
+### 16. Per-hit 3DNow runtime logging and initial guest-visible validation
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- CPU dynarec now exposes an optional per-hit 3DNow shutdown report gated by `86BOX_NEW_DYNAREC_LOG_3DNOW_HITS=1`
+- each reported line includes the suffix opcode and three counters: `direct`, `helper_table_null`, and `helper_bailout`
+- the 3DNow direct/helper decision points in `src/codegen_new/codegen.c` now feed that reporting surface for every exercised 3DNow suffix
+
+Why it was needed:
+
+- the earlier selective verify sampling was useful for proving one suffix at a time, but it was too narrow for workload validation of the whole 3DNow surface
+- after the direct generator gap was closed, the next useful question was no longer "is one opcode direct?"; it was "which opcodes does a real guest workload actually hit, and do any of them still fall back?"
+- that required a cumulative workload report rather than another round of one-opcode filters
+
+What evidence confirmed it:
+
+- `tests/codegen_new_dynarec_observability_test.c` now covers per-suffix hit accounting and the shutdown formatter
+- guest runs with `/tmp/3dnow_hit_report.log` now emit one shutdown line per exercised 3DNow opcode
+- across Windows 98 + 3DMark99 and longer mixed runs, the observed direct set is now:
+  - `0x0d`, `0x1d`, `0x90`, `0x94`, `0x96`, `0x97`, `0x9a`, `0x9e`, `0xa0`, `0xa4`, `0xa6`, `0xaa`, `0xae`, `0xb0`, `0xb4`, `0xb6`
+- every observed hit in those runs stayed direct, with `helper_table_null=0` and `helper_bailout=0`
+
+Interpretation:
+
+- this does not prove that all 24 direct-capable suffixes are exercised by the current workload set
+- it does prove that the observed 16-suffix subset is not silently falling back through the old direct-vs-helper dispatch boundary
+- the remaining guest-visible gap is now explicitly the still-unhit suffix set: `0x0c`, `0x1c`, `0x8a`, `0x8e`, `0xa7`, `0xb7`, `0xbb`, `0xbf`
+- the next useful expansion is broader workload coverage, not more table work for 3DNow itself
+
 ## What is still considered open
 
 These are not closed by the work above:
 
 - REP direct recompilation coverage
 - softfloat direct-coverage cliffs
-- arm64 MMX / 3DNow parity gaps
+- broader guest-visible coverage for the still-unhit direct 3DNow suffixes
 - a possible future full CPU shadow-execution verify tier
 - allocator/reclaim policy work to reduce structurally high random eviction under pressure
 

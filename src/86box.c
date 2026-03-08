@@ -1912,6 +1912,7 @@ static void
 log_new_dynarec_shutdown_summary(void)
 {
     char summary[2048];
+    int  opcode;
 
     if (!new_dynarec_stats_logging_enabled())
         return;
@@ -1920,6 +1921,16 @@ log_new_dynarec_shutdown_summary(void)
         return;
 
     always_log("CPU new dynarec stats [shutdown]: %s\n", summary);
+
+    if (!new_dynarec_3dnow_hit_logging_enabled())
+        return;
+
+    for (opcode = 0; opcode <= 0xff; opcode++) {
+        if (new_dynarec_format_3dnow_hit_summary(summary, sizeof(summary), (uint8_t) opcode) <= 0)
+            continue;
+
+        always_log("CPU new dynarec 3DNow hits [shutdown]: %s\n", summary);
+    }
 }
 #endif
 

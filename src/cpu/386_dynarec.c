@@ -648,9 +648,13 @@ exec386_dynarec_dyn(void)
 #    endif
     } else if (!cpu_state.abrt) {
         /* Mark block but do not recompile */
+        int defer_block_mark = 0;
+        int mark_block_initialized = 0;
 #    ifdef USE_NEW_DYNAREC
         start_pc                 = cs + cpu_state.pc;
         const int max_block_size = (block->flags & CODEBLOCK_BYTE_MASK) ? ((128 - 25) - (start_pc & 0x3f)) : 1000;
+        /* Under scarcity, prefer not to admit another cold mark-only block immediately after random eviction. */
+        defer_block_mark         = new_dynarec_should_defer_marking_new_block();
 #    else
         start_pc = cpu_state.pc;
 #    endif
@@ -658,7 +662,9 @@ exec386_dynarec_dyn(void)
         cpu_block_end = 0;
         x86_was_reset = 0;
 
-        codegen_block_init(phys_addr);
+        if (!defer_block_mark)
+            codegen_block_init(phys_addr);
+        mark_block_initialized = !defer_block_mark;
 
         while (!cpu_block_end) {
 #    ifndef USE_NEW_DYNAREC
@@ -728,7 +734,7 @@ exec386_dynarec_dyn(void)
             }
 
             if (cpu_state.abrt) {
-                if (!(cpu_state.abrt & ABRT_EXPECTED))
+                if (new_dynarec_should_remove_aborted_mark_block(mark_block_initialized, !(cpu_state.abrt & ABRT_EXPECTED)))
                     codegen_block_remove();
                 CPU_BLOCK_END();
             }
@@ -736,8 +742,12 @@ exec386_dynarec_dyn(void)
 
         cpu_end_block_after_ins = 0;
 
-        if ((!cpu_state.abrt || (cpu_state.abrt & ABRT_EXPECTED)) && !new_ne && !x86_was_reset)
-            codegen_block_end();
+        if ((!cpu_state.abrt || (cpu_state.abrt & ABRT_EXPECTED)) && !new_ne && !x86_was_reset) {
+            if (defer_block_mark)
+                new_dynarec_note_deferred_block_mark(start_pc, phys_addr);
+            else
+                codegen_block_end();
+        }
 
         if (x86_was_reset)
             codegen_reset();

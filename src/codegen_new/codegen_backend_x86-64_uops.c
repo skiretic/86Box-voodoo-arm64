@@ -1786,6 +1786,41 @@ codegen_PCMPGTD(codeblock_t *block, uop_t *uop)
     return 0;
 }
 
+static uint64_t
+codegen_helper_3dnow_pavgusb(uint64_t dest_bits, uint64_t src_bits)
+{
+    union {
+        uint64_t q;
+        uint8_t  b[8];
+    } dest, src, result;
+    int i;
+
+    dest.q = dest_bits;
+    src.q  = src_bits;
+    for (i = 0; i < 8; i++)
+        result.b[i] = (uint8_t) (((uint16_t) dest.b[i] + (uint16_t) src.b[i] + 1) >> 1);
+
+    return result.q;
+}
+
+static uint64_t
+codegen_helper_3dnow_pmulhrw(uint64_t dest_bits, uint64_t src_bits)
+{
+    union {
+        uint64_t q;
+        int16_t  sw[4];
+        uint16_t w[4];
+    } dest, src, result;
+    int i;
+
+    dest.q = dest_bits;
+    src.q  = src_bits;
+    for (i = 0; i < 4; i++)
+        result.w[i] = (uint16_t) ((((int32_t) dest.sw[i] * (int32_t) src.sw[i]) + 0x8000) >> 16);
+
+    return result.q;
+}
+
 static int
 codegen_PF2ID(codeblock_t *block, uop_t *uop)
 {
@@ -1925,6 +1960,33 @@ codegen_PFMUL(codeblock_t *block, uop_t *uop)
     return 0;
 }
 static int
+codegen_PAVGUSB(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+#    if _WIN64
+        host_x86_MOVQ_REG_XREG(block, REG_RCX, src_reg_a);
+        host_x86_MOVQ_REG_XREG(block, REG_RDX, src_reg_b);
+#    else
+        host_x86_MOVQ_REG_XREG(block, REG_RDI, src_reg_a);
+        host_x86_MOVQ_REG_XREG(block, REG_RSI, src_reg_b);
+#    endif
+        host_x86_CALL(block, codegen_helper_3dnow_pavgusb);
+        host_x86_MOVQ_XREG_REG(block, dest_reg, REG_RAX);
+    }
+#    ifdef RECOMPILER_DEBUG
+    else
+        fatal("PAVGUSB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+#    endif
+    return 0;
+}
+static int
 codegen_PFRCP(codeblock_t *block, uop_t *uop)
 {
     int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
@@ -2005,6 +2067,34 @@ codegen_PI2FD(codeblock_t *block, uop_t *uop)
 #    ifdef RECOMPILER_DEBUG
     else
         fatal("PI2FD %02x %02x\n", uop->dest_reg_a_real);
+#    endif
+    return 0;
+}
+
+static int
+codegen_PMULHRW(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+#    if _WIN64
+        host_x86_MOVQ_REG_XREG(block, REG_RCX, src_reg_a);
+        host_x86_MOVQ_REG_XREG(block, REG_RDX, src_reg_b);
+#    else
+        host_x86_MOVQ_REG_XREG(block, REG_RDI, src_reg_a);
+        host_x86_MOVQ_REG_XREG(block, REG_RSI, src_reg_b);
+#    endif
+        host_x86_CALL(block, codegen_helper_3dnow_pmulhrw);
+        host_x86_MOVQ_XREG_REG(block, dest_reg, REG_RAX);
+    }
+#    ifdef RECOMPILER_DEBUG
+    else
+        fatal("PMULHRW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
 #    endif
     return 0;
 }
@@ -3234,6 +3324,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PFRSQRT &
         UOP_MASK]
     = codegen_PFRSQRT,
+    [UOP_PAVGUSB &
+        UOP_MASK]
+    = codegen_PAVGUSB,
     [UOP_PFSUB &
         UOP_MASK]
     = codegen_PFSUB,
@@ -3244,6 +3337,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PMADDWD &
         UOP_MASK]
     = codegen_PMADDWD,
+    [UOP_PMULHRW &
+        UOP_MASK]
+    = codegen_PMULHRW,
     [UOP_PMULHW &
         UOP_MASK]
     = codegen_PMULHW,

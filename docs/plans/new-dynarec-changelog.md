@@ -39,23 +39,48 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 ## 2026-03-08
 
 ### Added
+- Added an explicit pivot note across the Phase docs recording that allocator/reclaim policy experiments are paused after stable but low-yield 3DMark99 results, and that active implementation has moved to CPU dynarec coverage closure.
+- Added the first coverage-closure implementation step after that pivot: arm64 no longer forces `PMADDWD` through helper fallback, and the repo now has a focused coverage-policy test for that support decision.
+- Added the next narrow coverage-closure step: arm64 now uses the existing direct 3DNow table entries instead of compiling that whole table out to zero.
+- Added the cumulative direct 3DNow coverage step that closes the remaining generator gap: `PI2FW`, `PF2IW`, `PFNACC`, `PFPNACC`, `PFACC`, `PMULHRW`, `PSWAPD`, and `PAVGUSB` now have direct CPU dynarec handlers.
+- Added optional per-hit 3DNow shutdown logging through `86BOX_NEW_DYNAREC_LOG_3DNOW_HITS=1`, so guest runs can now report every exercised 3DNow suffix and whether each hit stayed direct, hit a `NULL` direct-table entry, or bailed out of the direct handler.
+- Added the first explicit Phase 2 allocator/reclaim policy experiment: after a random eviction, the next 8 first-hit mark opportunities are interpreted without allocating a new mark-only block, and the runtime summary now counts those skips as `deferred_block_marks`.
 - Added a selective CPU dynarec verify-sampling surface on the direct-vs-helper decision boundary, including optional `86BOX_NEW_DYNAREC_VERIFY_PC`, `86BOX_NEW_DYNAREC_VERIFY_OPCODE`, and `86BOX_NEW_DYNAREC_VERIFY_BUDGET` filters plus per-sample counters in the existing summary output.
 - Added an explicit Phase 1 closeout pass across the executive summary, changelog, and optimization overview so the remaining Windows 98 + 3DMark99 allocator-pressure behavior is documented as expected scarcity for this workload rather than an open Phase 1 bug.
 
 ### Changed
+- Changed the allocator-policy readout from "active tuning" to "paused after first experiments" because the crash fix held, the policy activated at scale, and the stronger empty-purge trigger still did not produce a clear enough random-eviction win to justify more immediate tuning.
+- Changed the `recomp_opcodes_0f` arm64 table so `PMADDWD` uses the same direct recompiler entry as x86-64, aligning the frontend table with the already-existing arm64 `UOP_PMADDWD` backend support.
+- Changed `recomp_opcodes_3DNOW` so arm64 no longer compiles it to an all-zero table; the shared non-`NULL` entries are now enabled on both backends.
+- Changed the 3DNow direct-coverage test from a boolean smoke test into an exact 24-opcode support matrix so earlier coverage stays visible while new suffixes are added.
+- Changed the 3DNow dispatch gate in `src/codegen_new/codegen.c` so Enhanced 3DNow-only suffixes only direct-compile when the active dynarec opcode table is `dynarec_ops_3DNOWE`, preserving legality on plain 3DNow CPUs.
+- Changed the 3DNow validation strategy from one-opcode-at-a-time verify filtering to cumulative per-hit runtime logging, which is a better fit for guest workload sweeps.
+- Changed the mark-only path in `src/cpu/386_dynarec.c` so cold first-hit blocks can be deferred briefly after random-eviction pressure instead of immediately consuming another block slot under the same scarcity window.
+- Expanded the retained observability surface with a `NEW_DYNAREC_TRACE_BLOCK_MARK_DEFERRED` event, a fixed Phase 2 deferral budget constant, and summary/test coverage for the new `deferred_block_marks` counter.
 - Wired the selective verify samples into `src/codegen_new/codegen.c` so targeted direct hits, NULL-table fallbacks, and direct-handler bailouts can be reproduced through the existing trace-hook and runtime-summary path without adding a larger framework.
 - Trimmed the temporary late-Phase-1 boundary probes from the durable CPU dynarec stats surface by removing `purgable_page_missed_write_enqueue_overlap`, `purgable_page_reenqueues_after_flush`, and `purgable_page_reenqueues_after_no_blocks`.
 - Trimmed dequeue-by-enqueue-source probe counters from the durable stats surface, keeping the aggregate purge-list lifecycle counters and enqueue-source counters that remain useful for future Phase 2 allocator/reclaim policy work.
 - Simplified the purgeable-page list bookkeeping by removing the last-dequeue-reason state that only existed to feed the temporary re-enqueue probes.
 
 ### Validated
+- Confirmed a clean 3DMark99 shutdown after the deferred-mark cleanup fix with no `Deleting deleted block` fatal in `/tmp/phase2_mark_deferral.log`.
+- Confirmed the first allocator-policy experiment was active at scale under 3DMark99 (`deferred_block_marks=1912405`) but still ended with `random_evictions=239633`, so the workload remained scarcity-dominated.
+- Confirmed the stronger trigger that arms the same fixed deferral window on empty-purge allocator pressure also remained stable under 3DMark99 and reached shutdown with `deferred_block_marks=1938759` and `random_evictions=239338`, which was not a clear enough win to keep prioritizing allocator-policy tuning ahead of coverage closure.
+- Confirmed a red/green cycle for the new coverage-policy test in `tests/codegen_new_opcode_coverage_policy_test.c`, then rebuilt `86Box`, `cpu`, `dynarec`, and `mem` successfully after enabling direct arm64 `PMADDWD`.
+- Confirmed the same focused coverage-policy test and target build still pass after enabling the existing direct 3DNow table on arm64.
+- Confirmed a second red/green cycle for `tests/codegen_new_opcode_coverage_policy_test.c` after expanding it to the full 24-opcode direct 3DNow matrix, then rebuilt `86Box`, `cpu`, `dynarec`, and `mem` successfully after landing the remaining generator batch.
+- Confirmed a red/green cycle for the new per-hit 3DNow logging API in `tests/codegen_new_dynarec_observability_test.c`, then re-signed and rebuilt `86Box` successfully before guest runtime checks.
+- Confirmed guest-visible direct-path evidence with `/tmp/3dnow_hit_report.log`: across Windows 98 + 3DMark99 and longer mixed runs, 16 suffixes (`0x0d`, `0x1d`, `0x90`, `0x94`, `0x96`, `0x97`, `0x9a`, `0x9e`, `0xa0`, `0xa4`, `0xa6`, `0xaa`, `0xae`, `0xb0`, `0xb4`, `0xb6`) were exercised, and every observed hit stayed direct with `helper_table_null=0` and `helper_bailout=0`.
+- Confirmed a focused red/green cycle for the Phase 2 policy helper surface in `tests/codegen_new_allocator_pressure_policy_test.c`, including deferral-budget consumption after random eviction and summary formatting for `deferred_block_marks`.
+- Confirmed the updated observability API test covers the new deferred-mark trace event, counter reset behavior, and summary formatting in `tests/codegen_new_dynarec_observability_test.c`.
 - Confirmed focused standalone coverage for the new verify-sampling API in `tests/codegen_new_dynarec_observability_test.c`, including filter matching, budget exhaustion, trace emission, and summary counter formatting.
 - Reconfirmed the late-Phase-1 boundary evidence from `/tmp/phase1_reenqueue_probe.log`: `allocator_pressure_events=772998`, `allocator_pressure_empty_purgable_list=756683`, `purgable_page_enqueues=11341`, `purgable_page_enqueues_write=8042`, `purgable_page_enqueues_codegen=3084`, `purgable_page_enqueues_bulk_dirty=215`, `purgable_page_dequeues_stale=0`, `purgable_page_dequeues_flush=8328`, `purgable_page_dequeues_no_blocks=3013`, `purgable_flush_attempts=8008`, `purgable_flush_successes=101`, `purgable_flush_no_overlap=0`, `purgable_flush_no_free_block=7907`, `purgable_flush_no_blocks=339`, `purgable_flush_dirty_list_reuses=6998`, and `random_evictions=748517`.
 - Reconfirmed from that same boundary run that the removed temporary probes all closed at zero before cleanup: `purgable_page_missed_write_enqueue_overlap=0`, `purgable_page_reenqueues_after_flush=0`, and `purgable_page_reenqueues_after_no_blocks=0`.
 
 ### Open
 - There is still no full CPU shadow-execution verify mode or benchmark corpus, but the minimal selective sampling surface needed before Phase 2 is now present.
-- Further reduction of the remaining random-eviction rate is deferred to explicit Phase 2 allocator/reclaim policy work.
+- The allocator-policy path is paused, not closed permanently. It should be revisited later if coverage work changes the hot-path mix or exposes a better eviction/admission lever.
+- Larger coverage gaps remain: REP, softfloat cliffs, and broader guest-visible workload coverage for the still-unhit direct 3DNow suffixes (`0x0c`, `0x1c`, `0x8a`, `0x8e`, `0xa7`, `0xb7`, `0xbb`, `0xbf`) still need explicit prioritization.
 
 ## 2026-03-07
 

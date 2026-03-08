@@ -23,6 +23,7 @@ static void
 assert_zeroed(const new_dynarec_stats_t *stats)
 {
     assert(stats->blocks_marked == 0);
+    assert(stats->deferred_block_marks == 0);
     assert(stats->blocks_recompiled == 0);
     assert(stats->direct_recompiled_instructions == 0);
     assert(stats->helper_call_fallbacks == 0);
@@ -53,6 +54,14 @@ assert_zeroed(const new_dynarec_stats_t *stats)
     assert(stats->verify_helper_bailout_samples == 0);
 }
 
+static void
+assert_no_3dnow_hit_summary(uint8_t opcode)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_3dnow_hit_summary(summary, sizeof(summary), opcode) == 0);
+}
+
 int
 main(void)
 {
@@ -66,6 +75,8 @@ main(void)
     new_dynarec_stats_reset();
     new_dynarec_stats_snapshot(&snapshot);
     assert_zeroed(&snapshot);
+    assert_no_3dnow_hit_summary(0xae);
+    assert_no_3dnow_hit_summary(0xbf);
 
     new_dynarec_set_trace_hook(capture_trace, &trace_capture);
 
@@ -76,6 +87,7 @@ main(void)
     assert(trace_capture.last_event.phys == 0x2000);
     assert(trace_capture.last_event.detail == 7);
 
+    assert(!new_dynarec_should_defer_marking_new_block());
     new_dynarec_note_block_recompiled(0x1010, 0x2010, 5);
     new_dynarec_note_direct_recompiled_instruction();
     new_dynarec_note_direct_recompiled_instruction();
@@ -100,6 +112,11 @@ main(void)
     new_dynarec_note_purgable_flush_no_blocks();
     new_dynarec_note_purgable_flush_dirty_list_reuse();
     new_dynarec_note_random_eviction(0x1050, 0x2050, 0x08);
+    assert(new_dynarec_should_defer_marking_new_block());
+    new_dynarec_note_deferred_block_mark(0x1054, 0x2054);
+    assert(trace_capture.last_event.kind == NEW_DYNAREC_TRACE_BLOCK_MARK_DEFERRED);
+    assert(trace_capture.last_event.pc == 0x1054);
+    assert(trace_capture.last_event.phys == 0x2054);
     memset(&verify_config, 0, sizeof(verify_config));
     verify_config.match_pc     = 1;
     verify_config.match_opcode = 1;
@@ -124,12 +141,17 @@ main(void)
     assert(trace_capture.last_event.flags == NEW_DYNAREC_VERIFY_DIRECT);
     assert(new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_BAILOUT));
     assert(!new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL));
+    new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_DIRECT);
+    new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_DIRECT);
+    new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+    new_dynarec_note_3dnow_opcode_hit(0xbf, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
     assert(new_dynarec_classify_post_purge_state(1, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_HAVE_FREE_BLOCK);
     assert(new_dynarec_classify_post_purge_state(0, 7) == NEW_DYNAREC_POST_PURGE_RETRY_DIRTY_LIST);
     assert(new_dynarec_classify_post_purge_state(0, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_RANDOM_EVICTION);
 
     new_dynarec_stats_snapshot(&snapshot);
     assert(snapshot.blocks_marked == 1);
+    assert(snapshot.deferred_block_marks == 1);
     assert(snapshot.blocks_recompiled == 1);
     assert(snapshot.direct_recompiled_instructions == 2);
     assert(snapshot.helper_call_fallbacks == 2);
@@ -161,6 +183,7 @@ main(void)
 
     assert(new_dynarec_format_stats_summary(summary, sizeof(summary), &snapshot) > 0);
     assert(strstr(summary, "blocks_marked=1"));
+    assert(strstr(summary, "deferred_block_marks=1"));
     assert(strstr(summary, "blocks_recompiled=1"));
     assert(strstr(summary, "allocator_pressure_empty_purgable_list=1"));
     assert(strstr(summary, "purgable_page_enqueues=1"));
@@ -179,6 +202,21 @@ main(void)
     assert(strstr(summary, "verify_samples=2"));
     assert(strstr(summary, "verify_direct_samples=1"));
     assert(strstr(summary, "verify_helper_bailout_samples=1"));
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_3dnow_hit_summary(summary, sizeof(summary), 0xae) > 0);
+    assert(strstr(summary, "opcode=0xae"));
+    assert(strstr(summary, "direct=2"));
+    assert(strstr(summary, "helper_table_null=0"));
+    assert(strstr(summary, "helper_bailout=1"));
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_3dnow_hit_summary(summary, sizeof(summary), 0xbf) > 0);
+    assert(strstr(summary, "opcode=0xbf"));
+    assert(strstr(summary, "direct=0"));
+    assert(strstr(summary, "helper_table_null=1"));
+    assert(strstr(summary, "helper_bailout=0"));
+    assert_no_3dnow_hit_summary(0xb4);
 
     new_dynarec_note_block_became_no_immediates(0x1040, 0x2040, 0xa0);
     new_dynarec_stats_snapshot(&snapshot);

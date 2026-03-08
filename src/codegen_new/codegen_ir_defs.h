@@ -323,8 +323,12 @@
 #define UOP_PFRCP (UOP_TYPE_PARAMS_REGS | 0xc4)
 /*UOP_PFRSQRT - (packed float) dest_reg[0] = dest_reg[1] = 1.0 / sqrt(src_reg[0])*/
 #define UOP_PFRSQRT (UOP_TYPE_PARAMS_REGS | 0xc5)
+/*UOP_PAVGUSB - rounded average of packed unsigned bytes*/
+#define UOP_PAVGUSB (UOP_TYPE_PARAMS_REGS | 0xc6)
+/*UOP_PMULHRW - rounded high word of packed signed word multiply*/
+#define UOP_PMULHRW (UOP_TYPE_PARAMS_REGS | 0xc7)
 
-#define UOP_MAX     0xc6
+#define UOP_MAX     0xc8
 
 #define UOP_INVALID 0xff
 
@@ -835,10 +839,12 @@ extern int codegen_fp_enter(void);
 #define uop_PFMUL(ir, dst_reg, src_reg_a, src_reg_b)                     uop_gen_reg_dst_src2(UOP_PFMUL, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PFRCP(ir, dst_reg, src_reg)                                  uop_gen_reg_dst_src1(UOP_PFRCP, ir, dst_reg, src_reg)
 #define uop_PFRSQRT(ir, dst_reg, src_reg)                                uop_gen_reg_dst_src1(UOP_PFRSQRT, ir, dst_reg, src_reg)
+#define uop_PAVGUSB(ir, dst_reg, src_reg_a, src_reg_b)                   uop_gen_reg_dst_src2(UOP_PAVGUSB, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PFSUB(ir, dst_reg, src_reg_a, src_reg_b)                     uop_gen_reg_dst_src2(UOP_PFSUB, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PI2FD(ir, dst_reg, src_reg)                                  uop_gen_reg_dst_src1(UOP_PI2FD, ir, dst_reg, src_reg)
 
 #define uop_PMADDWD(ir, dst_reg, src_reg_a, src_reg_b)                   uop_gen_reg_dst_src2(UOP_PMADDWD, ir, dst_reg, src_reg_a, src_reg_b)
+#define uop_PMULHRW(ir, dst_reg, src_reg_a, src_reg_b)                   uop_gen_reg_dst_src2(UOP_PMULHRW, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PMULHW(ir, dst_reg, src_reg_a, src_reg_b)                    uop_gen_reg_dst_src2(UOP_PMULHW, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PMULLW(ir, dst_reg, src_reg_a, src_reg_b)                    uop_gen_reg_dst_src2(UOP_PMULLW, ir, dst_reg, src_reg_a, src_reg_b)
 
