@@ -592,12 +592,98 @@ Interpretation:
 - the remaining guest-visible gap is now explicitly the still-unhit suffix set: `0x0c`, `0x1c`, `0x8a`, `0x8e`, `0xa7`, `0xb7`, `0xbb`, `0xbf`
 - the next useful expansion is broader workload coverage, not more table work for 3DNow itself
 
+### 17. Fallback-family narrowing and base-opcode hotspot discovery
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- CPU dynarec now exposes an optional helper fallback-family shutdown report gated by `86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES=1`
+- that report classifies helper fallback load into `base`, `0f`, `x87`, `rep`, and `3dnow`
+- CPU dynarec now also exposes an optional per-opcode base-fallback shutdown report gated by `86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS=1`
+
+Why it was needed:
+
+- once 3DNow direct coverage was validated, the next open question was not "is 3DNow still falling back?" but "what family is actually dominating the remaining helper traffic?"
+- the first family-level pass showed that `3dnow=0` and `x87` was smaller than both `base` and `rep`, so guessing at REP or MMX next would still have been premature
+- the next smallest useful step was therefore to break the dominant `base` bucket down into exact opcodes
+
+What evidence confirmed it:
+
+- `/tmp/fallback_family_report.log` showed `base=48526`, `rep=8100`, `0f=6763`, `x87=2843`, and `3dnow=0`
+- `/tmp/base_fallback_report.log` then showed the dominant base fallback cluster is led by:
+  - `0x9a`, `0xca`, `0xab`, `0xc8`, `0xf7`, `0xad`, `0x9d`, `0xcb`, `0xa5`, `0x6b`, `0xac`, and `0xff`
+- those results split naturally into:
+  - string ops: `0xab`, `0xad`, `0xa5`, `0xac`, plus smaller `0xaa`
+  - far control transfer / frame / flags: `0x9a`, `0xca`, `0xcb`, `0xc8`, `0x9d`
+  - a smaller remaining bailout cluster: `0xf7`, `0xff`, `0x6b`
+
+Interpretation:
+
+- this changes the next implementation target materially
+- the next evidence-backed move is no longer REP or x87 work
+- the best next target is the hot base-opcode cluster, starting with either:
+  - the string-op subset, or
+  - the far control-transfer / frame subset
+- REP remains relevant, but as a measured second-tier target behind the base bucket for this workload set
+
+### 18. First measured base-opcode reduction batch: non-REP STOS/LODS
+
+Status:
+- complete
+- kept
+
+What changed:
+
+- the first implementation batch out of the measured base-opcode hotspot list takes the narrowest coherent string-op slice: non-REP `STOS`/`LODS`
+- direct CPU dynarec handlers now exist for:
+  - `0xaa` (`STOSB`)
+  - `0xab` (`STOSW` / `STOSD`)
+  - `0xac` (`LODSB`)
+  - `0xad` (`LODSW` / `LODSD`)
+- the new handlers cover both address-size modes and keep the existing direction-flag behavior by updating `SI`/`DI` or `ESI`/`EDI` from the runtime `D_FLAG`
+- the standalone coverage-policy test now locks that exact four-opcode subset and still asserts that nearby string ops like `MOVS` / `CMPS` / `SCAS` remain open
+
+Why it was needed:
+
+- the measured hotspot list said to start with base string/far-control work, but mixing those two buckets in one change would have expanded both code surface and risk
+- `STOS`/`LODS` was the best first subset because it covers four hot opcodes immediately while avoiding the extra flag-setting work in `SCAS` / `CMPS` and the privilege / segment-load complexity in far control-transfer ops
+- this is therefore the smallest batch that still follows the measured priority order with credible payoff
+
+What evidence confirmed it:
+
+- `tests/codegen_new_opcode_coverage_policy_test.c` now asserts that `0xaa`, `0xab`, `0xac`, and `0xad` direct-recompile, while `0xa5`, `0xa6`, `0xa7`, `0xae`, and `0xaf` still do not
+- the three required standalone tests pass, `cmake --build build --target 86Box cpu dynarec mem -j4` succeeds, and `codesign -s - --force --deep build/src/86Box.app` succeeds after the build
+- a follow-up 3DMark99 rerun with `86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES=1` and `86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS=1` confirmed the guest-visible effect:
+  - fallback families at shutdown: `base=31127`, `0f=4880`, `x87=319`, `rep=6818`, `3dnow=0`
+  - the shutdown base-opcode report no longer contains `0xaa`, `0xab`, `0xac`, or `0xad`
+
+What remains from the measured hotspot list:
+
+- far control / frame / flags:
+  - `0x9a`, `0xca`, `0xc8`, `0x9d`, `0xcb`
+- string:
+  - `0xa5`
+- smaller bailout cluster:
+  - `0xf7`, `0x6b`, `0xff`
+
+Interpretation:
+
+- the base hotspot is no longer an undifferentiated mixed bucket
+- the next measured subset is now far control / frame (`0x9a`, `0xca`, `0xc8`, `0x9d`, `0xcb`)
+- `MOVS` (`0xa5`) is still the next string-op follow-up after that
+- REP, `0F`, x87, and more 3DNow work remain behind those for this workload set
+
 ## What is still considered open
 
 These are not closed by the work above:
 
 - REP direct recompilation coverage
 - softfloat direct-coverage cliffs
+- hot base-opcode fallback reduction, starting from the measured string/far-control cluster
+- the remaining measured post-`STOS`/`LODS` base-opcode list: `0x9a`, `0xca`, `0xc8`, `0xf7`, `0x9d`, `0xcb`, `0xa5`, `0x6b`, and `0xff`
 - broader guest-visible coverage for the still-unhit direct 3DNow suffixes
 - a possible future full CPU shadow-execution verify tier
 - allocator/reclaim policy work to reduce structurally high random eviction under pressure

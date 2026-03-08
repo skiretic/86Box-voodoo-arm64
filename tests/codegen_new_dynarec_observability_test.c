@@ -62,6 +62,30 @@ assert_no_3dnow_hit_summary(uint8_t opcode)
     assert(new_dynarec_format_3dnow_hit_summary(summary, sizeof(summary), opcode) == 0);
 }
 
+static void
+assert_no_gap_family_summary(void)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_gap_family_summary(summary, sizeof(summary)) == 0);
+}
+
+static void
+assert_no_fallback_family_summary(void)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_fallback_family_summary(summary, sizeof(summary)) == 0);
+}
+
+static void
+assert_no_base_fallback_summary(uint8_t opcode)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_base_fallback_summary(summary, sizeof(summary), opcode) == 0);
+}
+
 int
 main(void)
 {
@@ -77,6 +101,10 @@ main(void)
     assert_zeroed(&snapshot);
     assert_no_3dnow_hit_summary(0xae);
     assert_no_3dnow_hit_summary(0xbf);
+    assert_no_gap_family_summary();
+    assert_no_fallback_family_summary();
+    assert_no_base_fallback_summary(0x90);
+    assert_no_base_fallback_summary(0xec);
 
     new_dynarec_set_trace_hook(capture_trace, &trace_capture);
 
@@ -145,6 +173,18 @@ main(void)
     new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_DIRECT);
     new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
     new_dynarec_note_3dnow_opcode_hit(0xbf, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    new_dynarec_note_gap_family_hit(NEW_DYNAREC_GAP_FAMILY_REP);
+    new_dynarec_note_gap_family_hit(NEW_DYNAREC_GAP_FAMILY_REP);
+    new_dynarec_note_gap_family_hit(NEW_DYNAREC_GAP_FAMILY_SOFTFLOAT_X87);
+    new_dynarec_note_fallback_family_hit(NEW_DYNAREC_FALLBACK_FAMILY_BASE);
+    new_dynarec_note_fallback_family_hit(NEW_DYNAREC_FALLBACK_FAMILY_0F);
+    new_dynarec_note_fallback_family_hit(NEW_DYNAREC_FALLBACK_FAMILY_X87);
+    new_dynarec_note_fallback_family_hit(NEW_DYNAREC_FALLBACK_FAMILY_REP);
+    new_dynarec_note_fallback_family_hit(NEW_DYNAREC_FALLBACK_FAMILY_3DNOW);
+    new_dynarec_note_fallback_family_hit(NEW_DYNAREC_FALLBACK_FAMILY_3DNOW);
+    new_dynarec_note_base_fallback_opcode_hit(0x90, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    new_dynarec_note_base_fallback_opcode_hit(0x90, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+    new_dynarec_note_base_fallback_opcode_hit(0xec, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
     assert(new_dynarec_classify_post_purge_state(1, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_HAVE_FREE_BLOCK);
     assert(new_dynarec_classify_post_purge_state(0, 7) == NEW_DYNAREC_POST_PURGE_RETRY_DIRTY_LIST);
     assert(new_dynarec_classify_post_purge_state(0, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_RANDOM_EVICTION);
@@ -217,6 +257,32 @@ main(void)
     assert(strstr(summary, "helper_table_null=1"));
     assert(strstr(summary, "helper_bailout=0"));
     assert_no_3dnow_hit_summary(0xb4);
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_gap_family_summary(summary, sizeof(summary)) > 0);
+    assert(strstr(summary, "rep=2"));
+    assert(strstr(summary, "softfloat_x87=1"));
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_fallback_family_summary(summary, sizeof(summary)) > 0);
+    assert(strstr(summary, "base=1"));
+    assert(strstr(summary, "0f=1"));
+    assert(strstr(summary, "x87=1"));
+    assert(strstr(summary, "rep=1"));
+    assert(strstr(summary, "3dnow=2"));
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_base_fallback_summary(summary, sizeof(summary), 0x90) > 0);
+    assert(strstr(summary, "opcode=0x90"));
+    assert(strstr(summary, "helper_table_null=1"));
+    assert(strstr(summary, "helper_bailout=1"));
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_base_fallback_summary(summary, sizeof(summary), 0xec) > 0);
+    assert(strstr(summary, "opcode=0xec"));
+    assert(strstr(summary, "helper_table_null=1"));
+    assert(strstr(summary, "helper_bailout=0"));
+    assert_no_base_fallback_summary(0x91);
 
     new_dynarec_note_block_became_no_immediates(0x1040, 0x2040, 0xa0);
     new_dynarec_stats_snapshot(&snapshot);

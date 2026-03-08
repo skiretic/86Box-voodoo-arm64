@@ -17,8 +17,8 @@ Last updated: 2026-03-08
 | Investigation and architecture review | Complete | 100% | Detailed report written and saved |
 | Implementation work | In progress | 80% | Phase 1 invalidation/reclamation hardening is complete; durable Phase 0/1 observability remains in tree, allocator-policy experiments are paused, and active implementation has now closed the remaining direct 3DNow generator gap in one cumulative batch |
 | Correctness risk mitigation | Complete | 100% | Phase 1 is closed: page-0 sentinel, stale-head purge churn, post-purge dirty-list reuse, stale code-presence state, and bogus bulk-dirty enqueue churn were fixed and validated; remaining high random eviction is treated as reclaimable-page scarcity for this workload |
-| Coverage closure | In progress | 60% | REP and softfloat remain open, but the direct 3DNow/3DNowE generator gap is now closed with cumulative regression coverage, a legality gate for 3DNowE-only suffixes, and initial guest-visible direct-path validation |
-| Observability and validation tooling | In progress | 86% | Core CPU dynarec counters, runtime summary logging, purge failure-mode counters, empty-purge accounting, purge-list lifecycle counters, selective verify sampling, per-hit 3DNow shutdown logging, and Phase 2 mark-deferral accounting are in tree; temporary scarcity-boundary probes were retired after Phase 1 closure |
+| Coverage closure | In progress | 64% | REP and softfloat remain open, but the direct 3DNow/3DNowE generator gap is now closed with cumulative regression coverage, a legality gate for 3DNowE-only suffixes, initial guest-visible direct-path validation, and a measured fallback priority order |
+| Observability and validation tooling | In progress | 90% | Core CPU dynarec counters, runtime summary logging, purge failure-mode counters, empty-purge accounting, purge-list lifecycle counters, selective verify sampling, per-hit 3DNow shutdown logging, fallback-family logging, base-opcode fallback logging, and Phase 2 mark-deferral accounting are in tree; temporary scarcity-boundary probes were retired after Phase 1 closure |
 | Performance optimization | Paused | 8% | Initial allocator/reclaim policy experiments were stable but low-yield on the 3DMark99 workload, so this track is paused while coverage work proceeds |
 
 ## Current executive readout
@@ -40,6 +40,12 @@ Last updated: 2026-03-08
 - The standalone coverage-policy test now locks the exact 24-suffix direct 3DNow set instead of only asserting that "some 3DNow support exists", so future regressions in older or newer suffixes stay visible until guest-level validation is complete.
 - CPU dynarec now also exposes optional per-hit 3DNow shutdown logging through `86BOX_NEW_DYNAREC_LOG_3DNOW_HITS=1`, which records every 3DNow suffix actually exercised by a guest run and whether each hit stayed direct, fell back because the table entry was `NULL`, or bailed out of the direct handler.
 - Initial guest-visible validation is now in hand: Windows 98 + 3DMark99 and longer mixed runs exercised 16 suffixes (`0x0d`, `0x1d`, `0x90`, `0x94`, `0x96`, `0x97`, `0x9a`, `0x9e`, `0xa0`, `0xa4`, `0xa6`, `0xaa`, `0xae`, `0xb0`, `0xb4`, `0xb6`), and every observed hit stayed on the direct path with `helper_table_null=0` and `helper_bailout=0`.
+- Fallback-family measurement is now in hand too: the first broad breakdown showed `base=48526`, `rep=8100`, `0f=6763`, `x87=2843`, and `3dnow=0`, so the next evidence-backed implementation target is the plain base-opcode fallback bucket rather than more 3DNow, REP, or x87 work.
+- A deeper base-opcode breakdown then showed the dominant plain-opcode fallback cluster is not generic noise but a narrow set led by far control-transfer / frame ops and string ops: `0x9a`, `0xca`, `0xab`, `0xc8`, `0xf7`, `0xad`, `0x9d`, `0xcb`, `0xa5`, `0x6b`, `0xac`, and `0xff`.
+- The current measured priority order is therefore: base string/far-control opcodes first, REP second, `0F` fallback third, and x87 / 3DNow behind those for this workload set.
+- The first measured base-opcode reduction batch now in tree takes the narrowest coherent string-op slice from that hotspot list: non-REP `STOS`/`LODS` (`0xaa`, `0xab`, `0xac`, `0xad`) now direct-recompile in both address-size modes, and the focused coverage-policy test locks that exact four-opcode subset.
+- A follow-up 3DMark99 rerun with fallback-family and base-opcode shutdown logging now confirms that result guest-visibly: `0xaa`, `0xab`, `0xac`, and `0xad` are absent from the shutdown base-fallback report, while the family summary tightened to `base=31127`, `0f=4880`, `x87=319`, `rep=6818`, and `3dnow=0`.
+- That closes the first string-op batch and narrows the remaining measured base-opcode list to `0x9a`, `0xca`, `0xc8`, `0xf7`, `0x9d`, `0xcb`, `0xa5`, `0x6b`, and `0xff`, with the far control/frame subset now the clear next measured implementation target ahead of `MOVS`, REP, x87, or more 3DNow work.
 - Runtime logging now distinguishes purge attempts that hit a dead head-page entry (`no overlap`) from purge attempts that do flush work but still fail to free a block, and now counts when a purge leaves reusable blocks in the dirty list for immediate recovery.
 - A Windows 98 + 3DMark99 rerun after the dirty-list reuse fix showed `purgable_flush_dirty_list_reuses=7691` and reduced `random_evictions` from `795608` to `744661`, confirming the fix is real but also showing a remaining no-free-block failure mode.
 - The next confirmed failure mode was stale `code_present_mask` / `byte_code_present_mask` state on pages with no live blocks, which can make purge see overlap but invalidate nothing. The code now clears stale code-presence state when the last block leaves a page, and logs a `purgable_flush_no_blocks` counter to measure any remaining occurrences.
@@ -59,9 +65,9 @@ Last updated: 2026-03-08
 | Workstream | Objective | Status | Progress | Exit condition |
 |---|---|---|---:|---|
 | WS0: Investigation | Capture architecture, risks, gaps, and plan | Complete | 100% | Report accepted as planning baseline |
-| WS1: Observability | Add counters, traces, and verify hooks | Nearly complete | 90% | Core counters and runtime summary logging are in; empty-purge and purge-list lifecycle counters were kept as durable validation surface; temporary scarcity-boundary probes were removed after Phase 1 closure; selective verify sampling now covers the minimal pre-Phase-2 reproducibility need |
+| WS1: Observability | Add counters, traces, and verify hooks | Nearly complete | 94% | Core counters and runtime summary logging are in; empty-purge and purge-list lifecycle counters were kept as durable validation surface; temporary scarcity-boundary probes were removed after Phase 1 closure; selective verify sampling plus 3DNow/fallback/base-opcode shutdown logging now cover the current reproducibility need |
 | WS2: Invalidation and reclamation | Fix page-list correctness and dirty-page reclaim behavior | Complete | 100% | Page-list sentinel bug fixed; stale-head pruning landed; allocator reuses dirty-list blocks created by purge before random eviction, stale code-presence masks are cleared when pages lose their last block, bulk-dirty enqueue skips non-reclaimable pages, and the remaining empty-purge behavior was closed out as expected scarcity for this workload |
-| WS3: Coverage closure | Reduce silent helper-path and unsupported direct coverage gaps | In progress | 68% | Pivoted into active implementation after allocator-policy pause; direct arm64 `PMADDWD`, the existing 3DNow table enable, the remaining direct 3DNow generator batch, and first guest-visible per-hit validation are now in tree |
+| WS3: Coverage closure | Reduce silent helper-path and unsupported direct coverage gaps | In progress | 79% | Pivoted into active implementation after allocator-policy pause; direct arm64 `PMADDWD`, the existing 3DNow table enable, the remaining direct 3DNow generator batch, first guest-visible per-hit validation, measured fallback-priority ordering, the first measured base-opcode reduction batch (`STOS`/`LODS`, `0xaa`-`0xad`), and the confirming post-change 3DMark99 rerun are now in tree |
 | WS4: Backend parity | Close meaningful arm64 vs x86-64 CPU dynarec deltas | Not started | 0% | Backend differences are intentional, measured, and documented |
 | WS5: Performance | Improve warmup, eviction policy, and hot-path code quality | Paused | 10% | Initial allocator/reclaim policy work produced stable instrumentation-backed experiments, but this track is paused until coverage closure work is further along |
 | WS6: Validation and benchmarking | Add regression corpus and benchmark gates | In progress | 15% | Initial Windows 98 + 3DMark99 workload evidence exists; scripted gates still do not |
@@ -72,16 +78,16 @@ Scale: 20 slots per phase. `#` = completed progress, `-` = remaining work.
 
 | Phase | Status | Chart | Progress | Current readout |
 |---|---|---|---:|---|
-| Phase 0: Observability and reproducibility | Effectively complete for Phase 2 entry | `[##################--]` | 92% | Core counters, runtime stats summaries, workload-level logging, purge failure-mode counters, empty-purge instrumentation, purge-list lifecycle counters, selective verify sampling, and mark-deferral accounting landed; only a future optional shadow-execution tier remains |
+| Phase 0: Observability and reproducibility | Effectively complete for Phase 2 entry | `[###################-]` | 95% | Core counters, runtime stats summaries, workload-level logging, purge failure-mode counters, empty-purge instrumentation, purge-list lifecycle counters, selective verify sampling, 3DNow/fallback/base-opcode shutdown logging, and mark-deferral accounting landed; only a future optional shadow-execution tier remains |
 | Phase 1: Invalidation and reclamation hardening | Complete | `[####################]` | 100% | Page-0 list fix, byte-mask reclaim hardening, stale-head pruning, post-purge dirty-list reuse, stale code-mask cleanup, and bulk-dirty overlap-gated enqueue all landed and validated; remaining empty-purge behavior is treated as expected scarcity for this workload |
 | Phase 2: Allocator/reclaim policy | Paused | `[##------------------]` | 10% | Two narrow mark-deferral experiments landed and are stable, but they did not show a clear enough workload win to justify more tuning before coverage closure |
-| Phase 3: Coverage closure and backend performance work | In progress | `[#########-----------]` | 45% | Coverage closure is now the active implementation track; arm64 direct `PMADDWD`, direct 3DNow table enable, the remaining direct 3DNow generator batch, and first guest-visible direct-path validation landed, while REP policy, softfloat cliffs, and broader workload coverage remain open |
+| Phase 3: Coverage closure and backend performance work | In progress | `[##########----------]` | 50% | Coverage closure is now the active implementation track; arm64 direct `PMADDWD`, direct 3DNow table enable, the remaining direct 3DNow generator batch, first guest-visible direct-path validation, and measured fallback-priority ordering landed, while the hot base-opcode string/far-control cluster, REP policy, and broader workload coverage remain open |
 | Phase 4: Release-quality validation | In progress | `[###-----------------]` | 15% | Initial Windows 98 + 3DMark99 workload evidence exists, but scripted sweeps and threshold-based regression checks do not |
 
 ### Phase 0 chart basis
 
 - Completed slice: counter surface, trace-hook surface, direct-vs-helper fallback accounting, invalidation/degradation accounting, allocator-pressure/random-eviction accounting, focused API verification, selective verify sampling at the direct-vs-helper boundary, and the extra accounting needed to measure Phase 2 mark deferral.
-- Remaining slice: broader runtime consumers, a future shadow-execution tier if needed, reproducibility matrix, and benchmark-backed validation beyond the initial 3DNow hit report.
+- Remaining slice: a future shadow-execution tier if needed, reproducibility matrix, and benchmark-backed validation beyond the current 3DNow/fallback/base-opcode reports.
 
 ## Top risks tracker
 
@@ -89,7 +95,7 @@ Scale: 20 slots per phase. `#` = completed progress, `-` = remaining work.
 |---|---|---|---|---|
 | 1 | Empty purge list under allocator pressure | High | Characterized | Latest workload evidence shows `allocator_pressure_empty_purgable_list=756683` out of `772998`; final boundary validation stayed at zero for the late-Phase-1 bug probes, so the remaining behavior is currently best explained by scarce reclaimable pages rather than another confirmed Phase 1 bug |
 | 2 | Purgeable-page list collides with page 0 | Critical | Closed | Distinct evict-list sentinels implemented and regression-tested |
-| 3 | REP / softfloat coverage cliffs and remaining guest-visible validation gaps | High | Open | Build explicit support matrix, extend workload coverage beyond the 16 already observed direct 3DNow suffixes, and then prioritize the next measured gap |
+| 3 | Base-opcode helper fallback cluster | High | Narrowed | The first measured batch now covers non-REP `STOS`/`LODS` (`0xaa`, `0xab`, `0xac`, `0xad`), and the confirming 3DMark99 rerun shows those opcodes no longer appear in the shutdown base-fallback report; the next target is far control/frame (`0x9a`, `0xca`, `0xc8`, `0x9d`, `0xcb`), then `0xa5`, `0xf7`, `0x6b`, and `0xff` |
 | 4 | Known direct-recompile correctness regressions | High | Open | Reproduce and track guest-facing failures separately |
 | 5 | CPU dynarec verify tooling is still shallow | Medium | Narrowed | Core counters + runtime summaries landed, and selective verify sampling now exists; only a deeper shadow-execution tier remains optional later |
 | 6 | Fixed exec pool plus random block eviction | Medium | Characterized | Current workload still behaves as expected scarcity after stable policy experiments; further allocator-policy tuning is paused while coverage gaps are addressed |
@@ -121,7 +127,10 @@ Scale: 20 slots per phase. `#` = completed progress, `-` = remaining work.
 - [x] Implement the first narrow CPU dynarec coverage-closure change
 - [x] Close the remaining direct 3DNow/3DNowE generator gap with cumulative regression coverage
 - [x] Add per-hit 3DNow runtime logging and capture initial guest-visible direct-path evidence
-- [ ] Decide explicit policy for REP, softfloat, and arm64 parity gaps
+- [x] Measure fallback family and base-opcode fallback concentration under real workloads
+- [x] Implement the first measured base-opcode fallback reduction step
+- [x] Re-measure the narrowed base-opcode hotspot list after the non-REP `STOS`/`LODS` batch
+- [ ] Implement the next measured base-opcode subset: far control / frame (`0x9a`, `0xca`, `0xc8`, `0x9d`, `0xcb`)
 - [ ] Define initial benchmark workload set
 
 ## Deliverables tracker
@@ -137,7 +146,9 @@ Scale: 20 slots per phase. `#` = completed progress, `-` = remaining work.
 | Phase 0 selective verify sampling | Complete | `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `src/codegen_new/codegen.c`, `tests/codegen_new_dynarec_observability_test.c` |
 | Phase 2 cold-block mark deferral experiment | Complete | `src/cpu/386_dynarec.c`, `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `tests/codegen_new_allocator_pressure_policy_test.c`, `tests/codegen_new_dynarec_observability_test.c` |
 | Phase 3 arm64 direct `PMADDWD` parity and direct 3DNow table enable | Complete | `src/codegen_new/codegen_ops.c`, `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `tests/codegen_new_opcode_coverage_policy_test.c` |
+| Phase 3 first measured base-opcode reduction batch | Complete | `src/codegen_new/codegen_ops.c`, `src/codegen_new/codegen_ops_string.c`, `src/codegen_new/codegen_ops_string.h`, `src/codegen_new/CMakeLists.txt`, `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `tests/codegen_new_opcode_coverage_policy_test.c` |
 | Phase 3 per-hit 3DNow runtime logging | Complete | `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `src/codegen_new/codegen.c`, `src/86box.c`, `tests/codegen_new_dynarec_observability_test.c` |
+| Phase 3 fallback-family and base-opcode fallback logging | Complete | `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `src/codegen_new/codegen.c`, `src/86box.c`, `tests/codegen_new_dynarec_observability_test.c` |
 | Phase 1 page-list sentinel fix | Complete | `src/include/86box/mem.h`, `src/mem/mem_evict_list.c`, `src/mem/mem.c`, `src/mem/row.c`, `tests/mem_evict_list_test.c` |
 | Phase 1 byte-mask reclaim hardening | Complete | `src/include/86box/mem.h`, `src/mem/mem_evict_list.c`, `src/codegen_new/codegen_block.c`, `tests/mem_evict_list_test.c` |
 | Phase 1 purge failure-mode counters | Complete | `src/cpu/codegen_public.h`, `src/codegen_new/codegen_observability.c`, `src/codegen_new/codegen_block.c`, `tests/codegen_new_dynarec_observability_test.c` |
@@ -154,7 +165,7 @@ Scale: 20 slots per phase. `#` = completed progress, `-` = remaining work.
 ## Open decisions
 
 - Is a deeper CPU shadow-execution tier still worth building later, or is selective sampling plus focused regressions enough for the expected Phase 2 policy work?
-- Should REP direct recompilation be pursued immediately, or tracked first with per-opcode fallback counters?
+- How narrow should the next far-control/frame batch be: full subset (`0x9a`, `0xca`, `0xc8`, `0x9d`, `0xcb`) or a still-smaller legality-first slice?
 - What guest workload set will be the standing regression corpus for CPU dynarec changes?
 
 ## Update instructions

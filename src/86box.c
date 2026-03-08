@@ -1923,13 +1923,42 @@ log_new_dynarec_shutdown_summary(void)
     always_log("CPU new dynarec stats [shutdown]: %s\n", summary);
 
     if (!new_dynarec_3dnow_hit_logging_enabled())
-        return;
+        goto done_3dnow_hits;
 
     for (opcode = 0; opcode <= 0xff; opcode++) {
         if (new_dynarec_format_3dnow_hit_summary(summary, sizeof(summary), (uint8_t) opcode) <= 0)
             continue;
 
         always_log("CPU new dynarec 3DNow hits [shutdown]: %s\n", summary);
+    }
+
+done_3dnow_hits:
+    if (!new_dynarec_gap_family_logging_enabled())
+        goto done_gap_family;
+
+    if (new_dynarec_format_gap_family_summary(summary, sizeof(summary)) <= 0)
+        goto done_gap_family;
+
+    always_log("CPU new dynarec gap families [shutdown]: %s\n", summary);
+
+done_gap_family:
+    if (!new_dynarec_fallback_family_logging_enabled())
+        goto done_fallback_families;
+
+    if (new_dynarec_format_fallback_family_summary(summary, sizeof(summary)) <= 0)
+        goto done_fallback_families;
+
+    always_log("CPU new dynarec fallback families [shutdown]: %s\n", summary);
+
+done_fallback_families:
+    if (!new_dynarec_base_fallback_logging_enabled())
+        return;
+
+    for (opcode = 0; opcode <= 0xff; opcode++) {
+        if (new_dynarec_format_base_fallback_summary(summary, sizeof(summary), (uint8_t) opcode) <= 0)
+            continue;
+
+        always_log("CPU new dynarec base fallbacks [shutdown]: %s\n", summary);
     }
 }
 #endif

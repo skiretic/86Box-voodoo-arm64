@@ -46,6 +46,45 @@ codegen_3dnow_opcode_requires_3dnowe(uint8_t opcode)
     }
 }
 
+static int
+codegen_rep_helper_gap_hit(const OpFn *op_table)
+{
+    return op_table == x86_dynarec_opcodes_REPNE || op_table == x86_dynarec_opcodes_REPE;
+}
+
+static int
+codegen_softfloat_x87_gap_hit(const OpFn *op_table)
+{
+    if (!fpu_softfloat)
+        return 0;
+
+    return op_table == x86_dynarec_opcodes_d8_a16 || op_table == x86_dynarec_opcodes_d8_a32 || op_table == x86_dynarec_opcodes_d9_a16
+           || op_table == x86_dynarec_opcodes_d9_a32 || op_table == x86_dynarec_opcodes_da_a16 || op_table == x86_dynarec_opcodes_da_a32
+           || op_table == x86_dynarec_opcodes_db_a16 || op_table == x86_dynarec_opcodes_db_a32 || op_table == x86_dynarec_opcodes_dc_a16
+           || op_table == x86_dynarec_opcodes_dc_a32 || op_table == x86_dynarec_opcodes_dd_a16 || op_table == x86_dynarec_opcodes_dd_a32
+           || op_table == x86_dynarec_opcodes_de_a16 || op_table == x86_dynarec_opcodes_de_a32 || op_table == x86_dynarec_opcodes_df_a16
+           || op_table == x86_dynarec_opcodes_df_a32;
+}
+
+static new_dynarec_fallback_family_t
+codegen_classify_fallback_family(const OpFn *op_table)
+{
+    if (op_table == x86_dynarec_opcodes_3DNOW)
+        return NEW_DYNAREC_FALLBACK_FAMILY_3DNOW;
+    if (op_table == x86_dynarec_opcodes_REPNE || op_table == x86_dynarec_opcodes_REPE)
+        return NEW_DYNAREC_FALLBACK_FAMILY_REP;
+    if (op_table == x86_dynarec_opcodes_0f)
+        return NEW_DYNAREC_FALLBACK_FAMILY_0F;
+    if (op_table == x86_dynarec_opcodes_d8_a16 || op_table == x86_dynarec_opcodes_d8_a32 || op_table == x86_dynarec_opcodes_d9_a16
+        || op_table == x86_dynarec_opcodes_d9_a32 || op_table == x86_dynarec_opcodes_da_a16 || op_table == x86_dynarec_opcodes_da_a32
+        || op_table == x86_dynarec_opcodes_db_a16 || op_table == x86_dynarec_opcodes_db_a32 || op_table == x86_dynarec_opcodes_dc_a16
+        || op_table == x86_dynarec_opcodes_dc_a32 || op_table == x86_dynarec_opcodes_dd_a16 || op_table == x86_dynarec_opcodes_dd_a32
+        || op_table == x86_dynarec_opcodes_de_a16 || op_table == x86_dynarec_opcodes_de_a32 || op_table == x86_dynarec_opcodes_df_a16
+        || op_table == x86_dynarec_opcodes_df_a32)
+        return NEW_DYNAREC_FALLBACK_FAMILY_X87;
+
+    return NEW_DYNAREC_FALLBACK_FAMILY_BASE;
+}
 int
 codegen_get_instruction_uop(codeblock_t *block, uint32_t pc, int *first_instruction, int *TOP)
 {
@@ -730,6 +769,21 @@ codegen_skip:
         new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
         if (op_table == x86_dynarec_opcodes_3DNOW)
             new_dynarec_note_3dnow_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+    }
+    if (codegen_rep_helper_gap_hit(op_table))
+        new_dynarec_note_gap_family_hit(NEW_DYNAREC_GAP_FAMILY_REP);
+    else if (codegen_softfloat_x87_gap_hit(op_table))
+        new_dynarec_note_gap_family_hit(NEW_DYNAREC_GAP_FAMILY_SOFTFLOAT_X87);
+    {
+        new_dynarec_fallback_family_t fallback_family = codegen_classify_fallback_family(op_table);
+
+        new_dynarec_note_fallback_family_hit(fallback_family);
+        if (fallback_family == NEW_DYNAREC_FALLBACK_FAMILY_BASE) {
+            if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL)
+                new_dynarec_note_base_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+            else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT)
+                new_dynarec_note_base_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+        }
     }
     new_dynarec_note_helper_call_fallback(helper_fallback_reason);
 

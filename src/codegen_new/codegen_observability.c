@@ -16,6 +16,11 @@ static uint32_t                   new_dynarec_mark_deferral_budget;
 static uint64_t                   new_dynarec_3dnow_direct_hits[256];
 static uint64_t                   new_dynarec_3dnow_helper_table_null_hits[256];
 static uint64_t                   new_dynarec_3dnow_helper_bailout_hits[256];
+static uint64_t                   new_dynarec_rep_gap_hits;
+static uint64_t                   new_dynarec_softfloat_x87_gap_hits;
+static uint64_t                   new_dynarec_fallback_family_hits[6];
+static uint64_t                   new_dynarec_base_fallback_table_null_hits[256];
+static uint64_t                   new_dynarec_base_fallback_bailout_hits[256];
 
 static void
 new_dynarec_emit_trace(new_dynarec_trace_kind_t kind, uint32_t pc, uint32_t phys, uint32_t detail, uint16_t flags)
@@ -88,6 +93,11 @@ new_dynarec_stats_reset(void)
     memset(new_dynarec_3dnow_direct_hits, 0, sizeof(new_dynarec_3dnow_direct_hits));
     memset(new_dynarec_3dnow_helper_table_null_hits, 0, sizeof(new_dynarec_3dnow_helper_table_null_hits));
     memset(new_dynarec_3dnow_helper_bailout_hits, 0, sizeof(new_dynarec_3dnow_helper_bailout_hits));
+    new_dynarec_rep_gap_hits           = 0;
+    new_dynarec_softfloat_x87_gap_hits = 0;
+    memset(new_dynarec_fallback_family_hits, 0, sizeof(new_dynarec_fallback_family_hits));
+    memset(new_dynarec_base_fallback_table_null_hits, 0, sizeof(new_dynarec_base_fallback_table_null_hits));
+    memset(new_dynarec_base_fallback_bailout_hits, 0, sizeof(new_dynarec_base_fallback_bailout_hits));
 }
 
 void
@@ -120,6 +130,48 @@ new_dynarec_3dnow_hit_logging_enabled(void)
 
     if (enabled == -1) {
         const char *value = getenv("86BOX_NEW_DYNAREC_LOG_3DNOW_HITS");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+int
+new_dynarec_gap_family_logging_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_GAP_FAMILIES");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+int
+new_dynarec_fallback_family_logging_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_FALLBACK_FAMILIES");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+int
+new_dynarec_base_fallback_logging_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_BASE_FALLBACKS");
 
         enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
     }
@@ -225,6 +277,62 @@ new_dynarec_format_3dnow_hit_summary(char *buffer, size_t size, uint8_t opcode)
                     opcode, direct_hits, helper_table_null_hits, helper_bailout_hits);
 }
 
+int
+new_dynarec_format_gap_family_summary(char *buffer, size_t size)
+{
+    if (!buffer || !size)
+        return 0;
+
+    if (!(new_dynarec_rep_gap_hits || new_dynarec_softfloat_x87_gap_hits))
+        return 0;
+
+    return snprintf(buffer, size,
+                    "rep=%" PRIu64 " softfloat_x87=%" PRIu64,
+                    new_dynarec_rep_gap_hits, new_dynarec_softfloat_x87_gap_hits);
+}
+
+int
+new_dynarec_format_fallback_family_summary(char *buffer, size_t size)
+{
+    if (!buffer || !size)
+        return 0;
+
+    if (!(new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_BASE]
+          || new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_0F]
+          || new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_X87]
+          || new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_REP]
+          || new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_3DNOW]))
+        return 0;
+
+    return snprintf(buffer, size,
+                    "base=%" PRIu64 " 0f=%" PRIu64 " x87=%" PRIu64 " rep=%" PRIu64 " 3dnow=%" PRIu64,
+                    new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_BASE],
+                    new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_0F],
+                    new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_X87],
+                    new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_REP],
+                    new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_3DNOW]);
+}
+
+int
+new_dynarec_format_base_fallback_summary(char *buffer, size_t size, uint8_t opcode)
+{
+    uint64_t helper_table_null_hits;
+    uint64_t helper_bailout_hits;
+
+    if (!buffer || !size)
+        return 0;
+
+    helper_table_null_hits = new_dynarec_base_fallback_table_null_hits[opcode];
+    helper_bailout_hits    = new_dynarec_base_fallback_bailout_hits[opcode];
+
+    if (!(helper_table_null_hits || helper_bailout_hits))
+        return 0;
+
+    return snprintf(buffer, size,
+                    "opcode=0x%02x helper_table_null=%" PRIu64 " helper_bailout=%" PRIu64,
+                    opcode, helper_table_null_hits, helper_bailout_hits);
+}
+
 void
 new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque)
 {
@@ -306,6 +414,39 @@ new_dynarec_note_3dnow_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t o
     }
 }
 
+void
+new_dynarec_note_gap_family_hit(new_dynarec_gap_family_t family)
+{
+    switch (family) {
+        case NEW_DYNAREC_GAP_FAMILY_REP:
+            new_dynarec_rep_gap_hits++;
+            break;
+        case NEW_DYNAREC_GAP_FAMILY_SOFTFLOAT_X87:
+            new_dynarec_softfloat_x87_gap_hits++;
+            break;
+        default:
+            break;
+    }
+}
+
+void
+new_dynarec_note_fallback_family_hit(new_dynarec_fallback_family_t family)
+{
+    if (family <= NEW_DYNAREC_FALLBACK_FAMILY_NONE || family > NEW_DYNAREC_FALLBACK_FAMILY_3DNOW)
+        return;
+
+    new_dynarec_fallback_family_hits[family]++;
+}
+
+void
+new_dynarec_note_base_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome)
+{
+    if (outcome == NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL)
+        new_dynarec_base_fallback_table_null_hits[opcode]++;
+    else if (outcome == NEW_DYNAREC_VERIFY_HELPER_BAILOUT)
+        new_dynarec_base_fallback_bailout_hits[opcode]++;
+}
+
 int
 new_dynarec_should_defer_marking_new_block(void)
 {
@@ -372,6 +513,26 @@ int
 new_dynarec_direct_3dnow_opcode_count(void)
 {
     return 24;
+}
+
+int
+new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode)
+{
+    switch (opcode) {
+        case 0xaa:
+        case 0xab:
+        case 0xac:
+        case 0xad:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+int
+new_dynarec_direct_base_string_opcode_count(void)
+{
+    return 4;
 }
 
 void
