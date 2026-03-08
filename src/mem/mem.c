@@ -1834,13 +1834,6 @@ mem_read_ram_2gbl(uint32_t addr, UNUSED(void *priv))
 }
 
 #ifdef USE_NEW_DYNAREC
-static inline void
-new_dynarec_note_write_overlap_left_off_list(page_t *page)
-{
-    if (!page_in_evict_list(page) && page_has_dirty_code_overlap(page))
-        new_dynarec_note_purgable_page_missed_write_enqueue_overlap();
-}
-
 void
 mem_write_ramb_page(uint32_t addr, uint8_t val, page_t *page)
 {
@@ -1869,7 +1862,6 @@ mem_write_ramb_page(uint32_t addr, uint8_t val, page_t *page)
             page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
             page_add_to_evict_list(page);
         }
-        new_dynarec_note_write_overlap_left_off_list(page);
     }
 }
 
@@ -1914,7 +1906,6 @@ mem_write_ramw_page(uint32_t addr, uint16_t val, page_t *page)
             page_set_evict_enqueue_source(page, PAGE_EVICT_ENQUEUE_SOURCE_WRITE);
             page_add_to_evict_list(page);
         }
-        new_dynarec_note_write_overlap_left_off_list(page);
     }
 }
 
@@ -1953,7 +1944,6 @@ mem_write_raml_page(uint32_t addr, uint32_t val, page_t *page)
                 page_add_to_evict_list(page);
             }
         }
-        new_dynarec_note_write_overlap_left_off_list(page);
     }
 }
 #else

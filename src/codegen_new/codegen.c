@@ -685,6 +685,7 @@ generate_call:
         uint32_t new_pc = recomp_op_table[(opcode | op_32) & recomp_opcode_mask](block, ir, opcode, fetchdat, op_32, op_pc);
         if (new_pc) {
             new_dynarec_note_direct_recompiled_instruction();
+            new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_DIRECT);
             if (new_pc != -1)
                 uop_MOV_IMM(ir, IREG_pc, new_pc);
 
@@ -703,6 +704,10 @@ generate_call:
     }
 
 codegen_skip:
+    if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL)
+        new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT)
+        new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
     new_dynarec_note_helper_call_fallback(helper_fallback_reason);
 
     if ((op_table == x86_dynarec_opcodes_REPNE || op_table == x86_dynarec_opcodes_REPE) && !op_table[opcode | op_32]) {

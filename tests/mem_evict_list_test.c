@@ -34,7 +34,6 @@ reset_pages(void)
         test_pages[i].evict_prev = EVICT_NOT_IN_LIST;
         test_pages[i].evict_next = EVICT_LINK_NULL;
         test_pages[i].evict_enqueue_source = PAGE_EVICT_ENQUEUE_SOURCE_NONE;
-        test_pages[i].evict_last_dequeue_reason = PAGE_EVICT_DEQUEUE_REASON_NONE;
         test_pages[i].dirty_mask = 0;
         test_pages[i].code_present_mask = 0;
         test_pages[i].byte_dirty_mask = byte_dirty_masks[i];
@@ -94,7 +93,6 @@ main(void)
     assert(test_pages[1].byte_code_present_mask[7] == 0);
     assert(purgeable_page_count == 0);
     assert(new_dynarec_stats.purgable_page_dequeues_flush == 1);
-    assert(new_dynarec_stats.purgable_page_dequeues_flush_write == 1);
 
     test_pages[3].dirty_mask = 0x20;
     test_pages[3].code_present_mask = 0x20;
@@ -136,7 +134,6 @@ main(void)
     assert(test_pages[2].byte_code_present_mask[4] == 0);
     assert(!page_in_evict_list(&test_pages[2]));
     assert(new_dynarec_stats.purgable_page_dequeues_no_blocks == 1);
-    assert(new_dynarec_stats.purgable_page_dequeues_no_blocks_codegen == 1);
 
     test_pages[2].code_present_mask = 0x10;
     test_pages[2].byte_code_present_mask[4] = 0x2;
@@ -166,28 +163,6 @@ main(void)
     assert(page_enqueue_if_reclaimable_with_source(&test_pages[0], PAGE_EVICT_ENQUEUE_SOURCE_BULK_DIRTY));
     assert(page_in_evict_list(&test_pages[0]));
     assert(test_pages[0].evict_enqueue_source == PAGE_EVICT_ENQUEUE_SOURCE_BULK_DIRTY);
-
-    reset_pages();
-    test_pages[0].dirty_mask = 0x1;
-    test_pages[0].code_present_mask = 0x1;
-    test_pages[0].evict_enqueue_source = PAGE_EVICT_ENQUEUE_SOURCE_WRITE;
-    page_add_to_evict_list(&test_pages[0]);
-    page_complete_dirty_code_flush(&test_pages[0]);
-    test_pages[0].dirty_mask = 0x1;
-    test_pages[0].code_present_mask = 0x1;
-    assert(page_enqueue_if_reclaimable(&test_pages[0]));
-    assert(new_dynarec_stats.purgable_page_reenqueues_after_flush == 1);
-
-    reset_pages();
-    test_pages[0].dirty_mask = 0x1;
-    test_pages[0].code_present_mask = 0x1;
-    test_pages[0].evict_enqueue_source = PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN;
-    page_add_to_evict_list(&test_pages[0]);
-    page_clear_code_presence_if_no_blocks(&test_pages[0]);
-    test_pages[0].dirty_mask = 0x1;
-    test_pages[0].code_present_mask = 0x1;
-    assert(page_enqueue_if_reclaimable(&test_pages[0]));
-    assert(new_dynarec_stats.purgable_page_reenqueues_after_no_blocks == 1);
 
     return 0;
 }

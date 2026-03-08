@@ -37,18 +37,9 @@ assert_zeroed(const new_dynarec_stats_t *stats)
     assert(stats->purgable_page_enqueues_write == 0);
     assert(stats->purgable_page_enqueues_codegen == 0);
     assert(stats->purgable_page_enqueues_bulk_dirty == 0);
-    assert(stats->purgable_page_missed_write_enqueue_overlap == 0);
-    assert(stats->purgable_page_reenqueues_after_flush == 0);
-    assert(stats->purgable_page_reenqueues_after_no_blocks == 0);
     assert(stats->purgable_page_dequeues_stale == 0);
     assert(stats->purgable_page_dequeues_flush == 0);
-    assert(stats->purgable_page_dequeues_flush_write == 0);
-    assert(stats->purgable_page_dequeues_flush_codegen == 0);
-    assert(stats->purgable_page_dequeues_flush_bulk_dirty == 0);
     assert(stats->purgable_page_dequeues_no_blocks == 0);
-    assert(stats->purgable_page_dequeues_no_blocks_write == 0);
-    assert(stats->purgable_page_dequeues_no_blocks_codegen == 0);
-    assert(stats->purgable_page_dequeues_no_blocks_bulk_dirty == 0);
     assert(stats->purgable_flush_attempts == 0);
     assert(stats->purgable_flush_successes == 0);
     assert(stats->purgable_flush_no_overlap == 0);
@@ -56,6 +47,10 @@ assert_zeroed(const new_dynarec_stats_t *stats)
     assert(stats->purgable_flush_no_blocks == 0);
     assert(stats->purgable_flush_dirty_list_reuses == 0);
     assert(stats->random_evictions == 0);
+    assert(stats->verify_samples == 0);
+    assert(stats->verify_direct_samples == 0);
+    assert(stats->verify_helper_table_null_samples == 0);
+    assert(stats->verify_helper_bailout_samples == 0);
 }
 
 int
@@ -64,6 +59,7 @@ main(void)
     char                summary[2048];
     new_dynarec_stats_t snapshot;
     trace_capture_t     trace_capture;
+    new_dynarec_verify_config_t verify_config;
 
     memset(&trace_capture, 0, sizeof(trace_capture));
 
@@ -94,18 +90,9 @@ main(void)
     new_dynarec_note_purgable_page_enqueued_write();
     new_dynarec_note_purgable_page_enqueued_codegen();
     new_dynarec_note_purgable_page_enqueued_bulk_dirty();
-    new_dynarec_note_purgable_page_missed_write_enqueue_overlap();
-    new_dynarec_note_purgable_page_reenqueued_after_flush();
-    new_dynarec_note_purgable_page_reenqueued_after_no_blocks();
     new_dynarec_note_purgable_page_dequeued_stale();
     new_dynarec_note_purgable_page_dequeued_flush();
-    new_dynarec_note_purgable_page_dequeued_flush_write();
-    new_dynarec_note_purgable_page_dequeued_flush_codegen();
-    new_dynarec_note_purgable_page_dequeued_flush_bulk_dirty();
     new_dynarec_note_purgable_page_dequeued_no_blocks();
-    new_dynarec_note_purgable_page_dequeued_no_blocks_write();
-    new_dynarec_note_purgable_page_dequeued_no_blocks_codegen();
-    new_dynarec_note_purgable_page_dequeued_no_blocks_bulk_dirty();
     new_dynarec_note_purgable_flush_attempt();
     new_dynarec_note_purgable_flush_success();
     new_dynarec_note_purgable_flush_no_overlap();
@@ -113,6 +100,30 @@ main(void)
     new_dynarec_note_purgable_flush_no_blocks();
     new_dynarec_note_purgable_flush_dirty_list_reuse();
     new_dynarec_note_random_eviction(0x1050, 0x2050, 0x08);
+    memset(&verify_config, 0, sizeof(verify_config));
+    verify_config.match_pc     = 1;
+    verify_config.match_opcode = 1;
+    verify_config.pc           = 0x1060;
+    verify_config.opcode       = 0x90;
+    verify_config.budget       = 2;
+    new_dynarec_set_verify_config(&verify_config);
+    memset(&snapshot, 0, sizeof(snapshot));
+    new_dynarec_get_verify_config(&verify_config);
+    assert(verify_config.match_pc == 1);
+    assert(verify_config.match_opcode == 1);
+    assert(verify_config.pc == 0x1060);
+    assert(verify_config.opcode == 0x90);
+    assert(verify_config.budget == 2);
+    const int trace_count_before_verify = trace_capture.event_count;
+    assert(!new_dynarec_note_verify_sample(0x1060, 0x91, NEW_DYNAREC_VERIFY_DIRECT));
+    assert(new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_DIRECT));
+    assert(trace_capture.event_count == trace_count_before_verify + 1);
+    assert(trace_capture.last_event.kind == NEW_DYNAREC_TRACE_VERIFY_SAMPLE);
+    assert(trace_capture.last_event.pc == 0x1060);
+    assert(trace_capture.last_event.detail == 0x90);
+    assert(trace_capture.last_event.flags == NEW_DYNAREC_VERIFY_DIRECT);
+    assert(new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_BAILOUT));
+    assert(!new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL));
     assert(new_dynarec_classify_post_purge_state(1, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_HAVE_FREE_BLOCK);
     assert(new_dynarec_classify_post_purge_state(0, 7) == NEW_DYNAREC_POST_PURGE_RETRY_DIRTY_LIST);
     assert(new_dynarec_classify_post_purge_state(0, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_RANDOM_EVICTION);
@@ -133,18 +144,9 @@ main(void)
     assert(snapshot.purgable_page_enqueues_write == 1);
     assert(snapshot.purgable_page_enqueues_codegen == 1);
     assert(snapshot.purgable_page_enqueues_bulk_dirty == 1);
-    assert(snapshot.purgable_page_missed_write_enqueue_overlap == 1);
-    assert(snapshot.purgable_page_reenqueues_after_flush == 1);
-    assert(snapshot.purgable_page_reenqueues_after_no_blocks == 1);
     assert(snapshot.purgable_page_dequeues_stale == 1);
     assert(snapshot.purgable_page_dequeues_flush == 1);
-    assert(snapshot.purgable_page_dequeues_flush_write == 1);
-    assert(snapshot.purgable_page_dequeues_flush_codegen == 1);
-    assert(snapshot.purgable_page_dequeues_flush_bulk_dirty == 1);
     assert(snapshot.purgable_page_dequeues_no_blocks == 1);
-    assert(snapshot.purgable_page_dequeues_no_blocks_write == 1);
-    assert(snapshot.purgable_page_dequeues_no_blocks_codegen == 1);
-    assert(snapshot.purgable_page_dequeues_no_blocks_bulk_dirty == 1);
     assert(snapshot.purgable_flush_attempts == 1);
     assert(snapshot.purgable_flush_successes == 1);
     assert(snapshot.purgable_flush_no_overlap == 1);
@@ -152,6 +154,10 @@ main(void)
     assert(snapshot.purgable_flush_no_blocks == 1);
     assert(snapshot.purgable_flush_dirty_list_reuses == 1);
     assert(snapshot.random_evictions == 1);
+    assert(snapshot.verify_samples == 2);
+    assert(snapshot.verify_direct_samples == 1);
+    assert(snapshot.verify_helper_table_null_samples == 0);
+    assert(snapshot.verify_helper_bailout_samples == 1);
 
     assert(new_dynarec_format_stats_summary(summary, sizeof(summary), &snapshot) > 0);
     assert(strstr(summary, "blocks_marked=1"));
@@ -161,29 +167,24 @@ main(void)
     assert(strstr(summary, "purgable_page_enqueues_write=1"));
     assert(strstr(summary, "purgable_page_enqueues_codegen=1"));
     assert(strstr(summary, "purgable_page_enqueues_bulk_dirty=1"));
-    assert(strstr(summary, "purgable_page_missed_write_enqueue_overlap=1"));
-    assert(strstr(summary, "purgable_page_reenqueues_after_flush=1"));
-    assert(strstr(summary, "purgable_page_reenqueues_after_no_blocks=1"));
     assert(strstr(summary, "purgable_page_dequeues_stale=1"));
     assert(strstr(summary, "purgable_page_dequeues_flush=1"));
-    assert(strstr(summary, "purgable_page_dequeues_flush_write=1"));
-    assert(strstr(summary, "purgable_page_dequeues_flush_codegen=1"));
-    assert(strstr(summary, "purgable_page_dequeues_flush_bulk_dirty=1"));
     assert(strstr(summary, "purgable_page_dequeues_no_blocks=1"));
-    assert(strstr(summary, "purgable_page_dequeues_no_blocks_write=1"));
-    assert(strstr(summary, "purgable_page_dequeues_no_blocks_codegen=1"));
-    assert(strstr(summary, "purgable_page_dequeues_no_blocks_bulk_dirty=1"));
     assert(strstr(summary, "purgable_flush_attempts=1"));
     assert(strstr(summary, "purgable_flush_no_overlap=1"));
     assert(strstr(summary, "purgable_flush_no_free_block=1"));
     assert(strstr(summary, "purgable_flush_no_blocks=1"));
     assert(strstr(summary, "purgable_flush_dirty_list_reuses=1"));
     assert(strstr(summary, "random_evictions=1"));
+    assert(strstr(summary, "verify_samples=2"));
+    assert(strstr(summary, "verify_direct_samples=1"));
+    assert(strstr(summary, "verify_helper_bailout_samples=1"));
 
     new_dynarec_note_block_became_no_immediates(0x1040, 0x2040, 0xa0);
     new_dynarec_stats_snapshot(&snapshot);
     assert(snapshot.no_immediates_transitions == 2);
 
+    new_dynarec_set_verify_config(NULL);
     new_dynarec_set_trace_hook(NULL, NULL);
 
     return 0;

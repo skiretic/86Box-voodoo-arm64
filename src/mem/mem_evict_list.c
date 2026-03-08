@@ -10,42 +10,6 @@ page_index(page_t *page)
     return ((uintptr_t) page - (uintptr_t) pages) / sizeof(page_t);
 }
 
-static void
-page_note_dequeue_source_flush(const page_t *page)
-{
-    switch (page->evict_enqueue_source) {
-        case PAGE_EVICT_ENQUEUE_SOURCE_WRITE:
-            new_dynarec_note_purgable_page_dequeued_flush_write();
-            break;
-        case PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN:
-            new_dynarec_note_purgable_page_dequeued_flush_codegen();
-            break;
-        case PAGE_EVICT_ENQUEUE_SOURCE_BULK_DIRTY:
-            new_dynarec_note_purgable_page_dequeued_flush_bulk_dirty();
-            break;
-        default:
-            break;
-    }
-}
-
-static void
-page_note_dequeue_source_no_blocks(const page_t *page)
-{
-    switch (page->evict_enqueue_source) {
-        case PAGE_EVICT_ENQUEUE_SOURCE_WRITE:
-            new_dynarec_note_purgable_page_dequeued_no_blocks_write();
-            break;
-        case PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN:
-            new_dynarec_note_purgable_page_dequeued_no_blocks_codegen();
-            break;
-        case PAGE_EVICT_ENQUEUE_SOURCE_BULK_DIRTY:
-            new_dynarec_note_purgable_page_dequeued_no_blocks_bulk_dirty();
-            break;
-        default:
-            break;
-    }
-}
-
 int
 page_has_dirty_code_overlap(const page_t *page)
 {
@@ -81,12 +45,6 @@ page_enqueue_if_reclaimable(page_t *page)
 {
     if (page_in_evict_list(page) || !page_has_dirty_code_overlap(page))
         return 0;
-
-    if (page->evict_last_dequeue_reason == PAGE_EVICT_DEQUEUE_REASON_FLUSH)
-        new_dynarec_note_purgable_page_reenqueued_after_flush();
-    else if (page->evict_last_dequeue_reason == PAGE_EVICT_DEQUEUE_REASON_NO_BLOCKS)
-        new_dynarec_note_purgable_page_reenqueued_after_no_blocks();
-    page->evict_last_dequeue_reason = PAGE_EVICT_DEQUEUE_REASON_NONE;
     page_add_to_evict_list(page);
     return 1;
 }
@@ -108,12 +66,6 @@ page_set_evict_enqueue_source(page_t *page, page_evict_enqueue_source_t source)
 }
 
 void
-page_set_last_evict_dequeue_reason(page_t *page, page_evict_dequeue_reason_t reason)
-{
-    page->evict_last_dequeue_reason = reason;
-}
-
-void
 page_complete_dirty_code_flush(page_t *page)
 {
     page->code_present_mask &= ~page->dirty_mask;
@@ -126,10 +78,6 @@ page_complete_dirty_code_flush(page_t *page)
 
     if (page_in_evict_list(page))
         new_dynarec_note_purgable_page_dequeued_flush();
-    if (page_in_evict_list(page))
-        page_note_dequeue_source_flush(page);
-    if (page_in_evict_list(page))
-        page_set_last_evict_dequeue_reason(page, PAGE_EVICT_DEQUEUE_REASON_FLUSH);
     if (page_in_evict_list(page))
         page_remove_from_evict_list(page);
 }
@@ -146,10 +94,6 @@ page_clear_code_presence_if_no_blocks(page_t *page)
 
     if (page_in_evict_list(page) && !page_has_dirty_code_overlap(page))
         new_dynarec_note_purgable_page_dequeued_no_blocks();
-    if (page_in_evict_list(page) && !page_has_dirty_code_overlap(page))
-        page_note_dequeue_source_no_blocks(page);
-    if (page_in_evict_list(page) && !page_has_dirty_code_overlap(page))
-        page_set_last_evict_dequeue_reason(page, PAGE_EVICT_DEQUEUE_REASON_NO_BLOCKS);
     if (page_in_evict_list(page) && !page_has_dirty_code_overlap(page))
         page_remove_from_evict_list(page);
 }

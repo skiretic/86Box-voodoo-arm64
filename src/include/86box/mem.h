@@ -211,12 +211,6 @@ typedef enum page_evict_enqueue_source_t {
     PAGE_EVICT_ENQUEUE_SOURCE_CODEGEN,
     PAGE_EVICT_ENQUEUE_SOURCE_BULK_DIRTY,
 } page_evict_enqueue_source_t;
-
-typedef enum page_evict_dequeue_reason_t {
-    PAGE_EVICT_DEQUEUE_REASON_NONE = 0,
-    PAGE_EVICT_DEQUEUE_REASON_FLUSH,
-    PAGE_EVICT_DEQUEUE_REASON_NO_BLOCKS,
-} page_evict_dequeue_reason_t;
 typedef struct page_t {
     void (*write_b)(uint32_t addr, uint8_t val, struct page_t *page);
     void (*write_w)(uint32_t addr, uint16_t val, struct page_t *page);
@@ -235,7 +229,6 @@ typedef struct page_t {
     uint32_t evict_prev;
     uint32_t evict_next;
     uint8_t  evict_enqueue_source;
-    uint8_t  evict_last_dequeue_reason;
 
     uint64_t *byte_dirty_mask;
     uint64_t *byte_code_present_mask;
@@ -258,7 +251,6 @@ page_t *page_get_next_reclaimable_evict_page(void);
 int page_enqueue_if_reclaimable(page_t *page);
 int page_enqueue_if_reclaimable_with_source(page_t *page, page_evict_enqueue_source_t source);
 void page_set_evict_enqueue_source(page_t *page, page_evict_enqueue_source_t source);
-void page_set_last_evict_dequeue_reason(page_t *page, page_evict_dequeue_reason_t reason);
 void page_complete_dirty_code_flush(page_t *page);
 void page_clear_code_presence_if_no_blocks(page_t *page);
 void page_remove_from_evict_list(page_t *page);

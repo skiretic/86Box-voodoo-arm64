@@ -4,6 +4,7 @@ Related docs:
 
 - [new-dynarec-investigation.md](./new-dynarec-investigation.md)
 - [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md)
+- [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md)
 
 ## Purpose
 
@@ -35,9 +36,31 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-08
+
+### Added
+- Added a selective CPU dynarec verify-sampling surface on the direct-vs-helper decision boundary, including optional `86BOX_NEW_DYNAREC_VERIFY_PC`, `86BOX_NEW_DYNAREC_VERIFY_OPCODE`, and `86BOX_NEW_DYNAREC_VERIFY_BUDGET` filters plus per-sample counters in the existing summary output.
+- Added an explicit Phase 1 closeout pass across the executive summary, changelog, and optimization overview so the remaining Windows 98 + 3DMark99 allocator-pressure behavior is documented as expected scarcity for this workload rather than an open Phase 1 bug.
+
+### Changed
+- Wired the selective verify samples into `src/codegen_new/codegen.c` so targeted direct hits, NULL-table fallbacks, and direct-handler bailouts can be reproduced through the existing trace-hook and runtime-summary path without adding a larger framework.
+- Trimmed the temporary late-Phase-1 boundary probes from the durable CPU dynarec stats surface by removing `purgable_page_missed_write_enqueue_overlap`, `purgable_page_reenqueues_after_flush`, and `purgable_page_reenqueues_after_no_blocks`.
+- Trimmed dequeue-by-enqueue-source probe counters from the durable stats surface, keeping the aggregate purge-list lifecycle counters and enqueue-source counters that remain useful for future Phase 2 allocator/reclaim policy work.
+- Simplified the purgeable-page list bookkeeping by removing the last-dequeue-reason state that only existed to feed the temporary re-enqueue probes.
+
+### Validated
+- Confirmed focused standalone coverage for the new verify-sampling API in `tests/codegen_new_dynarec_observability_test.c`, including filter matching, budget exhaustion, trace emission, and summary counter formatting.
+- Reconfirmed the late-Phase-1 boundary evidence from `/tmp/phase1_reenqueue_probe.log`: `allocator_pressure_events=772998`, `allocator_pressure_empty_purgable_list=756683`, `purgable_page_enqueues=11341`, `purgable_page_enqueues_write=8042`, `purgable_page_enqueues_codegen=3084`, `purgable_page_enqueues_bulk_dirty=215`, `purgable_page_dequeues_stale=0`, `purgable_page_dequeues_flush=8328`, `purgable_page_dequeues_no_blocks=3013`, `purgable_flush_attempts=8008`, `purgable_flush_successes=101`, `purgable_flush_no_overlap=0`, `purgable_flush_no_free_block=7907`, `purgable_flush_no_blocks=339`, `purgable_flush_dirty_list_reuses=6998`, and `random_evictions=748517`.
+- Reconfirmed from that same boundary run that the removed temporary probes all closed at zero before cleanup: `purgable_page_missed_write_enqueue_overlap=0`, `purgable_page_reenqueues_after_flush=0`, and `purgable_page_reenqueues_after_no_blocks=0`.
+
+### Open
+- There is still no full CPU shadow-execution verify mode or benchmark corpus, but the minimal selective sampling surface needed before Phase 2 is now present.
+- Further reduction of the remaining random-eviction rate is deferred to explicit Phase 2 allocator/reclaim policy work.
+
 ## 2026-03-07
 
 ### Added
+- Added `docs/plans/new-dynarec-optimization-overview.md`, a maintained explanation of the CPU dynarec optimizations and hardening work organized by area instead of by date.
 - Added a focused allocator-pressure policy regression test at `tests/codegen_new_allocator_pressure_policy_test.c` covering the post-purge decision boundary.
 - Documented the reliable GUI launch path for the Windows 98 Low End VM in `scripts/test-with-vm.sh`, including optional logfile and CPU dynarec stats support.
 - Added a focused stale-code-presence regression in `tests/mem_evict_list_test.c` covering pages that retain code masks after their last live block is gone.

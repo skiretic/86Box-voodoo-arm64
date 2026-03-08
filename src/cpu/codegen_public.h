@@ -67,18 +67,9 @@ typedef struct new_dynarec_stats_t {
     uint64_t purgable_page_enqueues_write;
     uint64_t purgable_page_enqueues_codegen;
     uint64_t purgable_page_enqueues_bulk_dirty;
-    uint64_t purgable_page_missed_write_enqueue_overlap;
-    uint64_t purgable_page_reenqueues_after_flush;
-    uint64_t purgable_page_reenqueues_after_no_blocks;
     uint64_t purgable_page_dequeues_stale;
     uint64_t purgable_page_dequeues_flush;
-    uint64_t purgable_page_dequeues_flush_write;
-    uint64_t purgable_page_dequeues_flush_codegen;
-    uint64_t purgable_page_dequeues_flush_bulk_dirty;
     uint64_t purgable_page_dequeues_no_blocks;
-    uint64_t purgable_page_dequeues_no_blocks_write;
-    uint64_t purgable_page_dequeues_no_blocks_codegen;
-    uint64_t purgable_page_dequeues_no_blocks_bulk_dirty;
     uint64_t purgable_flush_attempts;
     uint64_t purgable_flush_successes;
     uint64_t purgable_flush_no_overlap;
@@ -86,6 +77,10 @@ typedef struct new_dynarec_stats_t {
     uint64_t purgable_flush_no_blocks;
     uint64_t purgable_flush_dirty_list_reuses;
     uint64_t random_evictions;
+    uint64_t verify_samples;
+    uint64_t verify_direct_samples;
+    uint64_t verify_helper_table_null_samples;
+    uint64_t verify_helper_bailout_samples;
 } new_dynarec_stats_t;
 
 typedef enum new_dynarec_post_purge_state_t {
@@ -102,6 +97,7 @@ typedef enum new_dynarec_trace_kind_t {
     NEW_DYNAREC_TRACE_BLOCK_BECAME_NO_IMMEDIATES,
     NEW_DYNAREC_TRACE_ALLOCATOR_PRESSURE,
     NEW_DYNAREC_TRACE_RANDOM_EVICTION,
+    NEW_DYNAREC_TRACE_VERIFY_SAMPLE,
 } new_dynarec_trace_kind_t;
 
 typedef struct new_dynarec_trace_event_t {
@@ -120,6 +116,20 @@ typedef enum new_dynarec_helper_fallback_reason_t {
     NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT,
 } new_dynarec_helper_fallback_reason_t;
 
+typedef enum new_dynarec_verify_outcome_t {
+    NEW_DYNAREC_VERIFY_DIRECT = 1,
+    NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL,
+    NEW_DYNAREC_VERIFY_HELPER_BAILOUT,
+} new_dynarec_verify_outcome_t;
+
+typedef struct new_dynarec_verify_config_t {
+    uint32_t pc;
+    uint16_t opcode;
+    uint8_t  match_pc;
+    uint8_t  match_opcode;
+    uint32_t budget;
+} new_dynarec_verify_config_t;
+
 extern new_dynarec_stats_t new_dynarec_stats;
 
 extern void new_dynarec_stats_reset(void);
@@ -127,6 +137,9 @@ extern void new_dynarec_stats_snapshot(new_dynarec_stats_t *out);
 extern int  new_dynarec_stats_logging_enabled(void);
 extern int  new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_stats_t *stats);
 extern void new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque);
+extern void new_dynarec_set_verify_config(const new_dynarec_verify_config_t *config);
+extern void new_dynarec_get_verify_config(new_dynarec_verify_config_t *out);
+extern int  new_dynarec_note_verify_sample(uint32_t pc, uint16_t opcode, new_dynarec_verify_outcome_t outcome);
 
 extern void new_dynarec_note_block_marked(uint32_t pc, uint32_t phys, uint32_t detail);
 extern void new_dynarec_note_block_recompiled(uint32_t pc, uint32_t phys, uint32_t detail);
@@ -223,24 +236,6 @@ new_dynarec_note_purgable_page_enqueued_bulk_dirty(void)
 }
 
 static inline void
-new_dynarec_note_purgable_page_missed_write_enqueue_overlap(void)
-{
-    new_dynarec_stats.purgable_page_missed_write_enqueue_overlap++;
-}
-
-static inline void
-new_dynarec_note_purgable_page_reenqueued_after_flush(void)
-{
-    new_dynarec_stats.purgable_page_reenqueues_after_flush++;
-}
-
-static inline void
-new_dynarec_note_purgable_page_reenqueued_after_no_blocks(void)
-{
-    new_dynarec_stats.purgable_page_reenqueues_after_no_blocks++;
-}
-
-static inline void
 new_dynarec_note_purgable_page_dequeued_stale(void)
 {
     new_dynarec_stats.purgable_page_dequeues_stale++;
@@ -253,45 +248,9 @@ new_dynarec_note_purgable_page_dequeued_flush(void)
 }
 
 static inline void
-new_dynarec_note_purgable_page_dequeued_flush_write(void)
-{
-    new_dynarec_stats.purgable_page_dequeues_flush_write++;
-}
-
-static inline void
-new_dynarec_note_purgable_page_dequeued_flush_codegen(void)
-{
-    new_dynarec_stats.purgable_page_dequeues_flush_codegen++;
-}
-
-static inline void
-new_dynarec_note_purgable_page_dequeued_flush_bulk_dirty(void)
-{
-    new_dynarec_stats.purgable_page_dequeues_flush_bulk_dirty++;
-}
-
-static inline void
 new_dynarec_note_purgable_page_dequeued_no_blocks(void)
 {
     new_dynarec_stats.purgable_page_dequeues_no_blocks++;
-}
-
-static inline void
-new_dynarec_note_purgable_page_dequeued_no_blocks_write(void)
-{
-    new_dynarec_stats.purgable_page_dequeues_no_blocks_write++;
-}
-
-static inline void
-new_dynarec_note_purgable_page_dequeued_no_blocks_codegen(void)
-{
-    new_dynarec_stats.purgable_page_dequeues_no_blocks_codegen++;
-}
-
-static inline void
-new_dynarec_note_purgable_page_dequeued_no_blocks_bulk_dirty(void)
-{
-    new_dynarec_stats.purgable_page_dequeues_no_blocks_bulk_dirty++;
 }
 #endif
 

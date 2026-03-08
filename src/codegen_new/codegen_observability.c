@@ -10,6 +10,8 @@ new_dynarec_stats_t new_dynarec_stats;
 
 static new_dynarec_trace_hook_t new_dynarec_trace_hook;
 static void                    *new_dynarec_trace_hook_opaque;
+static new_dynarec_verify_config_t new_dynarec_verify_config;
+static int                        new_dynarec_verify_config_initialized;
 
 static void
 new_dynarec_emit_trace(new_dynarec_trace_kind_t kind, uint32_t pc, uint32_t phys, uint32_t detail, uint16_t flags)
@@ -26,6 +28,52 @@ new_dynarec_emit_trace(new_dynarec_trace_kind_t kind, uint32_t pc, uint32_t phys
     event.flags  = flags;
 
     new_dynarec_trace_hook(&event, new_dynarec_trace_hook_opaque);
+}
+
+static uint32_t
+new_dynarec_parse_u32_env(const char *name, int *present)
+{
+    const char    *value = getenv(name);
+    char          *end   = NULL;
+    unsigned long  parsed;
+
+    if (present)
+        *present = 0;
+
+    if (!value || !value[0])
+        return 0;
+
+    parsed = strtoul(value, &end, 0);
+    if (!end || end == value || *end)
+        return 0;
+
+    if (present)
+        *present = 1;
+
+    return (uint32_t) parsed;
+}
+
+static void
+new_dynarec_verify_config_init_from_env(void)
+{
+    int present_pc     = 0;
+    int present_opcode = 0;
+    int present_budget = 0;
+
+    if (new_dynarec_verify_config_initialized)
+        return;
+
+    new_dynarec_verify_config_initialized = 1;
+    memset(&new_dynarec_verify_config, 0, sizeof(new_dynarec_verify_config));
+
+    new_dynarec_verify_config.pc     = new_dynarec_parse_u32_env("86BOX_NEW_DYNAREC_VERIFY_PC", &present_pc);
+    new_dynarec_verify_config.opcode = (uint16_t) new_dynarec_parse_u32_env("86BOX_NEW_DYNAREC_VERIFY_OPCODE", &present_opcode);
+    new_dynarec_verify_config.budget = new_dynarec_parse_u32_env("86BOX_NEW_DYNAREC_VERIFY_BUDGET", &present_budget);
+    new_dynarec_verify_config.match_pc     = present_pc ? 1 : 0;
+    new_dynarec_verify_config.match_opcode = present_opcode ? 1 : 0;
+
+    if (!present_budget && (present_pc || present_opcode))
+        new_dynarec_verify_config.budget = 1;
 }
 
 void
@@ -86,25 +134,20 @@ new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_st
                     " purgable_page_enqueues_write=%" PRIu64
                     " purgable_page_enqueues_codegen=%" PRIu64
                     " purgable_page_enqueues_bulk_dirty=%" PRIu64
-                    " purgable_page_missed_write_enqueue_overlap=%" PRIu64
-                    " purgable_page_reenqueues_after_flush=%" PRIu64
-                    " purgable_page_reenqueues_after_no_blocks=%" PRIu64
                     " purgable_page_dequeues_stale=%" PRIu64
                     " purgable_page_dequeues_flush=%" PRIu64
-                    " purgable_page_dequeues_flush_write=%" PRIu64
-                    " purgable_page_dequeues_flush_codegen=%" PRIu64
-                    " purgable_page_dequeues_flush_bulk_dirty=%" PRIu64
                     " purgable_page_dequeues_no_blocks=%" PRIu64
-                    " purgable_page_dequeues_no_blocks_write=%" PRIu64
-                    " purgable_page_dequeues_no_blocks_codegen=%" PRIu64
-                    " purgable_page_dequeues_no_blocks_bulk_dirty=%" PRIu64
                     " purgable_flush_attempts=%" PRIu64
                     " purgable_flush_successes=%" PRIu64
                     " purgable_flush_no_overlap=%" PRIu64
                     " purgable_flush_no_free_block=%" PRIu64
                     " purgable_flush_no_blocks=%" PRIu64
                     " purgable_flush_dirty_list_reuses=%" PRIu64
-                    " random_evictions=%" PRIu64,
+                    " random_evictions=%" PRIu64
+                    " verify_samples=%" PRIu64
+                    " verify_direct_samples=%" PRIu64
+                    " verify_helper_table_null_samples=%" PRIu64
+                    " verify_helper_bailout_samples=%" PRIu64,
                     snapshot.blocks_marked,
                     snapshot.blocks_recompiled,
                     snapshot.direct_recompiled_instructions,
@@ -120,25 +163,20 @@ new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_st
                     snapshot.purgable_page_enqueues_write,
                     snapshot.purgable_page_enqueues_codegen,
                     snapshot.purgable_page_enqueues_bulk_dirty,
-                    snapshot.purgable_page_missed_write_enqueue_overlap,
-                    snapshot.purgable_page_reenqueues_after_flush,
-                    snapshot.purgable_page_reenqueues_after_no_blocks,
                     snapshot.purgable_page_dequeues_stale,
                     snapshot.purgable_page_dequeues_flush,
-                    snapshot.purgable_page_dequeues_flush_write,
-                    snapshot.purgable_page_dequeues_flush_codegen,
-                    snapshot.purgable_page_dequeues_flush_bulk_dirty,
                     snapshot.purgable_page_dequeues_no_blocks,
-                    snapshot.purgable_page_dequeues_no_blocks_write,
-                    snapshot.purgable_page_dequeues_no_blocks_codegen,
-                    snapshot.purgable_page_dequeues_no_blocks_bulk_dirty,
                     snapshot.purgable_flush_attempts,
                     snapshot.purgable_flush_successes,
                     snapshot.purgable_flush_no_overlap,
                     snapshot.purgable_flush_no_free_block,
                     snapshot.purgable_flush_no_blocks,
                     snapshot.purgable_flush_dirty_list_reuses,
-                    snapshot.random_evictions);
+                    snapshot.random_evictions,
+                    snapshot.verify_samples,
+                    snapshot.verify_direct_samples,
+                    snapshot.verify_helper_table_null_samples,
+                    snapshot.verify_helper_bailout_samples);
 }
 
 void
@@ -146,6 +184,62 @@ new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque)
 {
     new_dynarec_trace_hook        = hook;
     new_dynarec_trace_hook_opaque = opaque;
+}
+
+void
+new_dynarec_set_verify_config(const new_dynarec_verify_config_t *config)
+{
+    new_dynarec_verify_config_initialized = 1;
+    memset(&new_dynarec_verify_config, 0, sizeof(new_dynarec_verify_config));
+    if (config)
+        new_dynarec_verify_config = *config;
+}
+
+void
+new_dynarec_get_verify_config(new_dynarec_verify_config_t *out)
+{
+    if (!out)
+        return;
+
+    *out = new_dynarec_verify_config;
+}
+
+int
+new_dynarec_note_verify_sample(uint32_t pc, uint16_t opcode, new_dynarec_verify_outcome_t outcome)
+{
+    new_dynarec_verify_config_init_from_env();
+
+    if (!new_dynarec_verify_config.budget)
+        return 0;
+
+    if (new_dynarec_verify_config.match_pc && new_dynarec_verify_config.pc != pc)
+        return 0;
+
+    if (new_dynarec_verify_config.match_opcode && new_dynarec_verify_config.opcode != opcode)
+        return 0;
+
+    switch (outcome) {
+        case NEW_DYNAREC_VERIFY_DIRECT:
+            break;
+        case NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL:
+            break;
+        case NEW_DYNAREC_VERIFY_HELPER_BAILOUT:
+            break;
+        default:
+            return 0;
+    }
+
+    new_dynarec_verify_config.budget--;
+    new_dynarec_stats.verify_samples++;
+    if (outcome == NEW_DYNAREC_VERIFY_DIRECT)
+        new_dynarec_stats.verify_direct_samples++;
+    else if (outcome == NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL)
+        new_dynarec_stats.verify_helper_table_null_samples++;
+    else
+        new_dynarec_stats.verify_helper_bailout_samples++;
+
+    new_dynarec_emit_trace(NEW_DYNAREC_TRACE_VERIFY_SAMPLE, pc, 0, opcode, outcome);
+    return 1;
 }
 
 void
