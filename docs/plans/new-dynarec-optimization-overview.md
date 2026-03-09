@@ -51,14 +51,30 @@ That means future work to reduce the remaining random eviction rate should be tr
 
 The current active implementation track is now coverage closure, starting with the smallest parity gap that already had backend support in place.
 
-The latest small table-hole follow-up after the `D0`-`D3` debug pause is base `0xa6` / `0xa7` (`CMPSB` / `CMPSW` / `CMPSD`):
+The latest small table-hole follow-up after the `D0`-`D3` debug pause first landed base `0xa6` / `0xa7` (`CMPSB` / `CMPSW` / `CMPSD`):
 
 - the direct handlers are now in tree
 - they reuse the existing non-REP string-op address/index helpers
 - they set lazy `SUB`-style flag state directly rather than introducing new helper-call shapes
 - focused local policy/build verification is complete
 - guest validation on `Windows 98 SE` is now complete, and the shutdown base-fallback report contains no `0xa6` / `0xa7` entries
-- the next same-class follow-up is non-REP `SCAS` (`0xae` / `0xaf`), which still remains `helper_table_null` in that same guest run
+
+That validated `CMPS` result then fed the next same-class sibling directly:
+
+- base `0xae` / `0xaf` (`SCASB` / `SCASW` / `SCASD`) is now in tree too
+- it reuses the same non-REP string-op address/index helpers
+- it keeps the same lazy `SUB`-style flag pattern, with accumulator-vs-memory compare semantics
+- focused local policy/build verification is complete
+- guest validation on `Windows 98 SE` is now complete too, and the shutdown base-fallback report contains no `0xae` / `0xaf` entries
+
+That `SCAS` result then fed the next low-risk non-memory table-hole pair directly:
+
+- base `0x9e` / `0x9f` (`SAHF` / `LAHF`) is now in tree too
+- it reuses the existing flags materialization path and register high-byte transfer support already present in both backends
+- it does not add any new helper-call ABI shape
+- `SAHF` also now preserves interpreter intent by treating the instruction as a local lazy-flags barrier after the architectural flag-byte overwrite
+- focused local policy/build verification is complete
+- guest validation on `Windows 98 SE` is now complete too, and the shutdown base-fallback report contains no `0x9e` / `0x9f` entries
 
 ## Current opcode status
 
@@ -73,6 +89,8 @@ These opcodes have direct CPU new dynarec coverage in tree and have dropped out 
 
 - non-REP `STOS` / `LODS`: `0xaa`, `0xab`, `0xac`, `0xad`
 - non-REP `CMPS`: `0xa6`, `0xa7`
+- non-REP `SCAS`: `0xae`, `0xaf`
+- `SAHF` / `LAHF`: `0x9e`, `0x9f`
 - far-control / frame legality-first slices: `0xc8`, `0x9d`
 - non-protected follow-up batch: `0xa5`, `0x6b`
 - low-risk sibling cleanup: `0x69`, `0xa4`
@@ -94,6 +112,12 @@ Latest confirming shutdown logs:
 - `/tmp/windows98_se_cmps_validation.log`
 - fallback families: `base=18915`, `0f=3016`, `x87=435`, `rep=6571`, `3dnow=0`
 - `0xa6` and `0xa7` are absent from the shutdown base-fallback report, while sibling `SCAS` opcodes `0xae=33` and `0xaf=16` still remain as `helper_table_null`
+- `/tmp/windows98_se_scas_validation.log`
+- fallback families: `base=20856`, `0f=5565`, `x87=4568`, `rep=9016`, `3dnow=0`
+- `0xae` and `0xaf` are absent from the shutdown base-fallback report
+- `/tmp/windows98_se_sahf_lahf_validation.log`
+- fallback families: `base=19873`, `0f=4578`, `x87=1919`, `rep=8853`, `3dnow=0`
+- `0x9e` and `0x9f` are absent from the shutdown base-fallback report
 
 ### MMX-only re-baseline
 

@@ -1,5 +1,7 @@
 # REP and Softfloat Gap Measurement Implementation Plan
 
+> Historical implementation-plan note (updated 2026-03-09): this plan captures the observability work used to measure REP and softfloat-disabled coverage pressure. That measurement work is already in tree and the branch has since closed several low-risk non-REP families (`CMPS`, `SCAS`, `SAHF` / `LAHF`), so this file should be read as preserved implementation history rather than the current branch-status source of truth. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Add minimal runtime accounting that tells us whether REP or softfloat-disabled direct coverage is the hotter remaining CPU dynarec gap under real workloads.

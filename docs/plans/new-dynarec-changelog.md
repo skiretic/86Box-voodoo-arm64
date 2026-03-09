@@ -36,6 +36,47 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-09 (`SAHF` / `LAHF` landing)
+
+### Added
+- Added direct CPU dynarec coverage for base `0x9e` / `0x9f` in `src/codegen_new/codegen_ops_misc.c`, covering `SAHF` and `LAHF` through the existing flags rebuild path and register-byte transfer machinery.
+- Added direct base-opcode table entries for that pair in `src/codegen_new/codegen_ops.c` and updated the coverage-policy surface in `src/codegen_new/codegen_observability.c`.
+- Updated focused host-side policy coverage in `tests/codegen_new_opcode_coverage_policy_test.c` to lock the direct `SAHF` / `LAHF` pair.
+
+### Changed
+- Changed the post-`SCAS` next step from planning-only into a narrow non-memory flag-transfer table-hole closure instead of returning to the mixed `D0`-`D3` bailout bucket.
+- Changed the direct `SAHF` implementation shape to respect the interpreter-visible lazy-flags barrier: after rebuilding flags and overwriting the low architectural flag byte from `AH`, the dynarec now clears `codegen_flags_changed` so later `Jcc` lowering cannot reason from stale lazy-flags metadata.
+- Changed the executive summary format at the same branch point: the top of `docs/plans/new-dynarec-executive-summary.md` now starts with branch-wide work and opcode charts instead of relying only on prose status notes.
+
+### Validated
+- Confirmed the focused coverage-policy test followed TDD for this slice: it was first updated to expect `0x9e` / `0x9f` direct coverage, failed against the pre-change tree, and then passed after the implementation via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu tests/codegen_new_opcode_coverage_policy_test.c src/codegen_new/codegen_observability.c -o /tmp/codegen_new_opcode_coverage_policy_test && /tmp/codegen_new_opcode_coverage_policy_test`.
+- Confirmed `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` succeeds with the new `SAHF` / `LAHF` handlers in tree.
+- Confirmed `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds before the narrow `Windows 98 SE` validation launch.
+- Confirmed `/tmp/windows98_se_sahf_lahf_validation.log` reached shutdown with `CPU new dynarec fallback families [shutdown]: base=19873 0f=4578 x87=1919 rep=8853 3dnow=0`, and no shutdown base-fallback entries remained for `0x9e` or `0x9f`.
+
+### Open
+- The next follow-up should keep those executive-summary charts current rather than letting the branch history drift back into changelog-only form.
+
+## 2026-03-09 (`SCAS` table-hole landing)
+
+### Added
+- Added direct CPU dynarec coverage for base `0xae` / `0xaf` through the shared string-op file `src/codegen_new/codegen_ops_string.c`, covering `SCASB`, `SCASW`, and `SCASD` with the existing non-REP string address/index helpers and lazy `SUB`-style flag state.
+- Added direct base-opcode table entries for that same family in `src/codegen_new/codegen_ops.c` and updated the coverage-policy surface in `src/codegen_new/codegen_observability.c`.
+- Updated focused host-side policy coverage in `tests/codegen_new_opcode_coverage_policy_test.c` to lock the direct `SCAS` pair and the raised direct base-string opcode count.
+
+### Changed
+- Changed the low-risk post-`CMPS` follow-up from a planned sibling target into an implemented narrow table-hole closure: non-REP `SCAS` now joins the existing direct `MOVS` / `CMPS` / `STOS` / `LODS` subset.
+- Changed the base string-op direct-coverage count from 8 to 10 because `SCAS` now joins the already guest-validated `CMPS` pair.
+
+### Validated
+- Confirmed the focused coverage-policy test followed TDD for this slice: it was first updated to expect `0xae` / `0xaf` direct coverage and a count of 10, failed against the pre-change tree, and then passed after the implementation via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu tests/codegen_new_opcode_coverage_policy_test.c src/codegen_new/codegen_observability.c -o /tmp/codegen_new_opcode_coverage_policy_test && /tmp/codegen_new_opcode_coverage_policy_test`.
+- Confirmed `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` succeeds with the new `SCAS` handlers in tree.
+- Confirmed `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds before the narrow `Windows 98 SE` validation launch.
+- Confirmed `/tmp/windows98_se_scas_validation.log` reached shutdown with `CPU new dynarec fallback families [shutdown]: base=20856 0f=5565 x87=4568 rep=9016 3dnow=0`, and no shutdown base-fallback entries remained for `0xae` or `0xaf`.
+
+### Open
+- The low-risk non-REP compare-string family is now exhausted on this branch state: the next step should be a fresh opportunity review rather than assuming another same-class table-hole sibling exists.
+
 ## 2026-03-09 (`CMPS` table-hole landing)
 
 ### Added
@@ -53,7 +94,7 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - Confirmed guest validation on `Windows 98 SE` reached a normal shutdown at `/tmp/windows98_se_cmps_validation.log` with `CPU new dynarec fallback families [shutdown]: base=18915 0f=3016 x87=435 rep=6571 3dnow=0`, and no shutdown base-fallback entries remained for `0xa6` or `0xa7`.
 
 ### Open
-- The next low-risk sibling family is now non-REP `SCAS` (`0xae` / `0xaf`), which still appears in the same `Windows 98 SE` shutdown log as `helper_table_null` traffic (`0xae=33`, `0xaf=16`).
+- That guest-validated `CMPS` result directly set up the next same-class sibling target: non-REP `SCAS` (`0xae` / `0xaf`) was the remaining `helper_table_null` pair in the same `Windows 98 SE` shutdown log (`0xae=33`, `0xaf=16`) and is now the immediate follow-up in tree.
 
 ## 2026-03-09 (`D0-D3` compare-only debug path)
 

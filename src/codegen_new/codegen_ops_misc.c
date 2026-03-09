@@ -968,6 +968,29 @@ ropCWDE(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSE
 
     return op_pc;
 }
+uint32_t
+ropSAHF(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_MOVZX(ir, IREG_temp0_W, IREG_AH);
+    uop_AND_IMM(ir, IREG_temp0_W, IREG_temp0_W, 0x00d5);
+    uop_AND_IMM(ir, IREG_flags, IREG_flags, 0xff00);
+    uop_OR_IMM(ir, IREG_temp0_W, IREG_temp0_W, 0x0002);
+    uop_OR(ir, IREG_flags, IREG_flags, IREG_temp0_W);
+
+    /* SAHF overwrites architectural flags, so later Jcc lowering must stop using stale lazy-flags metadata. */
+    codegen_flags_changed = 0;
+    return op_pc;
+}
+uint32_t
+ropLAHF(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_MOV(ir, IREG_temp0_W, IREG_flags);
+    uop_MOV(ir, IREG_AH, IREG_temp0_B);
+
+    return op_pc;
+}
 
 #define ropLxS(name, seg)                                                                      \
     uint32_t rop##name##_16(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode),         \

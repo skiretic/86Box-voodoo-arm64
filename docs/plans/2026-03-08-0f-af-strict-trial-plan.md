@@ -1,5 +1,7 @@
 # `0F AF` Strict Trial Plan
 
+> Historical implementation-plan note (updated 2026-03-09): this plan reflects the strict host-harness-first retry shape for direct `0x0f 0xaf` at the time it was written. The branch has since added host-side semantics harness support for `0x0f 0xaf`, but guest-facing direct enablement remains paused after boot regressions, so this document should be read as preserved trial planning rather than the current branch status summary. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+
 > **For Claude/Codex:** follow the host-harness-first workflow. Do not start with a guest run. Do not mix this work with `0f ba`, the bit-test family, or any protected/system opcode work.
 
 ## Goal

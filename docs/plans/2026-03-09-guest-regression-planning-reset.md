@@ -1,5 +1,7 @@
 # 2026-03-09 Guest Regression Planning Reset
 
+> Historical workflow note (updated 2026-03-09): this reset remains valid as process guidance, but it is not the live branch-status summary anymore. Later the same day the branch deliberately pivoted back to low-risk table-hole work and guest-validated `CMPS`, `SCAS`, and `SAHF` / `LAHF` on `Windows 98 SE`, while the blocked guest-facing families named here remain paused. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+
 ## Purpose
 
 This note resets the CPU new dynarec near-term workflow after the recent run of host-clean but guest-regressed opcode trials.

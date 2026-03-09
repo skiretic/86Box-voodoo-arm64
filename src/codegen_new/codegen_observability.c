@@ -1056,6 +1056,10 @@ new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode)
         case 0xa5:
         case 0xa6:
         case 0xa7:
+        case 0xae:
+        case 0xaf:
+        case 0x9e:
+        case 0x9f:
         case 0x9d:
         case 0xc8:
         case 0xaa:
@@ -1071,7 +1075,7 @@ new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode)
 int
 new_dynarec_direct_base_string_opcode_count(void)
 {
-    return 8;
+    return 10;
 }
 
 void

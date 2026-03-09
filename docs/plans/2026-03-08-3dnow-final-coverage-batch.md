@@ -1,5 +1,7 @@
 # 3DNow Final Coverage Batch Implementation Plan
 
+> Historical implementation-plan note (updated 2026-03-09): this plan records a completed earlier branch phase. The remaining direct 3DNow/3DNowE coverage gap it describes is already closed in the current branch state, so this file should be treated as preserved execution history rather than a live to-do list. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Close the remaining direct CPU new dynarec 3DNow/Enhanced 3DNow opcode coverage gap on both x86-64 and arm64, with cumulative regression tests that remain in tree.

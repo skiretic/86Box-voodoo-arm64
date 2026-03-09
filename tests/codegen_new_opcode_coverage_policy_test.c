@@ -23,7 +23,7 @@ main(void)
     assert(new_dynarec_has_direct_pmaddwd_recompile() == 1);
     assert(new_dynarec_has_direct_3dnow_recompile() == 1);
     assert(new_dynarec_direct_3dnow_opcode_count() == (int) (sizeof(expected_direct_3dnow_opcodes) / sizeof(expected_direct_3dnow_opcodes[0])));
-    assert(new_dynarec_direct_base_string_opcode_count() == 8);
+    assert(new_dynarec_direct_base_string_opcode_count() == 10);
 
     for (i = 0; i < sizeof(expected_direct_3dnow_opcodes) / sizeof(expected_direct_3dnow_opcodes[0]); i++)
         assert(new_dynarec_has_direct_3dnow_opcode_recompile(expected_direct_3dnow_opcodes[i]) == 1);
@@ -39,8 +39,10 @@ main(void)
     assert(new_dynarec_has_direct_base_opcode_recompile(0xa4) == 1);
     assert(new_dynarec_has_direct_base_opcode_recompile(0xa6) == 1);
     assert(new_dynarec_has_direct_base_opcode_recompile(0xa7) == 1);
-    assert(new_dynarec_has_direct_base_opcode_recompile(0xae) == 0);
-    assert(new_dynarec_has_direct_base_opcode_recompile(0xaf) == 0);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0xae) == 1);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0xaf) == 1);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0x9e) == 1);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0x9f) == 1);
     assert(new_dynarec_direct_0f_setcc_opcode_count() == 16);
     assert(new_dynarec_direct_0f_bswap_opcode_count() == 8);
     assert(new_dynarec_direct_0f_bitscan_opcode_count() == 2);

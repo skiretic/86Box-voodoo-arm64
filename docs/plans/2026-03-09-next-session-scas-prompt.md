@@ -1,4 +1,6 @@
-# Next Session Prompt: Land The SCAS String-Op Sibling
+# Next Session Prompt: Re-rank The Next Low-Risk Target
+
+> Historical prompt note (updated 2026-03-09): this prompt was also consumed later the same day. The recommended follow-up audit was completed, `SAHF` / `LAHF` (`0x9e` / `0x9f`) was chosen, and that pair has since landed and guest-validated on `Windows 98 SE`. Treat the body below as preserved planning history, not current execution guidance. For current branch status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
 
 Use this prompt to start the next session:
 
@@ -23,24 +25,29 @@ Current required context:
 - `CMPS` (`0xa6` / `0xa7`) is now in tree and guest-validated on `Windows 98 SE`
 - the latest logged `Windows 98 SE` shutdown report is `/tmp/windows98_se_cmps_validation.log`
 - that shutdown report contains no base-fallback entries for `0xa6` / `0xa7`
-- that same shutdown report still contains:
-  - `CPU new dynarec base fallbacks [shutdown]: opcode=0xae helper_table_null=33 helper_bailout=0`
-  - `CPU new dynarec base fallbacks [shutdown]: opcode=0xaf helper_table_null=16 helper_bailout=0`
+- base `0xae` / `0xaf` (`SCASB` / `SCASW` / `SCASD`) direct coverage is now in tree locally
+- focused local verification already passed:
+  - `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu tests/codegen_new_opcode_coverage_policy_test.c src/codegen_new/codegen_observability.c -o /tmp/codegen_new_opcode_coverage_policy_test && /tmp/codegen_new_opcode_coverage_policy_test`
+  - `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4`
+  - `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app`
+- `/tmp/windows98_se_scas_validation.log` reached shutdown with:
+  - `CPU new dynarec fallback families [shutdown]: base=20856 0f=5565 x87=4568 rep=9016 3dnow=0`
+  - no shutdown base-fallback entries for `0xae` or `0xaf`
+- repeated manual reruns were reported stable enough to treat the first blue screen as non-reproducible
 - do not revert unrelated changes
 - `Windows 98 SE` is the standing strict-i686 VM going forward:
   - `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 SE`
 
 Session goal:
-Take the next same-class low-risk CPU dynarec table-hole family after the validated `CMPS` landing.
+Choose the next low-risk CPU dynarec target now that the non-REP compare-string sibling family is closed.
 
-Recommended target:
-- base `0xae` / `0xaf` (`SCASB` / `SCASW` / `SCASD`)
+Primary task:
+- refresh the measured opportunity ranking before implementing another opcode family
 
 Why this target:
-- it is the immediate sibling to the now-validated `CMPS` work
-- it is still plain table-hole traffic (`helper_table_null`), not bailout cleanup
-- it should reuse the same string-op infrastructure and the same lazy `SUB`-style flag pattern
-- it avoids reopening `0x0f 0xaf`, `BSF/BSR`, `D0-D3`, port-I/O, or protected/system opcode work
+- the last same-class low-risk table-hole sibling is now landed and guest-validated
+- the remaining hot families are more system-heavy or already known guest-risky
+- the next safe move is to re-rank from current evidence instead of guessing
 
 Hard constraints:
 - CPU new dynarec scope only
@@ -48,18 +55,17 @@ Hard constraints:
 - do not guest-enable `D0-D3` `RCL/RCR`
 - do not retry guest enablement for `0x0f 0xaf` or `BSF/BSR`
 - do not choose port-I/O, interrupt, segment, or other system opcode families as side work
-- keep the new work narrow and table-hole oriented
+- keep the work narrow and evidence-led
 
 Required work:
-1. Audit the existing non-REP string-op direct handlers and coverage-policy tests.
-2. Implement the smallest coherent direct path for base `0xae` / `0xaf`.
-3. Add or update focused host-side tests first.
-4. Update planning/docs/changelog to record the validated `CMPS` result and the new `SCAS` target.
-5. Verify with focused local tests/build.
-6. Only do one narrow guest validation run on `Windows 98 SE` if the local evidence is clean.
+1. Start from current head and the maintained docs/logs, including `/tmp/windows98_se_scas_validation.log`.
+2. Re-rank the next candidates from the latest strict-i686 shutdown evidence instead of the pre-`SCAS` ranking.
+3. Prefer table-hole or other low-risk coverage work; avoid reopening the paused high-risk guest-regressed families.
+4. Write down the narrowed recommendation before implementing anything.
+5. If a new target is clearly low-risk, follow the same host-test-first workflow.
 
 Desired outcome:
-- `0xae` / `0xaf` direct coverage is in tree or clearly blocked by specific evidence
-- the next guest shutdown report no longer contains `0xae` / `0xaf` base-fallback entries
+- the next target is chosen from current evidence rather than stale pre-`SCAS` assumptions
+- docs stay aligned with the branch state where both `CMPS` and `SCAS` are guest-validated on `Windows 98 SE`
 - docs stay aligned with the current branch state and standing VM choice
 ```

@@ -8,6 +8,45 @@ Optimization overview: [new-dynarec-optimization-overview.md](./new-dynarec-opti
 
 This document is the executive-level status view for the CPU new dynarec investigation and follow-on improvement work. It is meant to stay short, update cleanly, and show progress at a glance while the detailed technical analysis lives in the linked investigation report.
 
+## Branch work chart
+
+This chart is the shortest branch-wide answer to “what have we actually done here?”
+
+| Track | Slice | Work type | What landed | Current state |
+|---|---|---|---|---|
+| Phase 1 hardening | page-0 sentinel, stale-head pruning, dirty-list reuse, stale code-mask cleanup, bulk-dirty overlap gating | correctness fix / hardening | fixed real invalidation and reclaim-path bugs that were corrupting allocator-pressure behavior | complete and validated |
+| Observability | runtime stats, shutdown summaries, selective verify, 3DNow hit logging, fallback-family logging, base-fallback logging | instrumentation | added the evidence layer used to rank hotspots and prove direct-vs-helper behavior | in tree and active |
+| Phase 2 policy | cold-block mark deferral | allocator policy experiment | reduced mark-only block admission after random eviction under scarcity | in tree, stable, low-yield so paused |
+| Backend parity | arm64 `PMADDWD`, direct 3DNow table enable, 3DNow/3DNowE legality gate and generator closure | backend parity / coverage enablement | enabled already-supported arm64/shared frontend coverage and closed the remaining direct 3DNow generator gap | in tree with focused regression and guest evidence |
+| Base opcode campaign | `0xaa`-`0xad`, `0xa5`, `0xa4`, `0xa6`-`0xa7`, `0xae`-`0xaf` | table-hole closure | closed the non-REP string-op holes first with direct shared handlers | all listed slices guest-validated |
+| Base opcode campaign | `0xc8`, `0x9d`, `0x9a`, `0xca`, `0xcb` | legality-first table-hole / protected-mode slice | closed the far-control / frame cluster in small audited steps | in tree and guest-validated |
+| Base opcode campaign | `0x69`, `0x6b`, `0xf6`, `0xf7`, `0xff` | narrow helper-backed cleanup | closed the remaining measured non-protected and mixed-group slices that stayed inside existing safe backend patterns | in tree and guest-validated |
+| Base opcode campaign | `0x9e`, `0x9f` | table-hole closure with lazy-flags barrier | landed `SAHF` / `LAHF` through the existing flags/AH machinery without new helper ABI shapes | in tree and guest-validated |
+| `0F` campaign | `0x90`-`0x9f`, `0xc8`-`0xcf` | row-sized low-risk coverage | landed full `SETcc` and `BSWAP` rows | `SETcc` in tree, `BSWAP` guest-validated |
+| Debug-first blocked work | base `D0`-`D3` `RCL` / `RCR` | compare/debug-only infrastructure | added a narrow direct-vs-helper compare path instead of keeping guest dispatch enabled | debug-only in tree, guest path disabled |
+| Host-harness-only blocked work | `0x0f 0xbc` / `0xbd`, `0x0f 0xaf` | host semantics + retained direct handlers | kept reusable harness/debug code after guest-visible backouts | host-clean, guest-disabled |
+
+## Opcode work chart
+
+This chart is the opcode-oriented view: what family moved, what kind of change it was, and how far it got.
+
+| Opcode(s) | Instruction family | Change class | Landing shape | Validation / kept state |
+|---|---|---|---|---|
+| `0xaa`-`0xad` | non-REP `STOS` / `LODS` | base table-hole closure | shared string direct handlers | guest-validated, kept enabled |
+| `0xa5`, `0xa4` | non-REP `MOVS` | base table-hole closure | sibling follow-up after initial string batch | guest-validated, kept enabled |
+| `0xa6`, `0xa7` | non-REP `CMPS` | base table-hole closure | shared string compare handlers with lazy `SUB` flags | guest-validated, kept enabled |
+| `0xae`, `0xaf` | non-REP `SCAS` | base table-hole closure | shared string compare handlers with accumulator-vs-memory compare semantics | guest-validated, kept enabled |
+| `0x9e`, `0x9f` | `SAHF` / `LAHF` | base table-hole closure | direct flags/AH transfer through existing flags rebuild plus local lazy-flags barrier handling | guest-validated, kept enabled |
+| `0xc8`, `0x9d` | `ENTER`, `POPF` | legality-first base follow-up | narrow one-opcode slices chosen for lower semantic risk | guest-validated, kept enabled |
+| `0x9a`, `0xca`, `0xcb` | far transfer / far return | protected-mode slice | audited narrow legality-first steps, not a broad control-op batch | guest-validated, kept enabled |
+| `0x69`, `0x6b` | `IMUL` with immediates | narrow helper-backed closure | reused existing direct arithmetic patterns | guest-validated, kept enabled |
+| `0xf6`, `0xf7`, `0xff` | mixed-group cleanup | helper-backed cleanup | closed adjacent measured bailout/hole cluster | guest-validated, kept enabled |
+| `0x0f 0x90`-`0x0f 0x9f` | `SETcc` row | row-sized `0F` table-hole closure | one shared condition-evaluation path | in tree, kept enabled |
+| `0x0f 0xc8`-`0x0f 0xcf` | `BSWAP` row | row-sized `0F` table-hole closure | one shared register-only handler | guest-validated, kept enabled |
+| `0x0f 0xbc`, `0x0f 0xbd` | `BSF` / `BSR` | blocked helper-backed `0F` retry | host harness plus retained direct handlers | guest-disabled after regression |
+| `0x0f 0xaf` | two-operand `IMUL` | blocked helper-backed `0F` retry | host harness plus retained direct handler and compare pass | guest-disabled after regression |
+| base `D0`-`D3` `RCL` / `RCR` | rotate-through-carry subset | blocked bailout closure | compare/debug-only path kept; normal guest dispatch removed | debug-only, guest-disabled |
+
 ## Status snapshot
 
 Last updated: 2026-03-09
@@ -15,9 +54,9 @@ Last updated: 2026-03-09
 | Area | Status | Progress | Notes |
 |---|---|---:|---|
 | Investigation and architecture review | Complete | 100% | Detailed report written and saved |
-| Implementation work | In progress | 93% | Phase 1 invalidation/reclamation hardening is complete; durable Phase 0/1 observability remains in tree, allocator-policy experiments are paused, the measured protected-mode and mixed-group hotspot sequence is closed through `0x9a`, `0xca`, `0xcb`, `0xf7`, `0xf6`, and `0xff`, the full `SETcc` row (`0x90`-`0x9f`) remains in tree with corrected boolean normalization, the `BSWAP` row (`0xc8`-`0xcf`) remains guest-validated, and base `0xa6` / `0xa7` (`CMPSB` / `CMPSW` / `CMPSD`) are now guest-validated on `Windows 98 SE` while both the `BSF` / `BSR` pair and the retried strict `0x0f 0xaf` path are currently kept at host-harness-only status pending guest-safe debugging; base `D0`-`D3` `RCL` / `RCR` now also has a narrow compare-only direct path in tree, but normal guest dispatch remains disabled |
+| Implementation work | In progress | 95% | Phase 1 invalidation/reclamation hardening is complete; durable Phase 0/1 observability remains in tree, allocator-policy experiments are paused, the measured protected-mode and mixed-group hotspot sequence is closed through `0x9a`, `0xca`, `0xcb`, `0xf7`, `0xf6`, and `0xff`, the full `SETcc` row (`0x90`-`0x9f`) remains in tree with corrected boolean normalization, the `BSWAP` row (`0xc8`-`0xcf`) remains guest-validated, both low-risk non-REP compare-string sibling pairs (`0xa6` / `0xa7`, `0xae` / `0xaf`) are guest-validated, and base `0x9e` / `0x9f` (`SAHF` / `LAHF`) is now guest-validated on `Windows 98 SE`; both the `BSF` / `BSR` pair and the retried strict `0x0f 0xaf` path remain host-harness-only, and base `D0`-`D3` `RCL` / `RCR` still keeps normal guest dispatch disabled |
 | Correctness risk mitigation | Complete | 100% | Phase 1 is closed: page-0 sentinel, stale-head purge churn, post-purge dirty-list reuse, stale code-presence state, and bogus bulk-dirty enqueue churn were fixed and validated; remaining high random eviction is treated as reclaimable-page scarcity for this workload |
-| Coverage closure | In progress | 82% | REP remains open and softfloat/x87 follow-up is intentionally deferred for now, but the direct 3DNow/3DNowE generator gap is now closed with cumulative regression coverage, a legality gate for 3DNowE-only suffixes, initial guest-visible direct-path validation, a measured fallback priority order, the protected-mode far-transfer / far-return sequence (`0x9a`, `0xca`, `0xcb`), the mixed-group cleanup sequence (`0xf7`, `0xf6`, `0xff`), the full `SETcc` row (`0x90`-`0x9f`), the guest-validated `BSWAP` row (`0xc8`-`0xcf`), and the guest-validated low-risk `CMPS` table-hole pair (`0xa6`, `0xa7`) are now in tree; `BSF` / `BSR` and `0x0f 0xaf` host-harness coverage now exist, but both direct guest paths remain paused after guest-visible boot failures, and the `0xaf` compare-debug pass indicates the remaining issue is outside the sampled result/`CF`-`OF` semantics path |
+| Coverage closure | In progress | 86% | REP remains open and softfloat/x87 follow-up is intentionally deferred for now, but the direct 3DNow/3DNowE generator gap is now closed with cumulative regression coverage, a legality gate for 3DNowE-only suffixes, initial guest-visible direct-path validation, a measured fallback priority order, the protected-mode far-transfer / far-return sequence (`0x9a`, `0xca`, `0xcb`), the mixed-group cleanup sequence (`0xf7`, `0xf6`, `0xff`), the full `SETcc` row (`0x90`-`0x9f`), the guest-validated `BSWAP` row (`0xc8`-`0xcf`), the guest-validated low-risk `CMPS` / `SCAS` pairs (`0xa6`, `0xa7`, `0xae`, `0xaf`), and the guest-validated `SAHF` / `LAHF` pair (`0x9e`, `0x9f`) are in tree; `BSF` / `BSR` and `0x0f 0xaf` host-harness coverage now exist, but both direct guest paths remain paused after guest-visible boot failures, and the `0xaf` compare-debug pass indicates the remaining issue is outside the sampled result/`CF`-`OF` semantics path |
 | Observability and validation tooling | In progress | 92% | Core CPU dynarec counters, runtime summary logging, purge failure-mode counters, empty-purge accounting, purge-list lifecycle counters, selective verify sampling, per-hit 3DNow shutdown logging, fallback-family logging, base-opcode fallback logging, the new `D0`-`D3` compare-only shutdown summary / mismatch logging surface, and Phase 2 mark-deferral accounting are in tree; temporary scarcity-boundary probes were retired after Phase 1 closure, and the temporary `0xaf` compare-only guest override has already been removed after producing its evidence |
 | Performance optimization | Paused | 8% | Initial allocator/reclaim policy experiments were stable but low-yield on the 3DMark99 workload, so this track is paused while coverage work proceeds |
 
@@ -32,6 +71,8 @@ Last updated: 2026-03-09
 - Base `D0`-`D3` `RCL` / `RCR` now has the first narrow base-opcode compare-only path in tree as well: `86BOX_NEW_DYNAREC_DEBUG_D0D3_RCLRCR=1` enables the sampled direct-vs-helper check, `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE=1` emits mismatch/shutdown evidence, `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE_SITES=1` emits first-hit site discovery lines for later `VERIFY_PC` targeting, and normal guest dispatch still stays disabled unless that debug knob is explicitly set.
 - That compare/debug path has now answered the main semantic question strongly enough for this branch stage: recent broad and locked-site runs matched helper semantics throughout sampled `RCL` / `RCR` traffic, so the next productive session should pivot back to low-risk implementation work instead of adding more `D0`-`D3` probes.
 - That low-risk pivot has now validated cleanly too: base `0xa6` / `0xa7` (`CMPSB` / `CMPSW` / `CMPSD`) reached a normal `Windows 98 SE` shutdown with no remaining shutdown base-fallback entries for either opcode.
+- That same-class sibling is now closed too: base `0xae` / `0xaf` (`SCASB` / `SCASW` / `SCASD`) reuses the same non-REP string address/index helpers and lazy `SUB`-style flag pattern, and `/tmp/windows98_se_scas_validation.log` reached shutdown with no remaining base-fallback entries for either opcode.
+- The next low-risk two-opcode follow-up is now closed as well: base `0x9e` / `0x9f` (`SAHF` / `LAHF`) landed through the existing flags/AH transfer machinery, and `/tmp/windows98_se_sahf_lahf_validation.log` reached shutdown with no remaining shutdown base-fallback entries for either opcode.
 - The best first Phase 2 target was block-demand reduction rather than another reclaim-path rewrite: under the confirmed empty-purge scarcity signature, a first-hit mark-only block is the lowest-value resident because it consumes a block slot before it has ever produced direct code.
 - The first Phase 2 policy step now in tree is a narrow cold-block admission experiment: after a random eviction, the next 8 first-hit mark opportunities are interpreted without allocating a new mark-only block, and each skipped mark is counted as `deferred_block_marks`.
 - This keeps Phase 1 closed: the new policy is explicitly trying to reduce structurally high random eviction under scarcity, not reclassify the remaining behavior as another invalidation/reclamation correctness bug.
