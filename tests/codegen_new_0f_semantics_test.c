@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 
+#include "cpu.h"
 #include "codegen_test_support.h"
 
 int
@@ -8,6 +9,36 @@ main(void)
 {
     assert(new_dynarec_bswap32_result(0x11223344u) == 0x44332211u);
     assert(new_dynarec_bswap32_result(0xaabbccddU) == 0xddccbbaau);
+
+    assert(new_dynarec_imul_rm16_result(0x0003u, 0x0004u) == 0x000cu);
+    assert(new_dynarec_imul_rm16_overflow_flag_mask(0x0003u, 0x0004u) == 0);
+    assert(new_dynarec_imul_rm16_result(0x0003u, 0xfffcu) == 0xfff4u);
+    assert(new_dynarec_imul_rm16_overflow_flag_mask(0x0003u, 0xfffcu) == 0);
+    assert(new_dynarec_imul_rm16_result(0xfffdu, 0xfffcu) == 0x000cu);
+    assert(new_dynarec_imul_rm16_overflow_flag_mask(0xfffdu, 0xfffcu) == 0);
+    assert(new_dynarec_imul_rm16_result(0x4000u, 0x0002u) == 0x8000u);
+    assert(new_dynarec_imul_rm16_overflow_flag_mask(0x4000u, 0x0002u) == (C_FLAG | V_FLAG));
+    assert(new_dynarec_imul_rm16_result(0x7fffu, 0x0002u) == 0xfffeu);
+    assert(new_dynarec_imul_rm16_overflow_flag_mask(0x7fffu, 0x0002u) == (C_FLAG | V_FLAG));
+    assert(new_dynarec_imul_rm16_result(0x8000u, 0x0001u) == 0x8000u);
+    assert(new_dynarec_imul_rm16_overflow_flag_mask(0x8000u, 0x0001u) == 0);
+    assert(new_dynarec_imul_rm16_result(0xff80u, 0x0002u) == 0xff00u);
+    assert(new_dynarec_imul_rm16_overflow_flag_mask(0xff80u, 0x0002u) == 0);
+
+    assert(new_dynarec_imul_rm32_result(0x00000003u, 0x00000004u) == 0x0000000cu);
+    assert(new_dynarec_imul_rm32_overflow_flag_mask(0x00000003u, 0x00000004u) == 0);
+    assert(new_dynarec_imul_rm32_result(0x00000003u, 0xfffffffcu) == 0xfffffff4u);
+    assert(new_dynarec_imul_rm32_overflow_flag_mask(0x00000003u, 0xfffffffcu) == 0);
+    assert(new_dynarec_imul_rm32_result(0xfffffffdu, 0xfffffffcu) == 0x0000000cu);
+    assert(new_dynarec_imul_rm32_overflow_flag_mask(0xfffffffdu, 0xfffffffcu) == 0);
+    assert(new_dynarec_imul_rm32_result(0x40000000u, 0x00000002u) == 0x80000000u);
+    assert(new_dynarec_imul_rm32_overflow_flag_mask(0x40000000u, 0x00000002u) == (C_FLAG | V_FLAG));
+    assert(new_dynarec_imul_rm32_result(0x7fffffffu, 0x00000002u) == 0xfffffffeu);
+    assert(new_dynarec_imul_rm32_overflow_flag_mask(0x7fffffffu, 0x00000002u) == (C_FLAG | V_FLAG));
+    assert(new_dynarec_imul_rm32_result(0x80000000u, 0x00000001u) == 0x80000000u);
+    assert(new_dynarec_imul_rm32_overflow_flag_mask(0x80000000u, 0x00000001u) == 0);
+    assert(new_dynarec_imul_rm32_result(0xffffff80u, 0x00000002u) == 0xffffff00u);
+    assert(new_dynarec_imul_rm32_overflow_flag_mask(0xffffff80u, 0x00000002u) == 0);
 
     assert(new_dynarec_bsf16_result(0x5555u, 0x0000u) == 0x5555u);
     assert(new_dynarec_bsf16_result(0x5555u, 0x8000u) == 15u);

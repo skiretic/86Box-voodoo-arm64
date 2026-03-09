@@ -10,10 +10,12 @@
 #include "x86seg.h"
 #include "386_common.h"
 #include "codegen.h"
+#include "codegen_public.h"
 #include "codegen_ir.h"
 #include "codegen_ops.h"
 #include "codegen_ops_arith.h"
 #include "codegen_ops_helpers.h"
+#include "codegen_test_support.h"
 
 static inline void
 get_cf(ir_data_t *ir, int dest_reg)
@@ -75,6 +77,68 @@ codegen_imul32_il_flag_mask(uint32_t src, uint32_t imm)
     const int64_t result = ((int64_t) (int32_t) src) * ((int64_t) (int32_t) imm);
 
     return ((result >> 31) != 0 && (result >> 31) != -1) ? (C_FLAG | V_FLAG) : 0;
+}
+
+uint32_t
+ropIMUL_0f_w_rm(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+{
+    const int dest_reg = (fetchdat >> 3) & 7;
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_16(dest_reg));
+    if ((fetchdat & 0xc0) == 0xc0) {
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_16(fetchdat & 7));
+    } else {
+        x86seg *target_seg;
+
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+        codegen_check_seg_read(block, ir, target_seg);
+        uop_MEM_LOAD_REG(ir, IREG_temp0_W, ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_MOV(ir, IREG_temp3_W, IREG_temp0_W);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp0_W);
+    }
+
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_imul_rm16_result);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_imul_rm16_overflow_flag_mask);
+    uop_MOV(ir, IREG_16(dest_reg), IREG_temp0_W);
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_AND_IMM(ir, IREG_flags, IREG_flags, ~(C_FLAG | V_FLAG));
+    uop_OR(ir, IREG_flags, IREG_flags, IREG_temp1_W);
+
+    codegen_flags_changed = 1;
+    return op_pc + 1;
+}
+
+uint32_t
+ropIMUL_0f_l_rm(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+{
+    const int dest_reg = (fetchdat >> 3) & 7;
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+    uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_32(dest_reg));
+    if ((fetchdat & 0xc0) == 0xc0) {
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_32(fetchdat & 7));
+    } else {
+        x86seg *target_seg;
+
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+        codegen_check_seg_read(block, ir, target_seg);
+        uop_MEM_LOAD_REG(ir, IREG_temp0, ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_MOV(ir, IREG_temp3, IREG_temp0);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp0);
+    }
+
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_imul_rm32_result);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_imul_rm32_overflow_flag_mask);
+    uop_MOV(ir, IREG_32(dest_reg), IREG_temp0);
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_AND_IMM(ir, IREG_flags, IREG_flags, ~(C_FLAG | V_FLAG));
+    uop_OR(ir, IREG_flags, IREG_flags, IREG_temp1_W);
+
+    codegen_flags_changed = 1;
+    return op_pc + 1;
 }
 
 uint32_t

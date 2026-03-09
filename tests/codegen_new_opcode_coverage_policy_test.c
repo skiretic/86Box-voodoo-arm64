@@ -70,8 +70,11 @@ main(void)
     assert(new_dynarec_has_direct_0f_opcode_recompile(0xcf) == 1);
     assert(new_dynarec_has_direct_0f_opcode_recompile(0xbc) == 1);
     assert(new_dynarec_has_direct_0f_opcode_recompile(0xbd) == 1);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xaf) == 0);
     assert(new_dynarec_has_direct_0f_opcode_recompile(0x8f) == 0);
     assert(new_dynarec_has_direct_0f_opcode_recompile(0xa0) == 0);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xae) == 0);
+    assert(new_dynarec_has_direct_0f_opcode_recompile(0xb0) == 0);
     assert(new_dynarec_has_direct_0f_opcode_recompile(0xc7) == 0);
     assert(new_dynarec_has_direct_0f_opcode_recompile(0xd0) == 0);
 

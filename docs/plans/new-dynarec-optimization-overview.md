@@ -196,12 +196,15 @@ Current batching guidance:
 - the mapping pass is now complete, and the first landed `0F` slice is the full `SETcc` row (`0x90`-`0x9f`)
 - the failed direct bit-test-family attempt showed that `0xa3` / `0xab` / `0xb3` / `0xba` are not a safe near-term batch without tighter opcode-level runtime validation
 - the narrow `0x0f 0xaf` trial was also backed out after guest boot failure
+- the later strict `0x0f 0xaf` retry kept that opcode isolated and used a host-side synthetic semantics harness first, but the single allowed `Windows 98 Gaming PC` checkpoint still failed with the guest-visible “Insufficient memory to initialize Windows” boot error, so only the harness/debugging support stays in tree
+- the follow-up compare-enabled `0xaf` debug pass then showed zero sampled mismatches for destination writeback or `CF` / `OF` versus helper-visible expected values, which rules out the obvious `IMUL` result/overflow semantics as the primary explanation for that guest regression
 - the next safe multi-op `0F` batch is the `BSWAP` row (`0xc8`-`0xcf`): register-only, no flags, no memory forms, and no protected-mode rules
 - the logged `BSWAP` rerun is now complete too: `0f` fell to `6633`, and there are no remaining shutdown `0xc8`-`0xcf` fallback entries in `/tmp/new_dynarec_0f_bswap_validation.log`
 - the first host-harness follow-up after `BSWAP` was the `BSF` / `BSR` pair (`0xbc`, `0xbd`), but the first guest-visible attempt is not stable enough to keep enabled
 - the guest-debugging pass found two real bugs in that combined `9c77c0fa6` state: generic `SETcc` was incorrectly normalizing raw flag masks as boolean values, and `BSF` / `BSR` reused stale helper arguments for the ZF-mask helper
 - after fixing the `SETcc` bug, guest boot progressed further but still failed during Windows 98 `IOS` initialization until direct `BSF` / `BSR` table dispatch was removed again
 - the current stable state is therefore: `SETcc` enabled with corrected boolean normalization, `BSWAP` enabled and guest-validated, host-side `BSF` / `BSR` harness support retained, but direct guest dispatch for `0xbc` / `0xbd` disabled pending further debugging
+- the current stable state now also keeps host-side `0x0f 0xaf` semantics coverage and helper-backed direct-handler code available, but direct guest dispatch for `0xaf` is disabled again after the strict retry reproduced a new early-boot regression on the `Windows 98 Gaming PC` VM and the later compare pass still failed to clear it; the temporary guest override used for that compare pass has since been removed
 - future low-risk `0F` follow-ups should still use a host-side synthetic semantics harness first, then one logged guest confirmation run afterward, but a failed guest run should revert only the new table dispatch instead of leaving the unstable direct path enabled
 - if a generic base-only follow-up is needed in parallel or afterward, `0xd0`-`0xd3` is now the clearest coherent base batch
 - REP is still the hottest family overall, but it is a separate non-MMX campaign and no longer blocks doing the MMX-only `0F` follow-up first

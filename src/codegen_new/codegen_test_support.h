@@ -5,6 +5,11 @@
 
 uint32_t new_dynarec_bswap32_result(uint32_t value);
 
+uint32_t new_dynarec_imul_rm16_result(uint32_t dest, uint32_t src);
+uint32_t new_dynarec_imul_rm16_overflow_flag_mask(uint32_t dest, uint32_t src);
+uint32_t new_dynarec_imul_rm32_result(uint32_t dest, uint32_t src);
+uint32_t new_dynarec_imul_rm32_overflow_flag_mask(uint32_t dest, uint32_t src);
+
 uint32_t new_dynarec_bsf16_result(uint32_t dest, uint32_t src);
 uint32_t new_dynarec_bsf32_result(uint32_t dest, uint32_t src);
 uint32_t new_dynarec_bsr16_result(uint32_t dest, uint32_t src);

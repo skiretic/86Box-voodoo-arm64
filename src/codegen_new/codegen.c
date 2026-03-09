@@ -18,6 +18,7 @@
 #include "codegen_backend.h"
 #include "codegen_ir.h"
 #include "codegen_ops.h"
+#include "codegen_ops_arith.h"
 #include "codegen_ops_helpers.h"
 
 #define MAX_INSTRUCTION_COUNT 50
@@ -736,28 +737,36 @@ generate_call:
     if (in_lock && ((opcode == 0x90) || (opcode == 0xec)))
         goto codegen_skip;
 
-    if (recomp_op_table && recomp_op_table[(opcode | op_32) & recomp_opcode_mask]) {
-        uint32_t new_pc = recomp_op_table[(opcode | op_32) & recomp_opcode_mask](block, ir, opcode, fetchdat, op_32, op_pc);
-        if (new_pc) {
-            new_dynarec_note_direct_recompiled_instruction();
-            new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_DIRECT);
-            if (op_table == x86_dynarec_opcodes_3DNOW)
-                new_dynarec_note_3dnow_opcode_hit(opcode, NEW_DYNAREC_VERIFY_DIRECT);
-            if (new_pc != -1)
-                uop_MOV_IMM(ir, IREG_pc, new_pc);
+    {
+        RecompOpFn recomp_fn = NULL;
 
-            codegen_endpc = (cs + cpu_state.pc) + 8;
+        if (recomp_op_table)
+            recomp_fn = recomp_op_table[(opcode | op_32) & recomp_opcode_mask];
 
-            block->ins++;
+        if (recomp_fn) {
+            uint32_t new_pc = recomp_fn(block, ir, opcode, fetchdat, op_32, op_pc);
 
-            if (block->ins >= MAX_INSTRUCTION_COUNT)
-                CPU_BLOCK_END();
+            if (new_pc) {
+                new_dynarec_note_direct_recompiled_instruction();
+                new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_DIRECT);
+                if (op_table == x86_dynarec_opcodes_3DNOW)
+                    new_dynarec_note_3dnow_opcode_hit(opcode, NEW_DYNAREC_VERIFY_DIRECT);
+                if (new_pc != -1)
+                    uop_MOV_IMM(ir, IREG_pc, new_pc);
 
-            return;
+                codegen_endpc = (cs + cpu_state.pc) + 8;
+
+                block->ins++;
+
+                if (block->ins >= MAX_INSTRUCTION_COUNT)
+                    CPU_BLOCK_END();
+
+                return;
+            }
+            helper_fallback_reason = NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT;
+        } else {
+            helper_fallback_reason = NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL;
         }
-        helper_fallback_reason = NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT;
-    } else {
-        helper_fallback_reason = NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL;
     }
 
 codegen_skip:

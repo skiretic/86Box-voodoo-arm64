@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "cpu.h"
 #include "codegen_public.h"
 
 typedef struct trace_capture_t {

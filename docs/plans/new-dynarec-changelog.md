@@ -36,6 +36,30 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-08 (`0F AF` strict host-harness trial and guest backout)
+
+### Added
+- Added host-side synthetic semantics harness coverage for `0x0f 0xaf` (`IMUL r16/32, r/m16/32`) in `tests/codegen_new_0f_semantics_test.c` and `src/codegen_new/codegen_test_support.c`, covering 16-bit and 32-bit result truncation plus `CF` / `OF` overflow-mask behavior for register-source and memory-equivalent source cases.
+- Added narrow direct-handler code for `0x0f 0xaf` using the same helper-backed result/flag-mask shape already used by the existing immediate-`IMUL` direct paths, so the reusable decode/helper/writeback path stays available for future debugging even though guest dispatch is not kept enabled.
+- Added a temporary `0xaf`-only guest debug override plus shutdown-summary logging for the compare pass that sampled direct attempts without restoring normal direct-coverage policy exposure.
+
+### Changed
+- Changed the `0x0f 0xaf` retry from a broad direct-coverage attempt to a strict one-opcode host-harness-first trial on the `Windows 98 Gaming PC` baseline VM.
+- Changed the final kept branch state after the guest checkpoint: host-side `0x0f 0xaf` harness support remains in tree, but direct `0x0f 0xaf` table dispatch and direct-coverage policy exposure are backed out again because the single allowed guest run regressed during boot.
+- Changed the post-trial understanding of the remaining `0xaf` risk: compare-enabled guest debugging now shows direct `0xaf` destination writeback and `CF` / `OF` mask matching helper-visible expected values on sampled executions, so the unresolved guest failure is no longer explained by the obvious `IMUL` math or `CF` / `OF` semantics path.
+- Changed the kept code state after that debug pass: the temporary `0xaf` guest override and compare-only shutdown logging are removed again so the branch returns to the stable non-direct `0xaf` behavior while keeping the reusable host-side semantics helpers and retained direct handler code.
+
+### Validated
+- Confirmed the red/green cycle for the new `0x0f 0xaf` harness: the standalone semantics test first failed at link on the missing `new_dynarec_imul_rm16_*` / `new_dynarec_imul_rm32_*` helpers, then passed after the helpers landed.
+- Confirmed the focused coverage-policy red/green cycle: the standalone coverage test first failed on `new_dynarec_has_direct_0f_opcode_recompile(0xaf) == 1`, then passed once the direct path was wired, and passed again after the final backout with `0xaf` restored to non-direct status.
+- Confirmed the required host verification commands all pass on the final kept state, including the `0x0f` semantics harness test, the three focused standalone policy/observability tests, the target build, and app re-signing.
+- Confirmed the single logged guest run at `/tmp/windows98_gaming_pc_0f_af_validation.log` did not reach desktop; it failed at boot with the guest-visible Windows message “Insufficient memory to initialize Windows,” and the shutdown log was only `base=688 0f=38 x87=0 rep=375 3dnow=0`, which is far short of the stable baseline profile.
+- Confirmed the compare-enabled guest debug pass at `/tmp/windows98_gaming_pc_0f_af_debug.log` reached shutdown and reported `attempts=204 direct=204`, `dest_mismatches=0`, `flags_mismatches=0`, `last_expected_dest=0x00005100`, `last_actual_dest=0x00005100`, `last_expected_flags=0x00000801`, and `last_actual_flags=0x00000801`, while the guest still hit the same Windows boot error.
+
+### Open
+- `0x0f 0xaf` should still be treated as host-harness-covered but not guest-safe. The next debugging pass can reuse the helper-backed direct handler and semantics helpers, but direct guest dispatch must stay disabled until the remaining integration-level guest regression is understood.
+- The next `0F` follow-up should not assume that a clean host harness is enough to keep arithmetic-family guest dispatch enabled; the `0x0f 0xaf` trial reinforced the same keep/backout rule already established by the `BSF` / `BSR` backout.
+
 ## 2026-03-08 (`0F` `BSF` / `BSR` guest backout after harness-first trial)
 
 ### Added
