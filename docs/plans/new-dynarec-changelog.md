@@ -36,6 +36,81 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-09 (`D0-D3` rotate-through-carry bailout closure)
+
+### Added
+- Added helper-backed host semantics support for `RCL` / `RCR` in `src/codegen_new/codegen_test_support.c` and extended `tests/codegen_new_0f_semantics_test.c` with focused rotate-through-carry result and `CF` / `OF` mask coverage for 8-bit, 16-bit, and 32-bit forms.
+
+### Changed
+- Changed the measured `0xd0`-`0xd3` follow-up from a pure recommendation into a narrow implementation trial, then backed the guest path out again after validation: `src/codegen_new/codegen_ops_shift.c` returns to the stable immediate-fallback behavior for `RCL` / `RCR`, while the host-side rotate helpers and harness coverage remain in tree.
+- Changed the branch status for base `0xd0`-`0xd3`: the family is still the best narrow i686-oriented next opportunity on paper, but direct `RCL` / `RCR` guest enablement is not currently safe on this branch.
+
+### Validated
+- Confirmed the focused semantics harness passes after the new helper coverage lands via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu -Isrc/codegen_new tests/codegen_new_0f_semantics_test.c src/codegen_new/codegen_test_support.c -o /tmp/codegen_new_0f_semantics_test && /tmp/codegen_new_0f_semantics_test`.
+- Confirmed `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` succeeds with the `D0` / `D1` / `D2` / `D3` handler changes in tree.
+- Confirmed the first guest validation attempt crashed in the dynarec backend with `codegen_LOAD_FUNC_ARG2 113`, which traced to the new three-argument helper-call shape rather than guest execution itself.
+- Confirmed the follow-up two-argument packed-helper retry booted far enough to reach the same class of guest-visible early Windows boot failure seen on other unstable trials, showing “Insufficient conventional memory to run Windows” instead of reaching a comparable stable shutdown profile.
+- Confirmed the failed-boot shutdown log at `/tmp/windows98_testing_i686_d0d3_validation.log` is not comparable to the stable strict i686 baseline: it ended at `base=15803 0f=43 x87=0 rep=202`, far short of the stable `/tmp/windows98_testing_i686_baseline.log` shape (`base=23216 0f=8719 x87=2148 rep=17238`).
+
+### Open
+- Keep the host-side `RCL` / `RCR` helper coverage for future debugging, but treat direct `D0` / `D1` / `D2` / `D3` `RCL` / `RCR` guest enablement as backed out until the remaining integration-level boot regression is understood.
+- Re-measure strict i686 ranking on a cleaner pre-install guest image if I/O-heavy behavior from the current Windows 98 TESTING image is now distorting the base-bucket ordering.
+
+## 2026-03-09 (guest-regression planning reset)
+
+### Added
+- Added `docs/plans/2026-03-09-guest-regression-planning-reset.md`, a workflow-reset note that explains why recent host-clean opcode trials (`BSF` / `BSR`, `0x0f 0xaf`, `D0`-`D3`) still regressed in guest execution, and classifies remaining work into safe landing candidates, debug-first candidates, and blocked system-risk candidates.
+
+### Changed
+- Changed the near-term recommendation from “pick the next measured hotspot family” to “stop guest-facing bailout-closure trials until the missing planning/debugging layer is in place,” because the repeated failures now point to workflow and backend-audit gaps rather than a single bad opcode choice.
+- Changed the required preconditions for future guest-facing opcode work: any new helper-backed or bailout-closure trial now needs an explicit arm64 backend capability audit, a Class A/B/C risk label, a defined guest compare/debug path when applicable, and a named clean baseline image before guest enablement is allowed.
+
+### Validated
+- Confirmed the current repeated-failure pattern spans three separate families rather than one isolated bug: `0x0f 0xbc` / `0xbd`, `0x0f 0xaf`, and base `D0` / `D1` / `D2` / `D3` all cleared host-side gates but still failed guest validation strongly enough to force backout.
+- Confirmed the existing workflow is still effective for lower-risk table-hole families like `BSWAP`, but is not sufficient on its own for helper-backed bailout-closure work.
+
+### Open
+- Write down the concrete arm64 helper-call and helper-result constraints for CPU dynarec helper-backed paths.
+- Add a narrow base-opcode direct-vs-helper compare path before retrying any Class B bailout-closure family.
+
+## 2026-03-09 (i686 opportunity review and strict-baseline recommendation)
+
+### Added
+- Added `docs/plans/2026-03-09-i686-opportunity-review.md`, a focused analysis note that confirms the stable `d960e431a` baseline, gathers the current on-disk proxy fallback evidence, maps the hottest remaining opcode families, and ranks the best i686-oriented opportunities without starting a new implementation slice.
+- Added the strict i686 VM inventory to that review: `Windows 98 TESTING` and `Windows 98 SE copy` (`celeron_mendocino`) plus `Windows 2000 copy` (`pentium2_klamath`) are available locally even though the exact on-disk shutdown logs still come from the K6-2 `Windows 98 Gaming PC` baseline and the Tillamook `Windows 98 Low End copy` MMX-only baseline.
+
+### Changed
+- Changed the immediate i686 recommendation from “pick the next opcode directly from the current proxy logs” to “take one observability-only Mendocino shutdown baseline first,” because the current exact logs are still K6-2 and Pentium MMX flavored rather than strict i686-class evidence.
+- Changed the safest post-baseline implementation guidance accordingly: base `0xd0`-`0xd3` (group-2 shift/rotate bailout closure) now leads the i686 shortlist on safety grounds, while `0x0f 0xaf`, `0xbc` / `0xbd`, and the `0x0f 0xba` / bit-test family remain blocked for this branch state.
+
+### Validated
+- Confirmed from the current stable K6-2 shutdown log at `/tmp/windows98_gaming_pc_new_dynarec.log` that the post-backout exact `0F` ranking is still led by `0xaf=2863`, `0xba=2067`, then `0x02`, `0xb3`, `0xa3`, `0xab`, and `0x03`, with all of those still recorded as `helper_table_null`.
+- Confirmed from the MMX-only shutdown logs at `/tmp/new_dynarec_mmx_only_validation.log` and `/tmp/new_dynarec_mmx_only_0f_validation.log` that the remaining exact base bucket is now led by `0xd1`, `0xd3`, `0xee`, `0xcd`, `0xe6`, `0xcf`, `0xec`, `0x8e`, `0xd0`, and `0x9b`, while the longer exact `0F` ranking still leads with `0xaf`, `0xba`, `0x94`, `0x95`, `0x02`, `0xc8`, `0xb3`, `0xab`, `0xa3`, and `0x03`.
+- Confirmed from the local VM configs that the strict i686-class baselines exist on disk now even though they do not yet have matching current exact shutdown logs.
+
+### Open
+- Capture one current-stable Mendocino shutdown log with fallback-family, base-fallback, and exact `0F` logging before choosing the next actual opcode landing for i686-focused work.
+- Re-rank `0xd0`-`0xd3` versus `0x0f 0x02` / `0x03` only after that strict i686 run, rather than assuming the K6-2 and Tillamook proxy order is good enough.
+
+## 2026-03-09 (strict Mendocino baseline captured)
+
+### Added
+- Added the completed strict i686-class shutdown evidence at `/tmp/windows98_testing_i686_baseline.log` for `Windows 98 TESTING` (`celeron_mendocino`, `bf6`) with fallback-family, base-fallback, and exact `0F` logging enabled.
+
+### Changed
+- Changed the i686 recommendation from “take one observability-only Mendocino shutdown baseline first” to a concrete next implementation family: base `0xd0`-`0xd3` now remains the best narrow trial after the strict baseline too.
+- Changed the interpretation of the remaining strict-i686 base bucket: it is now clearly dominated by I/O and control opcodes (`0xee`, `0xe6`, `0xec`, `0xef`, `0xcd`, `0xcf`) rather than by plain integer helpers, which makes the hotter base leaders worse first landing candidates than the still-measured shift/rotate bailout family.
+
+### Validated
+- Confirmed the strict Mendocino shutdown families are `base=23216`, `0f=8719`, `x87=2148`, `rep=17238`, and `3dnow=0`.
+- Confirmed the strict Mendocino base ranking is led by `0xee=5562`, `0xe6=5319`, `0xec=3578`, `0xef=3202`, `0xd1=1183`, `0xd3=983`, `0x8e=520`, `0xcd=500`, `0xcf=462`, and `0xd0=421`.
+- Confirmed the strict Mendocino `0F` ranking is still led by the same risky families as the proxy logs: `0xaf=3056`, `0xba=2458`, `0x02=602`, `0xb3=446`, `0xa3=328`, `0x03=299`, `0x22=290`, `0xab=289`, `0x20=218`, and `0xbc=218`.
+- Confirmed the measured `0xd0`-`0xd3` strict-i686 total is `2747`, and all of those hits remain `helper_bailout` rather than `helper_table_null`, which keeps the likely work inside the existing direct handlers.
+
+### Open
+- If the next session moves from planning to implementation, keep the trial narrow to `0xd0`-`0xd3` only and use a host-harness-first workflow before one logged Mendocino guest confirmation run.
+- Keep `0x0f 0xaf`, `0xbc` / `0xbd`, and the `0x0f 0xba` / bit-test family out of the next landing despite their higher raw counts, because the strict i686 run did not improve their validation-risk profile.
+
 ## 2026-03-08 (`0F AF` strict host-harness trial and guest backout)
 
 ### Added

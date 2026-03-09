@@ -149,6 +149,49 @@ Interpretation of the new `0F` report:
 - the new priority is therefore missing direct `0F` coverage, not fixing unstable existing `0F` handlers
 - the next decision point is no longer “what observability is missing?” but “which of these opcodes form the tightest coherent implementation slice after instruction-family mapping?”
 
+### Strict i686 baseline gap
+
+A later review on Monday, March 9, 2026 narrowed an important limitation in that MMX-only section:
+
+- the exact base and longer exact `0F` shutdown reports above are still only proxy evidence for i686-focused planning
+- the current stable exact `0F` shutdown report on disk is the K6-2 `Windows 98 Gaming PC` log, not a strict i686-class guest
+- the actual strict i686-class VMs already available locally are:
+  - `Windows 98 TESTING` (`celeron_mendocino`, `bf6`)
+  - `Windows 98 SE copy` (`celeron_mendocino`, `ax6bc`)
+  - `Windows 2000 copy` (`pentium2_klamath`, `bf6`)
+
+Interpretation:
+
+- the existing K6-2 and Tillamook logs are still useful for hotspot mapping
+- they are not a good enough reason on their own to choose the next i686 landing blindly
+- the safest next i686-focused trial is now one observability-only Mendocino shutdown baseline with fallback-family, base-fallback, and exact `0F` logging enabled
+- if that strict re-baseline preserves the same generic-base ordering, base `0xd0`-`0xd3` becomes the leading low-risk implementation family ahead of another `0x0f` retry
+
+That strict Mendocino re-baseline has now been captured too:
+
+- `/tmp/windows98_testing_i686_baseline.log`
+- fallback families: `base=23216`, `0f=8719`, `x87=2148`, `rep=17238`, `3dnow=0`
+- hottest base opcodes:
+  - `0xee`, `0xe6`, `0xec`, `0xef`
+  - then `0xd1`, `0xd3`, `0x8e`, `0xcd`, `0xcf`, `0xd0`
+- hottest `0F` opcodes:
+  - `0xaf`, `0xba`, `0x02`
+  - then `0xb3`, `0xa3`, `0x03`, `0x22`, `0xab`, `0x20`, `0xbc`
+
+Interpretation after the strict i686 run:
+
+- the proxy logs were directionally right about the risky `0F` cluster; the Mendocino result still does not justify another `0x0f 0xaf`, `BSF` / `BSR`, or bit-test-family retry first
+- the strict i686 base bucket is even more dominated by system and I/O behavior than the proxy runs suggested
+- that makes the hottest base leaders worse first landing candidates despite their count
+- base `0xd0`-`0xd3` remains the best narrow next implementation family because it still has real measured payoff (`2747` combined hits), already has direct handlers in tree, and stays outside the hotter I/O/control-heavy base surface
+- that narrow family step has now been attempted and then backed out: the host-side rotate-through-carry helpers remain available, but the direct `D0` / `D1` / `D2` / `D3` `RCL` / `RCR` guest path is disabled again after the strict Mendocino validation hit an early Windows boot regression
+- the most recent failed-boot validation log (`/tmp/windows98_testing_i686_d0d3_validation.log`) is not a valid replacement baseline because it ended at `base=15803 0f=43 x87=0 rep=202`, so the next evidence task is either deeper debugging of that regression or a cleaner strict-i686 re-baseline on a less I/O-polluted image
+- the broader planning reset after that result is now: repeated host-clean / guest-regressed trials are a workflow problem, not just a prioritization problem
+- near-term work should therefore shift away from more guest-facing bailout-closure attempts and toward three missing prerequisites:
+  - arm64 helper-call capability documentation
+  - base-opcode direct-vs-helper compare/debug support
+  - a cleaner strict-i686 baseline image for future hotspot ranking
+
 ### First coherent `0F` batch comparison
 
 Two plausible larger first batches came out of the mapping pass:

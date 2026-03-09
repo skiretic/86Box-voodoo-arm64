@@ -7,6 +7,14 @@
 int
 main(void)
 {
+    const uint32_t rcl8_zero_cf = (1u << 16);
+    const uint32_t rcl8_keep_cf = (0u << 16) | C_FLAG;
+    const uint32_t rcl16_twice = (2u << 16);
+    const uint32_t rcl32_once_cf = (1u << 16) | C_FLAG;
+    const uint32_t rcr8_once_cf = (1u << 16) | C_FLAG;
+    const uint32_t rcr16_twice = (2u << 16);
+    const uint32_t rcr32_once = (1u << 16);
+
     assert(new_dynarec_bswap32_result(0x11223344u) == 0x44332211u);
     assert(new_dynarec_bswap32_result(0xaabbccddU) == 0xddccbbaau);
 
@@ -59,6 +67,26 @@ main(void)
     assert(new_dynarec_bsr32_result(0x0badc0deu, 0x00000000u) == 0x0badc0deu);
     assert(new_dynarec_bsr32_result(0x0badc0deu, 0x80000000u) == 31u);
     assert(new_dynarec_bsr32_result(0x0badc0deu, 0x00000100u) == 8u);
+
+    assert(new_dynarec_rcl8_result(0x80u, rcl8_zero_cf) == 0x00u);
+    assert(new_dynarec_rcl8_flag_mask(0x80u, rcl8_zero_cf) == (C_FLAG | V_FLAG));
+    assert(new_dynarec_rcl8_result(0x55u, rcl8_keep_cf) == 0x55u);
+    assert(new_dynarec_rcl8_flag_mask(0x55u, rcl8_keep_cf) == C_FLAG);
+
+    assert(new_dynarec_rcl16_result(0x8000u, rcl16_twice) == 0x0001u);
+    assert(new_dynarec_rcl16_flag_mask(0x8000u, rcl16_twice) == 0u);
+
+    assert(new_dynarec_rcl32_result(0x40000000u, rcl32_once_cf) == 0x80000001u);
+    assert(new_dynarec_rcl32_flag_mask(0x40000000u, rcl32_once_cf) == V_FLAG);
+
+    assert(new_dynarec_rcr8_result(0x00u, rcr8_once_cf) == 0x80u);
+    assert(new_dynarec_rcr8_flag_mask(0x00u, rcr8_once_cf) == V_FLAG);
+
+    assert(new_dynarec_rcr16_result(0x0001u, rcr16_twice) == 0x8000u);
+    assert(new_dynarec_rcr16_flag_mask(0x0001u, rcr16_twice) == V_FLAG);
+
+    assert(new_dynarec_rcr32_result(0x00000003u, rcr32_once) == 0x00000001u);
+    assert(new_dynarec_rcr32_flag_mask(0x00000003u, rcr32_once) == C_FLAG);
 
     return 0;
 }
