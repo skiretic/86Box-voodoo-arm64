@@ -57,7 +57,8 @@ The latest small table-hole follow-up after the `D0`-`D3` debug pause is base `0
 - they reuse the existing non-REP string-op address/index helpers
 - they set lazy `SUB`-style flag state directly rather than introducing new helper-call shapes
 - focused local policy/build verification is complete
-- guest validation is still pending, so this family is implemented but not yet counted as guest-validated closure
+- guest validation on `Windows 98 SE` is now complete, and the shutdown base-fallback report contains no `0xa6` / `0xa7` entries
+- the next same-class follow-up is non-REP `SCAS` (`0xae` / `0xaf`), which still remains `helper_table_null` in that same guest run
 
 ## Current opcode status
 
@@ -71,6 +72,7 @@ This section is the short current-state view for opcode-related NDR closure work
 These opcodes have direct CPU new dynarec coverage in tree and have dropped out of the shutdown base-fallback report in guest validation:
 
 - non-REP `STOS` / `LODS`: `0xaa`, `0xab`, `0xac`, `0xad`
+- non-REP `CMPS`: `0xa6`, `0xa7`
 - far-control / frame legality-first slices: `0xc8`, `0x9d`
 - non-protected follow-up batch: `0xa5`, `0x6b`
 - low-risk sibling cleanup: `0x69`, `0xa4`
@@ -89,6 +91,9 @@ Latest confirming shutdown logs:
 - `/tmp/new_dynarec_f6_ff_validation.log`
 - fallback families: `base=5142`, `0f=6906`, `x87=1607`, `rep=9182`, `3dnow=0`
 - `0xf6` and `0xff` are absent from the shutdown base-fallback report
+- `/tmp/windows98_se_cmps_validation.log`
+- fallback families: `base=18915`, `0f=3016`, `x87=435`, `rep=6571`, `3dnow=0`
+- `0xa6` and `0xa7` are absent from the shutdown base-fallback report, while sibling `SCAS` opcodes `0xae=33` and `0xaf=16` still remain as `helper_table_null`
 
 ### MMX-only re-baseline
 

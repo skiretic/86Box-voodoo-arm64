@@ -50,9 +50,10 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 ### Validated
 - Confirmed the focused coverage-policy test follows TDD for this slice: it was first updated to expect `0xa6` / `0xa7` direct coverage, failed against the pre-change tree, and then passed after the implementation via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu tests/codegen_new_opcode_coverage_policy_test.c src/codegen_new/codegen_observability.c -o /tmp/codegen_new_opcode_coverage_policy_test && /tmp/codegen_new_opcode_coverage_policy_test`.
 - Confirmed `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` succeeds with the new `CMPS` handlers in tree.
+- Confirmed guest validation on `Windows 98 SE` reached a normal shutdown at `/tmp/windows98_se_cmps_validation.log` with `CPU new dynarec fallback families [shutdown]: base=18915 0f=3016 x87=435 rep=6571 3dnow=0`, and no shutdown base-fallback entries remained for `0xa6` or `0xa7`.
 
 ### Open
-- A narrow guest validation rerun for `Windows 98 SE` is still pending before `0xa6` / `0xa7` can be described as guest-validated rather than locally verified.
+- The next low-risk sibling family is now non-REP `SCAS` (`0xae` / `0xaf`), which still appears in the same `Windows 98 SE` shutdown log as `helper_table_null` traffic (`0xae=33`, `0xaf=16`).
 
 ## 2026-03-09 (`D0-D3` compare-only debug path)
 
