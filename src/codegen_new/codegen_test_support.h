@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#include "codegen_public.h"
+
 uint32_t new_dynarec_bswap32_result(uint32_t value);
 
 uint32_t new_dynarec_imul_rm16_result(uint32_t dest, uint32_t src);
@@ -31,5 +33,9 @@ uint32_t new_dynarec_rcr16_result(uint32_t value, uint32_t packed);
 uint32_t new_dynarec_rcr16_flag_mask(uint32_t value, uint32_t packed);
 uint32_t new_dynarec_rcr32_result(uint32_t value, uint32_t packed);
 uint32_t new_dynarec_rcr32_flag_mask(uint32_t value, uint32_t packed);
+
+uint32_t new_dynarec_d0d3_rotate_compare_mismatch(uint32_t value, uint32_t packed_compare);
+uint32_t new_dynarec_d0d3_rotate_compare_direct_result(uint32_t value, uint32_t packed_compare);
+uint32_t new_dynarec_d0d3_rotate_compare_direct_flag_mask(uint32_t value, uint32_t packed_compare);
 
 #endif

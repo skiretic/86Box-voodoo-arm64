@@ -119,6 +119,12 @@ typedef enum new_dynarec_helper_fallback_reason_t {
     NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT,
 } new_dynarec_helper_fallback_reason_t;
 
+typedef enum new_dynarec_d0d3_compare_bailout_reason_t {
+    NEW_DYNAREC_D0D3_COMPARE_BAILOUT_NONE = 0,
+    NEW_DYNAREC_D0D3_COMPARE_BAILOUT_NO_BLOCK_INS,
+    NEW_DYNAREC_D0D3_COMPARE_BAILOUT_ZERO_COUNT,
+} new_dynarec_d0d3_compare_bailout_reason_t;
+
 typedef enum new_dynarec_verify_outcome_t {
     NEW_DYNAREC_VERIFY_DIRECT = 1,
     NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL,
@@ -158,12 +164,19 @@ extern int  new_dynarec_gap_family_logging_enabled(void);
 extern int  new_dynarec_fallback_family_logging_enabled(void);
 extern int  new_dynarec_base_fallback_logging_enabled(void);
 extern int  new_dynarec_0f_fallback_logging_enabled(void);
+extern int  new_dynarec_d0d3_compare_enabled_for_site(uint32_t pc, uint8_t opcode);
+extern int  new_dynarec_d0d3_compare_logging_enabled(void);
+extern int  new_dynarec_d0d3_compare_site_logging_enabled(void);
 extern int  new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_stats_t *stats);
 extern int  new_dynarec_format_3dnow_hit_summary(char *buffer, size_t size, uint8_t opcode);
 extern int  new_dynarec_format_gap_family_summary(char *buffer, size_t size);
 extern int  new_dynarec_format_fallback_family_summary(char *buffer, size_t size);
 extern int  new_dynarec_format_base_fallback_summary(char *buffer, size_t size, uint8_t opcode);
 extern int  new_dynarec_format_0f_fallback_summary(char *buffer, size_t size, uint8_t opcode);
+extern int  new_dynarec_format_d0d3_compare_summary(char *buffer, size_t size);
+extern int  new_dynarec_format_d0d3_compare_site_summary(char *buffer, size_t size, uint32_t index);
+extern int  new_dynarec_format_d0d3_compare_sample_summary(char *buffer, size_t size, uint32_t index);
+extern int  new_dynarec_format_d0d3_compare_bailout_summary(char *buffer, size_t size, uint32_t index);
 extern void new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque);
 extern void new_dynarec_set_verify_config(const new_dynarec_verify_config_t *config);
 extern void new_dynarec_get_verify_config(new_dynarec_verify_config_t *out);
@@ -173,6 +186,13 @@ extern void new_dynarec_note_gap_family_hit(new_dynarec_gap_family_t family);
 extern void new_dynarec_note_fallback_family_hit(new_dynarec_fallback_family_t family);
 extern void new_dynarec_note_base_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome);
 extern void new_dynarec_note_0f_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome);
+extern void new_dynarec_note_d0d3_compare_site(uint32_t pc, uint32_t packed_compare);
+extern void new_dynarec_note_d0d3_compare_site_bailout(uint32_t pc, uint32_t packed_compare,
+                                                       new_dynarec_d0d3_compare_bailout_reason_t reason);
+extern void new_dynarec_note_d0d3_compare_site_zero_count_bailout(uint32_t pc, uint32_t packed_compare);
+extern void new_dynarec_note_d0d3_compare_attempt(uint32_t packed_compare, uint32_t original_operand,
+                                                  uint32_t direct_result, uint32_t direct_flag_mask,
+                                                  uint32_t helper_result, uint32_t helper_flag_mask);
 extern int  new_dynarec_should_defer_marking_new_block(void);
 extern int  new_dynarec_should_remove_aborted_mark_block(int mark_block_initialized, int unexpected_abrt);
 extern int  new_dynarec_has_direct_pmaddwd_recompile(void);
@@ -256,6 +276,70 @@ static inline void
 new_dynarec_note_purgable_page_enqueued(void)
 {
     new_dynarec_stats.purgable_page_enqueues++;
+}
+
+static inline uint32_t
+new_dynarec_pack_d0d3_rotate_compare(uint8_t opcode, uint8_t subgroup, uint8_t width, uint8_t is_memory,
+                                     uint8_t count, uint32_t flags)
+{
+    uint32_t packed     = opcode;
+    uint32_t width_code = 2;
+
+    if (width == 8)
+        width_code = 0;
+    else if (width == 16)
+        width_code = 1;
+
+    packed |= ((uint32_t) ((subgroup == 0x18) ? 1u : 0u)) << 8;
+    packed |= width_code << 9;
+    packed |= ((uint32_t) (is_memory & 1u)) << 11;
+    packed |= ((uint32_t) (count & 0x1fu)) << 12;
+    packed |= (flags ? 1u : 0u) << 17;
+
+    return packed;
+}
+
+static inline uint8_t
+new_dynarec_d0d3_rotate_compare_opcode(uint32_t packed)
+{
+    return (uint8_t) (packed & 0xffu);
+}
+
+static inline uint8_t
+new_dynarec_d0d3_rotate_compare_subgroup(uint32_t packed)
+{
+    return (packed & (1u << 8)) ? 0x18u : 0x10u;
+}
+
+static inline uint8_t
+new_dynarec_d0d3_rotate_compare_width(uint32_t packed)
+{
+    switch ((packed >> 9) & 0x3u) {
+        case 0:
+            return 8;
+        case 1:
+            return 16;
+        default:
+            return 32;
+    }
+}
+
+static inline uint8_t
+new_dynarec_d0d3_rotate_compare_is_memory(uint32_t packed)
+{
+    return (uint8_t) ((packed >> 11) & 1u);
+}
+
+static inline uint8_t
+new_dynarec_d0d3_rotate_compare_count(uint32_t packed)
+{
+    return (uint8_t) ((packed >> 12) & 0x1fu);
+}
+
+static inline uint32_t
+new_dynarec_d0d3_rotate_compare_flags(uint32_t packed)
+{
+    return (packed & (1u << 17)) ? 1u : 0u;
 }
 
 static inline void

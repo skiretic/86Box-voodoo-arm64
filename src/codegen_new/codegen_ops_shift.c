@@ -10,11 +10,137 @@
 #include "x86_flags.h"
 #include "386_common.h"
 #include "codegen.h"
+#include "codegen_public.h"
 #include "codegen_backend.h"
 #include "codegen_ir.h"
 #include "codegen_ops.h"
 #include "codegen_ops_helpers.h"
+#include "codegen_test_support.h"
 #include "codegen_ops_shift.h"
+
+static uint32_t
+rop_d0d3_rotate_compare(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32,
+                        uint32_t op_pc, unsigned width, int variable_count)
+{
+    const int is_memory = ((fetchdat & 0xc0) != 0xc0);
+    uint32_t  packed_compare;
+    int       mismatch_jump;
+    int       nonzero_jump;
+
+    if ((fetchdat & 0x30) != 0x10)
+        return 0;
+
+    if (!new_dynarec_d0d3_compare_enabled_for_site(cs + op_pc, opcode))
+        return 0;
+
+    packed_compare = new_dynarec_pack_d0d3_rotate_compare(opcode, fetchdat & 0x38, (uint8_t) width,
+                                                          (uint8_t) is_memory, 0u, 0u);
+
+    if (variable_count && !block->ins) {
+        new_dynarec_note_d0d3_compare_site_bailout(cs + op_pc, packed_compare,
+                                                   NEW_DYNAREC_D0D3_COMPARE_BAILOUT_NO_BLOCK_INS);
+        return 0;
+    }
+
+    codegen_mark_code_present(block, cs + op_pc, 1);
+
+    if (variable_count) {
+        uop_AND_IMM(ir, IREG_temp2, REG_ECX, 0x1f);
+        nonzero_jump = uop_CMP_IMM_JNZ_DEST(ir, IREG_temp2, 0);
+        uop_LOAD_FUNC_ARG_IMM(ir, 0, cs + op_pc);
+        uop_LOAD_FUNC_ARG_IMM(ir, 1, packed_compare);
+        uop_CALL_FUNC(ir, new_dynarec_note_d0d3_compare_site_zero_count_bailout);
+        uop_JMP(ir, codegen_exit_rout);
+        uop_set_jump_dest(ir, nonzero_jump);
+    }
+
+    new_dynarec_note_d0d3_compare_site(cs + op_pc, packed_compare);
+    uop_MOV_IMM(ir, IREG_temp3, packed_compare);
+    if (variable_count) {
+        uop_SHL_IMM(ir, IREG_temp1, IREG_temp2, 12);
+        uop_OR(ir, IREG_temp3, IREG_temp3, IREG_temp1);
+    } else
+        uop_OR_IMM(ir, IREG_temp3, IREG_temp3, 1u << 12);
+
+    uop_CALL_FUNC_RESULT(ir, IREG_temp1, CF_SET);
+    uop_AND_IMM(ir, IREG_temp2, IREG_temp1, C_FLAG);
+    uop_SHL_IMM(ir, IREG_temp2, IREG_temp2, 17);
+    uop_OR(ir, IREG_temp3, IREG_temp3, IREG_temp2);
+
+    if (is_memory) {
+        x86seg *target_seg;
+
+        uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+        target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
+        codegen_check_seg_write(block, ir, target_seg);
+        if (width == 8) {
+            uop_MEM_LOAD_REG(ir, IREG_temp0_B, ireg_seg_base(target_seg), IREG_eaaddr);
+            uop_MOVZX(ir, IREG_temp0, IREG_temp0_B);
+        } else if (width == 16) {
+            uop_MEM_LOAD_REG(ir, IREG_temp0_W, ireg_seg_base(target_seg), IREG_eaaddr);
+            uop_MOVZX(ir, IREG_temp0, IREG_temp0_W);
+        } else
+            uop_MEM_LOAD_REG(ir, IREG_temp0, ireg_seg_base(target_seg), IREG_eaaddr);
+
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp3);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp2, new_dynarec_d0d3_rotate_compare_mismatch);
+        mismatch_jump = uop_CMP_IMM_JZ_DEST(ir, IREG_temp2, 0);
+        uop_JMP(ir, codegen_exit_rout);
+        uop_set_jump_dest(ir, mismatch_jump);
+
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp3);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp2, new_dynarec_d0d3_rotate_compare_direct_result);
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp3);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_d0d3_rotate_compare_direct_flag_mask);
+
+        if (width == 8)
+            uop_MEM_STORE_REG(ir, ireg_seg_base(target_seg), IREG_eaaddr, IREG_temp2_B);
+        else if (width == 16)
+            uop_MEM_STORE_REG(ir, ireg_seg_base(target_seg), IREG_eaaddr, IREG_temp2_W);
+        else
+            uop_MEM_STORE_REG(ir, ireg_seg_base(target_seg), IREG_eaaddr, IREG_temp2);
+    } else {
+        const int dest_reg = fetchdat & 7;
+
+        if (width == 8)
+            uop_MOVZX(ir, IREG_temp0, IREG_8(dest_reg));
+        else if (width == 16)
+            uop_MOVZX(ir, IREG_temp0, IREG_16(dest_reg));
+        else
+            uop_MOV(ir, IREG_temp0, IREG_32(dest_reg));
+
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp3);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp2, new_dynarec_d0d3_rotate_compare_mismatch);
+        mismatch_jump = uop_CMP_IMM_JZ_DEST(ir, IREG_temp2, 0);
+        uop_JMP(ir, codegen_exit_rout);
+        uop_set_jump_dest(ir, mismatch_jump);
+
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp3);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp2, new_dynarec_d0d3_rotate_compare_direct_result);
+        uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp0);
+        uop_LOAD_FUNC_ARG_REG(ir, 1, IREG_temp3);
+        uop_CALL_FUNC_RESULT(ir, IREG_temp1, new_dynarec_d0d3_rotate_compare_direct_flag_mask);
+
+        if (width == 8)
+            uop_MOV(ir, IREG_8(dest_reg), IREG_temp2_B);
+        else if (width == 16)
+            uop_MOV(ir, IREG_16(dest_reg), IREG_temp2_W);
+        else
+            uop_MOV(ir, IREG_32(dest_reg), IREG_temp2);
+    }
+
+    uop_CALL_FUNC(ir, flags_rebuild);
+    uop_AND_IMM(ir, IREG_flags, IREG_flags, ~(C_FLAG | V_FLAG));
+    uop_OR(ir, IREG_flags, IREG_flags, IREG_temp1_W);
+
+    codegen_flags_changed = 1;
+    return op_pc + 1;
+}
 
 static uint32_t
 shift_common_8(ir_data_t *ir, uint32_t fetchdat, uint32_t op_pc, x86seg *target_seg, int count)
@@ -438,7 +564,7 @@ ropC0(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchd
     uint8_t imm;
 
     if ((fetchdat & 0x30) == 0x10) /*RCL/RCR*/
-        return 0;
+        return rop_d0d3_rotate_compare(block, ir, 0xd0, fetchdat, op_32, op_pc, 8, 0);
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) != 0xc0) {
@@ -461,7 +587,7 @@ ropC1_w(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetc
     uint8_t imm;
 
     if ((fetchdat & 0x30) == 0x10) /*RCL/RCR*/
-        return 0;
+        return rop_d0d3_rotate_compare(block, ir, 0xd1, fetchdat, op_32, op_pc, 16, 0);
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) != 0xc0) {
@@ -483,7 +609,7 @@ ropC1_l(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetc
     x86seg *target_seg = NULL;
 
     if ((fetchdat & 0x30) == 0x10) /*RCL/RCR*/
-        return 0;
+        return rop_d0d3_rotate_compare(block, ir, 0xd1, fetchdat, op_32, op_pc, 32, 0);
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) != 0xc0) {
@@ -520,7 +646,7 @@ ropD0(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchd
     x86seg *target_seg = NULL;
 
     if ((fetchdat & 0x30) == 0x10) /*RCL/RCR*/
-        return 0;
+        return rop_d0d3_rotate_compare(block, ir, 0xd2, fetchdat, op_32, op_pc, 8, 1);
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) != 0xc0) {
@@ -538,7 +664,7 @@ ropD1_w(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetc
     x86seg *target_seg = NULL;
 
     if ((fetchdat & 0x30) == 0x10) /*RCL/RCR*/
-        return 0;
+        return rop_d0d3_rotate_compare(block, ir, 0xd3, fetchdat, op_32, op_pc, 16, 1);
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) != 0xc0) {
@@ -556,7 +682,7 @@ ropD1_l(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetc
     x86seg *target_seg = NULL;
 
     if ((fetchdat & 0x30) == 0x10) /*RCL/RCR*/
-        return 0;
+        return rop_d0d3_rotate_compare(block, ir, 0xd3, fetchdat, op_32, op_pc, 32, 1);
 
     codegen_mark_code_present(block, cs + op_pc, 1);
     if ((fetchdat & 0xc0) != 0xc0) {

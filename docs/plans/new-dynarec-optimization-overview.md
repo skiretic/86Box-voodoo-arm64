@@ -51,6 +51,14 @@ That means future work to reduce the remaining random eviction rate should be tr
 
 The current active implementation track is now coverage closure, starting with the smallest parity gap that already had backend support in place.
 
+The latest small table-hole follow-up after the `D0`-`D3` debug pause is base `0xa6` / `0xa7` (`CMPSB` / `CMPSW` / `CMPSD`):
+
+- the direct handlers are now in tree
+- they reuse the existing non-REP string-op address/index helpers
+- they set lazy `SUB`-style flag state directly rather than introducing new helper-call shapes
+- focused local policy/build verification is complete
+- guest validation is still pending, so this family is implemented but not yet counted as guest-validated closure
+
 ## Current opcode status
 
 This section is the short current-state view for opcode-related NDR closure work. It is split into:
@@ -191,6 +199,16 @@ Interpretation after the strict i686 run:
   - arm64 helper-call capability documentation
   - base-opcode direct-vs-helper compare/debug support
   - a cleaner strict-i686 baseline image for future hotspot ranking
+- The first of those three prerequisites is now in tree too:
+  - base `D0`-`D3` `RCL` / `RCR` has an opt-in compare-only direct path
+  - `86BOX_NEW_DYNAREC_DEBUG_D0D3_RCLRCR=1` enables that compare path for sites selected by `86BOX_NEW_DYNAREC_VERIFY_PC`, `86BOX_NEW_DYNAREC_VERIFY_OPCODE`, and `86BOX_NEW_DYNAREC_VERIFY_BUDGET`
+  - `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE=1` emits compact mismatch records plus a shutdown summary
+  - `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE_SITES=1` emits the first sampled hit per unique compare site, and shutdown logging now preserves the discovered site list so later runs can lock onto real `VERIFY_PC` targets
+  - shutdown logging also preserves a small `CPU new dynarec D0-D3 compare sample [shutdown]: ...` ring so locked-site runs retain exact recent sample state even if live match logs are noisy or missing
+  - per-site shutdown lines now also expose `result_changed` and `flags_nonzero`, which helps separate semantically inert hot sites from ones that are actually mutating data or flags during the sampled compare traffic
+  - this path has now served its purpose for the current branch stage: the sampled direct-vs-helper evidence is strongly match-only, so the next productive work should move back to low-risk implementation families rather than more `D0`-`D3` instrumentation
+  - mismatch samples exit back to helper execution for that sampled run
+  - normal guest dispatch for `RCL` / `RCR` remains disabled by default
 
 ### First coherent `0F` batch comparison
 

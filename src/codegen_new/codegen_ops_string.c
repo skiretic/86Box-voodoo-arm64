@@ -111,6 +111,59 @@ ropMOVS_common(codeblock_t *block, ir_data_t *ir, int value_reg, int stride, uin
     return op_pc;
 }
 
+static uint32_t
+ropCMPS_common(codeblock_t *block, ir_data_t *ir, int src_value_reg, int dst_value_reg, int stride, uint32_t op_32, uint32_t op_pc)
+{
+    const int addr32        = (op_32 & 0x200) ? 1 : 0;
+    const int src_index_reg = addr32 ? IREG_ESI : IREG_SI;
+    const int dst_index_reg = addr32 ? IREG_EDI : IREG_DI;
+    int       src_addr_reg;
+    int       dst_addr_reg;
+
+    uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+    codegen_check_seg_read(block, ir, op_ea_seg);
+    codegen_check_seg_read(block, ir, &cpu_state.seg_es);
+
+    src_addr_reg = codegen_string_addr_reg(ir, addr32, src_index_reg);
+    CHECK_SEG_LIMITS(block, ir, op_ea_seg, src_addr_reg, stride - 1);
+    uop_MEM_LOAD_REG(ir, src_value_reg, ireg_seg_base(op_ea_seg), src_addr_reg);
+
+    dst_addr_reg = codegen_string_addr_reg(ir, addr32, dst_index_reg);
+    CHECK_SEG_LIMITS(block, ir, &cpu_state.seg_es, dst_addr_reg, stride - 1);
+    uop_MEM_LOAD_REG(ir, dst_value_reg, IREG_ES_base, dst_addr_reg);
+
+    switch (stride) {
+        case 1:
+            uop_MOVZX(ir, IREG_flags_op1, src_value_reg);
+            uop_MOVZX(ir, IREG_flags_op2, dst_value_reg);
+            uop_SUB(ir, IREG_flags_res_B, src_value_reg, dst_value_reg);
+            uop_MOVZX(ir, IREG_flags_res, IREG_flags_res_B);
+            uop_MOV_IMM(ir, IREG_flags_op, FLAGS_SUB8);
+            break;
+        case 2:
+            uop_MOVZX(ir, IREG_flags_op1, src_value_reg);
+            uop_MOVZX(ir, IREG_flags_op2, dst_value_reg);
+            uop_SUB(ir, IREG_flags_res_W, src_value_reg, dst_value_reg);
+            uop_MOVZX(ir, IREG_flags_res, IREG_flags_res_W);
+            uop_MOV_IMM(ir, IREG_flags_op, FLAGS_SUB16);
+            break;
+        case 4:
+            uop_MOV(ir, IREG_flags_op1, src_value_reg);
+            uop_MOV(ir, IREG_flags_op2, dst_value_reg);
+            uop_SUB(ir, IREG_flags_res, src_value_reg, dst_value_reg);
+            uop_MOV_IMM(ir, IREG_flags_op, FLAGS_SUB32);
+            break;
+        default:
+            fatal("ropCMPS_common stride %d\n", stride);
+    }
+
+    codegen_flags_changed = 1;
+    codegen_adjust_string_index(ir, src_index_reg, stride, addr32);
+    codegen_adjust_string_index(ir, dst_index_reg, stride, addr32);
+
+    return op_pc;
+}
+
 uint32_t
 ropSTOSB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
 {
@@ -151,6 +204,24 @@ uint32_t
 ropMOVSL(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
 {
     return ropMOVS_common(block, ir, IREG_temp0, 4, op_32, op_pc);
+}
+
+uint32_t
+ropCMPSB(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
+{
+    return ropCMPS_common(block, ir, IREG_temp0_B, IREG_temp1_B, 1, op_32, op_pc);
+}
+
+uint32_t
+ropCMPSW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
+{
+    return ropCMPS_common(block, ir, IREG_temp0_W, IREG_temp1_W, 2, op_32, op_pc);
+}
+
+uint32_t
+ropCMPSL(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), uint32_t op_32, uint32_t op_pc)
+{
+    return ropCMPS_common(block, ir, IREG_temp0, IREG_temp1, 4, op_32, op_pc);
 }
 
 uint32_t

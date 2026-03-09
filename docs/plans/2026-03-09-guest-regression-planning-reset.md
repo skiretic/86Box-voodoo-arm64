@@ -119,6 +119,7 @@ Current examples:
 - base `0xd0`-`0xd3` `RCL` / `RCR`
 - `0x0f 0xaf`
 - `0x0f 0xbc` / `0xbd`
+- `0x0f 0xba` / `0xa3` / `0xab` / `0xb3`
 
 ### Class C: blocked on backend or system-model risk
 
@@ -136,6 +137,8 @@ Expected workflow:
 Current examples:
 
 - base I/O opcodes: `0xe4`, `0xe6`, `0xec`, `0xee`, `0xef`
+- `0x8e`
+- `0x9b`
 - `INT` / `IRET`
 - `LAR` / `LSL`
 - REP
@@ -153,6 +156,56 @@ Before another helper-backed guest enablement, the plan must state:
 - whether the candidate depends on backend-illegal IR forms already seen in prior failures
 
 This step was missing on the `D0`-`D3` attempt.
+
+### 1a. Actual arm64 helper-call/backend audit
+
+The current codebase already makes the hard arm64 constraints explicit:
+
+- `src/codegen_new/codegen_backend_arm64_uops.c`
+  - `codegen_LOAD_FUNC_ARG0` and `codegen_LOAD_FUNC_ARG1` accept only `REG_IS_W` and `REG_IS_L` inputs
+  - 8-bit helper-source registers are not legal helper arguments on arm64
+  - `codegen_LOAD_FUNC_ARG2` and `codegen_LOAD_FUNC_ARG3` unconditionally `fatal(...)`
+  - `codegen_LOAD_FUNC_ARG0_IMM` through `codegen_LOAD_FUNC_ARG3_IMM` do exist
+  - `codegen_CALL_FUNC_RESULT` requires the destination to be an `L`-sized ireg and returns the helper value through `W0`
+- Practical arm64 rule for CPU dynarec helper-backed paths:
+  - at most two register-backed helper inputs
+  - optional immediate metadata in helper arg slots 0-3
+  - one 32-bit scalar helper return per call
+  - multi-result semantics must be expressed as multiple helper calls or by packing auxiliary data into an existing scalar argument
+- This is not just an arm64 quirk in practice:
+  - the current x86-64 backend also only implements register-backed helper args 0 and 1
+  - x86-64 is stricter on immediates because arg2/arg3 immediate loads also `fatal(...)` there
+  - the common safe subset across both backends is therefore:
+    - two register args max
+    - preferably only arg0/arg1 immediates
+    - one 32-bit return value per helper call
+
+### 1b. Existing valid helper-backed templates versus invalid shapes
+
+Valid templates already exercised in-tree:
+
+- single-register, single-result helper
+  - `ropBSWAP` uses arg0 register input plus one 32-bit result helper
+- two-register, dual-helper-result pattern with explicit flag merge
+  - `ropIMUL_0f_w_rm` / `ropIMUL_0f_l_rm`
+  - `ropBSF` / `ropBSR`
+  - these stay inside the backend ABI because they use only arg0/arg1 register loads and get result and flag-mask via separate helper calls
+- one-register plus immediate metadata helper
+  - `ropF6*`, `ropF7*`, and the immediate-IMUL handlers use arg0 register plus arg1 immediate and one scalar result
+- two-register plus immediate metadata helper
+  - far-call helpers such as `ropFF_16` / `ropFF_32` use arg0 register, arg1 register, and arg2 immediate
+  - this shape is valid on arm64 because arg2 immediate loads exist
+
+Invalid or backend-risky shapes for current CPU dynarec work:
+
+- any helper path that needs a register-backed arg2 or arg3
+  - that was the first `D0`-`D3` arm64 crash
+- any helper call that tries to pass an 8-bit ireg directly as a helper argument
+  - helper arg loaders only accept 16-bit or 32-bit source widths
+- any helper design that assumes multiple native return registers
+  - current helper-call lowering only captures a single 32-bit scalar result
+- any candidate that requires a new helper shape not already visible in a successful path
+  - that must be treated as backend work first, not as a guest trial
 
 ### 2. Risk-class gate before implementation
 
@@ -184,6 +237,50 @@ Needed next:
   - wrong decode/writeback integration
   - or a broader block/IR interaction
 
+Proposed smallest useful workflow:
+
+1. Reuse the existing decision-boundary filters already in `codegen.c` / `codegen_observability.c`
+   - keep the scope to exact PC, exact opcode, and a small sample budget
+2. Add one base-opcode compare mode only for the targeted bailout subgroup
+   - start with `D0`-`D3` `RCL` / `RCR`
+   - do not generalize to every opcode family yet
+3. In the direct handler, capture only the minimal pre-state needed to explain the bug
+   - opcode / ModRM subgroup
+   - width
+   - register-vs-memory form
+   - original operand value
+   - shift count
+   - incoming `CF`
+4. Compute the direct-path candidate result and direct flag mask without committing guest state yet
+5. Compute helper-visible expected result and flag mask through the existing packed two-argument helper ABI
+   - same helper harness helpers already used in `codegen_test_support.c`
+   - no new helper-call shape
+6. If the compare sample mismatches:
+   - log one compact structured record
+   - force helper fallback for that execution
+   - keep the family guest-disabled
+7. If the compare sample matches:
+   - that narrows the bug to decode/writeback, flag merge, or larger block interaction
+   - only then decide whether more instrumentation is needed
+
+What this intentionally does not try to do:
+
+- no whole-block shadow execution
+- no always-on logging
+- no new guest enablement by default
+- no speculative retry of `D0`-`D3`, `0x0f 0xaf`, or `BSF` / `BSR`
+
+Implementation now in tree:
+
+- the compare-only path is enabled only when `86BOX_NEW_DYNAREC_DEBUG_D0D3_RCLRCR=1` is set
+- site selection reuses the existing `86BOX_NEW_DYNAREC_VERIFY_PC`, `86BOX_NEW_DYNAREC_VERIFY_OPCODE`, and `86BOX_NEW_DYNAREC_VERIFY_BUDGET` filters
+- compact mismatch and shutdown logging is enabled with `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE=1`
+- first-hit per-site discovery logging is enabled with `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE_SITES=1` and is intended only to discover a later narrow `VERIFY_PC`
+- on a sampled mismatch, the direct compare path exits back to helper execution for that exact run instead of committing guest state
+- without the debug knob, base `D0`-`D3` `RCL` / `RCR` remains guest-disabled on this branch
+- enough broad and locked-site match-only evidence now exists that this compare/debug mechanism should be treated as a completed prerequisite rather than an open-ended instrumentation campaign
+- the next branch session should pivot back to low-risk implementation work instead of extending this `D0`-`D3` probe surface again
+
 ### 4. Cleaner strict-i686 baseline image
 
 The current `Windows 98 TESTING` image is no longer a clean ranking source for base hotspots if recent installs materially increased device traffic.
@@ -195,10 +292,25 @@ It does mean:
 - I/O-heavy ranking on that image is now more workload-specific
 - strict-i686 hotspot selection should not overfit to the post-install image
 
-Needed next:
+Recommended standing baseline going forward:
 
-- keep the current log as historical evidence
-- create or identify a cleaner pre-install strict-i686 baseline image for future ranking work
+- `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 SE`
+  - `cpu_family = celeron_mendocino`
+  - `cpu_speed = 300000000`
+  - `machine = bf6`
+  - same strict-i686 CPU/machine class as the existing strict Mendocino evidence
+  - use this as the named strict-i686 validation VM for future work
+
+Important caveat:
+
+- this image should be treated as the new standing VM choice for future work, not as retroactive replacement evidence for earlier `Windows 98 TESTING` logs
+- `Windows 98 SE copy` remains the alternate strict-i686 comparison candidate if later work needs a second Mendocino image
+
+Working rule:
+
+- use `Windows 98 SE` as the named strict-i686 VM for future planned validation and compare/debug work
+- keep the existing `windows98_testing_i686_baseline.log` lineage as the default comparison point
+- if hotspot ranking becomes sensitive to install/device churn again, take a fresh baseline snapshot from this VM or compare against `Windows 98 SE copy`
 
 ### 5. Hard stop rule for repeated guest failures
 
@@ -212,6 +324,22 @@ then the next session should not retry guest enablement directly.
 It should switch to infrastructure/debugging work first.
 
 That rule was not enforced strongly enough on the recent retries.
+
+## Candidate matrix
+
+| Class | Family | Why it belongs there | Immediate rule |
+|---|---|---|---|
+| A | No current top-bucket strict-i686 hotspot family clearly qualifies | The remaining measured leaders are now helper-backed bailout cleanup or system/I/O-heavy work, not another `BSWAP`-style row | Do not force a Class A pick from the current hotspot list |
+| B | base `0xd0`-`0xd3` `RCL` / `RCR` | Existing direct handlers, measurable bailout count, prior host-clean / guest-bad history, and one previously invalid helper shape | Debug-first only |
+| B | `0x0f 0xaf` | Existing retained direct handlers and harness coverage, but repeated guest failure after host-clean semantics and compare pass | Keep guest-disabled; use only as a compare/debug reference |
+| B | `0x0f 0xbc` / `0xbd` | Existing retained direct handlers and harness coverage, but guest-visible failure remained after obvious bugs were fixed | Keep guest-disabled; debug-first only |
+| B | `0x0f 0xba` / `0xa3` / `0xab` / `0xb3` | Hot and coherent, but semantically wider RMW/bit-index family with prior guest-risk evidence on adjacent work | Do not attempt before compare/debug path exists |
+| C | base I/O `0xe4` / `0xe6` / `0xec` / `0xee` / `0xef` | Hot because of system/device behavior; highly sensitive to guest I/O workload and image pollution | Do not choose as the next landing family |
+| C | `0xcd` / `0xcf` | Interrupt/control-flow surface, guest-bring-up sensitive | Leave out of near-term work |
+| C | `0x8e` | Segment-state mutation path | Leave out of near-term work |
+| C | `0x9b` | FPU/control crossover with poor isolation value | Leave out of near-term work |
+| C | `0x0f 0x02` / `0x03` and `0x0f 0x01` / `0x20` / `0x22` / `0x31` | Protected/control/system semantics | Block until a separate system-behavior plan exists |
+| C | REP / x87 follow-up | Broad architectural surface rather than a narrow opcode closure | Not a near-term CPU dynarec guest trial target |
 
 ## New preconditions for any guest-facing opcode trial
 
@@ -251,7 +379,7 @@ Not another opcode landing.
 1. Document arm64 helper-call constraints for CPU dynarec helper-backed paths.
 2. Add a base-opcode direct-vs-helper compare path for narrow families like `D0`-`D3`.
 3. Build a small candidate matrix that classifies remaining hotspots into Class A / B / C.
-4. Identify a cleaner strict-i686 baseline image for future ranking work.
+4. Use `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 SE` as the named strict-i686 working baseline for future runs, while keeping the existing `windows98_testing_*` logs as historical comparison evidence.
 
 ### What not to do next
 
@@ -271,3 +399,7 @@ It is:
 - one base-family compare infrastructure step
 
 Only after those are in place should another guest-facing bailout-closure attempt be considered.
+
+## Next safest productive session
+
+Implement only the narrow `D0`-`D3` direct-vs-helper compare path described above, keep guest dispatch for `RCL` / `RCR` disabled, and use `Windows 98 SE` as the named strict-i686 validation target for any later compare-only run.

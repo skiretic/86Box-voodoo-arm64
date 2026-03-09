@@ -36,6 +36,72 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-09 (`CMPS` table-hole landing)
+
+### Added
+- Added direct CPU dynarec coverage for base `0xa6` / `0xa7` through shared string-op handlers in `src/codegen_new/codegen_ops_string.c`, covering `CMPSB`, `CMPSW`, and `CMPSD` with the existing string address/index helpers plus lazy `SUB`-style flag state.
+- Added direct base-opcode table entries for that same family in `src/codegen_new/codegen_ops.c` and exposed the new coverage on the policy surface in `src/codegen_new/codegen_observability.c`.
+- Added focused host-side policy coverage for the family in `tests/codegen_new_opcode_coverage_policy_test.c`.
+
+### Changed
+- Changed the post-`D0`-`D3` next-step from planning-only to implementation: the branch now pivots back to a low-risk table-hole family instead of extending compare/debug-first bailout tooling.
+- Changed the base string-op direct-coverage count from 6 to 8 because non-REP `CMPS` now joins the earlier `MOVS` / `STOS` / `LODS` subset.
+
+### Validated
+- Confirmed the focused coverage-policy test follows TDD for this slice: it was first updated to expect `0xa6` / `0xa7` direct coverage, failed against the pre-change tree, and then passed after the implementation via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu tests/codegen_new_opcode_coverage_policy_test.c src/codegen_new/codegen_observability.c -o /tmp/codegen_new_opcode_coverage_policy_test && /tmp/codegen_new_opcode_coverage_policy_test`.
+- Confirmed `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` succeeds with the new `CMPS` handlers in tree.
+
+### Open
+- A narrow guest validation rerun for `Windows 98 SE` is still pending before `0xa6` / `0xa7` can be described as guest-validated rather than locally verified.
+
+## 2026-03-09 (`D0-D3` compare-only debug path)
+
+### Added
+- Added an opt-in compare-only direct path for base `D0` / `D1` / `D2` / `D3` `RCL` / `RCR` in `src/codegen_new/codegen_ops_shift.c`, gated by the existing verify-site filters plus a dedicated `86BOX_NEW_DYNAREC_DEBUG_D0D3_RCLRCR=1` enablement knob.
+- Added packed two-argument compare helpers in `src/codegen_new/codegen_test_support.c` and a compact shutdown summary / mismatch logging surface in `src/codegen_new/codegen_observability.c` for the minimal captured state: opcode, subgroup, width, form, operand, count, incoming carry, and direct-vs-helper result/flag masks.
+- Added a first-hit site-discovery surface for that same compare path: `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE_SITES=1` now emits one line per unique sampled `D0`-`D3` `RCL` / `RCR` site, and shutdown logging now records both the aggregate compare summary and a per-site `CPU new dynarec D0-D3 compare site [shutdown]: ...` list so later runs can promote real sampled sites into `86BOX_NEW_DYNAREC_VERIFY_PC`.
+- Added per-site compare counters to that shutdown site list too: each `CPU new dynarec D0-D3 compare site [shutdown]: ...` line now reports sampled `attempts`, `mismatches`, and `no_block_ins_bailouts`, which makes it easier to distinguish a hot matched site from one that was selected but dropped out before compare execution.
+- Added lightweight per-site compare-shape counters to those same shutdown site lines: `count_zero`, `count_one`, `count_multi`, `cf_set`, and `operand_zero` now show whether a hot sampled site is mostly trivial traffic or exercising multi-count / carry-dependent cases.
+- Added `zero_count_bailouts` to the per-site shutdown lines so variable-count `D2` / `D3` sites can now distinguish guest executions that skipped the compare body because `CL & 0x1f` was zero from ones that actually entered the sampled compare path.
+- Added two more per-site classification counters to the same shutdown site lines: `result_changed` now shows how often the sampled direct path actually changed the operand value, and `flags_nonzero` shows how often the sampled direct path produced any nonzero flag mask.
+- Added a tiny shutdown sample ring for `D0`-`D3` compare-only runs: `CPU new dynarec D0-D3 compare sample [shutdown]: ...` now preserves the last few sampled executions with exact `pc`, operand, count, carry-in, and direct/helper result+flag state, which is more reliable than live stderr streaming for locked hot-site runs.
+- Added a matching shutdown bailout ring too: `CPU new dynarec D0-D3 compare bailout [shutdown]: ...` now preserves the last few `no_block_ins` and `zero_count` exits with exact `pc`, subgroup, width, form, count, and carry-in so block/integration-side behavior can be inspected after a run.
+- Added focused host-side coverage for the new compare/debug support in `tests/codegen_new_0f_semantics_test.c` and `tests/codegen_new_dynarec_observability_test.c`.
+
+### Changed
+- Changed the `D0`-`D3` debug-first workflow from a planning-only recommendation into an implemented compare mechanism while keeping normal guest dispatch for `RCL` / `RCR` disabled by default.
+- Changed mismatch handling for the compare-only path so a sampled mismatch logs compact evidence and exits back to helper execution for that exact sampled run instead of committing the compare result.
+- Changed the compare/debug observability surface again to remove the unused live per-match stream; shutdown site/sample/bailout summaries are now the single intended evidence path for this family.
+
+### Validated
+- Confirmed the focused semantics harness passes with the new compare helpers via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu -Isrc/codegen_new tests/codegen_new_0f_semantics_test.c src/codegen_new/codegen_test_support.c -o /tmp/codegen_new_0f_semantics_test && /tmp/codegen_new_0f_semantics_test`.
+- Confirmed the focused observability coverage passes with the new compare summary surface via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu tests/codegen_new_dynarec_observability_test.c src/codegen_new/codegen_observability.c -o /tmp/codegen_new_dynarec_observability_test && /tmp/codegen_new_dynarec_observability_test`.
+- Confirmed `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` succeeds with the compare-only `D0`-`D3` handler changes in tree.
+- Confirmed repeated broad and locked-site compare-only runs on `Windows 98 TESTING` produced only matches across sampled `D0`-`D3` `RCL` / `RCR` traffic, which is enough evidence to pause further same-family probe expansion for now.
+
+### Open
+- Treat the current `D0`-`D3` compare tooling as good enough for now: do not extend it further unless a concrete new blocker appears.
+- The next session should pivot back to low-risk CPU dynarec implementation work instead of more `D0`-`D3` probe growth; a small table-hole family such as base `0xa6` / `0xa7` is the intended follow-up.
+
+## 2026-03-09 (backend audit and debug-first reset refinement)
+
+### Added
+- Added a concrete arm64 helper-call capability audit to `docs/plans/2026-03-09-guest-regression-planning-reset.md`, including the current backend limits that only helper arg slots 0 and 1 accept register-backed inputs while helper arg slots 2 and 3 are immediate-only on arm64.
+- Added an explicit Class A / B / C candidate matrix to both reset-planning notes so the remaining hotspot families are now classified before another implementation session starts.
+- Added a concrete base-opcode compare/debug workflow proposal for Class B work, scoped narrowly to `D0`-`D3`-style bailout families instead of another broad guest-facing retry.
+
+### Changed
+- Changed the strict-i686 baseline recommendation back to `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 TESTING`, because that is the VM currently being used for standby and it preserves direct comparability with the existing strict Mendocino logs.
+- Changed the next-session recommendation again from “name the next opcode family” to “implement only the narrow compare/debug layer for `D0`-`D3` while leaving guest dispatch disabled,” because that is the safest step most likely to reduce future churn.
+
+### Validated
+- Confirmed in the current tree that `src/codegen_new/codegen_backend_arm64_uops.c` accepts register-backed helper loads only for arg0 and arg1, rejects register-backed arg2 and arg3 outright, and requires `CALL_FUNC_RESULT` destinations to be `L`-sized iregs.
+- Confirmed the current helper-backed success templates all stay within that ABI envelope: single-result helpers (`BSWAP`), two-register plus dual-helper-result flag-merge paths (`IMUL`, `BSF` / `BSR`), and two-register plus arg2-immediate far-call helpers.
+- Confirmed the first `D0`-`D3` failure mode was therefore a direct backend-assumption violation rather than a guest-only semantic bug.
+
+### Open
+- Keep the next implementation session scoped to the compare/debug mechanism itself; do not re-enable `D0`-`D3`, `0x0f 0xaf`, or `BSF` / `BSR` guest paths as part of that session.
+
 ## 2026-03-09 (`D0-D3` rotate-through-carry bailout closure)
 
 ### Added

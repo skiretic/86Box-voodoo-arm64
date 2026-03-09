@@ -23,6 +23,53 @@ static uint64_t                   new_dynarec_base_fallback_table_null_hits[256]
 static uint64_t                   new_dynarec_base_fallback_bailout_hits[256];
 static uint64_t                   new_dynarec_0f_fallback_table_null_hits[256];
 static uint64_t                   new_dynarec_0f_fallback_bailout_hits[256];
+typedef struct {
+    uint32_t pc;
+    uint32_t packed_compare;
+    uint32_t original_operand;
+    uint32_t direct_result;
+    uint32_t direct_flag_mask;
+    uint32_t helper_result;
+    uint32_t helper_flag_mask;
+} new_dynarec_d0d3_compare_sample_t;
+typedef struct {
+    uint32_t pc;
+    uint32_t packed_compare;
+    uint32_t reason;
+} new_dynarec_d0d3_compare_bailout_sample_t;
+static struct {
+    new_dynarec_d0d3_compare_sample_t recent_samples[8];
+    new_dynarec_d0d3_compare_bailout_sample_t recent_bailouts[8];
+    uint64_t attempts;
+    uint64_t matches;
+    uint64_t mismatches;
+    uint32_t site_count;
+    uint32_t site_log_overflow;
+    uint32_t last_pc;
+    uint32_t recent_sample_count;
+    uint32_t recent_sample_next;
+    uint32_t recent_bailout_count;
+    uint32_t recent_bailout_next;
+    uint32_t packed_compare;
+    uint32_t original_operand;
+    uint32_t direct_result;
+    uint32_t direct_flag_mask;
+    uint32_t helper_result;
+    uint32_t helper_flag_mask;
+    uint32_t site_pcs[32];
+    uint32_t site_packed_compare[32];
+    uint64_t site_attempts[32];
+    uint64_t site_mismatches[32];
+    uint64_t site_no_block_ins_bailouts[32];
+    uint64_t site_zero_count_bailouts[32];
+    uint64_t site_count_zero[32];
+    uint64_t site_count_one[32];
+    uint64_t site_count_multi[32];
+    uint64_t site_cf_set[32];
+    uint64_t site_operand_zero[32];
+    uint64_t site_result_changed[32];
+    uint64_t site_flags_nonzero[32];
+} new_dynarec_d0d3_compare_state;
 
 static void
 new_dynarec_emit_trace(new_dynarec_trace_kind_t kind, uint32_t pc, uint32_t phys, uint32_t detail, uint16_t flags)
@@ -102,6 +149,7 @@ new_dynarec_stats_reset(void)
     memset(new_dynarec_base_fallback_bailout_hits, 0, sizeof(new_dynarec_base_fallback_bailout_hits));
     memset(new_dynarec_0f_fallback_table_null_hits, 0, sizeof(new_dynarec_0f_fallback_table_null_hits));
     memset(new_dynarec_0f_fallback_bailout_hits, 0, sizeof(new_dynarec_0f_fallback_bailout_hits));
+    memset(&new_dynarec_d0d3_compare_state, 0, sizeof(new_dynarec_d0d3_compare_state));
 }
 
 void
@@ -190,6 +238,34 @@ new_dynarec_0f_fallback_logging_enabled(void)
 
     if (enabled == -1) {
         const char *value = getenv("86BOX_NEW_DYNAREC_LOG_0F_FALLBACKS");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+int
+new_dynarec_d0d3_compare_logging_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+}
+
+int
+new_dynarec_d0d3_compare_site_logging_enabled(void)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE_SITES");
 
         enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
     }
@@ -371,6 +447,186 @@ new_dynarec_format_0f_fallback_summary(char *buffer, size_t size, uint8_t opcode
                     opcode, helper_table_null_hits, helper_bailout_hits);
 }
 
+int
+new_dynarec_format_d0d3_compare_summary(char *buffer, size_t size)
+{
+    const char *form;
+
+    if (!buffer || !size)
+        return 0;
+
+    if (!(new_dynarec_d0d3_compare_state.attempts || new_dynarec_d0d3_compare_state.site_count))
+        return 0;
+
+    form = new_dynarec_d0d3_rotate_compare_is_memory(new_dynarec_d0d3_compare_state.packed_compare) ? "mem" : "reg";
+
+    return snprintf(buffer, size,
+                    "attempts=%" PRIu64
+                    " matches=%" PRIu64
+                    " mismatches=%" PRIu64
+                    " sites=%u"
+                    " site_log_overflow=%u"
+                    " last_pc=0x%08x"
+                    " last_opcode=0x%02x"
+                    " last_subgroup=0x%02x"
+                    " last_width=%u"
+                    " last_form=%s"
+                    " last_operand=0x%08x"
+                    " last_count=%u"
+                    " last_cf=%u"
+                    " last_direct_result=0x%08x"
+                    " last_direct_flags=0x%08x"
+                    " last_helper_result=0x%08x"
+                    " last_helper_flags=0x%08x",
+                    new_dynarec_d0d3_compare_state.attempts,
+                    new_dynarec_d0d3_compare_state.matches,
+                    new_dynarec_d0d3_compare_state.mismatches,
+                    new_dynarec_d0d3_compare_state.site_count,
+                    new_dynarec_d0d3_compare_state.site_log_overflow,
+                    new_dynarec_d0d3_compare_state.last_pc,
+                    new_dynarec_d0d3_rotate_compare_opcode(new_dynarec_d0d3_compare_state.packed_compare),
+                    new_dynarec_d0d3_rotate_compare_subgroup(new_dynarec_d0d3_compare_state.packed_compare),
+                    new_dynarec_d0d3_rotate_compare_width(new_dynarec_d0d3_compare_state.packed_compare),
+                    form,
+                    new_dynarec_d0d3_compare_state.original_operand,
+                    new_dynarec_d0d3_rotate_compare_count(new_dynarec_d0d3_compare_state.packed_compare),
+                    new_dynarec_d0d3_rotate_compare_flags(new_dynarec_d0d3_compare_state.packed_compare) ? 1u : 0u,
+                    new_dynarec_d0d3_compare_state.direct_result,
+                    new_dynarec_d0d3_compare_state.direct_flag_mask,
+                    new_dynarec_d0d3_compare_state.helper_result,
+                    new_dynarec_d0d3_compare_state.helper_flag_mask);
+}
+
+int
+new_dynarec_format_d0d3_compare_site_summary(char *buffer, size_t size, uint32_t index)
+{
+    uint32_t    pc;
+    uint32_t    packed_compare;
+    const char *form;
+
+    if (!buffer || !size)
+        return 0;
+
+    if (index >= new_dynarec_d0d3_compare_state.site_count)
+        return 0;
+
+    pc             = new_dynarec_d0d3_compare_state.site_pcs[index];
+    packed_compare = new_dynarec_d0d3_compare_state.site_packed_compare[index];
+    form           = new_dynarec_d0d3_rotate_compare_is_memory(packed_compare) ? "mem" : "reg";
+
+    return snprintf(buffer, size,
+                    "index=%u pc=0x%08x opcode=0x%02x subgroup=0x%02x width=%u form=%s attempts=%" PRIu64 " mismatches=%" PRIu64 " no_block_ins_bailouts=%" PRIu64 " zero_count_bailouts=%" PRIu64 " count_zero=%" PRIu64 " count_one=%" PRIu64 " count_multi=%" PRIu64 " cf_set=%" PRIu64 " operand_zero=%" PRIu64 " result_changed=%" PRIu64 " flags_nonzero=%" PRIu64,
+                    index,
+                    pc,
+                    new_dynarec_d0d3_rotate_compare_opcode(packed_compare),
+                    new_dynarec_d0d3_rotate_compare_subgroup(packed_compare),
+                    new_dynarec_d0d3_rotate_compare_width(packed_compare),
+                    form,
+                    new_dynarec_d0d3_compare_state.site_attempts[index],
+                    new_dynarec_d0d3_compare_state.site_mismatches[index],
+                    new_dynarec_d0d3_compare_state.site_no_block_ins_bailouts[index],
+                    new_dynarec_d0d3_compare_state.site_zero_count_bailouts[index],
+                    new_dynarec_d0d3_compare_state.site_count_zero[index],
+                    new_dynarec_d0d3_compare_state.site_count_one[index],
+                    new_dynarec_d0d3_compare_state.site_count_multi[index],
+                    new_dynarec_d0d3_compare_state.site_cf_set[index],
+                    new_dynarec_d0d3_compare_state.site_operand_zero[index],
+                    new_dynarec_d0d3_compare_state.site_result_changed[index],
+                    new_dynarec_d0d3_compare_state.site_flags_nonzero[index]);
+}
+
+int
+new_dynarec_format_d0d3_compare_sample_summary(char *buffer, size_t size, uint32_t index)
+{
+    uint32_t absolute_index;
+    uint32_t ring_index;
+    const char *form;
+    const new_dynarec_d0d3_compare_sample_t *sample;
+
+    if (!buffer || !size)
+        return 0;
+
+    if (index >= new_dynarec_d0d3_compare_state.recent_sample_count)
+        return 0;
+
+    absolute_index = (new_dynarec_d0d3_compare_state.recent_sample_next
+                      + (sizeof(new_dynarec_d0d3_compare_state.recent_samples) / sizeof(new_dynarec_d0d3_compare_state.recent_samples[0]))
+                      - new_dynarec_d0d3_compare_state.recent_sample_count + index)
+                     % (sizeof(new_dynarec_d0d3_compare_state.recent_samples) / sizeof(new_dynarec_d0d3_compare_state.recent_samples[0]));
+    ring_index = absolute_index;
+    sample = &new_dynarec_d0d3_compare_state.recent_samples[ring_index];
+    form = new_dynarec_d0d3_rotate_compare_is_memory(sample->packed_compare) ? "mem" : "reg";
+
+    return snprintf(buffer, size,
+                    "index=%u pc=0x%08x opcode=0x%02x subgroup=0x%02x width=%u form=%s operand=0x%08x count=%u cf=%u direct=0x%08x/0x%08x helper=0x%08x/0x%08x",
+                    index,
+                    sample->pc,
+                    new_dynarec_d0d3_rotate_compare_opcode(sample->packed_compare),
+                    new_dynarec_d0d3_rotate_compare_subgroup(sample->packed_compare),
+                    new_dynarec_d0d3_rotate_compare_width(sample->packed_compare),
+                    form,
+                    sample->original_operand,
+                    new_dynarec_d0d3_rotate_compare_count(sample->packed_compare),
+                    new_dynarec_d0d3_rotate_compare_flags(sample->packed_compare) ? 1u : 0u,
+                    sample->direct_result, sample->direct_flag_mask,
+                    sample->helper_result, sample->helper_flag_mask);
+}
+
+int
+new_dynarec_format_d0d3_compare_bailout_summary(char *buffer, size_t size, uint32_t index)
+{
+    uint32_t absolute_index;
+    uint32_t ring_index;
+    const char *form;
+    const char *reason;
+    const new_dynarec_d0d3_compare_bailout_sample_t *sample;
+
+    if (!buffer || !size)
+        return 0;
+
+    if (index >= new_dynarec_d0d3_compare_state.recent_bailout_count)
+        return 0;
+
+    absolute_index = (new_dynarec_d0d3_compare_state.recent_bailout_next
+                      + (sizeof(new_dynarec_d0d3_compare_state.recent_bailouts) / sizeof(new_dynarec_d0d3_compare_state.recent_bailouts[0]))
+                      - new_dynarec_d0d3_compare_state.recent_bailout_count + index)
+                     % (sizeof(new_dynarec_d0d3_compare_state.recent_bailouts) / sizeof(new_dynarec_d0d3_compare_state.recent_bailouts[0]));
+    ring_index = absolute_index;
+    sample = &new_dynarec_d0d3_compare_state.recent_bailouts[ring_index];
+    form = new_dynarec_d0d3_rotate_compare_is_memory(sample->packed_compare) ? "mem" : "reg";
+    if (sample->reason == NEW_DYNAREC_D0D3_COMPARE_BAILOUT_NO_BLOCK_INS)
+        reason = "no_block_ins";
+    else if (sample->reason == NEW_DYNAREC_D0D3_COMPARE_BAILOUT_ZERO_COUNT)
+        reason = "zero_count";
+    else
+        reason = "unknown";
+
+    return snprintf(buffer, size,
+                    "index=%u pc=0x%08x opcode=0x%02x subgroup=0x%02x width=%u form=%s reason=%s count=%u cf=%u",
+                    index,
+                    sample->pc,
+                    new_dynarec_d0d3_rotate_compare_opcode(sample->packed_compare),
+                    new_dynarec_d0d3_rotate_compare_subgroup(sample->packed_compare),
+                    new_dynarec_d0d3_rotate_compare_width(sample->packed_compare),
+                    form,
+                    reason,
+                    new_dynarec_d0d3_rotate_compare_count(sample->packed_compare),
+                    new_dynarec_d0d3_rotate_compare_flags(sample->packed_compare) ? 1u : 0u);
+}
+
+static uint32_t
+new_dynarec_find_d0d3_compare_site_index(uint32_t pc)
+{
+    uint32_t index;
+
+    for (index = 0; index < new_dynarec_d0d3_compare_state.site_count; index++) {
+        if (new_dynarec_d0d3_compare_state.site_pcs[index] == pc)
+            return index;
+    }
+
+    return UINT32_MAX;
+}
+
 void
 new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque)
 {
@@ -394,6 +650,34 @@ new_dynarec_get_verify_config(new_dynarec_verify_config_t *out)
         return;
 
     *out = new_dynarec_verify_config;
+}
+
+int
+new_dynarec_d0d3_compare_enabled_for_site(uint32_t pc, uint8_t opcode)
+{
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_DEBUG_D0D3_RCLRCR");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    if (!enabled)
+        return 0;
+
+    new_dynarec_verify_config_init_from_env();
+
+    if (!new_dynarec_verify_config.budget)
+        return 0;
+
+    if (new_dynarec_verify_config.match_pc && new_dynarec_verify_config.pc != pc)
+        return 0;
+
+    if (new_dynarec_verify_config.match_opcode && new_dynarec_verify_config.opcode != opcode)
+        return 0;
+
+    return 1;
 }
 
 int
@@ -492,6 +776,146 @@ new_dynarec_note_0f_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outco
         new_dynarec_0f_fallback_table_null_hits[opcode]++;
     else if (outcome == NEW_DYNAREC_VERIFY_HELPER_BAILOUT)
         new_dynarec_0f_fallback_bailout_hits[opcode]++;
+}
+
+void
+new_dynarec_note_d0d3_compare_attempt(uint32_t packed_compare, uint32_t original_operand,
+                                      uint32_t direct_result, uint32_t direct_flag_mask,
+                                      uint32_t helper_result, uint32_t helper_flag_mask)
+{
+    const int mismatch = (direct_result != helper_result) || (direct_flag_mask != helper_flag_mask);
+
+    new_dynarec_d0d3_compare_state.attempts++;
+    if (mismatch)
+        new_dynarec_d0d3_compare_state.mismatches++;
+    else
+        new_dynarec_d0d3_compare_state.matches++;
+
+    new_dynarec_d0d3_compare_state.packed_compare   = packed_compare;
+    new_dynarec_d0d3_compare_state.original_operand = original_operand;
+    new_dynarec_d0d3_compare_state.direct_result    = direct_result;
+    new_dynarec_d0d3_compare_state.direct_flag_mask = direct_flag_mask;
+    new_dynarec_d0d3_compare_state.helper_result    = helper_result;
+    new_dynarec_d0d3_compare_state.helper_flag_mask = helper_flag_mask;
+    new_dynarec_d0d3_compare_state.recent_samples[new_dynarec_d0d3_compare_state.recent_sample_next].pc               = new_dynarec_d0d3_compare_state.last_pc;
+    new_dynarec_d0d3_compare_state.recent_samples[new_dynarec_d0d3_compare_state.recent_sample_next].packed_compare   = packed_compare;
+    new_dynarec_d0d3_compare_state.recent_samples[new_dynarec_d0d3_compare_state.recent_sample_next].original_operand = original_operand;
+    new_dynarec_d0d3_compare_state.recent_samples[new_dynarec_d0d3_compare_state.recent_sample_next].direct_result    = direct_result;
+    new_dynarec_d0d3_compare_state.recent_samples[new_dynarec_d0d3_compare_state.recent_sample_next].direct_flag_mask = direct_flag_mask;
+    new_dynarec_d0d3_compare_state.recent_samples[new_dynarec_d0d3_compare_state.recent_sample_next].helper_result    = helper_result;
+    new_dynarec_d0d3_compare_state.recent_samples[new_dynarec_d0d3_compare_state.recent_sample_next].helper_flag_mask = helper_flag_mask;
+    new_dynarec_d0d3_compare_state.recent_sample_next =
+        (new_dynarec_d0d3_compare_state.recent_sample_next + 1u)
+        % (sizeof(new_dynarec_d0d3_compare_state.recent_samples) / sizeof(new_dynarec_d0d3_compare_state.recent_samples[0]));
+    if (new_dynarec_d0d3_compare_state.recent_sample_count
+        < (sizeof(new_dynarec_d0d3_compare_state.recent_samples) / sizeof(new_dynarec_d0d3_compare_state.recent_samples[0])))
+        new_dynarec_d0d3_compare_state.recent_sample_count++;
+
+    if (new_dynarec_d0d3_compare_state.last_pc != 0) {
+        const uint32_t site_index = new_dynarec_find_d0d3_compare_site_index(new_dynarec_d0d3_compare_state.last_pc);
+
+        if (site_index != UINT32_MAX) {
+            const uint32_t count = new_dynarec_d0d3_rotate_compare_count(packed_compare);
+
+            new_dynarec_d0d3_compare_state.site_attempts[site_index]++;
+            if (mismatch)
+                new_dynarec_d0d3_compare_state.site_mismatches[site_index]++;
+            if (count == 0)
+                new_dynarec_d0d3_compare_state.site_count_zero[site_index]++;
+            else if (count == 1)
+                new_dynarec_d0d3_compare_state.site_count_one[site_index]++;
+            else
+                new_dynarec_d0d3_compare_state.site_count_multi[site_index]++;
+            if (new_dynarec_d0d3_rotate_compare_flags(packed_compare))
+                new_dynarec_d0d3_compare_state.site_cf_set[site_index]++;
+            if (original_operand == 0)
+                new_dynarec_d0d3_compare_state.site_operand_zero[site_index]++;
+            if (direct_result != original_operand)
+                new_dynarec_d0d3_compare_state.site_result_changed[site_index]++;
+            if (direct_flag_mask != 0)
+                new_dynarec_d0d3_compare_state.site_flags_nonzero[site_index]++;
+        }
+    }
+
+    if (mismatch && new_dynarec_d0d3_compare_logging_enabled()) {
+        fprintf(stderr,
+                "CPU new dynarec D0-D3 compare mismatch: opcode=0x%02x subgroup=0x%02x width=%u form=%s operand=0x%08x count=%u cf=%u direct=0x%08x/0x%08x helper=0x%08x/0x%08x\n",
+                new_dynarec_d0d3_rotate_compare_opcode(packed_compare),
+                new_dynarec_d0d3_rotate_compare_subgroup(packed_compare),
+                new_dynarec_d0d3_rotate_compare_width(packed_compare),
+                new_dynarec_d0d3_rotate_compare_is_memory(packed_compare) ? "mem" : "reg",
+                original_operand,
+                new_dynarec_d0d3_rotate_compare_count(packed_compare),
+                new_dynarec_d0d3_rotate_compare_flags(packed_compare) ? 1u : 0u,
+                direct_result, direct_flag_mask, helper_result, helper_flag_mask);
+    }
+}
+
+void
+new_dynarec_note_d0d3_compare_site(uint32_t pc, uint32_t packed_compare)
+{
+    uint32_t index;
+
+    new_dynarec_d0d3_compare_state.last_pc         = pc;
+    new_dynarec_d0d3_compare_state.packed_compare  = packed_compare;
+
+    for (index = 0; index < new_dynarec_d0d3_compare_state.site_count; index++) {
+        if (new_dynarec_d0d3_compare_state.site_pcs[index] == pc)
+            return;
+    }
+
+    if (new_dynarec_d0d3_compare_state.site_count >= (sizeof(new_dynarec_d0d3_compare_state.site_pcs) / sizeof(new_dynarec_d0d3_compare_state.site_pcs[0]))) {
+        new_dynarec_d0d3_compare_state.site_log_overflow = 1;
+        return;
+    }
+
+    new_dynarec_d0d3_compare_state.site_pcs[new_dynarec_d0d3_compare_state.site_count]           = pc;
+    new_dynarec_d0d3_compare_state.site_packed_compare[new_dynarec_d0d3_compare_state.site_count] = packed_compare;
+    new_dynarec_d0d3_compare_state.site_count++;
+
+    if (new_dynarec_d0d3_compare_site_logging_enabled()) {
+        fprintf(stderr,
+                "CPU new dynarec D0-D3 compare site: pc=0x%08x opcode=0x%02x subgroup=0x%02x width=%u form=%s\n",
+                pc,
+                new_dynarec_d0d3_rotate_compare_opcode(packed_compare),
+                new_dynarec_d0d3_rotate_compare_subgroup(packed_compare),
+                new_dynarec_d0d3_rotate_compare_width(packed_compare),
+                new_dynarec_d0d3_rotate_compare_is_memory(packed_compare) ? "mem" : "reg");
+    }
+}
+
+void
+new_dynarec_note_d0d3_compare_site_bailout(uint32_t pc, uint32_t packed_compare,
+                                           new_dynarec_d0d3_compare_bailout_reason_t reason)
+{
+    uint32_t site_index;
+
+    new_dynarec_note_d0d3_compare_site(pc, packed_compare);
+    site_index = new_dynarec_find_d0d3_compare_site_index(pc);
+    if (site_index == UINT32_MAX)
+        return;
+
+    if (reason == NEW_DYNAREC_D0D3_COMPARE_BAILOUT_NO_BLOCK_INS)
+        new_dynarec_d0d3_compare_state.site_no_block_ins_bailouts[site_index]++;
+    else if (reason == NEW_DYNAREC_D0D3_COMPARE_BAILOUT_ZERO_COUNT)
+        new_dynarec_d0d3_compare_state.site_zero_count_bailouts[site_index]++;
+
+    new_dynarec_d0d3_compare_state.recent_bailouts[new_dynarec_d0d3_compare_state.recent_bailout_next].pc = pc;
+    new_dynarec_d0d3_compare_state.recent_bailouts[new_dynarec_d0d3_compare_state.recent_bailout_next].packed_compare = packed_compare;
+    new_dynarec_d0d3_compare_state.recent_bailouts[new_dynarec_d0d3_compare_state.recent_bailout_next].reason = (uint32_t) reason;
+    new_dynarec_d0d3_compare_state.recent_bailout_next =
+        (new_dynarec_d0d3_compare_state.recent_bailout_next + 1u)
+        % (sizeof(new_dynarec_d0d3_compare_state.recent_bailouts) / sizeof(new_dynarec_d0d3_compare_state.recent_bailouts[0]));
+    if (new_dynarec_d0d3_compare_state.recent_bailout_count
+        < (sizeof(new_dynarec_d0d3_compare_state.recent_bailouts) / sizeof(new_dynarec_d0d3_compare_state.recent_bailouts[0])))
+        new_dynarec_d0d3_compare_state.recent_bailout_count++;
+}
+
+void
+new_dynarec_note_d0d3_compare_site_zero_count_bailout(uint32_t pc, uint32_t packed_compare)
+{
+    new_dynarec_note_d0d3_compare_site_bailout(pc, packed_compare,
+                                               NEW_DYNAREC_D0D3_COMPARE_BAILOUT_ZERO_COUNT);
 }
 
 int
@@ -630,6 +1054,8 @@ new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode)
         case 0x6b:
         case 0xa4:
         case 0xa5:
+        case 0xa6:
+        case 0xa7:
         case 0x9d:
         case 0xc8:
         case 0xaa:
@@ -645,7 +1071,7 @@ new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode)
 int
 new_dynarec_direct_base_string_opcode_count(void)
 {
-    return 6;
+    return 8;
 }
 
 void

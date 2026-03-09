@@ -1,6 +1,21 @@
 #include <stdint.h>
 
 #include "cpu.h"
+#include "codegen_public.h"
+#include "codegen_test_support.h"
+
+__attribute__((weak)) void
+new_dynarec_note_d0d3_compare_attempt(uint32_t packed_compare, uint32_t original_operand,
+                                      uint32_t direct_result, uint32_t direct_flag_mask,
+                                      uint32_t helper_result, uint32_t helper_flag_mask)
+{
+    (void) packed_compare;
+    (void) original_operand;
+    (void) direct_result;
+    (void) direct_flag_mask;
+    (void) helper_result;
+    (void) helper_flag_mask;
+}
 
 typedef struct {
     uint32_t result;
@@ -78,6 +93,89 @@ new_dynarec_rcr_common(uint32_t value, uint32_t count, uint32_t flags, unsigned 
     if ((rotate_result.result ^ (rotate_result.result >> 1)) & second_top_bit)
         rotate_result.flag_mask |= V_FLAG;
     return rotate_result;
+}
+
+static new_dynarec_rotate_result_t
+new_dynarec_d0d3_rotate_direct_common(uint32_t value, uint32_t packed_compare)
+{
+    const unsigned width      = new_dynarec_d0d3_rotate_compare_width(packed_compare);
+    const unsigned ring_width = width + 1u;
+    const uint32_t mask       = (width == 32) ? UINT32_MAX : ((1u << width) - 1u);
+    const uint32_t top_bit    = 1u << (width - 1u);
+    uint32_t       count      = new_dynarec_d0d3_rotate_compare_count(packed_compare);
+    uint32_t       carry      = new_dynarec_d0d3_rotate_compare_flags(packed_compare) ? 1u : 0u;
+    uint64_t       ring;
+    uint64_t       ring_mask;
+    new_dynarec_rotate_result_t rotate_result;
+
+    value &= mask;
+    if (width == 32)
+        count &= 0x1fu;
+    else
+        count %= ring_width;
+
+    if (!count) {
+        rotate_result.result    = value;
+        rotate_result.flag_mask = carry ? C_FLAG : 0u;
+        return rotate_result;
+    }
+
+    ring_mask = (UINT64_C(1) << ring_width) - 1u;
+    ring      = (((uint64_t) carry) << width) | value;
+    if (new_dynarec_d0d3_rotate_compare_subgroup(packed_compare) == 0x10)
+        ring = ((ring << count) | (ring >> (ring_width - count))) & ring_mask;
+    else
+        ring = ((ring >> count) | (ring << (ring_width - count))) & ring_mask;
+
+    rotate_result.result    = (uint32_t) (ring & mask);
+    rotate_result.flag_mask = (ring & (UINT64_C(1) << width)) ? C_FLAG : 0u;
+    if (new_dynarec_d0d3_rotate_compare_subgroup(packed_compare) == 0x10) {
+        if (((rotate_result.flag_mask ? 1u : 0u) ^ ((rotate_result.result >> (width - 1u)) & 1u)) != 0)
+            rotate_result.flag_mask |= V_FLAG;
+    } else if ((rotate_result.result ^ (rotate_result.result >> 1u)) & (top_bit >> 1u))
+        rotate_result.flag_mask |= V_FLAG;
+
+    return rotate_result;
+}
+
+static new_dynarec_rotate_result_t
+new_dynarec_d0d3_rotate_helper_common(uint32_t value, uint32_t packed_compare)
+{
+    const uint32_t packed = (((uint32_t) new_dynarec_d0d3_rotate_compare_count(packed_compare)) << 16)
+                            | new_dynarec_d0d3_rotate_compare_flags(packed_compare);
+    new_dynarec_rotate_result_t rotate_result;
+
+    if (new_dynarec_d0d3_rotate_compare_subgroup(packed_compare) == 0x10) {
+        switch (new_dynarec_d0d3_rotate_compare_width(packed_compare)) {
+            case 8:
+                rotate_result.result    = new_dynarec_rcl8_result(value, packed);
+                rotate_result.flag_mask = new_dynarec_rcl8_flag_mask(value, packed);
+                return rotate_result;
+            case 16:
+                rotate_result.result    = new_dynarec_rcl16_result(value, packed);
+                rotate_result.flag_mask = new_dynarec_rcl16_flag_mask(value, packed);
+                return rotate_result;
+            default:
+                rotate_result.result    = new_dynarec_rcl32_result(value, packed);
+                rotate_result.flag_mask = new_dynarec_rcl32_flag_mask(value, packed);
+                return rotate_result;
+        }
+    }
+
+    switch (new_dynarec_d0d3_rotate_compare_width(packed_compare)) {
+        case 8:
+            rotate_result.result    = new_dynarec_rcr8_result(value, packed);
+            rotate_result.flag_mask = new_dynarec_rcr8_flag_mask(value, packed);
+            return rotate_result;
+        case 16:
+            rotate_result.result    = new_dynarec_rcr16_result(value, packed);
+            rotate_result.flag_mask = new_dynarec_rcr16_flag_mask(value, packed);
+            return rotate_result;
+        default:
+            rotate_result.result    = new_dynarec_rcr32_result(value, packed);
+            rotate_result.flag_mask = new_dynarec_rcr32_flag_mask(value, packed);
+            return rotate_result;
+    }
 }
 
 uint32_t
@@ -236,4 +334,28 @@ uint32_t
 new_dynarec_rcr32_flag_mask(uint32_t value, uint32_t packed)
 {
     return new_dynarec_rcr_common(value, new_dynarec_rotate_count(packed), new_dynarec_rotate_flags(packed), 32).flag_mask;
+}
+
+uint32_t
+new_dynarec_d0d3_rotate_compare_mismatch(uint32_t value, uint32_t packed_compare)
+{
+    const new_dynarec_rotate_result_t direct_result = new_dynarec_d0d3_rotate_direct_common(value, packed_compare);
+    const new_dynarec_rotate_result_t helper_result = new_dynarec_d0d3_rotate_helper_common(value, packed_compare);
+
+    new_dynarec_note_d0d3_compare_attempt(packed_compare, value,
+                                          direct_result.result, direct_result.flag_mask,
+                                          helper_result.result, helper_result.flag_mask);
+    return (direct_result.result != helper_result.result) || (direct_result.flag_mask != helper_result.flag_mask);
+}
+
+uint32_t
+new_dynarec_d0d3_rotate_compare_direct_result(uint32_t value, uint32_t packed_compare)
+{
+    return new_dynarec_d0d3_rotate_direct_common(value, packed_compare).result;
+}
+
+uint32_t
+new_dynarec_d0d3_rotate_compare_direct_flag_mask(uint32_t value, uint32_t packed_compare)
+{
+    return new_dynarec_d0d3_rotate_direct_common(value, packed_compare).flag_mask;
 }

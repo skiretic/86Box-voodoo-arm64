@@ -22,6 +22,10 @@ Current stable baseline at `d960e431a`:
 
 ### Strict i686-class VM configurations available locally
 
+- `Windows 98 SE`
+  - `cpu_family = celeron_mendocino`
+  - `cpu_speed = 300000000`
+  - `machine = bf6`
 - `Windows 98 TESTING`
   - `cpu_family = celeron_mendocino`
   - `cpu_speed = 300000000`
@@ -52,7 +56,15 @@ Current stable baseline at `d960e431a`:
 
 ### Evidence-source conclusion
 
-- The best strict i686 VM for the next targeted measurement is `Windows 98 TESTING` because it is an actual Mendocino/Celeron Windows 98 configuration with dynarec enabled and no K6-specific `0F`/3DNow bias.
+- The chosen strict i686 working baseline going forward is `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 SE`.
+- Why that path is acceptable:
+  - it is also an actual Mendocino/Celeron Windows 98 configuration with dynarec enabled
+  - it stays on the same `bf6` machine class as the existing strict Mendocino evidence
+  - it keeps the same strict-i686 CPU/machine class while avoiding the stale `Windows 98 TESTING` pointer
+- Caveat:
+  - earlier strict baseline and failed-boot evidence on disk still come from `Windows 98 TESTING` and remain historically valid under their original paths
+  - treat `Windows 98 SE` as the standing VM choice going forward, not as a retroactive rename of those earlier logs
+- `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 SE copy` remains the alternate strict-i686 comparison candidate if later work needs a second Mendocino image.
 - The best exact logs currently in hand are still only proxy evidence:
   - K6-2 for current stable exact `0F`
   - Tillamook for exact base and longer exact `0F`
@@ -274,6 +286,20 @@ Current stable baseline at `d960e431a`:
 
 ## Payoff vs risk shortlist
 
+## Candidate matrix
+
+| Class | Family | Why it belongs there | Near-term disposition |
+|---|---|---|---|
+| A | No current measured strict-i686 hotspot family | The remaining top families are either helper-backed bailout cleanup or system/I/O-heavy behavior, not another low-side-effect table-hole row | Do not force a Class A pick from the current list |
+| B | base `0xd0`-`0xd3` `RCL` / `RCR` | Existing direct handlers, measurable bailout count, prior guest failure, and a now-understood backend shape mistake | Require compare/debug path first |
+| B | `0x0f 0xaf` | Existing direct handlers and helper harness support, but still guest-unsafe after host-clean and compare-enabled debugging | Keep guest-disabled |
+| B | `0x0f 0xbc` / `0xbd` | Existing direct handlers and helper harness support, but guest-visible regression remained after obvious bugs were fixed | Keep guest-disabled |
+| B | `0x0f 0xba` / `0xa3` / `0xab` / `0xb3` | High-payoff bit-test family with wider RMW/indexed semantics and adjacent guest-risk history | Do not attempt without compare/debug support |
+| C | base I/O `0xe4` / `0xe6` / `0xec` / `0xee` / `0xef` | Dominated by device traffic and image-specific churn | Keep out of next implementation slot |
+| C | `0xcd` / `0xcf` / `0x8e` / `0x9b` | Interrupt, segment, or control crossover work | Keep blocked for near-term CPU dynarec closure |
+| C | `0x0f 0x02` / `0x03`, `0x0f 0x01`, `0x0f 0x20`, `0x0f 0x22`, `0x0f 0x31` | Protected/control/system semantics | Leave for a separate system-behavior plan |
+| C | REP / x87 follow-up | Broad architectural campaigns rather than narrow opcode closure | Not a near-term guest-facing target |
+
 ### 1. Base `0xd0`-`0xd3` group-2 bailout closure
 
 - payoff:
@@ -329,17 +355,19 @@ Current stable baseline at `d960e431a`:
 Recommended next i686-focused trial:
 
 - that baseline has now been completed at `/tmp/windows98_testing_i686_baseline.log`
-- the next narrow implementation trial should be:
-  - base `0xd0`-`0xd3` only
-  - host-harness-first
-  - one logged Mendocino guest confirmation run afterward
+- do not roll straight into another guest-facing opcode trial from that evidence
+- the next productive step should be:
+  - base `0xd0`-`0xd3` compare/debug infrastructure only
+  - no guest enablement
+  - future compare-only validation should use `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 SE` as the named strict-i686 VM
 
 Why this is the best next step:
 
 - the strict Mendocino result keeps the same risky `0F` leaders (`0xaf`, `0xba`, `0x02`) but does not make any of them safer
 - the hotter base leaders on this VM are mostly I/O and control instructions, which are not good first implementation candidates
 - `0xd0`-`0xd3` still have meaningful measured payoff on the strict i686 run while remaining materially safer than the hotter I/O-heavy base opcodes
-- they already have direct handlers, so the likely work is bailout reduction rather than introducing a brand-new semantic family
+- they already have direct handlers, so the likely work is bailout debugging rather than introducing a brand-new semantic family
+- the arm64 backend audit now shows exactly which helper-call shape must be preserved during that work
 
 If an implementation family must be named immediately after that re-baseline, prefer:
 
@@ -353,6 +381,11 @@ Do not prefer next:
 
 Those remain either explicitly blocked by the session constraints or too risky relative to the current evidence quality.
 
+Recommended standing strict-i686 baseline:
+
+- `/Users/anthony/Library/Application Support/86Box/Virtual Machines/Windows 98 SE`
+- note in future plans that earlier `windows98_testing_*` logs remain the historical baseline lineage for prior evidence, while new validation should target `Windows 98 SE`
+
 ## Follow-up implementation status
 
 - The recommended narrow next trial was taken, validated, and then backed out for guest use:
@@ -360,7 +393,14 @@ Those remain either explicitly blocked by the session constraints or too risky r
   - `src/codegen_new/codegen_ops_shift.c` has been restored to the stable immediate-fallback behavior for `D0` / `D1` / `D2` / `D3` `RCL` / `RCR`
 - The host-side gate for that slice is still in place and passing:
   - `tests/codegen_new_0f_semantics_test.c` now covers representative `RCL` / `RCR` result and flag-mask cases across 8-bit, 16-bit, and 32-bit widths
+  - `tests/codegen_new_dynarec_observability_test.c` now also covers the compact `D0`-`D3` compare summary surface
 - The guest-facing result was not stable:
   - the first validation attempt died in the backend on an unsupported third helper argument
   - the second validation attempt booted far enough to show the same class of early Windows “insufficient conventional memory” failure seen on other unstable dynarec trials
   - the failed-boot shutdown profile at `/tmp/windows98_testing_i686_d0d3_validation.log` is therefore not comparable to `/tmp/windows98_testing_i686_baseline.log`
+- The new compare-only follow-up is now implemented too:
+  - `86BOX_NEW_DYNAREC_DEBUG_D0D3_RCLRCR=1` enables only the sampled `D0`-`D3` `RCL` / `RCR` compare path
+  - `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE=1` emits compact mismatch lines plus a shutdown summary
+  - `86BOX_NEW_DYNAREC_LOG_D0D3_COMPARE_SITES=1` emits one first-hit line per unique sampled compare site, and shutdown logging now preserves the discovered site list with per-site `attempts`, `mismatches`, `no_block_ins_bailouts`, `zero_count_bailouts`, `count_zero`, `count_one`, `count_multi`, `cf_set`, `operand_zero`, `result_changed`, and `flags_nonzero` so a later run can promote a real site into `86BOX_NEW_DYNAREC_VERIFY_PC`
+  - `86BOX_NEW_DYNAREC_VERIFY_PC`, `86BOX_NEW_DYNAREC_VERIFY_OPCODE`, and `86BOX_NEW_DYNAREC_VERIFY_BUDGET` remain the safest way to keep the compare run narrow on `Windows 98 SE`
+  - enough broad and locked-site compare-only evidence now exists to stop expanding this `D0`-`D3` probe family for the moment; the next productive branch step should return to a low-risk implementation family instead
