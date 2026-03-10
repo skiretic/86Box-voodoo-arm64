@@ -163,6 +163,7 @@ endif()
 add_library(voodoo OBJECT
     vid_voodoo.c
     vid_voodoo_banshee.c
+    vid_voodoo4.c
     vid_voodoo_banshee_blitter.c
     vid_voodoo_blitter.c
     vid_voodoo_display.c
