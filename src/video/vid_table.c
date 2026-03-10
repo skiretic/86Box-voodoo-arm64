@@ -258,7 +258,6 @@ video_cards[] = {
     { .device = &voodoo_3_3500_si_agp_device,                   .flags = VIDEO_FLAG_TYPE_NONE },
     { .device = &compaq_voodoo_3_3500_agp_device,               .flags = VIDEO_FLAG_TYPE_NONE },
     { .device = &voodoo_3_3500_se_agp_device,                   .flags = VIDEO_FLAG_TYPE_NONE },
-    { .device = &voodoo4_4500_agp_device,                       .flags = VIDEO_FLAG_TYPE_NONE },
 #ifdef USE_G100
     { .device = &productiva_g100_device,                        .flags = VIDEO_FLAG_TYPE_SPECIAL },
 #endif /*USE_G100 */

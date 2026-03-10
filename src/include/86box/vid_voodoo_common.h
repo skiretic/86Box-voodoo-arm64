@@ -34,8 +34,7 @@ enum {
     VOODOO_SB50,
     VOODOO_2,
     VOODOO_BANSHEE,
-    VOODOO_3,
-    VOODOO_4
+    VOODOO_3
 };
 
 typedef union int_float {

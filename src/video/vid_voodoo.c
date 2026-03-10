@@ -1355,7 +1355,7 @@ voodoo_2d3d_card_init(int type)
     }
 #endif
     voodoo->type      = type;
-    voodoo->dual_tmus = (type >= VOODOO_3) ? 1 : 0;
+    voodoo->dual_tmus = (type == VOODOO_3) ? 1 : 0;
 
     /*generate filter lookup tables*/
     voodoo_generate_filter_v2(voodoo);

@@ -644,7 +644,7 @@ voodoo_tex_writel(uint32_t addr, uint32_t val, void *priv)
 #endif
         flush_texture_cache(voodoo, addr & voodoo->texture_mask, tmu);
     }
-    if (voodoo->type >= VOODOO_3 && voodoo->texture_present[tmu ^ 1][(addr & voodoo->texture_mask) >> TEX_DIRTY_SHIFT]) {
+    if (voodoo->type == VOODOO_3 && voodoo->texture_present[tmu ^ 1][(addr & voodoo->texture_mask) >> TEX_DIRTY_SHIFT]) {
 #if 0
         voodoo_texture_log("texture_present at %08x %i\n", addr, (addr & voodoo->texture_mask) >> TEX_DIRTY_SHIFT);
 #endif
