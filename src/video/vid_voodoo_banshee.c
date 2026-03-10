@@ -63,6 +63,7 @@
 #define ROM_VOODOO3_3500_SI_AGP     "roms/video/voodoo/V3_3500_AGP_SD_2.15.07_PAL_3500TV-SI.rom"
 #define ROM_VELOCITY_100            "roms/video/voodoo/Velocity100.VBI"
 #define ROM_VELOCITY_200            "roms/video/voodoo/Velocity200sg.rom"
+#define ROM_VOODOO4_4500            "roms/video/voodoo/V4_4500_AGP_SD_1.18.rom"
 
 static video_timings_t timing_banshee     = { .type = VIDEO_PCI, .write_b = 2, .write_w = 2, .write_l = 1, .read_b = 20, .read_w = 20, .read_l = 21 };
 static video_timings_t timing_banshee_agp = { .type = VIDEO_AGP, .write_b = 2, .write_w = 2, .write_l = 1, .read_b = 20, .read_w = 20, .read_l = 21 };
@@ -87,7 +88,8 @@ enum {
     TYPE_V3_3500_COMPAQ,
     TYPE_V3_3500_SI,
     TYPE_VELOCITY100,
-    TYPE_VELOCITY200
+    TYPE_VELOCITY200,
+    TYPE_V4_4500
 };
 
 typedef struct banshee_t {
@@ -3088,7 +3090,12 @@ banshee_pci_read(int func, int addr, UNUSED(int len), void *priv)
             break;
 
         case 0x02:
-            ret = (banshee->type == TYPE_BANSHEE) ? 0x03 : 0x05;
+            if (banshee->type == TYPE_BANSHEE)
+                ret = 0x03;
+            else if (banshee->type == TYPE_V4_4500)
+                ret = 0x09;
+            else
+                ret = 0x05;
             break;
         case 0x03:
             ret = 0x00;
@@ -3433,7 +3440,9 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
             mem_size = 8; /* Velocity 100 only supports 8 MB */
         else
             mem_size = device_get_config_int("memory");
-    } else
+    } else if (type == TYPE_V4_4500)
+        mem_size = 32; /* Voodoo 4 4500 has 32 MB SDRAM */
+    else
         mem_size = 16; /* SDRAM Banshee only supports 16 MB */
 
     svga_init(info, &banshee->svga, banshee, mem_size << 20,
@@ -3596,6 +3605,13 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
             banshee->pci_regs[0x2f] = 0x00;
             break;
 
+        case TYPE_V4_4500:
+            banshee->pci_regs[0x2c] = 0x1a;
+            banshee->pci_regs[0x2d] = 0x12;
+            banshee->pci_regs[0x2e] = 0x09;
+            banshee->pci_regs[0x2f] = 0x00;
+            break;
+
         default:
             break;
     }
@@ -3707,6 +3723,12 @@ velocity_200_agp_init(const device_t *info)
     return banshee_init_common(info, ROM_VELOCITY_200, 1, TYPE_VELOCITY200, VOODOO_3, 1);
 }
 
+static void *
+v4_4500_agp_init(const device_t *info)
+{
+    return banshee_init_common(info, ROM_VOODOO4_4500, 0, TYPE_V4_4500, VOODOO_4, 1);
+}
+
 static int
 banshee_available(void)
 {
@@ -3786,6 +3808,12 @@ static int
 velocity_200_available(void)
 {
     return rom_present(ROM_VELOCITY_200);
+}
+
+static int
+v4_4500_agp_available(void)
+{
+    return rom_present(ROM_VOODOO4_4500);
 }
 
 static void
@@ -4335,4 +4363,18 @@ const device_t velocity_200_agp_device = {
     .speed_changed = banshee_speed_changed,
     .force_redraw  = banshee_force_redraw,
     .config        = banshee_sgram_16mbonly_config
+};
+
+const device_t voodoo4_4500_agp_device = {
+    .name          = "3dfx Voodoo4 4500",
+    .internal_name = "voodoo4_4500_agp",
+    .flags         = DEVICE_AGP,
+    .local         = 0,
+    .init          = v4_4500_agp_init,
+    .close         = banshee_close,
+    .reset         = NULL,
+    .available     = v4_4500_agp_available,
+    .speed_changed = banshee_speed_changed,
+    .force_redraw  = banshee_force_redraw,
+    .config        = banshee_sdram_config
 };

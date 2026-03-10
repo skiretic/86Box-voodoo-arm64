@@ -81,7 +81,7 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
     if (!chip)
         chip = 0xf;
 
-    if (voodoo->type == VOODOO_3)
+    if (voodoo->type >= VOODOO_3)
         voodoo_recalc_tex = voodoo_recalc_tex3;
     else
         voodoo_recalc_tex = voodoo_recalc_tex12;
