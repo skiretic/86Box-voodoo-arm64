@@ -6,9 +6,9 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 
 ## Status Snapshot
 
-- Overall phase: `Phase 1 audit complete; ROM shadow/dispatch and early init are proven; manual VM verification now reaches the Windows desktop through at least 1024x768 16-bit with the Voodoo4 driver installed`
+- Overall phase: `Phase 1 audit complete; ROM shadow/dispatch and early init are proven; manual VM verification reaches the Windows desktop with the Voodoo4 driver installed, common desktop 32-bit tiled scanout is proven, and the live boundary is now inconsistent higher-VRAM desktop population on the 32 MB path`
 - Primary strategy: `Reuse-first over Banshee/Voodoo3 until disproven`
-- Evidence baseline: `ROM analysis + source-backed register correlation + Phase 1 code audit + first runtime boundary trace`
+- Evidence baseline: `ROM analysis + source-backed register correlation + Phase 1 code audit + current high-base 2D/LFB runtime tracing`
 
 ## Done
 
@@ -87,15 +87,32 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 - [x] Remove the temporary Voodoo4 mode-state tracing after the `32-bit` desktop boundary was verified
 - [x] Rebuild successfully after removing the temporary mode-state tracing
 - [x] Re-run `bash scripts/test-voodoo4-blank-boundary.sh` successfully after removing the temporary mode-state tracing
+- [x] Add a Voodoo4-specific `32 MB` SDRAM device config and stop the reuse-first Voodoo4 path from inheriting the shared `16 MB` SDRAM default
+- [x] Rebuild successfully after the Voodoo4 `32 MB` memory-config change
+- [x] Re-run `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the Voodoo4 `32 MB` memory-config change
+- [x] Prove from a fresh log and 3DMark99 that guest-visible Voodoo4 VRAM now reports `32 MB`
+- [x] Reproduce the new post-`32 MB` symptom: desktop distortion once the driver uses the higher-VRAM desktop surface
+- [x] Re-enable narrow mode-state tracing to capture the `32 MB` desktop path
+- [x] Correct the working-history baseline: the older good Voodoo4 desktop state before the guest-visible memory fixes was effectively an `8 MB` path, not a verified good `16 MB` Voodoo4 path
+- [x] Compare the bad `32 MB` mode-state trace against the older working pre-`32 MB` trace and confirm that the desktop start address moves upward while the mode still lands on `32bpp_tiled`
+- [x] Try and revert a V4-only desktop-base alias experiment that made the desktop worse
+- [x] Try and revert a V4-only zero-`lfbMemoryConfig` LFB guard that did not change the distortion
+- [x] Add V4-only high-base `2D` tracing in `vid_voodoo_banshee_blitter.c` for `rectfill`, `host_to_screen`, and `screen_to_screen`
+- [x] Verify from fresh traces that the high-base `2D` desktop path targets `dstBase=00d00000`
+- [x] Sample high-base `screen_to_screen` copies and verify they are internally consistent, including cases that copy zero-filled linear source data into visible desktop tiles
+- [x] Add V4-only high-base linear/LFB tracing in `vid_voodoo_banshee.c`
+- [x] Verify from fresh traces that the linear/LFB path writes to tiled base `0x01d00000` while desktop scanout and traced `2D` destinations remain at `0x00d00000`
+- [x] Verify from fresh manual screenshots that the remaining failure is inconsistent population: some windows/icons/labels render correctly while other desktop regions remain black or missing
 
 ## Next
 
-- [ ] Re-evaluate shared reset/default assumptions such as `Init_dramInit1`, SDRAM sizing, and `Init_strapInfo` only if the next post-desktop boundary points back to them
-- [ ] Decide the next smallest probe from the new baseline-desktop boundary rather than widening broadly into unrelated VSA-100 behavior
+- [ ] Determine whether the `0x01d00000` versus `0x00d00000` split is the root Voodoo4 higher-half LFB/address-translation bug or a downstream symptom of another population path
+- [ ] Trace which path leaves some linear source surfaces zero or stale before `screen_to_screen` copies move them into the visible tiled desktop
+- [ ] Keep the current narrow high-base `2D` and LFB tracing only until the higher-VRAM desktop mismatch is localized
 
 ## Open Questions
 
-- `Verified:` the first concrete runtime failure boundary now observed is `32-bit` color, which produces distortion under the installed Voodoo4 driver
+- `Verified:` the earlier concrete `32-bit` desktop distortion boundary is now closed for the manually tested common modes `640x480`, `800x600`, `1024x768`, and `1280x1024`
 - `Verified:` the current Banshee/Voodoo3 reuse path is now sufficient for at least ROM POST plus Windows desktop bring-up through `1024x768` `16-bit`
 - `Verified:` the traced good V4 Windows desktop path uses tiled `16-bit` scanout
 - `Verified:` the traced bad `800x600` `32-bit` V4 Windows path also uses tiled desktop scanout (`pixfmt=3`, `tile=1`)
@@ -104,10 +121,22 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 - `Verified:` after the same code change, manual VM retest also shows `1024x768` `32-bit` looking correct and the post-fix trace resolves that mode onto `32bpp_tiled`
 - `Verified:` additional manual VM retests now also show `640x480` `32-bit` and `1280x1024` `32-bit` looking correct
 - `Verified:` the strongest current emulator-side explanation for the reproduced `800x600` `32-bit` distortion was the missing tiled `32-bit` desktop renderer, not a broad generic `32-bit` or ROM-dispatch theory
+- `Verified:` the emulator-side Voodoo4 device config now exposes and defaults to `32 MB` SDRAM instead of inheriting the shared `16 MB` SDRAM default
+- `Verified:` after the Voodoo4-specific guest-visible memory/strap changes, 3DMark99 now reports roughly `31207 KB`, so the guest-visible VRAM sizing boundary is closed
+- `Verified:` the fresh bad `32 MB` desktop trace still uses `pixfmt=3`, `tile=1`, and `render=32bpp_tiled`
+- `Verified:` the older working pre-`32 MB` desktop baseline was effectively an `8 MB` path, not a verified good `16 MB` Voodoo4 path
+- `Verified:` compared with that older working pre-`32 MB` trace, the fresh bad `32 MB` desktop trace moves the desktop start address upward into higher VRAM
+- `Verified:` fresh high-base `2D` traces show `rectfill`, `host_to_screen`, and `screen_to_screen` activity targeting `dstBase=00d00000`
+- `Verified:` sampled `screen_to_screen` copies are internally consistent, including later copies that faithfully move zero-filled linear source data into visible desktop tiles
+- `Verified:` fresh linear/LFB traces now show writes landing at tiled base `0x01d00000` while desktop scanout and traced `2D` destinations remain at `0x00d00000`
+- `Verified:` the latest user screenshots show inconsistent rendering: some windows, icons, and labels render correctly while other desktop regions remain black or missing
+- `Inferred:` the active remaining bug is no longer “still only `8 MB`” or “missing tiled `32-bit` desktop rendering”; it is a higher-VRAM desktop-surface population/address-translation mismatch
 - `Unknown:` does Voodoo 4 require different reset defaults for existing modeled registers such as `Init_dramInit1`?
 - `Inferred:` another early PCI shell mismatch is now less likely than before, because the ROM-dispatch boundary was cleared by matching the subsystem tuple that the ROM itself validates.
 - `Unknown:` does the shared `16 MB` SDRAM BIOS default misstate Voodoo 4 memory sizing early enough to matter during POST?
 - `Unknown:` whether any less common desktop timings outside the now-tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` modes expose another tiled-path mismatch
+- `Unknown:` whether the exact fix is a V4-only linear/LFB higher-half alias/fold or another register/path that should reconcile `0x01d00000` and `0x00d00000`
+- `Unknown:` whether the higher-VRAM desktop surface is being corrupted by zero/stale source surfaces, LFB writes, or desktop scanout interpretation
 - `Unknown:` what additional Voodoo4/VSA-100 differences matter for `32-bit` color modes and beyond, now that the protected-mode driver path is known to be active?
 
 ## Blockers
@@ -115,7 +144,8 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 - No hard blocker at research level.
 - `Verified:` the earlier ROM-execution / pre-ext blocker is resolved.
 - `Verified:` the earlier blank-screen blocker is resolved through desktop bring-up, higher-resolution `16-bit` mode validation, and a driver-enabled configuration.
-- `Verified:` further work should now target the observed `32-bit` color distortion boundary rather than revisiting the solved pre-ext path.
+- `Verified:` the earlier common tiled `32-bit` desktop boundary is also resolved for the manually tested modes.
+- `Verified:` the active blocker is now the inconsistent higher-VRAM desktop path after `32 MB` becomes guest-visible.
 
 ## Working Rules
 

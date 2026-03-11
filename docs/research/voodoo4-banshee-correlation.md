@@ -76,7 +76,8 @@ Linux `tdfx.h` defines the same offsets under the names:
 - `Unknown:` how much of `0x70` and adjacent video-input/overlay state matters for plain VGA/VBE success.
 - `Unknown:` whether VSA-100 strap, SDRAM sizing, or scanout assumptions require changes inside shared Banshee/Voodoo3 code rather than a device-identity layer.
 - `Unknown:` whether any later driver-visible MMIO windows diverge enough to require new shared-core types or new register handlers.
-- `Unknown:` whether the failing `32-bit` desktop mode also uses tiled scanout in the same family as the traced good `16-bit` mode.
+- `Unknown:` whether the remaining `32 MB` desktop mismatch is best explained by Voodoo4 linear/LFB address translation, source-surface population, or later scanout interpretation.
+- `Unknown:` whether the traced `0x01d00000` linear/LFB target is supposed to alias the visible `0x00d00000` desktop base on Voodoo4.
 
 ## Phase 1 Gap Audit
 
@@ -128,6 +129,12 @@ This section records the pre-implementation audit result that drove the first mi
 - `Verified:` the bad `800x600` `32-bit` trace later proved that the failing path also kept desktop tiling enabled while still selecting the linear `32bpp` renderer.
 - `Verified:` the shared file now has a custom tiled `32-bit` desktop renderer in addition to `banshee_render_16bpp_tiled()`.
 - `Verified:` manual VM retests now show the tiled `32-bit` renderer fix working at `640x480`, `800x600`, `1024x768`, and `1280x1024`.
+- `Verified:` the working pre-`32 MB` Voodoo4 desktop baseline was effectively an `8 MB` path, not a separately verified good `16 MB` Voodoo4 path.
+- `Verified:` fresh bad-path mode traces still program `32bpp_tiled` with desktop start `0x00d00000`, while the older working pre-`32 MB` comparison trace used a lower desktop start such as `0x005f8000`.
+- `Verified:` fresh high-base `2D` traces show `rectfill`, `host_to_screen`, and `screen_to_screen` activity targeting `dstBase=00d00000`.
+- `Verified:` sampled `screen_to_screen` copies are internally consistent, including cases where a zero-filled linear source region is copied into the visible tiled desktop.
+- `Verified:` fresh linear/LFB traces now show writes landing at tiled base `0x01d00000` while desktop scanout and traced `2D` destinations remain at `0x00d00000`.
+- `Inferred:` the next likely Voodoo4-specific delta sits in higher-half linear/LFB or source-surface population behavior, not in the already-closed common tiled renderer path.
 
 ## Corrections to Earlier Voodoo 4 Assumptions
 

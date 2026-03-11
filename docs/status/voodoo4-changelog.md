@@ -45,6 +45,11 @@ Purpose: record the meaningful research and planning milestones for the `voodoo4
 - A longer live V4 Windows boot trace now shows the working driver-enabled desktop path programming tiled `16-bit` scanout (`pixfmt=1`, `tile=1`) and reaching the existing `16bpp_tiled` renderer.
 - The current shared code still has no custom tiled desktop renderer for `24-bit` or `32-bit`; only the `16-bit` tiled path exists today.
 - A reproduced `800x600` `32-bit` manual retest on 2026-03-11 now shows the bad V4 mode also programming tiled desktop scanout (`pixfmt=3`, `tile=1`), while still landing on the generic linear `32bpp` renderer before the latest code change.
+- The working pre-`32 MB` Voodoo4 desktop baseline was effectively an `8 MB` path, not a separately verified good `16 MB` Voodoo4 path.
+- Fresh high-base `2D` tracing now shows `rectfill`, `host_to_screen`, and `screen_to_screen` activity targeting desktop base `0x00d00000` on the bad `32 MB` path.
+- Sampled high-base `screen_to_screen` copies are internally consistent, including later copies that faithfully move zero-filled linear source data into visible desktop tiles.
+- Fresh linear/LFB tracing now shows writes landing at tiled base `0x01d00000` while desktop scanout and traced `2D` destinations remain at `0x00d00000`, an exact `0x01000000` (`16 MB`) split.
+- Latest manual screenshots now show the remaining `32 MB` desktop failure is inconsistent rather than uniformly broken: some windows, icons, and labels render correctly while other desktop regions remain black or missing.
 
 ### Reframed
 
@@ -55,6 +60,7 @@ Purpose: record the meaningful research and planning milestones for the `voodoo4
 - The earlier ROM-dispatch/handoff theory is no longer the best description of the failure. The stronger description is that the ROM was already executing, but its own subsystem-ID validation was rejecting the provisional Voodoo4 PCI `0x2c-0x2f` tuple before ext-register traffic began.
 - The new boundary is no longer "pre-ext dispatch"; it is now "driver-enabled `32-bit` color distortion beyond the currently verified `16-bit` desktop modes."
 - The strongest current hypothesis is no longer just a possibility. The bad `800x600` `32-bit` mode has now been traced as tiled desktop scanout, so the narrower question is whether the newly added tiled `32-bit` renderer is sufficient or whether a second mismatch remains.
+- The strongest live lead is no longer a generic higher-VRAM `2D` mismatch. The narrower question is whether Voodoo4 linear/LFB handling or another source-surface population path is misaddressing the higher half by exactly `16 MB`.
 
 ### Corrected
 
@@ -66,6 +72,7 @@ Purpose: record the meaningful research and planning milestones for the `voodoo4
 - That all-zero subsystem-ID block is not, by itself, the root cause of the blank screen: a minimal nonzero probe did not advance execution into ext-register setup.
 - The provisional Voodoo4 subsystem-ID probe `121a:0009` was not the ROM-backed board tuple. The tested 1.18 ROM expects `121a:0004` at PCI `0x2c-0x2f`.
 - The BIOS was not refusing to dispatch the Voodoo4 ROM. The ROM was being shadowed and executed; the failure was earlier inside the ROM's own config validation.
+- Earlier references to an "earlier good `16 MB` trace" were inaccurate. The working pre-`32 MB` Voodoo4 desktop state was effectively an `8 MB` path.
 
 ### Implemented
 
@@ -82,17 +89,27 @@ Purpose: record the meaningful research and planning milestones for the `voodoo4
 - Rebuilt successfully and re-ran `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the targeted tracing delta.
 - Captured a longer live V4 Windows boot trace at `/tmp/voodoo4-mode-boundary.log`.
 - Added a shared tiled `32-bit` desktop renderer in `vid_voodoo_banshee.c` and routed tiled `PIX_FORMAT_RGB32` desktop scanout to it.
+- Added a Voodoo4-specific SDRAM device config that exposes `32 MB` and switched the reuse-first Voodoo4 path away from the inherited shared `16 MB` SDRAM default.
 - Rebuilt successfully and re-ran `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the tiled `32-bit` renderer delta.
+- Rebuilt successfully and re-ran `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the Voodoo4 `32 MB` memory-config change.
 - Manual VM retest on 2026-03-11 now shows `800x600` `32-bit` looking correct after that delta, and the post-fix trace confirms the working mode resolves onto `32bpp_tiled`.
 - Manual VM retest on 2026-03-11 also shows `1024x768` `32-bit` looking correct after that same delta, and the post-fix trace confirms that higher mode also resolves onto `32bpp_tiled`.
 - Additional manual VM retests on 2026-03-11 show `640x480` `32-bit` and `1280x1024` `32-bit` also looking correct after the same delta.
 - Removed the temporary Voodoo4 mode-state tracing after the tiled `32-bit` desktop investigation was complete, then rebuilt and re-ran `bash scripts/test-voodoo4-blank-boundary.sh` successfully.
+- Added a Voodoo4-specific `32 MB` guest-visible memory report path so 3DMark99 now reports about `31207 KB` instead of `8 MB`.
+- Re-enabled narrow mode-state tracing after the `32 MB` work reproduced a new desktop-only symptom: distortion once the driver uses a higher-VRAM tiled desktop surface.
+- Fresh `32 MB` traces now show the bad mode still landing on `32bpp_tiled` while shifting the desktop start address upward relative to the older working pre-`32 MB` trace.
+- Tried a V4-only desktop-base alias experiment and reverted it after it made the desktop worse.
+- Tried a V4-only zero-`lfbMemoryConfig` LFB guard and reverted it after it did not change the distortion.
+- Added temporary V4-only high-base `2D` tracing and sampled copy logging in `vid_voodoo_banshee_blitter.c`.
+- Added temporary V4-only high-base linear/LFB tracing in `vid_voodoo_banshee.c`.
 
 ### Open
 
-- Why `32-bit` color distorts under the installed Voodoo4 driver when `1024x768` `16-bit` already works
 - Whether any less common desktop timings outside the now-tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` modes expose another tiled-path mismatch
-- Whether shared defaults such as `Init_dramInit1`, SDRAM sizing, or `Init_strapInfo` matter for richer mode sets or protected-mode driver enable rather than for basic bring-up
+- Whether `screen_to_screen` is merely copying zeros from an upstream-unpopulated linear source surface on the bad `32 MB` path
+- Whether the exact remaining mismatch is a V4-only linear/LFB higher-half alias/fold problem or another source-surface population issue
+- Whether that remaining mismatch is in linear/LFB writes, source-surface population, or desktop scanout interpretation rather than in guest-visible memory sizing itself
 
 ## Maintenance Notes
 

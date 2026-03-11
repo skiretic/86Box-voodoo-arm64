@@ -20,6 +20,7 @@ Scope: fresh Voodoo 4 4500 / VSA-100 investigation on branch `voodoo4-restart`, 
 - [Executive summary](../status/voodoo4-executive-summary.md)
 - [Tracker](../status/voodoo4-tracker.md)
 - [Changelog](../status/voodoo4-changelog.md)
+- [Next-session prompt](../plans/voodoo4-next-session-prompt.md)
 
 ## Primary Evidence Used
 
@@ -47,9 +48,11 @@ Scope: fresh Voodoo 4 4500 / VSA-100 investigation on branch `voodoo4-restart`, 
 - `Verified:` the ROM uses many offsets that directly match the Banshee/Voodoo3-era register block described by Linux `tdfx.h` and by 86Box `vid_voodoo_banshee.c`.
 - `Verified:` the ROM contains standard VGA and VBE dispatch code, not just a minimal VSA-100-only bootstrap.
 - `Inferred:` first bring-up should bias toward reusing the existing 86Box Banshee/Voodoo3 VGA/display path and only splitting when a reproduced VSA-100 difference is proven.
-- `Verified:` the current reuse-first path now reaches ROM POST and manual Windows desktop bring-up through at least `800x600` `16-bit`.
-- `Inferred:` the strongest remaining deltas for Voodoo 4 are now more likely to be memory-sizing/strap behavior, richer mode-set behavior beyond `800x600` `16-bit`, or protected-mode driver details, not wholesale VGA POST handling.
-- `Unknown:` which parts of VSA-100 scanout, memory timing, and 3D/MMIO behavior are materially different enough to require new shared-core modeling beyond the working desktop baseline.
+- `Verified:` the current reuse-first path now reaches ROM POST, manual Windows desktop bring-up, and manually tested common tiled `32-bit` desktop modes once the earlier renderer gap is closed.
+- `Verified:` after the later guest-visible `32 MB` memory fixes, the live failure is no longer a generic mode-set failure but an inconsistent higher-VRAM desktop population bug.
+- `Verified:` fresh runtime tracing now shows visible `2D` work targeting `0x00d00000` while a separate linear/LFB path writes to `0x01d00000`.
+- `Inferred:` the strongest remaining delta for Voodoo 4 is now more likely to be higher-half linear/LFB or source-surface population behavior than wholesale VGA POST handling.
+- `Unknown:` which parts of VSA-100 scanout, memory timing, and 3D/MMIO behavior are materially different enough to require new shared-core modeling beyond that desktop baseline.
 
 ## Earlier Assumptions That Now Look Weak
 

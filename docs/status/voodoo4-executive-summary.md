@@ -22,6 +22,16 @@ Previous Voodoo 4 work in this repo accumulated implementation assumptions befor
 - `Verified:` the same tiled `32-bit` renderer change also restores manually tested `1024x768` `32-bit`, and the post-fix trace resolves that mode onto `32bpp_tiled`.
 - `Verified:` additional manual checks now also show `640x480` `32-bit` and `1280x1024` `32-bit` working correctly after the same change.
 - `Verified:` the strongest current emulator-side explanation for the reproduced `800x600` `32-bit` distortion is no longer hypothetical: the shared path was missing tiled `32-bit` desktop scanout even though tiled `16-bit` scanout already existed.
+- `Verified:` the emulator-side Voodoo4 device config now exposes and defaults to `32 MB` SDRAM instead of inheriting the shared `16 MB` SDRAM default.
+- `Verified:` the guest now sees `32 MB` VRAM after the Voodoo4-specific memory/strap fixes; 3DMark99 reports roughly `31207 KB`.
+- `Verified:` the pre-`32 MB` working Voodoo4 desktop baseline was effectively an `8 MB` path; there was no separately verified good `16 MB` Voodoo4 desktop path.
+- `Verified:` the current remaining symptom is not “still only `8 MB`.” It is an inconsistent `2D` desktop once the Voodoo4 driver places the tiled `32-bit` desktop surface in higher VRAM.
+- `Verified:` fresh mode-state tracing on the `32 MB` path still lands on `32bpp_tiled`, but the desktop start address moves upward relative to the older working pre-`32 MB` trace.
+- `Verified:` recent manual screenshots show the failure is inconsistent rather than uniformly broken: some windows, icons, and labels render correctly while other desktop regions remain black or missing.
+- `Verified:` current high-base `2D` tracing shows `rectfill`, `host_to_screen`, and `screen_to_screen` activity targeting desktop base `0x00d00000`.
+- `Verified:` sampled high-base `screen_to_screen` copies are internally consistent, including later copies that faithfully move zero-filled linear source data into visible desktop tiles.
+- `Verified:` fresh linear/LFB traces now show writes landing at tiled base `0x01d00000` while desktop scanout and traced `2D` destinations remain at `0x00d00000`, an exact `0x01000000` (`16 MB`) split.
+- `Inferred:` the strongest current lead is no longer a generic tiled-renderer or scanout bug. It is a higher-half desktop-surface population/address-translation mismatch, most likely around Voodoo4 linear/LFB handling or the surfaces that later get copied into the visible tiled desktop.
 - `Inferred:` the most likely successful bring-up path is reuse-first, not a clean-sheet Voodoo 4 rewrite.
 
 ## Strategic Recommendation
@@ -29,9 +39,10 @@ Previous Voodoo 4 work in this repo accumulated implementation assumptions befor
 The effort should continue from the new post-desktop boundary by proving the next smallest Voodoo 4-specific delta on top of the current Banshee/Voodoo3 path:
 
 1. preserve the current working PCI identity, ROM exposure, and ROM-backed subsystem tuple
-2. capture the first failing `32-bit` mode-set with the new mode-state tracing still enabled, so the bad path can be compared directly against the now-traced good tiled `16-bit` path
-3. only if that bad trace confirms a concrete divergence such as tiled `32-bit` scanout should the next code delta implement the smallest matching renderer/state fix
-4. only then revisit any proven VSA-100-specific reset/default differences that line up with that failure
+2. treat the earlier common tiled `32-bit` renderer boundary as closed for the manually tested modes `640x480`, `800x600`, `1024x768`, and `1280x1024`
+3. treat the new `32 MB` bring-up result as a fresh reproduced post-desktop symptom: inconsistent desktop population after the driver moves the surface into higher VRAM
+4. target the next smallest shared-path mismatch in higher-VRAM desktop-surface population or address translation before widening into unrelated VSA-100 or 3D work
+5. keep proven dead ends closed: do not reopen ROM-dispatch theory, and do not reuse the reverted desktop-base alias or zero-`lfbMemoryConfig` LFB-guard experiments
 
 This recommendation is driven by both the ROM and the current runtime result. The BIOS and Windows desktop path already prove substantial shared VGA-era behavior. That makes a premature standalone architecture high-risk and weakly supported.
 
@@ -46,11 +57,12 @@ This recommendation is driven by both the ROM and the current runtime result. Th
 ## Key Risks
 
 - `Inferred:` the main technical risk is overcommitting to a standalone Voodoo 4 implementation path before exhausting proven reuse.
-- `Verified:` the first meaningful hardware gap now appears on the driver-enabled `32-bit` color path, where the user reports distortion while `1024x768` `16-bit` works.
+- `Verified:` the first meaningful remaining desktop gap now appears on the driver-enabled higher-VRAM `32-bit` path, where rendering is inconsistent rather than uniformly broken.
 - `Verified:` the leading local-code candidate, the tiled `32-bit` desktop render path, was sufficient for the reproduced `800x600` `32-bit` failure and the manually tested `1024x768` `32-bit` mode.
 - `Verified:` the same fix also holds for manually tested `640x480` `32-bit` and `1280x1024` `32-bit`.
 - `Unknown:` whether any less common desktop timings outside the now-tested modes expose another mismatch.
-- `Unknown:` VSA-100-specific memory-sizing or reset-default behavior may still require shared-core changes once the first post-desktop failure is captured.
+- `Unknown:` which exact shared path leaves some higher-VRAM source surfaces zero or stale before they are copied into the visible tiled desktop.
+- `Unknown:` whether the remaining mismatch is in linear/LFB writes, source-surface population, or desktop scanout interpretation of that higher VRAM region.
 
 ## Decision Rule Going Forward
 

@@ -142,6 +142,17 @@ typedef struct banshee_t {
     uint32_t v4_trace_flags;
     uint16_t v4_ext_seen_mask;
     uint8_t  v4_rom_trace_count;
+    uint8_t  v4_mode_trace_count;
+    uint8_t  v4_mode_trace_started;
+    uint32_t v4_mode_last_dacMode;
+    uint32_t v4_mode_last_vidProcCfg;
+    uint32_t v4_mode_last_vidInFormat;
+    uint32_t v4_mode_last_vidScreenSize;
+    uint32_t v4_mode_last_vidDesktopStartAddr;
+    uint32_t v4_mode_last_vidDesktopOverlayStride;
+    int      v4_mode_last_bpp;
+    int      v4_mode_last_rowoffset;
+    void   (*v4_mode_last_render)(svga_t *);
     uint64_t trace_pci_read_seen[4];
 
     uint32_t overlay_buffer[2][4096];
@@ -167,6 +178,8 @@ typedef struct banshee_t {
 
     void *i2c, *i2c_ddc, *ddc;
 } banshee_t;
+
+static uint8_t high_base_linear_write_trace_count;
 
 enum {
     Init_status          = 0x00,
@@ -392,26 +405,32 @@ static int
 banshee_v4_trace_ext_index(uint16_t addr)
 {
     switch (addr) {
-        case Init_dramInit1:
+        case Init_lfbMemoryConfig:
             return 0;
-        case Init_vgaInit0:
+        case Init_dramInit0:
             return 1;
-        case Init_vgaInit1:
+        case Init_dramInit1:
             return 2;
-        case PLL_pllCtrl0:
+        case Init_strapInfo:
             return 3;
-        case DAC_dacMode:
+        case Init_vgaInit0:
             return 4;
-        case Video_vidProcCfg:
+        case Init_vgaInit1:
             return 5;
-        case Video_vidInFormat:
+        case PLL_pllCtrl0:
             return 6;
-        case Video_vidScreenSize:
+        case DAC_dacMode:
             return 7;
-        case Video_vidDesktopStartAddr:
+        case Video_vidProcCfg:
             return 8;
-        case Video_vidDesktopOverlayStride:
+        case Video_vidInFormat:
             return 9;
+        case Video_vidScreenSize:
+            return 10;
+        case Video_vidDesktopStartAddr:
+            return 11;
+        case Video_vidDesktopOverlayStride:
+            return 12;
         default:
             return -1;
     }
@@ -435,6 +454,69 @@ banshee_v4_trace_ext_access(banshee_t *banshee, const char *op, uint16_t addr, u
 
 static void banshee_render_16bpp_tiled(svga_t *svga);
 static void banshee_render_32bpp_tiled(svga_t *svga);
+
+static const char *
+banshee_trace_render_name(void (*render)(svga_t *))
+{
+    if (render == svga_render_null)
+        return "null";
+    if (render == svga_render_8bpp_highres)
+        return "8bpp";
+    if (render == svga_render_16bpp_highres)
+        return "16bpp";
+    if (render == banshee_render_16bpp_tiled)
+        return "16bpp_tiled";
+    if (render == svga_render_24bpp_highres)
+        return "24bpp";
+    if (render == svga_render_32bpp_highres)
+        return "32bpp";
+    if (render == banshee_render_32bpp_tiled)
+        return "32bpp_tiled";
+
+    return "other";
+}
+
+static void
+banshee_v4_trace_mode_state(banshee_t *banshee, const char *reason)
+{
+    svga_t *svga = &banshee->svga;
+
+    if (!banshee_trace_enabled(banshee) || (banshee->v4_mode_trace_count >= 64))
+        return;
+
+    if (banshee->v4_mode_trace_started &&
+        (banshee->v4_mode_last_dacMode == banshee->dacMode) &&
+        (banshee->v4_mode_last_vidProcCfg == banshee->vidProcCfg) &&
+        (banshee->v4_mode_last_vidInFormat == banshee->vidInFormat) &&
+        (banshee->v4_mode_last_vidScreenSize == banshee->vidScreenSize) &&
+        (banshee->v4_mode_last_vidDesktopStartAddr == banshee->vidDesktopStartAddr) &&
+        (banshee->v4_mode_last_vidDesktopOverlayStride == banshee->vidDesktopOverlayStride) &&
+        (banshee->v4_mode_last_bpp == svga->bpp) &&
+        (banshee->v4_mode_last_rowoffset == svga->rowoffset) &&
+        (banshee->v4_mode_last_render == svga->render))
+        return;
+
+    banshee->v4_mode_trace_started              = 1;
+    banshee->v4_mode_last_dacMode              = banshee->dacMode;
+    banshee->v4_mode_last_vidProcCfg           = banshee->vidProcCfg;
+    banshee->v4_mode_last_vidInFormat          = banshee->vidInFormat;
+    banshee->v4_mode_last_vidScreenSize        = banshee->vidScreenSize;
+    banshee->v4_mode_last_vidDesktopStartAddr  = banshee->vidDesktopStartAddr;
+    banshee->v4_mode_last_vidDesktopOverlayStride = banshee->vidDesktopOverlayStride;
+    banshee->v4_mode_last_bpp                  = svga->bpp;
+    banshee->v4_mode_last_rowoffset            = svga->rowoffset;
+    banshee->v4_mode_last_render               = svga->render;
+
+    banshee->v4_mode_trace_count++;
+    banshee_v4_trace(
+        banshee,
+        "%s trace: mode[%u] %s dacMode=%08x vidProcCfg=%08x pixfmt=%u tile=%u half=%u vidInFmt=%08x screen=%08x start=%08x stride=%08x bpp=%d rowoffset=%d render=%s\n",
+        banshee_trace_label(banshee), banshee->v4_mode_trace_count, reason, banshee->dacMode, banshee->vidProcCfg,
+        VIDPROCCFG_DESKTOP_PIX_FORMAT, !!(banshee->vidProcCfg & VIDPROCCFG_DESKTOP_TILE),
+        !!(banshee->vidProcCfg & VIDPROCCFG_HALF_MODE), banshee->vidInFormat, banshee->vidScreenSize,
+        banshee->vidDesktopStartAddr, banshee->vidDesktopOverlayStride, svga->bpp, svga->rowoffset,
+        banshee_trace_render_name(svga->render));
+}
 
 static void
 banshee_v4_trace_rom_read(banshee_t *banshee, const char *width, uint32_t addr, uint32_t val)
@@ -951,6 +1033,10 @@ banshee_recalctimings(svga_t *svga)
 
     svga->fb_only = (banshee->vidProcCfg & VIDPROCCFG_VIDPROC_ENABLE);
 
+    if (banshee_trace_enabled(banshee) &&
+        (banshee->vidProcCfg || banshee->vidScreenSize || banshee->vidDesktopStartAddr || banshee->vidDesktopOverlayStride))
+        banshee_v4_trace_mode_state(banshee, "recalctimings");
+
     if (((svga->miscout >> 2) & 3) == 3) {
         int    k    = banshee->pllCtrl0 & 3;
         int    m    = (banshee->pllCtrl0 >> 2) & 0x3f;
@@ -1122,6 +1208,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             banshee->dacMode = val;
             svga->dpms       = !!(val & 0x0a);
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "dacMode");
             break;
         case DAC_dacAddr:
             banshee->dacAddr = val & 0x1ff;
@@ -1141,6 +1228,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             svga->fullchange         = changeframecount;
             svga->lut_map            = !(val & VIDPROCCFG_DESKTOP_CLUT_BYPASS) && (svga->bpp < 24);
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "vidProcCfg");
             break;
 
         case Video_maxRgbDelta:
@@ -1182,6 +1270,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
 
         case Video_vidInFormat:
             banshee->vidInFormat = val;
+            banshee_v4_trace_mode_state(banshee, "vidInFormat");
             break;
 
         case Video_vidSerialParallelPort:
@@ -1205,6 +1294,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             banshee->vidScreenSize = val;
             voodoo->h_disp         = (val & 0xfff) + 1;
             voodoo->v_disp         = (val >> 12) & 0xfff;
+            banshee_v4_trace_mode_state(banshee, "vidScreenSize");
             break;
         case Video_vidOverlayStartCoords:
             voodoo->overlay.vidOverlayStartCoords = val;
@@ -1252,6 +1342,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
 #endif
             svga->fullchange = changeframecount;
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "vidDesktopStartAddr");
             break;
         case Video_vidDesktopOverlayStride:
             banshee->vidDesktopOverlayStride = val;
@@ -1260,6 +1351,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
 #endif
             svga->fullchange = changeframecount;
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "vidDesktopOverlayStride");
             break;
         default:
 #if 0
@@ -1449,7 +1541,10 @@ banshee_ext_inl(uint16_t addr, void *priv)
             ret = banshee->srcBaseAddr_2d;
             break;
         case Init_strapInfo:
-            ret = 0x00000040; /*8 MB SGRAM, PCI, IRQ enabled, 32kB BIOS*/
+            if (banshee->type == TYPE_V4_4500)
+                ret = 0x00000448; /* SDRAM, AGP, 16 Mbit strap pin, IRQ enabled, 32kB BIOS */
+            else
+                ret = 0x00000040; /*8 MB SGRAM, PCI, IRQ enabled, 32kB BIOS*/
             break;
 
         case PLL_pllCtrl0:
@@ -2413,6 +2508,8 @@ banshee_write_linear_l(uint32_t addr, uint32_t val, void *priv)
     voodoo_t  *voodoo  = banshee->voodoo;
     svga_t    *svga    = &banshee->svga;
     int        timing;
+    uint32_t   decoded_addr;
+    uint32_t   orig_addr = addr;
 
     if (addr & 3) {
         banshee_write_linear_w(addr, val, priv);
@@ -2432,6 +2529,7 @@ banshee_write_linear_l(uint32_t addr, uint32_t val, void *priv)
         banshee_log("write_linear_l: addr=%08x val=%08x  %08x\n", addr, val, voodoo->tile_base);
 #endif
     addr &= svga->decode_mask;
+    decoded_addr = addr;
     if (addr >= voodoo->tile_base) {
         int x;
         int y;
@@ -2444,6 +2542,22 @@ banshee_write_linear_l(uint32_t addr, uint32_t val, void *priv)
 #if 0
         banshee_log("  Tile %08x->%08x->%08x->%08x %i %i  tile_x=%i\n", old_addr, addr_off, addr2, addr, x, y, voodoo->tile_x_real);
 #endif
+    }
+
+    if ((high_base_linear_write_trace_count < 64) &&
+        (banshee->desktop_addr >= 0x800000) &&
+        (addr >= banshee->desktop_addr)) {
+        high_base_linear_write_trace_count++;
+        pclog("V4 LFB trace[%u]: orig=%08x decoded=%08x mapped=%08x val=%08x tileBase=%08x tileStride=%08x tileX=%08x desktop=%08x\n",
+              high_base_linear_write_trace_count,
+              orig_addr,
+              decoded_addr,
+              addr,
+              val,
+              voodoo->tile_base,
+              voodoo->tile_stride,
+              voodoo->tile_x_real,
+              banshee->desktop_addr);
     }
 
     if (addr >= svga->vram_max)
@@ -3707,7 +3821,9 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
             mem_size = 8; /* Velocity 100 only supports 8 MB */
         else
             mem_size = device_get_config_int("memory");
-    } else
+    } else if (banshee->type == TYPE_V4_4500)
+        mem_size = 32; /* Voodoo4 4500 uses 32 MB SDRAM */
+    else
         mem_size = 16; /* SDRAM Banshee only supports 16 MB */
 
     banshee_v4_trace_once(banshee, V4_TRACE_INIT,
@@ -3758,7 +3874,10 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
     banshee->svga.bpp     = 8;
     banshee->svga.miscout = 1;
 
-    banshee->dramInit0 = 1 << 27;
+    if (banshee->type == TYPE_V4_4500)
+        banshee->dramInit0 = 0x18000000; /* 4 chips * 8 MB/chip = 32 MB per Linux tdfxfb Voodoo4/5 sizing logic */
+    else
+        banshee->dramInit0 = 1 << 27;
     if (has_sgram && mem_size == 16)
         banshee->dramInit0 |= (1 << 26); /*2xSGRAM = 16 MB*/
     if (!has_sgram)
@@ -4399,6 +4518,108 @@ static const device_config_t banshee_sdram_config[] = {
     },
     { .name = "", .description = "", .type = CONFIG_END }
 };
+
+static const device_config_t voodoo_4_4500_sdram_config[] = {
+    {
+        .name           = "memory",
+        .description    = "Memory size",
+        .type           = CONFIG_SELECTION,
+        .default_string = NULL,
+        .default_int    = 32,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = {
+            { .description = "32 MB", .value = 32 },
+            { .description = ""                   }
+        },
+        .bios           = { { 0 } }
+    },
+    {
+        .name           = "bilinear",
+        .description    = "Bilinear filtering",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 1,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+    {
+        .name           = "chromakey",
+        .description    = "Video chroma-keying",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 1,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+    {
+        .name           = "dithersub",
+        .description    = "Dither subtraction",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 1,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+    {
+        .name           = "dacfilter",
+        .description    = "Screen Filter",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 0,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+    {
+        .name           = "render_threads",
+        .description    = "Render threads",
+        .type           = CONFIG_SELECTION,
+        .default_string = NULL,
+        .default_int    = 2,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = {
+            { .description = "1", .value = 1 },
+            { .description = "2", .value = 2 },
+            { .description = "4", .value = 4 },
+            { .description = ""              }
+        },
+        .bios           = { { 0 } }
+    },
+#ifndef NO_CODEGEN
+    {
+        .name           = "recompiler",
+        .description    = "Dynamic Recompiler",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 1,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+#endif
+    {
+        .name           = "jit_debug",
+        .description    = "JIT Debug Logging",
+        .type           = CONFIG_BINARY,
+        .default_string = NULL,
+        .default_int    = 0,
+        .file_filter    = NULL,
+        .spinner        = { 0 },
+        .selection      = { { 0 } },
+        .bios           = { { 0 } }
+    },
+    { .name = "", .description = "", .type = CONFIG_END }
+};
 // clang-format on
 
 const device_t voodoo_banshee_device = {
@@ -4650,5 +4871,5 @@ const device_t voodoo_4_4500_agp_device = {
     .available     = v4_4500_agp_available,
     .speed_changed = banshee_speed_changed,
     .force_redraw  = banshee_force_redraw,
-    .config        = banshee_sdram_config
+    .config        = voodoo_4_4500_sdram_config
 };

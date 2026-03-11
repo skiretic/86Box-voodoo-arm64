@@ -16,7 +16,13 @@ This plan intentionally replaces assumption-driven implementation planning with 
 - `Verified:` targeted mode-state tracing now shows the good live V4 Windows desktop path programming tiled `16-bit` scanout.
 - `Verified:` the first reproduced `32-bit` desktop failure was tiled scanout landing on the wrong renderer.
 - `Verified:` the smallest matching shared-path fix, a tiled `32-bit` desktop renderer, now restores the manually tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` desktop modes.
-- `Inferred:` the active milestone is no longer “capture the first bad `32-bit` desktop path”; it is now “use the stronger desktop baseline to evaluate the next real Voodoo4-specific unknown only when a fresh symptom points there.”
+- `Verified:` the Voodoo4 path now exposes/defaults to `32 MB`, and guest-visible tools now also report about `31207 KB`.
+- `Verified:` the working pre-`32 MB` desktop baseline was effectively an `8 MB` path, not a separately verified good `16 MB` Voodoo4 path.
+- `Verified:` that `32 MB` change exposes a fresh desktop-only symptom: the tiled `32-bit` desktop surface becomes inconsistently populated once the driver moves it into higher VRAM.
+- `Verified:` fresh high-base `2D` traces show the bad path launching `rectfill`, `host_to_screen`, and `screen_to_screen` against desktop base `0x00d00000`.
+- `Verified:` sampled `screen_to_screen` copies are internally consistent, including later copies that faithfully move zero-filled linear source data into visible desktop tiles.
+- `Verified:` fresh linear/LFB traces show writes landing at tiled base `0x01d00000` while desktop scanout and traced `2D` destinations remain at `0x00d00000`.
+- `Inferred:` the active milestone is no longer “capture the first bad `32-bit` desktop path”; it is now “localize the higher-half desktop-surface population/address-translation mismatch without reopening solved ROM or common tiled-renderer boundaries.”
 
 ## Non-Goals for the First Recovery Pass
 
@@ -80,13 +86,18 @@ Separate true VSA-100 deltas from accidental emulator gaps.
 
 ### Questions to answer
 
-1. `Verified:` the first concrete failure beyond the earlier desktop milestone was distortion in tiled `32-bit` color with the Voodoo4 driver installed.
+1. `Verified:` the earlier common tiled `32-bit` desktop distortion boundary is now closed for the manually tested `640x480`, `800x600`, `1024x768`, and `1280x1024` modes.
 2. `Verified:` the traced good `16-bit` desktop path uses tiled scanout.
 3. `Verified:` the traced bad `32-bit` desktop path also used tiled scanout, but initially fell through to the linear `32bpp` renderer.
 4. `Verified:` adding a tiled `32-bit` desktop renderer fixed the manually tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` desktop modes.
-5. `Unknown:` do Voodoo 4 display or memory-related registers require different reset values than Banshee/Voodoo3 beyond the now-working desktop scanout baseline?
-6. `Unknown:` do shared assumptions such as SDRAM sizing or `Init_strapInfo` become visible on a later failing path?
-7. `Inferred:` Voodoo4/Voodoo5 differences that still matter are now more likely to sit in richer driver-visible behavior than in basic VGA/VBE bring-up or common desktop scanout.
+5. `Verified:` guest-visible VRAM sizing is now corrected to `32 MB`.
+6. `Verified:` the remaining desktop failure still lands on `32bpp_tiled`, so the active bug is not the earlier missing tiled renderer.
+7. `Verified:` fresh high-base `2D` traces show the visible desktop work targeting `0x00d00000`.
+8. `Verified:` sampled `screen_to_screen` copies behave consistently with their sources, including copies of already-zero linear source regions into visible desktop tiles.
+9. `Verified:` fresh linear/LFB traces simultaneously show writes targeting `0x01d00000`, exactly `16 MB` above the visible desktop base.
+10. `Unknown:` is the real mismatch in Voodoo4 linear/LFB address translation, in upstream source-surface population, or in desktop scanout interpretation?
+11. `Unknown:` do Voodoo 4 display or memory-related registers require different reset values than Banshee/Voodoo3 beyond the now-working common desktop scanout baseline?
+12. `Inferred:` Voodoo4/Voodoo5 differences that still matter are now more likely to sit in richer driver-visible desktop/2D behavior than in basic VGA/VBE bring-up.
 
 ### Exit criteria
 
@@ -108,10 +119,11 @@ Use old research only after the fresh baseline exists.
 
 1. `Verified:` preserve the new docs in this repo as the current source of truth.
 2. `Verified:` preserve the current functional fix in `vid_voodoo_banshee.c`: PCI device ID `121a:0009`, ROM-backed subsystem tuple `121a:0004`, and the existing ext offset `0x70` coverage.
-3. `Verified:` the temporary targeted mode-state tracing has been removed now that the bad `32-bit` mode was captured and resolved.
-4. `Inferred:` only revisit fresh runtime tracing if a new display or driver-visible symptom appears.
-5. `Inferred:` the next smallest code delta should now be driven by a new reproduced post-desktop symptom, not by the solved tiled `32-bit` desktop boundary.
-6. `Inferred:` only if that next boundary points back to reset/default assumptions should the next code delta target SDRAM sizing, `Init_dramInit1`, `DACMODE`, stride, or `Init_strapInfo`.
+3. `Verified:` temporary targeted mode-state tracing has been re-enabled because the `32 MB` work exposed a fresh post-desktop symptom.
+4. `Verified:` two tiny runtime experiments against that fresh symptom were already tried and reverted: a desktop-base alias hack and a zero-`lfbMemoryConfig` LFB guard.
+5. `Verified:` temporary high-base `2D` and linear/LFB tracing is now in place in `vid_voodoo_banshee_blitter.c` and `vid_voodoo_banshee.c`.
+6. `Inferred:` the next smallest code delta should target the Voodoo4 linear/LFB or source-surface population path, not the already-solved guest-visible memory report or the already-closed common tiled `32-bit` renderer gap.
+7. `Inferred:` only if that next boundary points back to reset/default assumptions should the next code delta retarget SDRAM sizing, `Init_dramInit1`, `DACMODE`, stride, or `Init_strapInfo`.
 
 ## Supporting Documents
 
