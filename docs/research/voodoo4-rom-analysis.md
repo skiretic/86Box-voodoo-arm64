@@ -115,6 +115,14 @@ jmp [cs:si+0xfe]
   - `Verified:` starts with `AX=B102h`, `CX=0x0009`, `DX=0x121a`
   - `Verified:` the ROM explicitly asks PCI BIOS to find a `3dfx` device with device ID `0x0009`
 
+### Subsystem validation helper
+
+- File offset `0x3db2`
+  - `Verified:` reads PCI config dword `0x2c-0x2f` through PCI BIOS helper calls
+  - `Verified:` compares that dword against the 32-bit value stored at the end of the ROM's declared `0xa000` image
+  - `Verified:` for `V4_4500_AGP_SD_1.18.rom`, that stored value is subsystem tuple `121a:0004` at declared-image offset `0x9ff8`
+  - `Verified:` runtime tracing later confirmed that matching this tuple is what unlocks the first Voodoo4 ext-register writes
+
 ## Likely Initialization Routines
 
 ### File offset `0x3462`
@@ -163,6 +171,7 @@ Observed behavior:
 
 - `Verified:` Voodoo 4 4500 BIOS initialization is not detached from legacy VGA and VBE behavior.
 - `Verified:` the ROM expects PCI identity `121a:0009`.
+- `Verified:` the tested ROM also expects subsystem tuple `121a:0004` at PCI `0x2c-0x2f` for its early helper validation.
 - `Verified:` the ROM uses a Banshee/Voodoo3-style extended register block shape with offsets that closely match public `tdfx` documentation.
 - `Inferred:` early VGA/display bring-up should be investigated as an extension of Banshee/Voodoo3 behavior, not as a clean-sheet VSA-100-only path.
 

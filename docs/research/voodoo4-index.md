@@ -43,11 +43,13 @@ Scope: fresh Voodoo 4 4500 / VSA-100 investigation on branch `voodoo4-restart`, 
 
 - `Verified:` the ROM is a conventional x86 PCI option ROM with a standard `0x55 0xaa` header, a `PCIR` structure, and x86 entry code. It is not an EFI-only image.
 - `Verified:` the ROM actively searches PCI BIOS for vendor `0x121a`, device `0x0009`.
+- `Verified:` the tested ROM also validates PCI subsystem tuple `121a:0004` against PCI `0x2c-0x2f` before the first traced ext-register writes.
 - `Verified:` the ROM uses many offsets that directly match the Banshee/Voodoo3-era register block described by Linux `tdfx.h` and by 86Box `vid_voodoo_banshee.c`.
 - `Verified:` the ROM contains standard VGA and VBE dispatch code, not just a minimal VSA-100-only bootstrap.
 - `Inferred:` first bring-up should bias toward reusing the existing 86Box Banshee/Voodoo3 VGA/display path and only splitting when a reproduced VSA-100 difference is proven.
-- `Inferred:` the strongest likely deltas for Voodoo 4 are PCI identity, memory-sizing/strap behavior, and some later video/input-format or 3D-family details, not a wholesale rewrite of VGA POST handling.
-- `Unknown:` which parts of VSA-100 scanout, memory timing, and 3D/MMIO behavior are materially different enough to require new shared-core modeling in 86Box.
+- `Verified:` the current reuse-first path now reaches ROM POST and manual Windows desktop bring-up through at least `800x600` `16-bit`.
+- `Inferred:` the strongest remaining deltas for Voodoo 4 are now more likely to be memory-sizing/strap behavior, richer mode-set behavior beyond `800x600` `16-bit`, or protected-mode driver details, not wholesale VGA POST handling.
+- `Unknown:` which parts of VSA-100 scanout, memory timing, and 3D/MMIO behavior are materially different enough to require new shared-core modeling beyond the working desktop baseline.
 
 ## Earlier Assumptions That Now Look Weak
 

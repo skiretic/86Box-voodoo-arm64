@@ -142,6 +142,17 @@ typedef struct banshee_t {
     uint32_t v4_trace_flags;
     uint16_t v4_ext_seen_mask;
     uint8_t  v4_rom_trace_count;
+    uint8_t  v4_mode_trace_count;
+    uint8_t  v4_mode_trace_started;
+    uint32_t v4_mode_last_dacMode;
+    uint32_t v4_mode_last_vidProcCfg;
+    uint32_t v4_mode_last_vidInFormat;
+    uint32_t v4_mode_last_vidScreenSize;
+    uint32_t v4_mode_last_vidDesktopStartAddr;
+    uint32_t v4_mode_last_vidDesktopOverlayStride;
+    int      v4_mode_last_bpp;
+    int      v4_mode_last_rowoffset;
+    void   (*v4_mode_last_render)(svga_t *);
     uint64_t trace_pci_read_seen[4];
 
     uint32_t overlay_buffer[2][4096];
@@ -434,6 +445,8 @@ banshee_v4_trace_ext_access(banshee_t *banshee, const char *op, uint16_t addr, u
     banshee_v4_trace(banshee, "%s trace: first ext %s %04x = %08x\n", banshee_trace_label(banshee), op, addr, val);
 }
 
+static void banshee_render_16bpp_tiled(svga_t *svga);
+
 static void
 banshee_v4_trace_rom_read(banshee_t *banshee, const char *width, uint32_t addr, uint32_t val)
 {
@@ -453,6 +466,67 @@ banshee_v4_trace_rom_read(banshee_t *banshee, const char *width, uint32_t addr, 
     banshee->v4_rom_trace_count++;
     banshee_v4_trace(banshee, "%s trace: ROM %s read addr=%08x mapbase=%08x val=%08x\n",
                      banshee_trace_label(banshee), width, addr, banshee->bios_rom.mapping.base, val);
+}
+
+static const char *
+banshee_trace_render_name(void (*render)(svga_t *))
+{
+    if (render == svga_render_null)
+        return "null";
+    if (render == svga_render_8bpp_highres)
+        return "8bpp";
+    if (render == svga_render_16bpp_highres)
+        return "16bpp";
+    if (render == banshee_render_16bpp_tiled)
+        return "16bpp_tiled";
+    if (render == svga_render_24bpp_highres)
+        return "24bpp";
+    if (render == svga_render_32bpp_highres)
+        return "32bpp";
+
+    return "other";
+}
+
+static void
+banshee_v4_trace_mode_state(banshee_t *banshee, const char *reason)
+{
+    svga_t *svga = &banshee->svga;
+
+    if (!banshee_trace_enabled(banshee) || (banshee->v4_mode_trace_count >= 64))
+        return;
+
+    if (banshee->v4_mode_trace_started &&
+        (banshee->v4_mode_last_dacMode == banshee->dacMode) &&
+        (banshee->v4_mode_last_vidProcCfg == banshee->vidProcCfg) &&
+        (banshee->v4_mode_last_vidInFormat == banshee->vidInFormat) &&
+        (banshee->v4_mode_last_vidScreenSize == banshee->vidScreenSize) &&
+        (banshee->v4_mode_last_vidDesktopStartAddr == banshee->vidDesktopStartAddr) &&
+        (banshee->v4_mode_last_vidDesktopOverlayStride == banshee->vidDesktopOverlayStride) &&
+        (banshee->v4_mode_last_bpp == svga->bpp) &&
+        (banshee->v4_mode_last_rowoffset == svga->rowoffset) &&
+        (banshee->v4_mode_last_render == svga->render))
+        return;
+
+    banshee->v4_mode_trace_started            = 1;
+    banshee->v4_mode_last_dacMode            = banshee->dacMode;
+    banshee->v4_mode_last_vidProcCfg         = banshee->vidProcCfg;
+    banshee->v4_mode_last_vidInFormat        = banshee->vidInFormat;
+    banshee->v4_mode_last_vidScreenSize      = banshee->vidScreenSize;
+    banshee->v4_mode_last_vidDesktopStartAddr = banshee->vidDesktopStartAddr;
+    banshee->v4_mode_last_vidDesktopOverlayStride = banshee->vidDesktopOverlayStride;
+    banshee->v4_mode_last_bpp                = svga->bpp;
+    banshee->v4_mode_last_rowoffset          = svga->rowoffset;
+    banshee->v4_mode_last_render             = svga->render;
+
+    banshee->v4_mode_trace_count++;
+    banshee_v4_trace(
+        banshee,
+        "%s trace: mode[%u] %s dacMode=%08x vidProcCfg=%08x pixfmt=%u tile=%u half=%u vidInFmt=%08x screen=%08x start=%08x stride=%08x bpp=%d rowoffset=%d render=%s\n",
+        banshee_trace_label(banshee), banshee->v4_mode_trace_count, reason, banshee->dacMode, banshee->vidProcCfg,
+        VIDPROCCFG_DESKTOP_PIX_FORMAT, !!(banshee->vidProcCfg & VIDPROCCFG_DESKTOP_TILE),
+        !!(banshee->vidProcCfg & VIDPROCCFG_HALF_MODE), banshee->vidInFormat, banshee->vidScreenSize,
+        banshee->vidDesktopStartAddr, banshee->vidDesktopOverlayStride, svga->bpp, svga->rowoffset,
+        banshee_trace_render_name(svga->render));
 }
 
 static void
@@ -929,6 +1003,7 @@ banshee_recalctimings(svga_t *svga)
                               banshee_trace_label(banshee), banshee->vidProcCfg, banshee->vgaInit0, banshee->vidScreenSize,
                               banshee->vidDesktopStartAddr, banshee->vidDesktopOverlayStride,
                               svga->bpp, svga->hdisp, svga->dispend, svga->rowoffset, (void *) svga->render);
+        banshee_v4_trace_mode_state(banshee, "recalctimings");
     }
 }
 
@@ -1085,6 +1160,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             banshee->dacMode = val;
             svga->dpms       = !!(val & 0x0a);
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "dacMode");
             break;
         case DAC_dacAddr:
             banshee->dacAddr = val & 0x1ff;
@@ -1104,6 +1180,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             svga->fullchange         = changeframecount;
             svga->lut_map            = !(val & VIDPROCCFG_DESKTOP_CLUT_BYPASS) && (svga->bpp < 24);
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "vidProcCfg");
             break;
 
         case Video_maxRgbDelta:
@@ -1145,6 +1222,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
 
         case Video_vidInFormat:
             banshee->vidInFormat = val;
+            banshee_v4_trace_mode_state(banshee, "vidInFormat");
             break;
 
         case Video_vidSerialParallelPort:
@@ -1168,6 +1246,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             banshee->vidScreenSize = val;
             voodoo->h_disp         = (val & 0xfff) + 1;
             voodoo->v_disp         = (val >> 12) & 0xfff;
+            banshee_v4_trace_mode_state(banshee, "vidScreenSize");
             break;
         case Video_vidOverlayStartCoords:
             voodoo->overlay.vidOverlayStartCoords = val;
@@ -1215,6 +1294,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
 #endif
             svga->fullchange = changeframecount;
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "vidDeskStart");
             break;
         case Video_vidDesktopOverlayStride:
             banshee->vidDesktopOverlayStride = val;
@@ -1223,6 +1303,7 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
 #endif
             svga->fullchange = changeframecount;
             svga_recalctimings(svga);
+            banshee_v4_trace_mode_state(banshee, "vidDeskStride");
             break;
         default:
 #if 0
@@ -3825,13 +3906,13 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
 
         case TYPE_V4_4500:
             /*
-             * Hypothesis probe: the first V4/V3 runtime divergence is that V4
-             * leaves subsystem IDs at 0x0000:0000. Use a nonzero self-identifying
-             * tuple until a board-specific retail value is proven.
+             * The V4 ROM helper at 0x3db2 compares PCI 0x2c-0x2f against the
+             * dword stored at the end of the declared image, which is 121a:0004
+             * for the tested 1.18 ROM. Match that board-specific tuple here.
              */
             banshee->pci_regs[0x2c] = 0x1a;
             banshee->pci_regs[0x2d] = 0x12;
-            banshee->pci_regs[0x2e] = 0x09;
+            banshee->pci_regs[0x2e] = 0x04;
             banshee->pci_regs[0x2f] = 0x00;
             break;
 

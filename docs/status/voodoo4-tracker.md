@@ -6,7 +6,7 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 
 ## Status Snapshot
 
-- Overall phase: `Phase 1 audit complete; runtime blank-screen boundary narrowed to ROM-dispatch handoff before V4 entry-helper ext writes`
+- Overall phase: `Phase 1 audit complete; ROM shadow/dispatch and early init are proven; manual VM verification now reaches the Windows desktop through at least 1024x768 16-bit with the Voodoo4 driver installed`
 - Primary strategy: `Reuse-first over Banshee/Voodoo3 until disproven`
 - Evidence baseline: `ROM analysis + source-backed register correlation + Phase 1 code audit + first runtime boundary trace`
 
@@ -55,27 +55,52 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 - [x] Verify the Voodoo4 ROM's declared `0xa000` image has a correct zero checksum and standard `PCIR` metadata, weakening a simple generic ROM-header/checksum rejection theory
 - [x] Disassemble the Voodoo4 ROM entry helper at `0x865c` and verify that it would write ext `+0x28` on both success and failure paths, and ext `+0x70` on the normal path, before later init work
 - [x] Determine the next pre-ext evidence boundary after subsystem-ID reads: ROM dispatch/handoff is stopping before the Voodoo4 entry helper reaches its first traced ext write
+- [x] Trace the generic `p5a` option-ROM handoff closely enough to prove that the BIOS shadows the Voodoo4 ROM from the PCI ROM BAR into `0xc0000` and executes it at `c000:0003`
+- [x] Trace the shadowed execution path far enough to verify that the ROM reaches `0x3e6e`, enters helper `0x865c`, and runs the PCI config-validation loop before any ext write is seen
+- [x] Verify that helper `0x3db2` compares PCI `0x2c-0x2f` against the dword stored at the end of the declared ROM image rather than merely checking for a nonzero subsystem block
+- [x] Verify that the tested Voodoo4 ROM encodes subsystem pair `121a:0004` at declared-image offset `0x9ff8`, while the working Voodoo3 ROM encodes `121a:003a` at its analogous location
+- [x] Replace the provisional Voodoo4 subsystem-ID probe with the ROM-matched tuple `121a:0004`
+- [x] Verify that the ROM-matched subsystem tuple unlocks the first Voodoo4 ext-register traffic, including writes to ext `+0x28`, ext `+0x70`, `DACMODE`, desktop start, screen size, and stride
+- [x] Verify by manual VM boot that the current Voodoo4 path reaches the Windows desktop in `640x480` `16-color` mode and that Windows identifies the adapter as `Voodoo4 4500 AGP`
+- [x] Verify by manual VM testing that the current Voodoo4 path also reaches `800x600` at `16-bit` color
+- [x] Verify by manual VM testing that the current Voodoo4 path reaches `1024x768` at `16-bit` color
+- [x] Verify by user report that a Voodoo4 driver is installed and active in the working configuration
+- [x] Add targeted mode-state tracing in `vid_voodoo_banshee.c` for `DACMODE`, `VIDPROCCFG`, `VIDINFORMAT`, screen size, desktop start, desktop stride, and selected renderer
+- [x] Rebuild successfully after the targeted tracing delta
+- [x] Re-run `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the tracing delta
+- [x] Capture a longer live V4 Windows boot trace at `/tmp/voodoo4-mode-boundary.log`
+- [x] Verify from that live V4 Windows trace that the working driver-enabled desktop path programs tiled `16-bit` scanout (`pixfmt=1`, `tile=1`) and lands on the existing `16bpp_tiled` renderer
+- [x] Verify locally that the shared code still has no custom tiled desktop renderer for `24-bit` or `32-bit`; only the `16-bit` tiled path exists today
+- [x] Reconfirm that the active VM was returned to `16-bit` color before pausing the investigation
 
 ## Next
 
-- [ ] Trace the generic option-ROM dispatch/shadow handoff closely enough to prove why the Voodoo4 entry helper is not reaching its first ext write
-- [ ] Decide whether the next minimal probe should target BIOS ROM-dispatch criteria or shadowed `0xc0000` execution rather than any more Voodoo4 PCI-layout edits
-- [ ] Only after ROM execution is proven, revisit whether ext offset `0x70` or shared SDRAM/strap defaults block later POST progress
-- [ ] Capture the first runtime failure after ROM execution begins, before widening the implementation
+- [ ] Investigate the newly identified `32-bit` color distortion boundary with the Voodoo4 driver installed
+- [ ] Reproduce the distortion again with the new mode-state tracing still enabled and capture the bad-mode register state in `/tmp/voodoo4-mode-boundary.log`
+- [ ] Determine whether the same distortion appears first at `800x600` `32-bit`, `1024x768` `32-bit`, or both
+- [ ] Compare the traced good tiled `16-bit` mode against the traced bad `32-bit` mode at `DACMODE`, `VIDPROCCFG`, `VIDINFORMAT`, screen size, desktop start, and stride
+- [ ] Decide whether the smallest evidence-backed code delta is a tiled `32-bit` desktop renderer or some other narrower scanout/state fix
+- [ ] Re-evaluate shared reset/default assumptions such as `Init_dramInit1`, SDRAM sizing, and `Init_strapInfo` only if the next post-desktop boundary points back to them
+- [ ] Decide the next smallest probe from the new baseline-desktop boundary rather than widening broadly into unrelated VSA-100 behavior
 
 ## Open Questions
 
-- `Unknown:` what exact BIOS ROM-dispatch or shadow-handoff condition prevents the Voodoo4 entry helper from reaching its first ext write after the ROM header is inspected?
-- `Unknown:` does the current Banshee/Voodoo3 path already cover enough ext-register behavior for ROM POST once ROM execution actually begins?
+- `Verified:` the first concrete runtime failure boundary now observed is `32-bit` color, which produces distortion under the installed Voodoo4 driver
+- `Verified:` the current Banshee/Voodoo3 reuse path is now sufficient for at least ROM POST plus Windows desktop bring-up through `1024x768` `16-bit`
+- `Verified:` the traced good V4 Windows desktop path uses tiled `16-bit` scanout
+- `Inferred:` the strongest current emulator-side hypothesis is that the shared path is missing tiled `24/32-bit` desktop handling, because only `16bpp_tiled` exists today
 - `Unknown:` does Voodoo 4 require different reset defaults for existing modeled registers such as `Init_dramInit1`?
-- `Inferred:` PCI config space likely does not need another early layout change on this path, because the current Voodoo3/Voodoo4 AGP shell already matches for the bytes the `p5a` BIOS actually probes after the subsystem block.
+- `Inferred:` another early PCI shell mismatch is now less likely than before, because the ROM-dispatch boundary was cleared by matching the subsystem tuple that the ROM itself validates.
 - `Unknown:` does the shared `16 MB` SDRAM BIOS default misstate Voodoo 4 memory sizing early enough to matter during POST?
-- `Unknown:` how much of Voodoo4/Voodoo5-family behavior matters before protected-mode drivers load?
+- `Unknown:` whether the failing `32-bit` mode also programs `tile=1` in the same family as the traced good `16-bit` mode, or diverges earlier in another display register
+- `Unknown:` what additional Voodoo4/VSA-100 differences matter for `32-bit` color modes and beyond, now that the protected-mode driver path is known to be active?
 
 ## Blockers
 
 - No hard blocker at research level.
-- `Verified:` later ext-register and scanout debugging are blocked behind the earlier ROM-execution boundary found in runtime tracing.
+- `Verified:` the earlier ROM-execution / pre-ext blocker is resolved.
+- `Verified:` the earlier blank-screen blocker is resolved through desktop bring-up, higher-resolution `16-bit` mode validation, and a driver-enabled configuration.
+- `Verified:` further work should now target the observed `32-bit` color distortion boundary rather than revisiting the solved pre-ext path.
 
 ## Working Rules
 

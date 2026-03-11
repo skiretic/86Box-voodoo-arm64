@@ -9,9 +9,12 @@ This plan intentionally replaces assumption-driven implementation planning with 
 ## Starting Point
 
 - `Verified:` the local ROM is a conventional x86 VGA option ROM with VBE services and PCI ID `121a:0009`.
+- `Verified:` the tested ROM also validates PCI subsystem tuple `121a:0004` at `0x2c-0x2f`, and matching that value clears the earlier pre-ext gate.
 - `Verified:` the ROM touches many offsets already modeled by 86Box’s Banshee/Voodoo3 path.
 - `Verified:` the ROM does not justify a clean-sheet VGA bring-up model.
-- `Inferred:` the first milestone should be “prove the minimum Banshee/Voodoo3 reuse surface for POST and VGA/VBE,” not “create a standalone Voodoo 4 architecture.”
+- `Verified:` the current reuse-first path now reaches ROM POST plus manual Windows desktop bring-up through at least `1024x768` `16-bit`, with the Voodoo4 driver installed.
+- `Verified:` targeted mode-state tracing now shows the good live V4 Windows desktop path programming tiled `16-bit` scanout.
+- `Inferred:` the active milestone is no longer “prove the minimum Banshee/Voodoo3 reuse surface for POST and VGA/VBE”; it is now “capture the first failure on the known-bad `32-bit` color path beyond the known-good `1024x768` `16-bit` desktop.”
 
 ## Non-Goals for the First Recovery Pass
 
@@ -21,6 +24,8 @@ This plan intentionally replaces assumption-driven implementation planning with 
 - `Verified:` no forced adoption of a standalone `vid_voodoo4.c` unless reuse experiments fail with evidence
 
 ## Phase 1: Confirm the Reuse Baseline
+
+Status: `Verified complete`
 
 ### Goal
 
@@ -44,6 +49,8 @@ Prove how much of the current Banshee/Voodoo3 device shape already matches what 
 
 ## Phase 2: Implement the Smallest Proven Delta Set
 
+Status: `Verified complete for baseline desktop bring-up`
+
 ### Goal
 
 Reach ROM POST and VGA/VBE behavior by changing only what the evidence requires.
@@ -63,16 +70,20 @@ Reach ROM POST and VGA/VBE behavior by changing only what the evidence requires.
 
 ## Phase 3: Validate What Is Actually Different
 
+Status: `Active`
+
 ### Goal
 
 Separate true VSA-100 deltas from accidental emulator gaps.
 
 ### Questions to answer
 
-1. `Unknown:` does the ROM require VSA-100-specific config-space behavior beyond ID/BAR basics?
-2. `Unknown:` does offset `0x70` block POST or only later features?
-3. `Unknown:` do Voodoo 4 display registers require different reset values than Banshee/Voodoo3?
-4. `Inferred:` are Voodoo4/Voodoo5 differences mostly outside milestone-one VGA/VBE bring-up?
+1. `Verified:` the first concrete failure beyond the verified desktop milestone is distortion in `32-bit` color with the Voodoo4 driver installed.
+2. `Verified:` the traced good `16-bit` desktop path uses tiled scanout.
+3. `Unknown:` what exact runtime difference causes that distortion?
+4. `Unknown:` do Voodoo 4 display or memory-related registers require different reset values than Banshee/Voodoo3 once the machine leaves the working `16-bit` path?
+5. `Unknown:` do shared assumptions such as SDRAM sizing or `Init_strapInfo` become visible on the failing `32-bit` color path?
+6. `Inferred:` Voodoo4/Voodoo5 differences that still matter are now more likely to sit in richer color modes or later driver-visible behavior than in basic VGA/VBE bring-up.
 
 ### Exit criteria
 
@@ -93,8 +104,11 @@ Use old research only after the fresh baseline exists.
 ## Immediate Next Actions
 
 1. `Verified:` preserve the new docs in this repo as the current source of truth.
-2. `Verified:` use the ROM correlation list as the checklist for the first coding session.
-3. `Inferred:` start implementation later from the smallest reuse-first delta set, not from an architectural rewrite.
+2. `Verified:` preserve the current functional fix in `vid_voodoo_banshee.c`: PCI device ID `121a:0009`, ROM-backed subsystem tuple `121a:0004`, and the existing ext offset `0x70` coverage.
+3. `Verified:` preserve the new targeted mode-state tracing until the bad `32-bit` mode has been captured.
+4. `Inferred:` capture the failing `32-bit` color path with the current tracing and compare it directly against the already-traced good tiled `16-bit` path.
+5. `Inferred:` if the bad mode also keeps desktop tiling enabled, the next smallest code delta is likely a tiled `32-bit` desktop renderer rather than a broad scanout rewrite.
+6. `Inferred:` only if that boundary points back to reset/default assumptions should the next code delta target SDRAM sizing, `Init_dramInit1`, `DACMODE`, stride, or `Init_strapInfo`.
 
 ## Supporting Documents
 

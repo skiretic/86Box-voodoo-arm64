@@ -64,6 +64,7 @@ Linux `tdfx.h` defines the same offsets under the names:
 ## Behavior Clearly Different
 
 - `Verified:` the ROM wants PCI device ID `0x0009`, while the current 86Box Banshee/Voodoo3 path only reports `0x0003` or `0x0005`.
+- `Verified:` the tested ROM also validates PCI subsystem tuple `121a:0004` at `0x2c-0x2f`; a merely nonzero probe there was not sufficient.
 - `Verified:` Linux PCI IDs also map `0x0009` to the Voodoo4/5 family name (`PCI_DEVICE_ID_3DFX_VOODOO5` in current kernel headers).
 - `Verified:` Linux `tdfxfb` uses a different memory-sizing branch for `dev_id >= PCI_DEVICE_ID_3DFX_VOODOO5`, which means Voodoo4/5 were not treated as identical to Banshee/Voodoo3 for all memory assumptions.
 - `Verified:` XFree86 DRI documentation says Voodoo4/5 require different Glide library versions than Banshee/Voodoo3.
@@ -75,6 +76,7 @@ Linux `tdfx.h` defines the same offsets under the names:
 - `Unknown:` how much of `0x70` and adjacent video-input/overlay state matters for plain VGA/VBE success.
 - `Unknown:` whether VSA-100 strap, SDRAM sizing, or scanout assumptions require changes inside shared Banshee/Voodoo3 code rather than a device-identity layer.
 - `Unknown:` whether any later driver-visible MMIO windows diverge enough to require new shared-core types or new register handlers.
+- `Unknown:` whether the failing `32-bit` desktop mode also uses tiled scanout in the same family as the traced good `16-bit` mode.
 
 ## Phase 1 Gap Audit
 
@@ -110,14 +112,21 @@ This section records the pre-implementation audit result that drove the first mi
 - `Verified:` a Voodoo 4 reuse-first path still needs a PCI identity layer for device ID `121a:0009`.
 - `Verified:` a Voodoo 4 reuse-first path still needs ROM exposure wired to the local Voodoo 4 BIOS image.
 - `Verified:` ext offset `0x70` is the first audited ROM-touched offset that is actually missing from the current shared ext-register switch.
-- `Unknown:` whether current shared SDRAM/strap defaults are acceptable for ROM POST once the three deltas above are in place.
+- `Verified:` a merely nonzero subsystem-ID block is not enough; the tested ROM expects subsystem tuple `121a:0004` at PCI `0x2c-0x2f`.
+- `Verified:` the four deltas above are enough for ROM POST plus baseline Windows desktop bring-up.
+- `Unknown:` whether current shared SDRAM/strap defaults remain acceptable beyond that baseline.
 
 ## Current Implementation Status
 
 - `Verified:` the shared Banshee/Voodoo3 file now exposes a reuse-first `3dfx Voodoo4 4500` AGP device entry with PCI device ID `121a:0009`.
 - `Verified:` that device is wired to the local `V4_4500_AGP_SD_1.18.rom` image rather than a new standalone Voodoo 4 source file.
 - `Verified:` ext offset `0x70` now has shared ext-register read/write coverage as preserved state.
-- `Unknown:` runtime ROM POST behavior has not yet been re-verified in this session.
+- `Verified:` the Voodoo4 subsystem tuple in `vid_voodoo_banshee.c` now matches the ROM-backed value `121a:0004`.
+- `Verified:` runtime tracing now reaches the first Voodoo4 ext-register writes once that subsystem tuple is corrected.
+- `Verified:` manual VM verification now reaches the Windows desktop, with Windows identifying `Voodoo4 4500 AGP`, and has been manually tested through at least `800x600` `16-bit`.
+- `Verified:` targeted mode-state tracing on a longer live V4 Windows boot now shows the good desktop path programming `VIDPROCCFG` with `pixfmt=1` and `VIDPROCCFG_DESKTOP_TILE=1`, ultimately selecting the existing `16bpp_tiled` renderer.
+- `Verified:` the current shared file has no custom tiled desktop renderer for `24-bit` or `32-bit`; only `banshee_render_16bpp_tiled()` exists.
+- `Inferred:` if the failing `32-bit` mode also keeps desktop tiling enabled, a missing tiled `32-bit` renderer is a stronger immediate suspect than a broad VSA-100-only scanout rewrite.
 
 ## Corrections to Earlier Voodoo 4 Assumptions
 
