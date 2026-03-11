@@ -61,6 +61,7 @@
 #define ROM_VOODOO3_3500_AGP_COMPAQ "roms/video/voodoo/V3_3500_AGP_SD_2.15.05_Compaq.rom"
 #define ROM_VOODOO3_3500_SE_AGP     "roms/video/voodoo/V3_3500_AGP_SD_2.15.06_NTSC_Falcon_Northwest.rom"
 #define ROM_VOODOO3_3500_SI_AGP     "roms/video/voodoo/V3_3500_AGP_SD_2.15.07_PAL_3500TV-SI.rom"
+#define ROM_VOODOO4_4500_AGP        "roms/video/voodoo/V4_4500_AGP_SD_1.18.rom"
 #define ROM_VELOCITY_100            "roms/video/voodoo/Velocity100.VBI"
 #define ROM_VELOCITY_200            "roms/video/voodoo/Velocity200sg.rom"
 
@@ -87,7 +88,8 @@ enum {
     TYPE_V3_3500_COMPAQ,
     TYPE_V3_3500_SI,
     TYPE_VELOCITY100,
-    TYPE_VELOCITY200
+    TYPE_VELOCITY200,
+    TYPE_V4_4500
 };
 
 typedef struct banshee_t {
@@ -118,6 +120,7 @@ typedef struct banshee_t {
 
     uint32_t vidDesktopOverlayStride;
     uint32_t vidDesktopStartAddr;
+    uint32_t vidInFormat;
     uint32_t vidProcCfg;
     uint32_t vidScreenSize;
     uint32_t vidSerialParallelPort;
@@ -136,6 +139,10 @@ typedef struct banshee_t {
     uint32_t hwCurPatAddr, hwCurLoc, hwCurC0, hwCurC1;
 
     uint32_t intrCtrl;
+    uint32_t v4_trace_flags;
+    uint16_t v4_ext_seen_mask;
+    uint8_t  v4_rom_trace_count;
+    uint64_t trace_pci_read_seen[4];
 
     uint32_t overlay_buffer[2][4096];
 
@@ -190,6 +197,7 @@ enum {
     Video_hwCurLoc                     = 0x64,
     Video_hwCurC0                      = 0x68,
     Video_hwCurC1                      = 0x6c,
+    Video_vidInFormat                  = 0x70,
     Video_vidSerialParallelPort        = 0x78,
     Video_vidChromaKeyMin              = 0x8c,
     Video_vidChromaKeyMax              = 0x90,
@@ -321,6 +329,178 @@ banshee_log(const char *fmt, ...)
 #else
 #    define banshee_log(fmt, ...)
 #endif
+
+enum {
+    V4_TRACE_INIT        = 1 << 0,
+    V4_TRACE_PCI_ID_READ = 1 << 1,
+    V4_TRACE_COMMAND     = 1 << 2,
+    V4_TRACE_MMIO_BAR    = 1 << 3,
+    V4_TRACE_LFB_BAR     = 1 << 4,
+    V4_TRACE_IO_BAR      = 1 << 5,
+    V4_TRACE_ROM_BAR     = 1 << 6,
+    V4_TRACE_RECALC      = 1 << 7,
+    V4_TRACE_ROM_LEGACY  = 1 << 8
+};
+
+static int
+banshee_trace_enabled(const banshee_t *banshee)
+{
+    return (banshee->type == TYPE_V4_4500) || (banshee->type == TYPE_V3_3000);
+}
+
+static const char *
+banshee_trace_label(const banshee_t *banshee)
+{
+    switch (banshee->type) {
+        case TYPE_V4_4500:
+            return "V4";
+        case TYPE_V3_3000:
+            return "V3";
+        default:
+            return "Banshee";
+    }
+}
+
+static void
+banshee_v4_trace(const banshee_t *banshee, const char *fmt, ...)
+{
+    va_list ap;
+
+    if (!banshee_trace_enabled(banshee))
+        return;
+
+    va_start(ap, fmt);
+    pclog_ex(fmt, ap);
+    va_end(ap);
+}
+
+static void
+banshee_v4_trace_once(banshee_t *banshee, uint32_t flag, const char *fmt, ...)
+{
+    va_list ap;
+
+    if (!banshee_trace_enabled(banshee) || (banshee->v4_trace_flags & flag))
+        return;
+
+    banshee->v4_trace_flags |= flag;
+
+    va_start(ap, fmt);
+    pclog_ex(fmt, ap);
+    va_end(ap);
+}
+
+static int
+banshee_v4_trace_ext_index(uint16_t addr)
+{
+    switch (addr) {
+        case Init_dramInit1:
+            return 0;
+        case Init_vgaInit0:
+            return 1;
+        case Init_vgaInit1:
+            return 2;
+        case PLL_pllCtrl0:
+            return 3;
+        case DAC_dacMode:
+            return 4;
+        case Video_vidProcCfg:
+            return 5;
+        case Video_vidInFormat:
+            return 6;
+        case Video_vidScreenSize:
+            return 7;
+        case Video_vidDesktopStartAddr:
+            return 8;
+        case Video_vidDesktopOverlayStride:
+            return 9;
+        default:
+            return -1;
+    }
+}
+
+static void
+banshee_v4_trace_ext_access(banshee_t *banshee, const char *op, uint16_t addr, uint32_t val)
+{
+    int index;
+
+    if (!banshee_trace_enabled(banshee))
+        return;
+
+    index = banshee_v4_trace_ext_index(addr);
+    if ((index < 0) || (banshee->v4_ext_seen_mask & (1U << index)))
+        return;
+
+    banshee->v4_ext_seen_mask |= (1U << index);
+    banshee_v4_trace(banshee, "%s trace: first ext %s %04x = %08x\n", banshee_trace_label(banshee), op, addr, val);
+}
+
+static void
+banshee_v4_trace_rom_read(banshee_t *banshee, const char *width, uint32_t addr, uint32_t val)
+{
+    if (!banshee_trace_enabled(banshee))
+        return;
+
+    if (addr < 0x00100000) {
+        banshee_v4_trace_once(banshee, V4_TRACE_ROM_LEGACY,
+                              "%s trace: first legacy ROM %s read addr=%08x mapbase=%08x val=%08x\n",
+                              banshee_trace_label(banshee), width, addr, banshee->bios_rom.mapping.base, val);
+        return;
+    }
+
+    if (banshee->v4_rom_trace_count >= 16)
+        return;
+
+    banshee->v4_rom_trace_count++;
+    banshee_v4_trace(banshee, "%s trace: ROM %s read addr=%08x mapbase=%08x val=%08x\n",
+                     banshee_trace_label(banshee), width, addr, banshee->bios_rom.mapping.base, val);
+}
+
+static void
+banshee_trace_pci_read(banshee_t *banshee, uint8_t addr, uint8_t val)
+{
+    uint64_t mask;
+
+    if (!banshee_trace_enabled(banshee))
+        return;
+
+    mask = 1ULL << (addr & 63);
+    if (banshee->trace_pci_read_seen[addr >> 6] & mask)
+        return;
+
+    banshee->trace_pci_read_seen[addr >> 6] |= mask;
+    banshee_v4_trace(banshee, "%s trace: first PCI read %02x = %02x\n",
+                     banshee_trace_label(banshee), addr, val);
+}
+
+static uint8_t
+banshee_bios_rom_read(uint32_t addr, void *priv)
+{
+    banshee_t *banshee = (banshee_t *) priv;
+    uint8_t    val     = rom_read(addr, &banshee->bios_rom);
+
+    banshee_v4_trace_rom_read(banshee, "byte", addr, val);
+    return val;
+}
+
+static uint16_t
+banshee_bios_rom_readw(uint32_t addr, void *priv)
+{
+    banshee_t *banshee = (banshee_t *) priv;
+    uint16_t   val     = rom_readw(addr, &banshee->bios_rom);
+
+    banshee_v4_trace_rom_read(banshee, "word", addr, val);
+    return val;
+}
+
+static uint32_t
+banshee_bios_rom_readl(uint32_t addr, void *priv)
+{
+    banshee_t *banshee = (banshee_t *) priv;
+    uint32_t   val     = rom_readl(addr, &banshee->bios_rom);
+
+    banshee_v4_trace_rom_read(banshee, "long", addr, val);
+    return val;
+}
 
 static uint32_t banshee_status(banshee_t *banshee);
 
@@ -741,6 +921,15 @@ banshee_recalctimings(svga_t *svga)
         banshee_log("svga->clock = %g %g  m=%i k=%i n=%i\n", freq, freq / 1000000.0, m, k, n);
 #endif
     }
+
+    if (banshee_trace_enabled(banshee) &&
+        (banshee->vidProcCfg || banshee->vidScreenSize || banshee->vidDesktopStartAddr || banshee->vidDesktopOverlayStride)) {
+        banshee_v4_trace_once(banshee, V4_TRACE_RECALC,
+                              "%s trace: first recalctimings vidProcCfg=%08x vgaInit0=%08x screen=%08x start=%08x stride=%08x bpp=%d hdisp=%d dispend=%d rowoffset=%d render=%p\n",
+                              banshee_trace_label(banshee), banshee->vidProcCfg, banshee->vgaInit0, banshee->vidScreenSize,
+                              banshee->vidDesktopStartAddr, banshee->vidDesktopOverlayStride,
+                              svga->bpp, svga->hdisp, svga->dispend, svga->rowoffset, (void *) svga->render);
+    }
 }
 
 static void
@@ -821,6 +1010,8 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
 #if 0
     banshee_log("banshee_ext_outl: addr=%04x val=%08x %04x(%08x):%08x\n", addr, val, CS,cs,cpu_state.pc);
 #endif
+
+    banshee_v4_trace_ext_access(banshee, "write", addr & 0xff, val);
 
     switch (addr & 0xff) {
         case Init_pciInit0:
@@ -950,6 +1141,10 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             break;
         case Video_hwCurC1:
             banshee->hwCurC1 = val;
+            break;
+
+        case Video_vidInFormat:
+            banshee->vidInFormat = val;
             break;
 
         case Video_vidSerialParallelPort:
@@ -1257,6 +1452,10 @@ banshee_ext_inl(uint16_t addr, void *priv)
             ret = banshee->hwCurC1;
             break;
 
+        case Video_vidInFormat:
+            ret = banshee->vidInFormat;
+            break;
+
         case Video_vidSerialParallelPort:
             ret = banshee->vidSerialParallelPort & ~(VIDSERIAL_DDC_DCK_R | VIDSERIAL_DDC_DDA_R | VIDSERIAL_I2C_SCK_R | VIDSERIAL_I2C_SDA_R);
             if (banshee->vidSerialParallelPort & VIDSERIAL_DDC_EN) {
@@ -1322,6 +1521,8 @@ banshee_ext_inl(uint16_t addr, void *priv)
     if (addr)
         banshee_log("banshee_ext_inl: addr=%04x val=%08x\n", addr, ret);
 #endif
+
+    banshee_v4_trace_ext_access(banshee, "read", addr & 0xff, ret);
 
     return ret;
 }
@@ -3068,7 +3269,7 @@ banshee_vsync_callback(svga_t *svga)
 static uint8_t
 banshee_pci_read(int func, int addr, UNUSED(int len), void *priv)
 {
-    const banshee_t *banshee = (banshee_t *) priv;
+    banshee_t *banshee = (banshee_t *) priv;
 #if 0
     svga_t *svga = &banshee->svga;
 #endif
@@ -3076,6 +3277,11 @@ banshee_pci_read(int func, int addr, UNUSED(int len), void *priv)
 
     if (func)
         return 0xff;
+
+    if (addr <= 0x03)
+        banshee_v4_trace_once(banshee, V4_TRACE_PCI_ID_READ,
+                              "%s trace: first PCI ID read func=%d addr=%02x slot=%u\n",
+                              banshee_trace_label(banshee), func, addr, banshee->pci_slot);
 #if 0
     banshee_log("Banshee PCI read %08X  ", addr);
 #endif
@@ -3088,7 +3294,12 @@ banshee_pci_read(int func, int addr, UNUSED(int len), void *priv)
             break;
 
         case 0x02:
-            ret = (banshee->type == TYPE_BANSHEE) ? 0x03 : 0x05;
+            if (banshee->type == TYPE_BANSHEE)
+                ret = 0x03;
+            else if (banshee->type == TYPE_V4_4500)
+                ret = 0x09;
+            else
+                ret = 0x05;
             break;
         case 0x03:
             ret = 0x00;
@@ -3272,6 +3483,7 @@ banshee_pci_read(int func, int addr, UNUSED(int len), void *priv)
 #if 0
     banshee_log("%02X\n", ret);
 #endif
+    banshee_trace_pci_read(banshee, addr, ret);
     return ret;
 }
 
@@ -3303,6 +3515,11 @@ banshee_pci_write(int func, int addr, UNUSED(int len), uint8_t val, void *priv)
             return;
 
         case PCI_REG_COMMAND:
+            banshee_v4_trace_once(banshee, V4_TRACE_COMMAND,
+                                  "%s trace: PCI command write %02x io=%d mem=%d busmaster=%d ioBase=%08x mem0=%08x mem1=%08x\n",
+                                  banshee_trace_label(banshee), val, !!(val & PCI_COMMAND_IO), !!(val & PCI_COMMAND_MEM),
+                                  !!(val & PCI_COMMAND_L_BM), banshee->ioBaseAddr,
+                                  banshee->memBaseAddr0, banshee->memBaseAddr1);
             if (val & PCI_COMMAND_IO) {
                 io_removehandler(0x03c0, 0x0020, banshee_in, NULL, NULL, banshee_out, NULL, NULL, banshee);
                 if (banshee->ioBaseAddr)
@@ -3327,11 +3544,17 @@ banshee_pci_write(int func, int addr, UNUSED(int len), uint8_t val, void *priv)
 
         case 0x13:
             banshee->memBaseAddr0 = (val & 0xfe) << 24;
+            banshee_v4_trace_once(banshee, V4_TRACE_MMIO_BAR,
+                                  "%s trace: BAR0/MMIO high byte write %02x -> %08x\n",
+                                  banshee_trace_label(banshee), val, banshee->memBaseAddr0);
             banshee_updatemapping(banshee);
             return;
 
         case 0x17:
             banshee->memBaseAddr1 = (val & 0xfe) << 24;
+            banshee_v4_trace_once(banshee, V4_TRACE_LFB_BAR,
+                                  "%s trace: BAR1/LFB high byte write %02x -> %08x\n",
+                                  banshee_trace_label(banshee), val, banshee->memBaseAddr1);
             banshee_updatemapping(banshee);
             return;
 
@@ -3343,6 +3566,9 @@ banshee_pci_write(int func, int addr, UNUSED(int len), uint8_t val, void *priv)
             if ((banshee->pci_regs[PCI_REG_COMMAND] & PCI_COMMAND_IO) && banshee->ioBaseAddr)
                 io_sethandler(banshee->ioBaseAddr, 0x0100, banshee_ext_in, NULL, banshee_ext_inl, banshee_ext_out, NULL, banshee_ext_outl, banshee);
             banshee_log("Banshee ioBaseAddr=%08x\n", banshee->ioBaseAddr);
+            banshee_v4_trace_once(banshee, V4_TRACE_IO_BAR,
+                                  "%s trace: IO BAR middle byte write %02x -> %08x\n",
+                                  banshee_trace_label(banshee), val, banshee->ioBaseAddr);
             return;
 
         case 0x1a:
@@ -3364,10 +3590,15 @@ banshee_pci_write(int func, int addr, UNUSED(int len), uint8_t val, void *priv)
             if (banshee->pci_regs[0x30] & 0x01) {
                 uint32_t biosaddr = (banshee->pci_regs[0x32] << 16) | (banshee->pci_regs[0x33] << 24);
                 banshee_log("Banshee bios_rom enabled at %08x\n", biosaddr);
+                banshee_v4_trace_once(banshee, V4_TRACE_ROM_BAR,
+                                      "%s trace: ROM BAR enabled via write %02x=%02x -> %08x\n",
+                                      banshee_trace_label(banshee), addr, val, biosaddr);
                 mem_mapping_set_addr(&banshee->bios_rom.mapping, biosaddr, 0x10000);
                 mem_mapping_enable(&banshee->bios_rom.mapping);
             } else {
                 banshee_log("Banshee bios_rom disabled\n");
+                banshee_v4_trace(banshee, "%s trace: ROM BAR write %02x=%02x left ROM disabled\n",
+                                 banshee_trace_label(banshee), addr, val);
                 mem_mapping_disable(&banshee->bios_rom.mapping);
             }
             return;
@@ -3418,6 +3649,12 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
 
     if (banshee->has_bios) {
         rom_init(&banshee->bios_rom, fn, 0xc0000, 0x10000, 0xffff, 0, MEM_MAPPING_EXTERNAL);
+        mem_mapping_set_handler(&banshee->bios_rom.mapping,
+                                banshee_bios_rom_read,
+                                banshee_bios_rom_readw,
+                                banshee_bios_rom_readl,
+                                NULL, NULL, NULL);
+        mem_mapping_set_p(&banshee->bios_rom.mapping, banshee);
         mem_mapping_disable(&banshee->bios_rom.mapping);
     }
 
@@ -3435,6 +3672,10 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
             mem_size = device_get_config_int("memory");
     } else
         mem_size = 16; /* SDRAM Banshee only supports 16 MB */
+
+    banshee_v4_trace_once(banshee, V4_TRACE_INIT,
+                          "%s trace: init has_bios=%d agp=%d has_sgram=%d mem=%dMB rom=%s\n",
+                          banshee_trace_label(banshee), banshee->has_bios, banshee->agp, has_sgram, mem_size, fn ? fn : "(none)");
 
     svga_init(info, &banshee->svga, banshee, mem_size << 20,
               banshee_recalctimings,
@@ -3582,6 +3823,18 @@ banshee_init_common(const device_t *info, char *fn, int has_sgram, int type, int
             banshee->pci_regs[0x2f] = 0x00;
             break;
 
+        case TYPE_V4_4500:
+            /*
+             * Hypothesis probe: the first V4/V3 runtime divergence is that V4
+             * leaves subsystem IDs at 0x0000:0000. Use a nonzero self-identifying
+             * tuple until a board-specific retail value is proven.
+             */
+            banshee->pci_regs[0x2c] = 0x1a;
+            banshee->pci_regs[0x2d] = 0x12;
+            banshee->pci_regs[0x2e] = 0x09;
+            banshee->pci_regs[0x2f] = 0x00;
+            break;
+
         case TYPE_VELOCITY100:
             banshee->pci_regs[0x2c] = 0x1a;
             banshee->pci_regs[0x2d] = 0x12;
@@ -3707,6 +3960,12 @@ velocity_200_agp_init(const device_t *info)
     return banshee_init_common(info, ROM_VELOCITY_200, 1, TYPE_VELOCITY200, VOODOO_3, 1);
 }
 
+static void *
+v4_4500_agp_init(const device_t *info)
+{
+    return banshee_init_common(info, ROM_VOODOO4_4500_AGP, 0, TYPE_V4_4500, VOODOO_3, 1);
+}
+
 static int
 banshee_available(void)
 {
@@ -3786,6 +4045,12 @@ static int
 velocity_200_available(void)
 {
     return rom_present(ROM_VELOCITY_200);
+}
+
+static int
+v4_4500_agp_available(void)
+{
+    return rom_present(ROM_VOODOO4_4500_AGP);
 }
 
 static void
@@ -4335,4 +4600,18 @@ const device_t velocity_200_agp_device = {
     .speed_changed = banshee_speed_changed,
     .force_redraw  = banshee_force_redraw,
     .config        = banshee_sgram_16mbonly_config
+};
+
+const device_t voodoo_4_4500_agp_device = {
+    .name          = "3dfx Voodoo4 4500",
+    .internal_name = "voodoo4_4500_agp",
+    .flags         = DEVICE_AGP,
+    .local         = 0,
+    .init          = v4_4500_agp_init,
+    .close         = banshee_close,
+    .reset         = NULL,
+    .available     = v4_4500_agp_available,
+    .speed_changed = banshee_speed_changed,
+    .force_redraw  = banshee_force_redraw,
+    .config        = banshee_sdram_config
 };
