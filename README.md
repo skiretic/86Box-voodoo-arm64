@@ -90,6 +90,17 @@ Building
 ---------
 For instructions on how to build 86Box from source, see the [build guide](https://86box.readthedocs.io/en/latest/dev/buildguide.html).
 
+Upstream syncing
+----------------
+
+Do not use GitHub's "Sync fork" button for this fork. Use the local workflow in [docs/upstream-sync-workflow.md](docs/upstream-sync-workflow.md) instead:
+
+```bash
+./scripts/sync-upstream.sh
+```
+
+This creates a dated sync branch, merges `upstream/master` there, and preserves known fork-owned docs such as `README.md` if they conflict.
+
 Licensing
 ---------
 
