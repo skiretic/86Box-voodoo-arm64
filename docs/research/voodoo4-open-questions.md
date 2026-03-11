@@ -7,8 +7,8 @@ Date: 2026-03-11
 1. `Verified:` the first concrete runtime failure beyond the currently verified desktop modes is `32-bit` color distortion under the installed Voodoo4 driver.
 2. `Unknown:` what exact runtime or register mismatch causes that `32-bit` color distortion when `1024x768` `16-bit` already works?
 3. `Verified:` a longer live V4 Windows boot trace now shows the good desktop path programming tiled `16-bit` scanout (`pixfmt=1`, `tile=1`) and landing on the existing `16bpp_tiled` renderer.
-4. `Inferred:` the strongest current code-side hypothesis is a missing tiled `24/32-bit` desktop render path, because the shared file has custom tiled handling only for `16-bit`.
-5. `Unknown:` whether the failing `32-bit` mode also programs tiled desktop scanout in the same family as the traced good `16-bit` mode.
+4. `Verified:` a reproduced bad `800x600` `32-bit` V4 Windows mode now programs tiled desktop scanout (`pixfmt=3`, `tile=1`) while still selecting the generic linear `32bpp` renderer in the pre-fix trace.
+5. `Inferred:` the strongest current code-side hypothesis is therefore the missing tiled `32-bit` desktop render path, not a broad generic `32-bit` support gap.
 6. `Unknown:` what exact reset-time values should the Voodoo4 device expose for memory and strap-related registers before the ROM touches them further into POST?
 7. `Verified:` 86Box now provides enough of the shared path for ROM POST plus driver-enabled Windows desktop bring-up through `1024x768` `16-bit` once PCI identity, ROM wiring, and the ROM-backed subsystem tuple are corrected.
 8. `Inferred:` another early PCI config-space mismatch is now less likely than before, because the current `p5a` path does shadow and execute the ROM and the ROM-backed subsystem tuple clears the pre-ext gate.
@@ -38,8 +38,13 @@ Date: 2026-03-11
 - `Verified:` manual VM verification now shows Windows reaching the desktop in `640x480` `16-color` mode, identifying the adapter as `Voodoo4 4500 AGP`, successfully switching to `800x600` `16-bit`, and reaching `1024x768` `16-bit`.
 - `Verified:` user testing now reports an installed Voodoo4 driver and distortion when switching into `32-bit` color.
 - `Verified:` targeted mode-state tracing captured the good V4 Windows desktop path using tiled `16-bit` scanout.
-- `Inferred:` if the bad `32-bit` path also sets `tile=1`, the current lack of tiled `24/32-bit` desktop rendering becomes a direct emulator-side suspect.
+- `Verified:` the bad `32-bit` path does set `tile=1`, which made the current lack of tiled `32-bit` desktop rendering a direct emulator-side suspect.
 - `Impact:` the ROM-execution handoff itself is no longer the blocker; the next useful work is to identify the first mismatch on the `32-bit` color path.
+- `Verified:` the first minimal renderer-side response to that trace has now been implemented in the shared path as a tiled `32-bit` desktop renderer.
+- `Verified:` manual VM retest on 2026-03-11 now shows `800x600` `32-bit` looking correct after that change, and the post-fix trace resolves it onto `32bpp_tiled`.
+- `Verified:` manual VM retest on 2026-03-11 also shows `1024x768` `32-bit` looking correct after that same change, and the post-fix trace resolves it onto `32bpp_tiled`.
+- `Verified:` additional manual VM retests on 2026-03-11 also show `640x480` `32-bit` and `1280x1024` `32-bit` looking correct after that same change.
+- `Unknown:` whether that first minimal renderer change is also sufficient for any less common `32-bit` desktop timings outside the now-tested set.
 
 ### Shared-defaults risk
 
@@ -78,7 +83,12 @@ Date: 2026-03-11
 - `Inferred:` does Voodoo 4 share enough of Banshee/Voodoo3 scanout to reuse current SVGA/display timing logic through VBE mode set?
 - `Inferred:` does Voodoo 4 need only a new identity/config shell plus a few register deltas for milestone-one VGA/VBE bring-up?
 - `Inferred:` the next useful instrumentation point is now the first failing `32-bit` color mode-set path rather than the generic option-ROM dispatch/shadow path.
-- `Inferred:` if the failing `32-bit` path also keeps `VIDPROCCFG_DESKTOP_TILE` set, then the smallest next fix is likely a tiled `32-bit` desktop renderer rather than a broader architecture change.
+- `Verified:` the failing `32-bit` path keeps `VIDPROCCFG_DESKTOP_TILE` set.
+- `Verified:` the smallest next fix suggested by that evidence, a tiled `32-bit` desktop renderer, has now been implemented.
+- `Verified:` that fix is sufficient for the reproduced `800x600` `32-bit` mode.
+- `Verified:` that fix is also sufficient for the manually tested `1024x768` `32-bit` mode.
+- `Verified:` that fix is also sufficient for the manually tested `640x480` `32-bit` and `1280x1024` `32-bit` modes.
+- `Unknown:` whether any further tiled desktop assumptions still need adjustment outside the now-tested desktop modes.
 
 ## Useful External Clues, With Limits
 

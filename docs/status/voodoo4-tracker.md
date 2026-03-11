@@ -72,14 +72,24 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 - [x] Verify from that live V4 Windows trace that the working driver-enabled desktop path programs tiled `16-bit` scanout (`pixfmt=1`, `tile=1`) and lands on the existing `16bpp_tiled` renderer
 - [x] Verify locally that the shared code still has no custom tiled desktop renderer for `24-bit` or `32-bit`; only the `16-bit` tiled path exists today
 - [x] Reconfirm that the active VM was returned to `16-bit` color before pausing the investigation
+- [x] Reproduce the distorted `800x600` `32-bit` mode with tracing still enabled on 2026-03-11
+- [x] Verify from the new bad-mode trace that the failing `800x600` `32-bit` path programs tiled desktop scanout (`pixfmt=3`, `tile=1`) rather than a separate non-tiled path
+- [x] Verify from the same bad-mode trace that the failing path was still landing on the generic linear `32bpp` renderer before the next code change
+- [x] Implement the smallest renderer-side code delta suggested by that trace: a tiled `32-bit` desktop renderer in the shared Banshee/Voodoo3 path
+- [x] Rebuild successfully after the tiled `32-bit` renderer delta
+- [x] Re-run `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the tiled `32-bit` renderer delta
+- [x] Verify by manual VM retest on 2026-03-11 that `800x600` `32-bit` now looks correct after the tiled `32-bit` renderer change
+- [x] Verify from the post-fix trace that the working `800x600` `32-bit` mode still programs tiled scanout and now resolves onto `32bpp_tiled`
+- [x] Verify by manual VM retest on 2026-03-11 that `1024x768` `32-bit` now also looks correct after the tiled `32-bit` renderer change
+- [x] Verify from the post-fix trace that the working `1024x768` `32-bit` mode resolves onto `32bpp_tiled`
+- [x] Verify by manual VM retest on 2026-03-11 that `640x480` `32-bit` also looks correct after the tiled `32-bit` renderer change
+- [x] Verify by manual VM retest on 2026-03-11 that `1280x1024` `32-bit` also looks correct after the tiled `32-bit` renderer change
+- [x] Remove the temporary Voodoo4 mode-state tracing after the `32-bit` desktop boundary was verified
+- [x] Rebuild successfully after removing the temporary mode-state tracing
+- [x] Re-run `bash scripts/test-voodoo4-blank-boundary.sh` successfully after removing the temporary mode-state tracing
 
 ## Next
 
-- [ ] Investigate the newly identified `32-bit` color distortion boundary with the Voodoo4 driver installed
-- [ ] Reproduce the distortion again with the new mode-state tracing still enabled and capture the bad-mode register state in `/tmp/voodoo4-mode-boundary.log`
-- [ ] Determine whether the same distortion appears first at `800x600` `32-bit`, `1024x768` `32-bit`, or both
-- [ ] Compare the traced good tiled `16-bit` mode against the traced bad `32-bit` mode at `DACMODE`, `VIDPROCCFG`, `VIDINFORMAT`, screen size, desktop start, and stride
-- [ ] Decide whether the smallest evidence-backed code delta is a tiled `32-bit` desktop renderer or some other narrower scanout/state fix
 - [ ] Re-evaluate shared reset/default assumptions such as `Init_dramInit1`, SDRAM sizing, and `Init_strapInfo` only if the next post-desktop boundary points back to them
 - [ ] Decide the next smallest probe from the new baseline-desktop boundary rather than widening broadly into unrelated VSA-100 behavior
 
@@ -88,11 +98,16 @@ Purpose: keep a running status of what is complete, what is next, and what remai
 - `Verified:` the first concrete runtime failure boundary now observed is `32-bit` color, which produces distortion under the installed Voodoo4 driver
 - `Verified:` the current Banshee/Voodoo3 reuse path is now sufficient for at least ROM POST plus Windows desktop bring-up through `1024x768` `16-bit`
 - `Verified:` the traced good V4 Windows desktop path uses tiled `16-bit` scanout
-- `Inferred:` the strongest current emulator-side hypothesis is that the shared path is missing tiled `24/32-bit` desktop handling, because only `16bpp_tiled` exists today
+- `Verified:` the traced bad `800x600` `32-bit` V4 Windows path also uses tiled desktop scanout (`pixfmt=3`, `tile=1`)
+- `Verified:` before the latest code change, that traced bad tiled `32-bit` path still selected the generic linear `32bpp` renderer
+- `Verified:` after the latest code change, manual VM retest shows `800x600` `32-bit` looking correct and the post-fix trace resolves that mode onto `32bpp_tiled`
+- `Verified:` after the same code change, manual VM retest also shows `1024x768` `32-bit` looking correct and the post-fix trace resolves that mode onto `32bpp_tiled`
+- `Verified:` additional manual VM retests now also show `640x480` `32-bit` and `1280x1024` `32-bit` looking correct
+- `Verified:` the strongest current emulator-side explanation for the reproduced `800x600` `32-bit` distortion was the missing tiled `32-bit` desktop renderer, not a broad generic `32-bit` or ROM-dispatch theory
 - `Unknown:` does Voodoo 4 require different reset defaults for existing modeled registers such as `Init_dramInit1`?
 - `Inferred:` another early PCI shell mismatch is now less likely than before, because the ROM-dispatch boundary was cleared by matching the subsystem tuple that the ROM itself validates.
 - `Unknown:` does the shared `16 MB` SDRAM BIOS default misstate Voodoo 4 memory sizing early enough to matter during POST?
-- `Unknown:` whether the failing `32-bit` mode also programs `tile=1` in the same family as the traced good `16-bit` mode, or diverges earlier in another display register
+- `Unknown:` whether any less common desktop timings outside the now-tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` modes expose another tiled-path mismatch
 - `Unknown:` what additional Voodoo4/VSA-100 differences matter for `32-bit` color modes and beyond, now that the protected-mode driver path is known to be active?
 
 ## Blockers

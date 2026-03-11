@@ -44,6 +44,7 @@ Purpose: record the meaningful research and planning milestones for the `voodoo4
 - User manual testing now shows the Voodoo4 driver path is active, `1024x768` at `16-bit` works, and `32-bit` color produces distortion.
 - A longer live V4 Windows boot trace now shows the working driver-enabled desktop path programming tiled `16-bit` scanout (`pixfmt=1`, `tile=1`) and reaching the existing `16bpp_tiled` renderer.
 - The current shared code still has no custom tiled desktop renderer for `24-bit` or `32-bit`; only the `16-bit` tiled path exists today.
+- A reproduced `800x600` `32-bit` manual retest on 2026-03-11 now shows the bad V4 mode also programming tiled desktop scanout (`pixfmt=3`, `tile=1`), while still landing on the generic linear `32bpp` renderer before the latest code change.
 
 ### Reframed
 
@@ -53,7 +54,7 @@ Purpose: record the meaningful research and planning milestones for the `voodoo4
 - Earlier assumptions that the remaining work was mainly architectural are now weaker than the simpler identity/ROM/coverage gap picture.
 - The earlier ROM-dispatch/handoff theory is no longer the best description of the failure. The stronger description is that the ROM was already executing, but its own subsystem-ID validation was rejecting the provisional Voodoo4 PCI `0x2c-0x2f` tuple before ext-register traffic began.
 - The new boundary is no longer "pre-ext dispatch"; it is now "driver-enabled `32-bit` color distortion beyond the currently verified `16-bit` desktop modes."
-- The strongest current hypothesis is no longer a generic display-path mismatch. It is now the narrower possibility that the bad mode is asking for tiled `32-bit` desktop scanout that the shared path does not yet model.
+- The strongest current hypothesis is no longer just a possibility. The bad `800x600` `32-bit` mode has now been traced as tiled desktop scanout, so the narrower question is whether the newly added tiled `32-bit` renderer is sufficient or whether a second mismatch remains.
 
 ### Corrected
 
@@ -80,11 +81,17 @@ Purpose: record the meaningful research and planning milestones for the `voodoo4
 - Added targeted mode-state tracing in `vid_voodoo_banshee.c` for `DACMODE`, `VIDPROCCFG`, `VIDINFORMAT`, screen size, desktop start, desktop stride, and selected renderer.
 - Rebuilt successfully and re-ran `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the targeted tracing delta.
 - Captured a longer live V4 Windows boot trace at `/tmp/voodoo4-mode-boundary.log`.
+- Added a shared tiled `32-bit` desktop renderer in `vid_voodoo_banshee.c` and routed tiled `PIX_FORMAT_RGB32` desktop scanout to it.
+- Rebuilt successfully and re-ran `bash scripts/test-voodoo4-blank-boundary.sh` successfully after the tiled `32-bit` renderer delta.
+- Manual VM retest on 2026-03-11 now shows `800x600` `32-bit` looking correct after that delta, and the post-fix trace confirms the working mode resolves onto `32bpp_tiled`.
+- Manual VM retest on 2026-03-11 also shows `1024x768` `32-bit` looking correct after that same delta, and the post-fix trace confirms that higher mode also resolves onto `32bpp_tiled`.
+- Additional manual VM retests on 2026-03-11 show `640x480` `32-bit` and `1280x1024` `32-bit` also looking correct after the same delta.
+- Removed the temporary Voodoo4 mode-state tracing after the tiled `32-bit` desktop investigation was complete, then rebuilt and re-ran `bash scripts/test-voodoo4-blank-boundary.sh` successfully.
 
 ### Open
 
 - Why `32-bit` color distorts under the installed Voodoo4 driver when `1024x768` `16-bit` already works
-- Whether the failing `32-bit` path also programs tiled desktop scanout, which would line up directly with the current lack of tiled `24/32-bit` desktop rendering in the shared path
+- Whether any less common desktop timings outside the now-tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` modes expose another tiled-path mismatch
 - Whether shared defaults such as `Init_dramInit1`, SDRAM sizing, or `Init_strapInfo` matter for richer mode sets or protected-mode driver enable rather than for basic bring-up
 
 ## Maintenance Notes

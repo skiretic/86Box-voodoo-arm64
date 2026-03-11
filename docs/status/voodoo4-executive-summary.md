@@ -17,7 +17,11 @@ Previous Voodoo 4 work in this repo accumulated implementation assumptions befor
 - `Verified:` the ROM touches offsets that already exist in 86Box’s Banshee/Voodoo3 implementation, including `0x1c`, `0x28`, `0x2c`, `0x40`, `0x4c`, `0x5c`, `0x98`, `0xe4`, and `0xe8`.
 - `Verified:` after matching the ROM-backed subsystem tuple, the current reuse-first path reaches early ext-register traffic, manually boots Windows to the desktop, and has now been manually verified through `1024x768` `16-bit`, with Windows identifying `Voodoo4 4500 AGP`.
 - `Verified:` targeted mode-state tracing on the live V4 Windows path now shows the working driver-enabled desktop programming a tiled `16-bit` mode (`pixfmt=1`, `tile=1`) that resolves onto the existing `16bpp_tiled` renderer.
-- `Inferred:` the strongest current emulator-side hypothesis is no longer a generic scanout mismatch; it is that `24/32-bit` tiled desktop scanout is not modeled in the shared path even though `16-bit` tiled scanout is.
+- `Verified:` a reproduced bad `800x600` `32-bit` mode on 2026-03-11 also programs tiled desktop scanout (`pixfmt=3`, `tile=1`), but before the latest code change it still resolved onto the generic linear `32bpp` renderer.
+- `Verified:` after adding the smallest matching tiled `32-bit` renderer, manual VM retest on 2026-03-11 shows `800x600` `32-bit` looking correct, and the post-fix trace resolves that mode onto `32bpp_tiled`.
+- `Verified:` the same tiled `32-bit` renderer change also restores manually tested `1024x768` `32-bit`, and the post-fix trace resolves that mode onto `32bpp_tiled`.
+- `Verified:` additional manual checks now also show `640x480` `32-bit` and `1280x1024` `32-bit` working correctly after the same change.
+- `Verified:` the strongest current emulator-side explanation for the reproduced `800x600` `32-bit` distortion is no longer hypothetical: the shared path was missing tiled `32-bit` desktop scanout even though tiled `16-bit` scanout already existed.
 - `Inferred:` the most likely successful bring-up path is reuse-first, not a clean-sheet Voodoo 4 rewrite.
 
 ## Strategic Recommendation
@@ -43,8 +47,9 @@ This recommendation is driven by both the ROM and the current runtime result. Th
 
 - `Inferred:` the main technical risk is overcommitting to a standalone Voodoo 4 implementation path before exhausting proven reuse.
 - `Verified:` the first meaningful hardware gap now appears on the driver-enabled `32-bit` color path, where the user reports distortion while `1024x768` `16-bit` works.
-- `Inferred:` the leading local-code candidate is a missing tiled `24/32-bit` desktop render path, because the traced good `16-bit` Windows mode is tiled and the shared code only has a custom tiled renderer for `16-bit`.
-- `Unknown:` whether the failing `32-bit` mode programs the same `tile=1` shape at runtime or diverges somewhere earlier in pixel format, stride, desktop start, DAC mode, or another display register.
+- `Verified:` the leading local-code candidate, the tiled `32-bit` desktop render path, was sufficient for the reproduced `800x600` `32-bit` failure and the manually tested `1024x768` `32-bit` mode.
+- `Verified:` the same fix also holds for manually tested `640x480` `32-bit` and `1280x1024` `32-bit`.
+- `Unknown:` whether any less common desktop timings outside the now-tested modes expose another mismatch.
 - `Unknown:` VSA-100-specific memory-sizing or reset-default behavior may still require shared-core changes once the first post-desktop failure is captured.
 
 ## Decision Rule Going Forward

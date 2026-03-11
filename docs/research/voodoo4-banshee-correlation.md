@@ -125,8 +125,9 @@ This section records the pre-implementation audit result that drove the first mi
 - `Verified:` runtime tracing now reaches the first Voodoo4 ext-register writes once that subsystem tuple is corrected.
 - `Verified:` manual VM verification now reaches the Windows desktop, with Windows identifying `Voodoo4 4500 AGP`, and has been manually tested through at least `800x600` `16-bit`.
 - `Verified:` targeted mode-state tracing on a longer live V4 Windows boot now shows the good desktop path programming `VIDPROCCFG` with `pixfmt=1` and `VIDPROCCFG_DESKTOP_TILE=1`, ultimately selecting the existing `16bpp_tiled` renderer.
-- `Verified:` the current shared file has no custom tiled desktop renderer for `24-bit` or `32-bit`; only `banshee_render_16bpp_tiled()` exists.
-- `Inferred:` if the failing `32-bit` mode also keeps desktop tiling enabled, a missing tiled `32-bit` renderer is a stronger immediate suspect than a broad VSA-100-only scanout rewrite.
+- `Verified:` the bad `800x600` `32-bit` trace later proved that the failing path also kept desktop tiling enabled while still selecting the linear `32bpp` renderer.
+- `Verified:` the shared file now has a custom tiled `32-bit` desktop renderer in addition to `banshee_render_16bpp_tiled()`.
+- `Verified:` manual VM retests now show the tiled `32-bit` renderer fix working at `640x480`, `800x600`, `1024x768`, and `1280x1024`.
 
 ## Corrections to Earlier Voodoo 4 Assumptions
 

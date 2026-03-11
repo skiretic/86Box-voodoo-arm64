@@ -14,7 +14,9 @@ This plan intentionally replaces assumption-driven implementation planning with 
 - `Verified:` the ROM does not justify a clean-sheet VGA bring-up model.
 - `Verified:` the current reuse-first path now reaches ROM POST plus manual Windows desktop bring-up through at least `1024x768` `16-bit`, with the Voodoo4 driver installed.
 - `Verified:` targeted mode-state tracing now shows the good live V4 Windows desktop path programming tiled `16-bit` scanout.
-- `Inferred:` the active milestone is no longer “prove the minimum Banshee/Voodoo3 reuse surface for POST and VGA/VBE”; it is now “capture the first failure on the known-bad `32-bit` color path beyond the known-good `1024x768` `16-bit` desktop.”
+- `Verified:` the first reproduced `32-bit` desktop failure was tiled scanout landing on the wrong renderer.
+- `Verified:` the smallest matching shared-path fix, a tiled `32-bit` desktop renderer, now restores the manually tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` desktop modes.
+- `Inferred:` the active milestone is no longer “capture the first bad `32-bit` desktop path”; it is now “use the stronger desktop baseline to evaluate the next real Voodoo4-specific unknown only when a fresh symptom points there.”
 
 ## Non-Goals for the First Recovery Pass
 
@@ -78,12 +80,13 @@ Separate true VSA-100 deltas from accidental emulator gaps.
 
 ### Questions to answer
 
-1. `Verified:` the first concrete failure beyond the verified desktop milestone is distortion in `32-bit` color with the Voodoo4 driver installed.
+1. `Verified:` the first concrete failure beyond the earlier desktop milestone was distortion in tiled `32-bit` color with the Voodoo4 driver installed.
 2. `Verified:` the traced good `16-bit` desktop path uses tiled scanout.
-3. `Unknown:` what exact runtime difference causes that distortion?
-4. `Unknown:` do Voodoo 4 display or memory-related registers require different reset values than Banshee/Voodoo3 once the machine leaves the working `16-bit` path?
-5. `Unknown:` do shared assumptions such as SDRAM sizing or `Init_strapInfo` become visible on the failing `32-bit` color path?
-6. `Inferred:` Voodoo4/Voodoo5 differences that still matter are now more likely to sit in richer color modes or later driver-visible behavior than in basic VGA/VBE bring-up.
+3. `Verified:` the traced bad `32-bit` desktop path also used tiled scanout, but initially fell through to the linear `32bpp` renderer.
+4. `Verified:` adding a tiled `32-bit` desktop renderer fixed the manually tested `640x480`, `800x600`, `1024x768`, and `1280x1024` `32-bit` desktop modes.
+5. `Unknown:` do Voodoo 4 display or memory-related registers require different reset values than Banshee/Voodoo3 beyond the now-working desktop scanout baseline?
+6. `Unknown:` do shared assumptions such as SDRAM sizing or `Init_strapInfo` become visible on a later failing path?
+7. `Inferred:` Voodoo4/Voodoo5 differences that still matter are now more likely to sit in richer driver-visible behavior than in basic VGA/VBE bring-up or common desktop scanout.
 
 ### Exit criteria
 
@@ -105,10 +108,10 @@ Use old research only after the fresh baseline exists.
 
 1. `Verified:` preserve the new docs in this repo as the current source of truth.
 2. `Verified:` preserve the current functional fix in `vid_voodoo_banshee.c`: PCI device ID `121a:0009`, ROM-backed subsystem tuple `121a:0004`, and the existing ext offset `0x70` coverage.
-3. `Verified:` preserve the new targeted mode-state tracing until the bad `32-bit` mode has been captured.
-4. `Inferred:` capture the failing `32-bit` color path with the current tracing and compare it directly against the already-traced good tiled `16-bit` path.
-5. `Inferred:` if the bad mode also keeps desktop tiling enabled, the next smallest code delta is likely a tiled `32-bit` desktop renderer rather than a broad scanout rewrite.
-6. `Inferred:` only if that boundary points back to reset/default assumptions should the next code delta target SDRAM sizing, `Init_dramInit1`, `DACMODE`, stride, or `Init_strapInfo`.
+3. `Verified:` the temporary targeted mode-state tracing has been removed now that the bad `32-bit` mode was captured and resolved.
+4. `Inferred:` only revisit fresh runtime tracing if a new display or driver-visible symptom appears.
+5. `Inferred:` the next smallest code delta should now be driven by a new reproduced post-desktop symptom, not by the solved tiled `32-bit` desktop boundary.
+6. `Inferred:` only if that next boundary points back to reset/default assumptions should the next code delta target SDRAM sizing, `Init_dramInit1`, `DACMODE`, stride, or `Init_strapInfo`.
 
 ## Supporting Documents
 
