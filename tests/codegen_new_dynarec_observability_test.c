@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -95,6 +96,30 @@ assert_no_0f_fallback_summary(uint8_t opcode)
     assert(new_dynarec_format_0f_fallback_summary(summary, sizeof(summary), opcode) == 0);
 }
 
+static void
+assert_no_rep_fallback_summary(uint8_t opcode)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_rep_fallback_summary(summary, sizeof(summary), opcode) == 0);
+}
+
+static void
+assert_no_rep_scas_debug_summary(void)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_rep_scas_debug_summary(summary, sizeof(summary)) == 0);
+}
+
+static void
+assert_no_rep_scas_debug_site_summary(uint32_t index)
+{
+    char summary[256];
+
+    assert(new_dynarec_format_rep_scas_debug_site_summary(summary, sizeof(summary), index) == 0);
+}
+
 int
 main(void)
 {
@@ -116,16 +141,37 @@ main(void)
     assert_no_base_fallback_summary(0xec);
     assert_no_0f_fallback_summary(0x6f);
     assert_no_0f_fallback_summary(0xef);
+    assert_no_rep_fallback_summary(0xa4);
+    assert_no_rep_fallback_summary(0xaf);
     assert(new_dynarec_format_d0d3_compare_summary(summary, sizeof(summary)) == 0);
+    assert_no_rep_scas_debug_summary();
+    assert_no_rep_scas_debug_site_summary(0);
+    setenv("86BOX_NEW_DYNAREC_DEBUG_REP_SCAS", "1", 1);
+    setenv("86BOX_NEW_DYNAREC_DEBUG_REP_SCAS_BUDGET", "2", 1);
+#ifdef NEW_DYNAREC_DEVTOOLS
+    assert(new_dynarec_rep_scas_debug_enabled_for_site(0x405000u, 0xaeu) == 1);
+    assert(new_dynarec_rep_scas_debug_enabled_for_site(0x406000u, 0xafu) == 1);
+    assert(new_dynarec_rep_scas_debug_enabled_for_site(0x407000u, 0xaeu) == 0);
+#else
+    assert(new_dynarec_rep_scas_debug_enabled_for_site(0x405000u, 0xaeu) == 0);
+    assert(new_dynarec_rep_scas_debug_enabled_for_site(0x406000u, 0xafu) == 0);
+    assert(new_dynarec_rep_scas_debug_enabled_for_site(0x407000u, 0xaeu) == 0);
+#endif
+    unsetenv("86BOX_NEW_DYNAREC_DEBUG_REP_SCAS");
+    unsetenv("86BOX_NEW_DYNAREC_DEBUG_REP_SCAS_BUDGET");
 
     new_dynarec_set_trace_hook(capture_trace, &trace_capture);
 
     new_dynarec_note_block_marked(0x1000, 0x2000, 7);
+#ifdef NEW_DYNAREC_DEVTOOLS
     assert(trace_capture.event_count == 1);
     assert(trace_capture.last_event.kind == NEW_DYNAREC_TRACE_BLOCK_MARKED);
     assert(trace_capture.last_event.pc == 0x1000);
     assert(trace_capture.last_event.phys == 0x2000);
     assert(trace_capture.last_event.detail == 7);
+#else
+    assert(trace_capture.event_count == 0);
+#endif
 
     assert(!new_dynarec_should_defer_marking_new_block());
     new_dynarec_note_block_recompiled(0x1010, 0x2010, 5);
@@ -154,9 +200,13 @@ main(void)
     new_dynarec_note_random_eviction(0x1050, 0x2050, 0x08);
     assert(new_dynarec_should_defer_marking_new_block());
     new_dynarec_note_deferred_block_mark(0x1054, 0x2054);
+#ifdef NEW_DYNAREC_DEVTOOLS
     assert(trace_capture.last_event.kind == NEW_DYNAREC_TRACE_BLOCK_MARK_DEFERRED);
     assert(trace_capture.last_event.pc == 0x1054);
     assert(trace_capture.last_event.phys == 0x2054);
+#else
+    assert(trace_capture.event_count == 0);
+#endif
     memset(&verify_config, 0, sizeof(verify_config));
     verify_config.match_pc     = 1;
     verify_config.match_opcode = 1;
@@ -166,12 +216,21 @@ main(void)
     new_dynarec_set_verify_config(&verify_config);
     memset(&snapshot, 0, sizeof(snapshot));
     new_dynarec_get_verify_config(&verify_config);
+#ifdef NEW_DYNAREC_DEVTOOLS
     assert(verify_config.match_pc == 1);
     assert(verify_config.match_opcode == 1);
     assert(verify_config.pc == 0x1060);
     assert(verify_config.opcode == 0x90);
     assert(verify_config.budget == 2);
+#else
+    assert(verify_config.match_pc == 0);
+    assert(verify_config.match_opcode == 0);
+    assert(verify_config.pc == 0);
+    assert(verify_config.opcode == 0);
+    assert(verify_config.budget == 0);
+#endif
     const int trace_count_before_verify = trace_capture.event_count;
+#ifdef NEW_DYNAREC_DEVTOOLS
     assert(!new_dynarec_note_verify_sample(0x1060, 0x91, NEW_DYNAREC_VERIFY_DIRECT));
     assert(new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_DIRECT));
     assert(trace_capture.event_count == trace_count_before_verify + 1);
@@ -181,6 +240,13 @@ main(void)
     assert(trace_capture.last_event.flags == NEW_DYNAREC_VERIFY_DIRECT);
     assert(new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_BAILOUT));
     assert(!new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL));
+#else
+    assert(!new_dynarec_note_verify_sample(0x1060, 0x91, NEW_DYNAREC_VERIFY_DIRECT));
+    assert(!new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_DIRECT));
+    assert(trace_capture.event_count == trace_count_before_verify);
+    assert(!new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_BAILOUT));
+    assert(!new_dynarec_note_verify_sample(0x1060, 0x90, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL));
+#endif
     new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_DIRECT);
     new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_DIRECT);
     new_dynarec_note_3dnow_opcode_hit(0xae, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
@@ -200,6 +266,9 @@ main(void)
     new_dynarec_note_0f_fallback_opcode_hit(0x6f, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
     new_dynarec_note_0f_fallback_opcode_hit(0x6f, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
     new_dynarec_note_0f_fallback_opcode_hit(0xef, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    new_dynarec_note_rep_fallback_opcode_hit(0xa4, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+    new_dynarec_note_rep_fallback_opcode_hit(0xa4, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+    new_dynarec_note_rep_fallback_opcode_hit(0xaf, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
     assert(new_dynarec_classify_post_purge_state(1, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_HAVE_FREE_BLOCK);
     assert(new_dynarec_classify_post_purge_state(0, 7) == NEW_DYNAREC_POST_PURGE_RETRY_DIRTY_LIST);
     assert(new_dynarec_classify_post_purge_state(0, BLOCK_INVALID) == NEW_DYNAREC_POST_PURGE_RANDOM_EVICTION);
@@ -231,10 +300,17 @@ main(void)
     assert(snapshot.purgable_flush_no_blocks == 1);
     assert(snapshot.purgable_flush_dirty_list_reuses == 1);
     assert(snapshot.random_evictions == 1);
+#ifdef NEW_DYNAREC_DEVTOOLS
     assert(snapshot.verify_samples == 2);
     assert(snapshot.verify_direct_samples == 1);
     assert(snapshot.verify_helper_table_null_samples == 0);
     assert(snapshot.verify_helper_bailout_samples == 1);
+#else
+    assert(snapshot.verify_samples == 0);
+    assert(snapshot.verify_direct_samples == 0);
+    assert(snapshot.verify_helper_table_null_samples == 0);
+    assert(snapshot.verify_helper_bailout_samples == 0);
+#endif
 
     assert(new_dynarec_format_stats_summary(summary, sizeof(summary), &snapshot) > 0);
     assert(strstr(summary, "blocks_marked=1"));
@@ -254,11 +330,18 @@ main(void)
     assert(strstr(summary, "purgable_flush_no_blocks=1"));
     assert(strstr(summary, "purgable_flush_dirty_list_reuses=1"));
     assert(strstr(summary, "random_evictions=1"));
+#ifdef NEW_DYNAREC_DEVTOOLS
     assert(strstr(summary, "verify_samples=2"));
     assert(strstr(summary, "verify_direct_samples=1"));
     assert(strstr(summary, "verify_helper_bailout_samples=1"));
+#else
+    assert(strstr(summary, "verify_samples=0"));
+    assert(strstr(summary, "verify_direct_samples=0"));
+    assert(strstr(summary, "verify_helper_bailout_samples=0"));
+#endif
 
     memset(summary, 0, sizeof(summary));
+#ifdef NEW_DYNAREC_DEVTOOLS
     assert(new_dynarec_format_3dnow_hit_summary(summary, sizeof(summary), 0xae) > 0);
     assert(strstr(summary, "opcode=0xae"));
     assert(strstr(summary, "direct=2"));
@@ -311,6 +394,54 @@ main(void)
     assert(strstr(summary, "helper_table_null=1"));
     assert(strstr(summary, "helper_bailout=0"));
     assert_no_0f_fallback_summary(0x70);
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_rep_fallback_summary(summary, sizeof(summary), 0xa4) > 0);
+    assert(strstr(summary, "opcode=0xa4"));
+    assert(strstr(summary, "helper_table_null=1"));
+    assert(strstr(summary, "helper_bailout=1"));
+
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_rep_fallback_summary(summary, sizeof(summary), 0xaf) > 0);
+    assert(strstr(summary, "opcode=0xaf"));
+    assert(strstr(summary, "helper_table_null=1"));
+    assert(strstr(summary, "helper_bailout=0"));
+    assert_no_rep_fallback_summary(0xa5);
+
+    memset(summary, 0, sizeof(summary));
+    new_dynarec_note_rep_scas_debug_site(0x403000u, 0xaeu);
+    assert(new_dynarec_format_rep_scas_debug_summary(summary, sizeof(summary)) > 0);
+    assert(strstr(summary, "attempts=1"));
+    assert(strstr(summary, "sites=1"));
+    assert(strstr(summary, "site_log_overflow=0"));
+    assert(strstr(summary, "last_pc=0x00403000"));
+    assert(strstr(summary, "last_opcode=0xae"));
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_rep_scas_debug_site_summary(summary, sizeof(summary), 0) > 0);
+    assert(strstr(summary, "index=0"));
+    assert(strstr(summary, "pc=0x00403000"));
+    assert(strstr(summary, "opcode=0xae"));
+    assert(strstr(summary, "attempts=1"));
+    assert_no_rep_scas_debug_site_summary(1);
+
+    memset(summary, 0, sizeof(summary));
+    new_dynarec_note_rep_scas_debug_site(0x403000u, 0xaeu);
+    new_dynarec_note_rep_scas_debug_site(0x404000u, 0xafu);
+    assert(new_dynarec_format_rep_scas_debug_summary(summary, sizeof(summary)) > 0);
+    assert(strstr(summary, "attempts=3"));
+    assert(strstr(summary, "sites=2"));
+    assert(strstr(summary, "last_pc=0x00404000"));
+    assert(strstr(summary, "last_opcode=0xaf"));
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_rep_scas_debug_site_summary(summary, sizeof(summary), 0) > 0);
+    assert(strstr(summary, "pc=0x00403000"));
+    assert(strstr(summary, "opcode=0xae"));
+    assert(strstr(summary, "attempts=2"));
+    memset(summary, 0, sizeof(summary));
+    assert(new_dynarec_format_rep_scas_debug_site_summary(summary, sizeof(summary), 1) > 0);
+    assert(strstr(summary, "pc=0x00404000"));
+    assert(strstr(summary, "opcode=0xaf"));
+    assert(strstr(summary, "attempts=1"));
 
     memset(summary, 0, sizeof(summary));
     new_dynarec_note_d0d3_compare_site(0x401000u, new_dynarec_pack_d0d3_rotate_compare(0xd0u, 0x10u, 8u, 0u, 1u, C_FLAG));
@@ -487,6 +618,25 @@ main(void)
     assert(strstr(summary, "cf=0"));
     assert(strstr(summary, "direct=0x18000000/0x00000801"));
     assert(strstr(summary, "helper=0x10000000/0x00000001"));
+#else
+    assert_no_3dnow_hit_summary(0xae);
+    assert_no_3dnow_hit_summary(0xbf);
+    assert_no_gap_family_summary();
+    assert_no_fallback_family_summary();
+    assert_no_base_fallback_summary(0x90);
+    assert_no_base_fallback_summary(0xec);
+    assert_no_0f_fallback_summary(0x6f);
+    assert_no_0f_fallback_summary(0xef);
+    assert_no_rep_fallback_summary(0xa4);
+    assert_no_rep_fallback_summary(0xaf);
+    new_dynarec_note_rep_scas_debug_site(0x403000u, 0xaeu);
+    assert_no_rep_scas_debug_summary();
+    assert_no_rep_scas_debug_site_summary(0);
+    assert(new_dynarec_format_d0d3_compare_summary(summary, sizeof(summary)) == 0);
+    assert(new_dynarec_format_d0d3_compare_site_summary(summary, sizeof(summary), 0) == 0);
+    assert(new_dynarec_format_d0d3_compare_sample_summary(summary, sizeof(summary), 0) == 0);
+    assert(new_dynarec_format_d0d3_compare_bailout_summary(summary, sizeof(summary), 0) == 0);
+#endif
 
     new_dynarec_note_block_became_no_immediates(0x1040, 0x2040, 0xa0);
     new_dynarec_stats_snapshot(&snapshot);

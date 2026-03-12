@@ -7,6 +7,9 @@
 
 uint32_t new_dynarec_bswap32_result(uint32_t value);
 
+uint32_t new_dynarec_aad_result(uint32_t ax, uint32_t base, uint32_t cpu_is_intel);
+uint32_t new_dynarec_aam_result(uint32_t ax, uint32_t base, uint32_t cpu_is_intel);
+
 uint32_t new_dynarec_imul_rm16_result(uint32_t dest, uint32_t src);
 uint32_t new_dynarec_imul_rm16_overflow_flag_mask(uint32_t dest, uint32_t src);
 uint32_t new_dynarec_imul_rm32_result(uint32_t dest, uint32_t src);

@@ -20,6 +20,15 @@ main(void)
     assert(new_dynarec_bswap32_result(0x11223344u) == 0x44332211u);
     assert(new_dynarec_bswap32_result(0xaabbccddU) == 0xddccbbaau);
 
+    assert(new_dynarec_aad_result(0x0205u, 10u, 1u) == 0x0019u);
+    assert(new_dynarec_aad_result(0x7f80u, 16u, 1u) == 0x0070u);
+    assert(new_dynarec_aad_result(0x0205u, 7u, 0u) == 0x0019u);
+
+    assert(new_dynarec_aam_result(0x0029u, 10u, 1u) == 0x0401u);
+    assert(new_dynarec_aam_result(0x00ffu, 16u, 1u) == 0x0f0fu);
+    assert(new_dynarec_aam_result(0x0029u, 0u, 1u) == 0x0401u);
+    assert(new_dynarec_aam_result(0x0029u, 7u, 0u) == 0x0401u);
+
     assert(new_dynarec_imul_rm16_result(0x0003u, 0x0004u) == 0x000cu);
     assert(new_dynarec_imul_rm16_overflow_flag_mask(0x0003u, 0x0004u) == 0);
     assert(new_dynarec_imul_rm16_result(0x0003u, 0xfffcu) == 0xfff4u);

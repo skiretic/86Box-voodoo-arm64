@@ -1,6 +1,6 @@
 # 2026-03-09 `SAHF` / `LAHF` Audit
 
-> Historical pre-implementation audit note (updated 2026-03-09): this audit answered the go/no-go question and the recommendation was then implemented in the same branch state. Base `0x9e` / `0x9f` (`SAHF` / `LAHF`) has since landed and guest-validated on `Windows 98 SE`; the confirming shutdown log is `/tmp/windows98_se_sahf_lahf_validation.log`. Treat the body below as the preserved audit that justified the landing, not as the current coverage snapshot. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+> Historical pre-implementation audit note (updated 2026-03-12): this audit answered the go/no-go question and the recommendation was then implemented in the same branch state. Base `0x9e` / `0x9f` (`SAHF` / `LAHF`) has since landed and guest-validated on `Windows 98 SE`; later branch work also closed the large measured REP string subset. Treat the body below as the preserved audit that justified the landing, not as the current coverage snapshot. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
 
 ## Purpose
 

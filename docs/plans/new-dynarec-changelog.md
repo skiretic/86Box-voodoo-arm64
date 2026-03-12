@@ -36,6 +36,62 @@ This is the running changelog for the CPU new dynarec investigation and follow-o
 - ...
 ```
 
+## 2026-03-12 (`NEW_DYNAREC_DEVTOOLS` release/devtools split)
+
+### Added
+- Added a compile-time `NEW_DYNAREC_DEVTOOLS` switch in `CMakeLists.txt` plus `src/CMakeLists.txt` so investigation-only CPU dynarec tooling can be built back in without keeping it active in the default release-style app build.
+
+### Changed
+- Changed the default CPU new dynarec build shape so selective verify sampling, exact 3DNow/gap/fallback logging, base `D0`-`D3` compare-only tooling, and `REP SCAS` debug tooling are now compiled out of the default perf/release-style build while the core dynarec, stable direct handlers, and baseline runtime stats surface remain.
+- Changed the hot-path implementation accordingly: `src/codegen_new/codegen.c` and `src/codegen_new/codegen_ops_shift.c` no longer execute the extra verify/fallback/debug helper paths in the default build, while `src/codegen_new/codegen_observability.c` keeps those surfaces available behind the new compile-time gate.
+
+### Validated
+- Confirmed the focused observability test passes in both modes:
+  - default release-style build (`cc -std=c11 -DUSE_NEW_DYNAREC ... tests/codegen_new_dynarec_observability_test.c ...`)
+  - devtools-enabled build (`cc -std=c11 -DUSE_NEW_DYNAREC -DNEW_DYNAREC_DEVTOOLS ... tests/codegen_new_dynarec_observability_test.c ...`)
+- Confirmed the focused coverage-policy test still passes in the default build and `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` followed by `codesign -s - --force --deep out/build/llvm-macos-aarch64.cmake/src/86Box.app` succeeds on the stripped-down default configuration.
+
+### Open
+- The maintained summary docs should now treat the extra dynarec investigation surfaces as devtools-only rather than always-active runtime behavior. Perf testing should use the default build; later debugging sessions can re-enable the old tooling with `-DNEW_DYNAREC_DEVTOOLS=ON`.
+
+## 2026-03-12 (`REP` string-family closure through `CMPSW` / `CMPSD`)
+
+### Added
+- Added direct CPU dynarec coverage for `REP MOVS`, `REP STOS`, `REP SCASB`, `REP CMPSB`, and `REP CMPSW` / `REP CMPSD` in `src/codegen_new/codegen_ops_string.c` plus `src/codegen_new/codegen_ops.c`, using helper-backed direct handlers that preserve interpreter-style partial-repeat block exit semantics.
+- Added a temporary `REP SCAS` debug/observability layer in `src/codegen_new/codegen_observability.c`, `src/86box.c`, and `tests/codegen_new_dynarec_observability_test.c` to sample real `0xae` / `0xaf` sites safely through interpreter dispatch before landing the guest-visible `SCASB` path.
+
+### Changed
+- Changed the branch's hottest remaining practical CPU work from generic `REP` bucket chasing into a narrow family-by-family landing sequence: `MOVS` first, then `STOS`, then `SCASB`, then `CMPSB`, then `CMPSW` / `CMPSD`.
+- Changed the stop point recommendation after that sequence: only `REP SCASW` / `SCASD` (`0xaf`) and tiny `INS` / `OUTS` traffic remain in the measured REP bucket, so the next best use of branch time is clean performance testing rather than more REP closure work.
+
+### Validated
+- Confirmed `/tmp/windows98_se_rep_movs_trial9.log` booted, ran 3DMark99, shut down cleanly, and removed `0xa4` / `0xa5` from the shutdown REP fallback list while reducing total REP fallbacks from `6205` to `3628`.
+- Confirmed `/tmp/windows98_se_rep_stos_trial1.log` booted, ran 3DMark99, shut down cleanly, and removed `0xaa` / `0xab` from the shutdown REP fallback list while reducing total REP fallbacks from `3628` to `2421`.
+- Confirmed `/tmp/windows98_se_rep_scasb_trial1.log` booted, ran 3DMark99, shut down cleanly, and removed `0xae` from the shutdown REP fallback list while reducing total REP fallbacks from `2367` to `1302`.
+- Confirmed `/tmp/windows98_se_rep_cmpsb_trial1.log` booted, ran 3DMark99, shut down cleanly, and removed `0xa6` from the shutdown REP fallback list while reducing total REP fallbacks from `1302` to `589`.
+- Confirmed `/tmp/windows98_se_rep_cmpsw_trial1.log` booted, ran 3DMark99, shut down cleanly, and removed `0xa7` from the shutdown REP fallback list while reducing total REP fallbacks from `589` to `228`.
+
+### Open
+- `REP SCASW` / `REP SCASD` (`0xaf`) still remains at `160` shutdown fallback hits in the latest `Windows 98 SE` + 3DMark99 run, but it is now small enough that the branch should switch to clean benchmark/perf testing before deciding whether to chase that last REP compare sibling.
+
+## 2026-03-12 (`AAM` / `AAD` helper-backed base closure)
+
+### Added
+- Added direct CPU dynarec coverage for base `0xd4` / `0xd5` in `src/codegen_new/codegen_ops_misc.c`, covering `AAM` and `AAD` through a narrow helper-backed `AX` result path plus the existing lazy `FLAGS_ZN8` state shape.
+- Added focused host-side semantics coverage for that pair in `tests/codegen_new_0f_semantics_test.c` and extended the direct-coverage policy surface in `tests/codegen_new_opcode_coverage_policy_test.c` plus `src/codegen_new/codegen_observability.c`.
+
+### Changed
+- Changed the next narrow base-opcode follow-up from planning-only into a small non-memory helper-backed pair, staying in the branch's low-risk table-hole lane instead of reopening the paused `0F`, `REP`, or `D0`-`D3` work.
+- Changed build verification at the same time by restoring the missing direct `SCAS` string-op entry points and declarations in `src/codegen_new/codegen_ops_string.c` / `.h`, which the first full app rebuild exposed as a latent tree inconsistency.
+
+### Validated
+- Confirmed the focused coverage-policy test followed TDD for this slice: it was first updated to expect `0xd4` / `0xd5` direct coverage, failed against the pre-change tree, and then passed after the implementation via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu tests/codegen_new_opcode_coverage_policy_test.c src/codegen_new/codegen_observability.c -o /tmp/codegen_new_opcode_coverage_policy_test && /tmp/codegen_new_opcode_coverage_policy_test`.
+- Confirmed the focused semantics harness first failed because the new helper functions were still absent, then passed after the implementation via `cc -std=c11 -DUSE_NEW_DYNAREC -Isrc/include -Isrc/cpu -Isrc/codegen_new tests/codegen_new_0f_semantics_test.c src/codegen_new/codegen_test_support.c -o /tmp/codegen_new_0f_semantics_test && /tmp/codegen_new_0f_semantics_test`.
+- Confirmed `cmake --preset llvm-macos-aarch64.cmake` followed by `cmake --build out/build/llvm-macos-aarch64.cmake --target 86Box -j4` succeeds with the new `AAM` / `AAD` handlers in tree.
+
+### Open
+- `AAM` / `AAD` is currently host/build-verified only; the next follow-up should be one narrow guest validation run before the branch docs start treating the pair as guest-validated closure.
+
 ## 2026-03-09 (`SAHF` / `LAHF` landing)
 
 ### Added

@@ -1,6 +1,6 @@
 # 2026-03-09 Guest Regression Planning Reset
 
-> Historical workflow note (updated 2026-03-09): this reset remains valid as process guidance, but it is not the live branch-status summary anymore. Later the same day the branch deliberately pivoted back to low-risk table-hole work and guest-validated `CMPS`, `SCAS`, and `SAHF` / `LAHF` on `Windows 98 SE`, while the blocked guest-facing families named here remain paused. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+> Historical workflow note (updated 2026-03-12): this reset remains valid as process guidance, but it is not the live branch-status summary anymore. Later branch work deliberately pivoted back to low-risk table-hole work, guest-validated `CMPS`, `SCAS`, `SAHF` / `LAHF`, and then closed the large measured REP string subset on `Windows 98 SE`, while the blocked guest-facing families named here remain paused. The debug env-var flows referenced below should also now be read as devtools-only guidance, because current builds need `NEW_DYNAREC_DEVTOOLS=ON` before those probes are active again. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
 
 ## Purpose
 

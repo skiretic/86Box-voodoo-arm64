@@ -67,6 +67,10 @@ if(NEW_DYNAREC)
     add_compile_definitions(USE_NEW_DYNAREC)
 endif()
 
+if(NEW_DYNAREC_DEVTOOLS)
+    add_compile_definitions(NEW_DYNAREC_DEVTOOLS)
+endif()
+
 if(RELEASE)
     add_compile_definitions(RELEASE_BUILD)
 endif()

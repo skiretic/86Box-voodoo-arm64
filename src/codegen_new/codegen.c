@@ -47,6 +47,7 @@ codegen_3dnow_opcode_requires_3dnowe(uint8_t opcode)
     }
 }
 
+#ifdef NEW_DYNAREC_DEVTOOLS
 static int
 codegen_rep_helper_gap_hit(const OpFn *op_table)
 {
@@ -86,6 +87,8 @@ codegen_classify_fallback_family(const OpFn *op_table)
 
     return NEW_DYNAREC_FALLBACK_FAMILY_BASE;
 }
+#endif
+
 int
 codegen_get_instruction_uop(codeblock_t *block, uint32_t pc, int *first_instruction, int *TOP)
 {
@@ -622,14 +625,14 @@ codegen_generate_call(uint8_t opcode, OpFn op, uint32_t fetchdat, uint32_t new_p
                 last_prefix = 0xf2;
 #endif
                 op_table        = x86_dynarec_opcodes_REPNE;
-                recomp_op_table = NULL; // recomp_opcodes_REPNE;
+                recomp_op_table = recomp_opcodes_REPNE;
                 break;
             case 0xf3: /*REPE*/
 #ifdef DEBUG_EXTRA
                 last_prefix = 0xf3;
 #endif
                 op_table        = x86_dynarec_opcodes_REPE;
-                recomp_op_table = NULL; // recomp_opcodes_REPE;
+                recomp_op_table = recomp_opcodes_REPE;
                 break;
 
             default:
@@ -748,9 +751,11 @@ generate_call:
 
             if (new_pc) {
                 new_dynarec_note_direct_recompiled_instruction();
+#ifdef NEW_DYNAREC_DEVTOOLS
                 new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_DIRECT);
                 if (op_table == x86_dynarec_opcodes_3DNOW)
                     new_dynarec_note_3dnow_opcode_hit(opcode, NEW_DYNAREC_VERIFY_DIRECT);
+#endif
                 if (new_pc != -1)
                     uop_MOV_IMM(ir, IREG_pc, new_pc);
 
@@ -770,6 +775,7 @@ generate_call:
     }
 
 codegen_skip:
+#ifdef NEW_DYNAREC_DEVTOOLS
     if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL) {
         new_dynarec_note_verify_sample(cs + old_pc, opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
         if (op_table == x86_dynarec_opcodes_3DNOW)
@@ -797,8 +803,14 @@ codegen_skip:
                 new_dynarec_note_0f_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
             else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT)
                 new_dynarec_note_0f_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
+        } else if (fallback_family == NEW_DYNAREC_FALLBACK_FAMILY_REP) {
+            if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_TABLE_NULL)
+                new_dynarec_note_rep_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL);
+            else if (helper_fallback_reason == NEW_DYNAREC_HELPER_FALLBACK_DIRECT_HANDLER_BAILOUT)
+                new_dynarec_note_rep_fallback_opcode_hit(opcode, NEW_DYNAREC_VERIFY_HELPER_BAILOUT);
         }
     }
+#endif
     new_dynarec_note_helper_call_fallback(helper_fallback_reason);
 
     if ((op_table == x86_dynarec_opcodes_REPNE || op_table == x86_dynarec_opcodes_REPE) && !op_table[opcode | op_32]) {

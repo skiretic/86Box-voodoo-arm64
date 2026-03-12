@@ -12,6 +12,8 @@ static new_dynarec_trace_hook_t new_dynarec_trace_hook;
 static void                    *new_dynarec_trace_hook_opaque;
 static new_dynarec_verify_config_t new_dynarec_verify_config;
 static int                        new_dynarec_verify_config_initialized;
+static uint32_t                   new_dynarec_rep_scas_debug_budget;
+static int                        new_dynarec_rep_scas_debug_budget_initialized;
 static uint32_t                   new_dynarec_mark_deferral_budget;
 static uint64_t                   new_dynarec_3dnow_direct_hits[256];
 static uint64_t                   new_dynarec_3dnow_helper_table_null_hits[256];
@@ -23,6 +25,18 @@ static uint64_t                   new_dynarec_base_fallback_table_null_hits[256]
 static uint64_t                   new_dynarec_base_fallback_bailout_hits[256];
 static uint64_t                   new_dynarec_0f_fallback_table_null_hits[256];
 static uint64_t                   new_dynarec_0f_fallback_bailout_hits[256];
+static uint64_t                   new_dynarec_rep_fallback_table_null_hits[256];
+static uint64_t                   new_dynarec_rep_fallback_bailout_hits[256];
+static struct {
+    uint64_t attempts;
+    uint32_t site_count;
+    uint32_t site_log_overflow;
+    uint32_t last_pc;
+    uint32_t last_opcode;
+    uint32_t site_pcs[32];
+    uint32_t site_opcodes[32];
+    uint64_t site_attempts[32];
+} new_dynarec_rep_scas_debug_state;
 typedef struct {
     uint32_t pc;
     uint32_t packed_compare;
@@ -88,6 +102,7 @@ new_dynarec_emit_trace(new_dynarec_trace_kind_t kind, uint32_t pc, uint32_t phys
     new_dynarec_trace_hook(&event, new_dynarec_trace_hook_opaque);
 }
 
+#ifdef NEW_DYNAREC_DEVTOOLS
 static uint32_t
 new_dynarec_parse_u32_env(const char *name, int *present)
 {
@@ -134,11 +149,36 @@ new_dynarec_verify_config_init_from_env(void)
         new_dynarec_verify_config.budget = 1;
 }
 
+static void
+new_dynarec_rep_scas_debug_budget_init_from_env(void)
+{
+    int present_budget = 0;
+
+    if (new_dynarec_rep_scas_debug_budget_initialized)
+        return;
+
+    new_dynarec_rep_scas_debug_budget_initialized = 1;
+    new_dynarec_rep_scas_debug_budget =
+        new_dynarec_parse_u32_env("86BOX_NEW_DYNAREC_DEBUG_REP_SCAS_BUDGET", &present_budget);
+
+    if (!present_budget) {
+        int fallback_present = 0;
+
+        new_dynarec_rep_scas_debug_budget =
+            new_dynarec_parse_u32_env("86BOX_NEW_DYNAREC_VERIFY_BUDGET", &fallback_present);
+        if (!fallback_present)
+            new_dynarec_rep_scas_debug_budget = 8;
+    }
+}
+#endif
+
 void
 new_dynarec_stats_reset(void)
 {
     memset(&new_dynarec_stats, 0, sizeof(new_dynarec_stats));
     new_dynarec_mark_deferral_budget = 0;
+    new_dynarec_rep_scas_debug_budget = 0;
+    new_dynarec_rep_scas_debug_budget_initialized = 0;
     memset(new_dynarec_3dnow_direct_hits, 0, sizeof(new_dynarec_3dnow_direct_hits));
     memset(new_dynarec_3dnow_helper_table_null_hits, 0, sizeof(new_dynarec_3dnow_helper_table_null_hits));
     memset(new_dynarec_3dnow_helper_bailout_hits, 0, sizeof(new_dynarec_3dnow_helper_bailout_hits));
@@ -149,6 +189,9 @@ new_dynarec_stats_reset(void)
     memset(new_dynarec_base_fallback_bailout_hits, 0, sizeof(new_dynarec_base_fallback_bailout_hits));
     memset(new_dynarec_0f_fallback_table_null_hits, 0, sizeof(new_dynarec_0f_fallback_table_null_hits));
     memset(new_dynarec_0f_fallback_bailout_hits, 0, sizeof(new_dynarec_0f_fallback_bailout_hits));
+    memset(new_dynarec_rep_fallback_table_null_hits, 0, sizeof(new_dynarec_rep_fallback_table_null_hits));
+    memset(new_dynarec_rep_fallback_bailout_hits, 0, sizeof(new_dynarec_rep_fallback_bailout_hits));
+    memset(&new_dynarec_rep_scas_debug_state, 0, sizeof(new_dynarec_rep_scas_debug_state));
     memset(&new_dynarec_d0d3_compare_state, 0, sizeof(new_dynarec_d0d3_compare_state));
 }
 
@@ -178,6 +221,9 @@ new_dynarec_stats_logging_enabled(void)
 int
 new_dynarec_3dnow_hit_logging_enabled(void)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -187,11 +233,15 @@ new_dynarec_3dnow_hit_logging_enabled(void)
     }
 
     return enabled;
+#endif
 }
 
 int
 new_dynarec_gap_family_logging_enabled(void)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -201,11 +251,15 @@ new_dynarec_gap_family_logging_enabled(void)
     }
 
     return enabled;
+#endif
 }
 
 int
 new_dynarec_fallback_family_logging_enabled(void)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -215,11 +269,15 @@ new_dynarec_fallback_family_logging_enabled(void)
     }
 
     return enabled;
+#endif
 }
 
 int
 new_dynarec_base_fallback_logging_enabled(void)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -229,11 +287,15 @@ new_dynarec_base_fallback_logging_enabled(void)
     }
 
     return enabled;
+#endif
 }
 
 int
 new_dynarec_0f_fallback_logging_enabled(void)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -243,11 +305,33 @@ new_dynarec_0f_fallback_logging_enabled(void)
     }
 
     return enabled;
+#endif
+}
+
+int
+new_dynarec_rep_fallback_logging_enabled(void)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_LOG_REP_FALLBACKS");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+#endif
 }
 
 int
 new_dynarec_d0d3_compare_logging_enabled(void)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -257,11 +341,15 @@ new_dynarec_d0d3_compare_logging_enabled(void)
     }
 
     return enabled;
+#endif
 }
 
 int
 new_dynarec_d0d3_compare_site_logging_enabled(void)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -271,6 +359,25 @@ new_dynarec_d0d3_compare_site_logging_enabled(void)
     }
 
     return enabled;
+#endif
+}
+
+int
+new_dynarec_rep_scas_debug_logging_enabled(void)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    return 0;
+#else
+    static int enabled = -1;
+
+    if (enabled == -1) {
+        const char *value = getenv("86BOX_NEW_DYNAREC_DEBUG_REP_SCAS");
+
+        enabled = (value && value[0] && strcmp(value, "0")) ? 1 : 0;
+    }
+
+    return enabled;
+#endif
 }
 
 int
@@ -352,6 +459,12 @@ new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_st
 int
 new_dynarec_format_3dnow_hit_summary(char *buffer, size_t size, uint8_t opcode)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) opcode;
+    return 0;
+#else
     uint64_t direct_hits;
     uint64_t helper_table_null_hits;
     uint64_t helper_bailout_hits;
@@ -369,11 +482,17 @@ new_dynarec_format_3dnow_hit_summary(char *buffer, size_t size, uint8_t opcode)
     return snprintf(buffer, size,
                     "opcode=0x%02x direct=%" PRIu64 " helper_table_null=%" PRIu64 " helper_bailout=%" PRIu64,
                     opcode, direct_hits, helper_table_null_hits, helper_bailout_hits);
+#endif
 }
 
 int
 new_dynarec_format_gap_family_summary(char *buffer, size_t size)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    return 0;
+#else
     if (!buffer || !size)
         return 0;
 
@@ -383,11 +502,17 @@ new_dynarec_format_gap_family_summary(char *buffer, size_t size)
     return snprintf(buffer, size,
                     "rep=%" PRIu64 " softfloat_x87=%" PRIu64,
                     new_dynarec_rep_gap_hits, new_dynarec_softfloat_x87_gap_hits);
+#endif
 }
 
 int
 new_dynarec_format_fallback_family_summary(char *buffer, size_t size)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    return 0;
+#else
     if (!buffer || !size)
         return 0;
 
@@ -405,11 +530,18 @@ new_dynarec_format_fallback_family_summary(char *buffer, size_t size)
                     new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_X87],
                     new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_REP],
                     new_dynarec_fallback_family_hits[NEW_DYNAREC_FALLBACK_FAMILY_3DNOW]);
+#endif
 }
 
 int
 new_dynarec_format_base_fallback_summary(char *buffer, size_t size, uint8_t opcode)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) opcode;
+    return 0;
+#else
     uint64_t helper_table_null_hits;
     uint64_t helper_bailout_hits;
 
@@ -425,11 +557,18 @@ new_dynarec_format_base_fallback_summary(char *buffer, size_t size, uint8_t opco
     return snprintf(buffer, size,
                     "opcode=0x%02x helper_table_null=%" PRIu64 " helper_bailout=%" PRIu64,
                     opcode, helper_table_null_hits, helper_bailout_hits);
+#endif
 }
 
 int
 new_dynarec_format_0f_fallback_summary(char *buffer, size_t size, uint8_t opcode)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) opcode;
+    return 0;
+#else
     uint64_t helper_table_null_hits;
     uint64_t helper_bailout_hits;
 
@@ -445,11 +584,44 @@ new_dynarec_format_0f_fallback_summary(char *buffer, size_t size, uint8_t opcode
     return snprintf(buffer, size,
                     "opcode=0x%02x helper_table_null=%" PRIu64 " helper_bailout=%" PRIu64,
                     opcode, helper_table_null_hits, helper_bailout_hits);
+#endif
+}
+
+int
+new_dynarec_format_rep_fallback_summary(char *buffer, size_t size, uint8_t opcode)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) opcode;
+    return 0;
+#else
+    uint64_t helper_table_null_hits;
+    uint64_t helper_bailout_hits;
+
+    if (!buffer || !size)
+        return 0;
+
+    helper_table_null_hits = new_dynarec_rep_fallback_table_null_hits[opcode];
+    helper_bailout_hits    = new_dynarec_rep_fallback_bailout_hits[opcode];
+
+    if (!(helper_table_null_hits || helper_bailout_hits))
+        return 0;
+
+    return snprintf(buffer, size,
+                    "opcode=0x%02x helper_table_null=%" PRIu64 " helper_bailout=%" PRIu64,
+                    opcode, helper_table_null_hits, helper_bailout_hits);
+#endif
 }
 
 int
 new_dynarec_format_d0d3_compare_summary(char *buffer, size_t size)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    return 0;
+#else
     const char *form;
 
     if (!buffer || !size)
@@ -495,11 +667,66 @@ new_dynarec_format_d0d3_compare_summary(char *buffer, size_t size)
                     new_dynarec_d0d3_compare_state.direct_flag_mask,
                     new_dynarec_d0d3_compare_state.helper_result,
                     new_dynarec_d0d3_compare_state.helper_flag_mask);
+#endif
+}
+
+int
+new_dynarec_format_rep_scas_debug_summary(char *buffer, size_t size)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    return 0;
+#else
+    if (!buffer || !size)
+        return 0;
+
+    if (!(new_dynarec_rep_scas_debug_state.attempts || new_dynarec_rep_scas_debug_state.site_count))
+        return 0;
+
+    return snprintf(buffer, size,
+                    "attempts=%" PRIu64 " sites=%u site_log_overflow=%u last_pc=0x%08x last_opcode=0x%02x",
+                    new_dynarec_rep_scas_debug_state.attempts,
+                    new_dynarec_rep_scas_debug_state.site_count,
+                    new_dynarec_rep_scas_debug_state.site_log_overflow,
+                    new_dynarec_rep_scas_debug_state.last_pc,
+                    new_dynarec_rep_scas_debug_state.last_opcode);
+#endif
+}
+
+int
+new_dynarec_format_rep_scas_debug_site_summary(char *buffer, size_t size, uint32_t index)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) index;
+    return 0;
+#else
+    if (!buffer || !size)
+        return 0;
+
+    if (index >= new_dynarec_rep_scas_debug_state.site_count)
+        return 0;
+
+    return snprintf(buffer, size,
+                    "index=%u pc=0x%08x opcode=0x%02x attempts=%" PRIu64,
+                    index,
+                    new_dynarec_rep_scas_debug_state.site_pcs[index],
+                    new_dynarec_rep_scas_debug_state.site_opcodes[index],
+                    new_dynarec_rep_scas_debug_state.site_attempts[index]);
+#endif
 }
 
 int
 new_dynarec_format_d0d3_compare_site_summary(char *buffer, size_t size, uint32_t index)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) index;
+    return 0;
+#else
     uint32_t    pc;
     uint32_t    packed_compare;
     const char *form;
@@ -533,11 +760,18 @@ new_dynarec_format_d0d3_compare_site_summary(char *buffer, size_t size, uint32_t
                     new_dynarec_d0d3_compare_state.site_operand_zero[index],
                     new_dynarec_d0d3_compare_state.site_result_changed[index],
                     new_dynarec_d0d3_compare_state.site_flags_nonzero[index]);
+#endif
 }
 
 int
 new_dynarec_format_d0d3_compare_sample_summary(char *buffer, size_t size, uint32_t index)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) index;
+    return 0;
+#else
     uint32_t absolute_index;
     uint32_t ring_index;
     const char *form;
@@ -570,11 +804,18 @@ new_dynarec_format_d0d3_compare_sample_summary(char *buffer, size_t size, uint32
                     new_dynarec_d0d3_rotate_compare_flags(sample->packed_compare) ? 1u : 0u,
                     sample->direct_result, sample->direct_flag_mask,
                     sample->helper_result, sample->helper_flag_mask);
+#endif
 }
 
 int
 new_dynarec_format_d0d3_compare_bailout_summary(char *buffer, size_t size, uint32_t index)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) buffer;
+    (void) size;
+    (void) index;
+    return 0;
+#else
     uint32_t absolute_index;
     uint32_t ring_index;
     const char *form;
@@ -612,8 +853,10 @@ new_dynarec_format_d0d3_compare_bailout_summary(char *buffer, size_t size, uint3
                     reason,
                     new_dynarec_d0d3_rotate_compare_count(sample->packed_compare),
                     new_dynarec_d0d3_rotate_compare_flags(sample->packed_compare) ? 1u : 0u);
+#endif
 }
 
+#ifdef NEW_DYNAREC_DEVTOOLS
 static uint32_t
 new_dynarec_find_d0d3_compare_site_index(uint32_t pc)
 {
@@ -627,20 +870,48 @@ new_dynarec_find_d0d3_compare_site_index(uint32_t pc)
     return UINT32_MAX;
 }
 
+static uint32_t
+new_dynarec_find_rep_scas_debug_site_index(uint32_t pc, uint8_t opcode)
+{
+    uint32_t index;
+
+    for (index = 0; index < new_dynarec_rep_scas_debug_state.site_count; index++) {
+        if (new_dynarec_rep_scas_debug_state.site_pcs[index] == pc
+            && new_dynarec_rep_scas_debug_state.site_opcodes[index] == opcode)
+            return index;
+    }
+
+    return UINT32_MAX;
+}
+#endif
+
 void
 new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) hook;
+    (void) opaque;
+    new_dynarec_trace_hook        = NULL;
+    new_dynarec_trace_hook_opaque = NULL;
+#else
     new_dynarec_trace_hook        = hook;
     new_dynarec_trace_hook_opaque = opaque;
+#endif
 }
 
 void
 new_dynarec_set_verify_config(const new_dynarec_verify_config_t *config)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) config;
+    new_dynarec_verify_config_initialized = 1;
+    memset(&new_dynarec_verify_config, 0, sizeof(new_dynarec_verify_config));
+#else
     new_dynarec_verify_config_initialized = 1;
     memset(&new_dynarec_verify_config, 0, sizeof(new_dynarec_verify_config));
     if (config)
         new_dynarec_verify_config = *config;
+#endif
 }
 
 void
@@ -649,12 +920,21 @@ new_dynarec_get_verify_config(new_dynarec_verify_config_t *out)
     if (!out)
         return;
 
+#ifndef NEW_DYNAREC_DEVTOOLS
+    memset(out, 0, sizeof(*out));
+#else
     *out = new_dynarec_verify_config;
+#endif
 }
 
 int
 new_dynarec_d0d3_compare_enabled_for_site(uint32_t pc, uint8_t opcode)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) pc;
+    (void) opcode;
+    return 0;
+#else
     static int enabled = -1;
 
     if (enabled == -1) {
@@ -678,11 +958,46 @@ new_dynarec_d0d3_compare_enabled_for_site(uint32_t pc, uint8_t opcode)
         return 0;
 
     return 1;
+#endif
+}
+
+int
+new_dynarec_rep_scas_debug_enabled_for_site(uint32_t pc, uint8_t opcode)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) pc;
+    (void) opcode;
+    return 0;
+#else
+    if (!new_dynarec_rep_scas_debug_logging_enabled())
+        return 0;
+
+    new_dynarec_rep_scas_debug_budget_init_from_env();
+    new_dynarec_verify_config_init_from_env();
+
+    if (!new_dynarec_rep_scas_debug_budget)
+        return 0;
+
+    if (new_dynarec_verify_config.match_pc && new_dynarec_verify_config.pc != pc)
+        return 0;
+
+    if (new_dynarec_verify_config.match_opcode && new_dynarec_verify_config.opcode != opcode)
+        return 0;
+
+    new_dynarec_rep_scas_debug_budget--;
+    return 1;
+#endif
 }
 
 int
 new_dynarec_note_verify_sample(uint32_t pc, uint16_t opcode, new_dynarec_verify_outcome_t outcome)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) pc;
+    (void) opcode;
+    (void) outcome;
+    return 0;
+#else
     new_dynarec_verify_config_init_from_env();
 
     if (!new_dynarec_verify_config.budget)
@@ -716,11 +1031,16 @@ new_dynarec_note_verify_sample(uint32_t pc, uint16_t opcode, new_dynarec_verify_
 
     new_dynarec_emit_trace(NEW_DYNAREC_TRACE_VERIFY_SAMPLE, pc, 0, opcode, outcome);
     return 1;
+#endif
 }
 
 void
 new_dynarec_note_3dnow_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) opcode;
+    (void) outcome;
+#else
     switch (outcome) {
         case NEW_DYNAREC_VERIFY_DIRECT:
             new_dynarec_3dnow_direct_hits[opcode]++;
@@ -734,11 +1054,15 @@ new_dynarec_note_3dnow_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t o
         default:
             break;
     }
+#endif
 }
 
 void
 new_dynarec_note_gap_family_hit(new_dynarec_gap_family_t family)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) family;
+#else
     switch (family) {
         case NEW_DYNAREC_GAP_FAMILY_REP:
             new_dynarec_rep_gap_hits++;
@@ -749,33 +1073,62 @@ new_dynarec_note_gap_family_hit(new_dynarec_gap_family_t family)
         default:
             break;
     }
+#endif
 }
 
 void
 new_dynarec_note_fallback_family_hit(new_dynarec_fallback_family_t family)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) family;
+#else
     if (family <= NEW_DYNAREC_FALLBACK_FAMILY_NONE || family > NEW_DYNAREC_FALLBACK_FAMILY_3DNOW)
         return;
 
     new_dynarec_fallback_family_hits[family]++;
+#endif
 }
 
 void
 new_dynarec_note_base_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) opcode;
+    (void) outcome;
+#else
     if (outcome == NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL)
         new_dynarec_base_fallback_table_null_hits[opcode]++;
     else if (outcome == NEW_DYNAREC_VERIFY_HELPER_BAILOUT)
         new_dynarec_base_fallback_bailout_hits[opcode]++;
+#endif
 }
 
 void
 new_dynarec_note_0f_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) opcode;
+    (void) outcome;
+#else
     if (outcome == NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL)
         new_dynarec_0f_fallback_table_null_hits[opcode]++;
     else if (outcome == NEW_DYNAREC_VERIFY_HELPER_BAILOUT)
         new_dynarec_0f_fallback_bailout_hits[opcode]++;
+#endif
+}
+
+void
+new_dynarec_note_rep_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) opcode;
+    (void) outcome;
+#else
+    if (outcome == NEW_DYNAREC_VERIFY_HELPER_TABLE_NULL)
+        new_dynarec_rep_fallback_table_null_hits[opcode]++;
+    else if (outcome == NEW_DYNAREC_VERIFY_HELPER_BAILOUT)
+        new_dynarec_rep_fallback_bailout_hits[opcode]++;
+#endif
 }
 
 void
@@ -783,6 +1136,14 @@ new_dynarec_note_d0d3_compare_attempt(uint32_t packed_compare, uint32_t original
                                       uint32_t direct_result, uint32_t direct_flag_mask,
                                       uint32_t helper_result, uint32_t helper_flag_mask)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) packed_compare;
+    (void) original_operand;
+    (void) direct_result;
+    (void) direct_flag_mask;
+    (void) helper_result;
+    (void) helper_flag_mask;
+#else
     const int mismatch = (direct_result != helper_result) || (direct_flag_mask != helper_flag_mask);
 
     new_dynarec_d0d3_compare_state.attempts++;
@@ -849,11 +1210,46 @@ new_dynarec_note_d0d3_compare_attempt(uint32_t packed_compare, uint32_t original
                 new_dynarec_d0d3_rotate_compare_flags(packed_compare) ? 1u : 0u,
                 direct_result, direct_flag_mask, helper_result, helper_flag_mask);
     }
+#endif
+}
+
+void
+new_dynarec_note_rep_scas_debug_site(uint32_t pc, uint8_t opcode)
+{
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) pc;
+    (void) opcode;
+#else
+    uint32_t index;
+
+    new_dynarec_rep_scas_debug_state.attempts++;
+    new_dynarec_rep_scas_debug_state.last_pc     = pc;
+    new_dynarec_rep_scas_debug_state.last_opcode = opcode;
+
+    index = new_dynarec_find_rep_scas_debug_site_index(pc, opcode);
+    if (index == UINT32_MAX) {
+        if (new_dynarec_rep_scas_debug_state.site_count
+            >= (sizeof(new_dynarec_rep_scas_debug_state.site_pcs) / sizeof(new_dynarec_rep_scas_debug_state.site_pcs[0]))) {
+            new_dynarec_rep_scas_debug_state.site_log_overflow = 1;
+            return;
+        }
+
+        index = new_dynarec_rep_scas_debug_state.site_count++;
+        new_dynarec_rep_scas_debug_state.site_pcs[index]     = pc;
+        new_dynarec_rep_scas_debug_state.site_opcodes[index] = opcode;
+    }
+
+    new_dynarec_rep_scas_debug_state.site_attempts[index]++;
+#endif
 }
 
 void
 new_dynarec_note_d0d3_compare_site(uint32_t pc, uint32_t packed_compare)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) pc;
+    (void) packed_compare;
+#else
     uint32_t index;
 
     new_dynarec_d0d3_compare_state.last_pc         = pc;
@@ -882,12 +1278,18 @@ new_dynarec_note_d0d3_compare_site(uint32_t pc, uint32_t packed_compare)
                 new_dynarec_d0d3_rotate_compare_width(packed_compare),
                 new_dynarec_d0d3_rotate_compare_is_memory(packed_compare) ? "mem" : "reg");
     }
+#endif
 }
 
 void
 new_dynarec_note_d0d3_compare_site_bailout(uint32_t pc, uint32_t packed_compare,
                                            new_dynarec_d0d3_compare_bailout_reason_t reason)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) pc;
+    (void) packed_compare;
+    (void) reason;
+#else
     uint32_t site_index;
 
     new_dynarec_note_d0d3_compare_site(pc, packed_compare);
@@ -909,6 +1311,7 @@ new_dynarec_note_d0d3_compare_site_bailout(uint32_t pc, uint32_t packed_compare,
     if (new_dynarec_d0d3_compare_state.recent_bailout_count
         < (sizeof(new_dynarec_d0d3_compare_state.recent_bailouts) / sizeof(new_dynarec_d0d3_compare_state.recent_bailouts[0])))
         new_dynarec_d0d3_compare_state.recent_bailout_count++;
+#endif
 }
 
 void
@@ -1076,6 +1479,36 @@ int
 new_dynarec_direct_base_string_opcode_count(void)
 {
     return 10;
+}
+
+int
+new_dynarec_has_direct_rep_opcode_recompile(uint16_t opcode)
+{
+    switch (opcode) {
+        case 0x0a4:
+        case 0x0a5:
+        case 0x0a6:
+        case 0x0a7:
+        case 0x0aa:
+        case 0x0ab:
+        case 0x0ae:
+        case 0x1a4:
+        case 0x1a5:
+        case 0x1a6:
+        case 0x1a7:
+        case 0x1aa:
+        case 0x1ab:
+        case 0x1ae:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+int
+new_dynarec_direct_rep_string_opcode_count(void)
+{
+    return 7;
 }
 
 void

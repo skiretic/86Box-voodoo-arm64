@@ -24,6 +24,7 @@ main(void)
     assert(new_dynarec_has_direct_3dnow_recompile() == 1);
     assert(new_dynarec_direct_3dnow_opcode_count() == (int) (sizeof(expected_direct_3dnow_opcodes) / sizeof(expected_direct_3dnow_opcodes[0])));
     assert(new_dynarec_direct_base_string_opcode_count() == 10);
+    assert(new_dynarec_direct_rep_string_opcode_count() == 7);
 
     for (i = 0; i < sizeof(expected_direct_3dnow_opcodes) / sizeof(expected_direct_3dnow_opcodes[0]); i++)
         assert(new_dynarec_has_direct_3dnow_opcode_recompile(expected_direct_3dnow_opcodes[i]) == 1);
@@ -43,6 +44,23 @@ main(void)
     assert(new_dynarec_has_direct_base_opcode_recompile(0xaf) == 1);
     assert(new_dynarec_has_direct_base_opcode_recompile(0x9e) == 1);
     assert(new_dynarec_has_direct_base_opcode_recompile(0x9f) == 1);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0xd4) == 0);
+    assert(new_dynarec_has_direct_base_opcode_recompile(0xd5) == 0);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0a4) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0a5) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0aa) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0ab) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0a6) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0a7) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x1a4) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x1a5) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x1aa) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x1ab) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x1a6) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x1a7) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0ae) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x1ae) == 1);
+    assert(new_dynarec_has_direct_rep_opcode_recompile(0x0af) == 0);
     assert(new_dynarec_direct_0f_setcc_opcode_count() == 16);
     assert(new_dynarec_direct_0f_bswap_opcode_count() == 8);
     assert(new_dynarec_direct_0f_bitscan_opcode_count() == 2);

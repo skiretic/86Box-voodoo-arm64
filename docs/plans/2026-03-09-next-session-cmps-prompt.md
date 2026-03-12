@@ -1,6 +1,6 @@
 # Next Session Prompt: Continue After CMPS Validation
 
-> Historical prompt note (updated 2026-03-09): this prompt was consumed later the same day. `SCAS` (`0xae` / `0xaf`) has since landed and guest-validated, and the branch has also since landed and guest-validated `SAHF` / `LAHF` (`0x9e` / `0x9f`) on `Windows 98 SE`. Treat the body below as preserved session history, not the current next-step instruction. For current branch status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+> Historical prompt note (updated 2026-03-12): this prompt was consumed later the same day. `SCAS` (`0xae` / `0xaf`) has since landed and guest-validated, the branch has also since landed and guest-validated `SAHF` / `LAHF` (`0x9e` / `0x9f`), and later work closed the large measured REP string subset on `Windows 98 SE`. Treat the body below as preserved session history, not the current next-step instruction. For current branch status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
 
 Use this prompt to start the next session:
 

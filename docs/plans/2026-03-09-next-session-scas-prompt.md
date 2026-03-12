@@ -1,6 +1,6 @@
 # Next Session Prompt: Re-rank The Next Low-Risk Target
 
-> Historical prompt note (updated 2026-03-09): this prompt was also consumed later the same day. The recommended follow-up audit was completed, `SAHF` / `LAHF` (`0x9e` / `0x9f`) was chosen, and that pair has since landed and guest-validated on `Windows 98 SE`. Treat the body below as preserved planning history, not current execution guidance. For current branch status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+> Historical prompt note (updated 2026-03-12): this prompt was also consumed later the same day. The recommended follow-up audit was completed, `SAHF` / `LAHF` (`0x9e` / `0x9f`) was chosen, and that pair has since landed and guest-validated on `Windows 98 SE`; later work also closed the large measured REP string subset. Treat the body below as preserved planning history, not current execution guidance. For current branch status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
 
 Use this prompt to start the next session:
 

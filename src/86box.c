@@ -1969,6 +1969,15 @@ done_fallback_families:
         }
     }
 
+    if (new_dynarec_rep_fallback_logging_enabled()) {
+        for (opcode = 0; opcode <= 0xff; opcode++) {
+            if (new_dynarec_format_rep_fallback_summary(summary, sizeof(summary), (uint8_t) opcode) <= 0)
+                continue;
+
+            always_log("CPU new dynarec REP fallbacks [shutdown]: %s\n", summary);
+        }
+    }
+
     if (new_dynarec_d0d3_compare_logging_enabled()
         && new_dynarec_format_d0d3_compare_summary(summary, sizeof(summary)) > 0)
         always_log("CPU new dynarec D0-D3 compare [shutdown]: %s\n", summary);
@@ -1993,6 +2002,19 @@ done_fallback_families:
                 continue;
 
             always_log("CPU new dynarec D0-D3 compare bailout [shutdown]: %s\n", summary);
+        }
+    }
+
+    if (new_dynarec_rep_scas_debug_logging_enabled()
+        && new_dynarec_format_rep_scas_debug_summary(summary, sizeof(summary)) > 0)
+        always_log("CPU new dynarec REP SCAS debug [shutdown]: %s\n", summary);
+
+    if (new_dynarec_rep_scas_debug_logging_enabled()) {
+        for (opcode = 0; opcode < 32; opcode++) {
+            if (new_dynarec_format_rep_scas_debug_site_summary(summary, sizeof(summary), (uint32_t) opcode) <= 0)
+                continue;
+
+            always_log("CPU new dynarec REP SCAS debug site [shutdown]: %s\n", summary);
         }
     }
 

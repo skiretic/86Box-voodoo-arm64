@@ -150,6 +150,42 @@ ropBSR(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetch
 }
 
 uint32_t
+ropAAM(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    const uint8_t base = fastreadb(cs + op_pc + 1);
+
+    codegen_mark_code_present(block, cs + op_pc, 2);
+    uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_AX);
+    uop_LOAD_FUNC_ARG_IMM(ir, 1, base);
+    uop_LOAD_FUNC_ARG_IMM(ir, 2, cpu_isintel ? 1u : 0u);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_aam_result);
+    uop_MOV(ir, IREG_AX, IREG_temp0_W);
+    uop_MOVZX(ir, IREG_flags_res, IREG_temp0_B);
+    uop_MOV_IMM(ir, IREG_flags_op, FLAGS_ZN8);
+
+    codegen_flags_changed = 1;
+    return op_pc + 2;
+}
+
+uint32_t
+ropAAD(UNUSED(codeblock_t *block), ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+{
+    const uint8_t base = fastreadb(cs + op_pc + 1);
+
+    codegen_mark_code_present(block, cs + op_pc, 2);
+    uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_AX);
+    uop_LOAD_FUNC_ARG_IMM(ir, 1, base);
+    uop_LOAD_FUNC_ARG_IMM(ir, 2, cpu_isintel ? 1u : 0u);
+    uop_CALL_FUNC_RESULT(ir, IREG_temp0, new_dynarec_aad_result);
+    uop_MOV(ir, IREG_AX, IREG_temp0_W);
+    uop_MOVZX(ir, IREG_flags_res, IREG_temp0_B);
+    uop_MOV_IMM(ir, IREG_flags_op, FLAGS_ZN8);
+
+    codegen_flags_changed = 1;
+    return op_pc + 2;
+}
+
+uint32_t
 ropF6(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
     x86seg *target_seg = NULL;

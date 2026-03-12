@@ -185,6 +185,33 @@ new_dynarec_bswap32_result(uint32_t value)
 }
 
 uint32_t
+new_dynarec_aad_result(uint32_t ax, uint32_t base, uint32_t cpu_is_intel_arg)
+{
+    uint8_t al = ax & 0xffu;
+    uint8_t ah = (ax >> 8) & 0xffu;
+
+    if (!cpu_is_intel_arg)
+        base = 10u;
+
+    al = (uint8_t) ((ah * base) + al);
+    return al;
+}
+
+uint32_t
+new_dynarec_aam_result(uint32_t ax, uint32_t base, uint32_t cpu_is_intel_arg)
+{
+    uint8_t al = ax & 0xffu;
+    uint8_t ah;
+
+    if (!base || !cpu_is_intel_arg)
+        base = 10u;
+
+    ah = (uint8_t) (al / base);
+    al = (uint8_t) (al % base);
+    return (uint32_t) al | ((uint32_t) ah << 8);
+}
+
+uint32_t
 new_dynarec_imul_rm16_result(uint32_t dest, uint32_t src)
 {
     return (uint16_t) (((int32_t) (int16_t) dest) * ((int32_t) (int16_t) src));

@@ -76,6 +76,29 @@ That `SCAS` result then fed the next low-risk non-memory table-hole pair directl
 - focused local policy/build verification is complete
 - guest validation on `Windows 98 SE` is now complete too, and the shutdown base-fallback report contains no `0x9e` / `0x9f` entries
 
+The latest narrow helper-backed base follow-up now also exists in tree:
+
+- base `0xd4` / `0xd5` (`AAM` / `AAD`) is now in tree too
+- it reuses a minimal helper-backed `AX` result path plus the existing lazy `FLAGS_ZN8` state shape
+- it stays inside the branch's low-risk non-memory base-opcode lane
+- focused host-side semantics coverage, direct-coverage policy coverage, and full app build verification are complete
+- guest validation is still pending, so this pair should not yet be treated as fully closed
+
+The latest measured REP campaign has now materially changed the branch's stopping point too:
+
+- `REP MOVS`, `REP STOS`, `REP SCASB`, `REP CMPSB`, and `REP CMPSW` / `REP CMPSD` are now direct-covered and guest-validated on `Windows 98 SE`
+- the key validation logs are `/tmp/windows98_se_rep_movs_trial9.log`, `/tmp/windows98_se_rep_stos_trial1.log`, `/tmp/windows98_se_rep_scasb_trial1.log`, `/tmp/windows98_se_rep_cmpsb_trial1.log`, and `/tmp/windows98_se_rep_cmpsw_trial1.log`
+- that sequence reduced the measured shutdown REP bucket from `6205` to `228` on the `Windows 98 SE` + 3DMark99 workload
+- only `REP SCASW` / `REP SCASD` (`0xaf`) plus tiny `INS` / `OUTS` traffic remain in the latest exact REP report
+- the branch should now switch from more REP chasing to clean benchmark/perf re-baselining before deciding whether the last `0xaf` slice is worth the added validation risk
+
+The latest build-shape cleanup changed the instrumentation story too:
+
+- the default app build now keeps the stable CPU dynarec plus the baseline runtime stats surface
+- the deeper investigation-only surfaces now require `NEW_DYNAREC_DEVTOOLS=ON`
+- that devtools-only subset includes selective verify sampling, exact 3DNow/gap/fallback logging, the `D0`-`D3` compare-only path, and the retained `REP SCAS` debug surface
+- this keeps perf/release-style runs closer to the historical 86Box baseline while still letting later debugging sessions rebuild the old investigation surfaces quickly
+
 ## Current opcode status
 
 This section is the short current-state view for opcode-related NDR closure work. It is split into:
@@ -98,6 +121,14 @@ These opcodes have direct CPU new dynarec coverage in tree and have dropped out 
 - protected-mode far return pair: `0xca`, `0xcb`
 - mixed-group / adjacent helper-bailout cleanup: `0xf7`, `0xf6`, `0xff`
 
+These REP opcodes also now have direct CPU new dynarec coverage in tree and have dropped out of the shutdown REP-fallback report in guest validation:
+
+- `REP MOVS`: `0xa4`, `0xa5`
+- `REP STOS`: `0xaa`, `0xab`
+- `REP SCASB`: `0xae`
+- `REP CMPSB`: `0xa6`
+- `REP CMPSW` / `REP CMPSD`: `0xa7`
+
 Latest confirming shutdown logs:
 
 - `/tmp/new_dynarec_retf_validation.log`
@@ -110,6 +141,21 @@ Latest confirming shutdown logs:
 - fallback families: `base=5142`, `0f=6906`, `x87=1607`, `rep=9182`, `3dnow=0`
 - `0xf6` and `0xff` are absent from the shutdown base-fallback report
 - `/tmp/windows98_se_cmps_validation.log`
+- `/tmp/windows98_se_rep_movs_trial9.log`
+- fallback families: `base=18898`, `0f=2992`, `x87=672`, `rep=3628`, `3dnow=0`
+- `0xa4` and `0xa5` are absent from the shutdown REP-fallback report
+- `/tmp/windows98_se_rep_stos_trial1.log`
+- fallback families: `base=18819`, `0f=2993`, `x87=672`, `rep=2421`, `3dnow=0`
+- `0xaa` and `0xab` are absent from the shutdown REP-fallback report
+- `/tmp/windows98_se_rep_scasb_trial1.log`
+- fallback families: `base=18829`, `0f=2993`, `x87=672`, `rep=1302`, `3dnow=0`
+- `0xae` is absent from the shutdown REP-fallback report
+- `/tmp/windows98_se_rep_cmpsb_trial1.log`
+- fallback families: `base=18819`, `0f=2994`, `x87=672`, `rep=589`, `3dnow=0`
+- `0xa6` is absent from the shutdown REP-fallback report
+- `/tmp/windows98_se_rep_cmpsw_trial1.log`
+- fallback families: `base=18821`, `0f=2994`, `x87=672`, `rep=228`, `3dnow=0`
+- `0xa7` is absent from the shutdown REP-fallback report; only `0xaf`, `0x6d`, `0x6f`, and `0xad` remain
 - fallback families: `base=18915`, `0f=3016`, `x87=435`, `rep=6571`, `3dnow=0`
 - `0xa6` and `0xa7` are absent from the shutdown base-fallback report, while sibling `SCAS` opcodes `0xae=33` and `0xaf=16` still remain as `helper_table_null`
 - `/tmp/windows98_se_scas_validation.log`
@@ -130,9 +176,11 @@ The fresh MMX-only Windows 98 Low End rerun is now in hand:
 
 This changes the prioritization materially relative to the older mixed-CPU hotspot ordering:
 
-- REP is now the hottest remaining family overall
+- at that time, REP was now the hottest remaining family overall
 - `0F` is now the hottest non-REP family and sits well above the remaining plain base bucket
 - plain base opcodes are now third, not first
+
+That older MMX-only ranking is still useful historical evidence, but it is no longer the live branch recommendation after the later `Windows 98 SE` REP closure campaign. The current maintained stopping point is the one recorded near the top of this document: only `REP SCASW` / `SCASD` (`0xaf`) plus tiny `INS` / `OUTS` traffic remain in the measured REP tail, so clean perf re-baselining now beats another immediate REP landing attempt.
 
 The shutdown base-opcode report from the same MMX-only run is now led by:
 
@@ -714,6 +762,7 @@ Interpretation:
 
 - this is enough Phase 0 surface to make upcoming Phase 2 allocator/reclaim work defensible without reopening speculative Phase 1 debugging
 - if future correctness work needs deeper A/B execution comparison, it can layer on top of this selective hook rather than replacing it
+- current branch note: this hook now lives behind `NEW_DYNAREC_DEVTOOLS`, so it is preserved for future debugging but no longer executes in the default perf/release-style build
 
 Key files:
 
@@ -1067,7 +1116,7 @@ Interpretation:
 
 These are not closed by the work above:
 
-- REP direct recompilation coverage
+- the last measured REP tail: `REP SCASW` / `REP SCASD` (`0xaf`) plus tiny `INS` / `OUTS` traffic
 - softfloat direct-coverage cliffs
 - hot base-opcode fallback reduction, starting from the measured string/far-control cluster
 - the remaining measured post-`MOVS`/`IMUL imm8` base-opcode list: `0x9a`, `0xca`, `0xcb`, `0xf7`, and `0xff`
@@ -1075,6 +1124,12 @@ These are not closed by the work above:
 - broader guest-visible coverage for the still-unhit direct 3DNow suffixes
 - a possible future full CPU shadow-execution verify tier
 - allocator/reclaim policy work to reduce structurally high random eviction under pressure
+
+Current recommendation:
+
+- stop the REP campaign here for now
+- do clean performance re-baseline runs without dynarec debug/logging knobs
+- revisit `0xaf` only if the perf numbers show that the remaining REP tail still matters enough to justify another guest-validation cycle
 
 ### 21. Next non-protected measured batch: MOVS (`0xa5`) and IMUL r, r/m, imm8 (`0x6b`)
 

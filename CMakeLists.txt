@@ -145,6 +145,8 @@ else()
     option(NEW_DYNAREC "Use the PCem v15 (\"new\") dynamic recompiler" OFF)
 endif()
 
+option(NEW_DYNAREC_DEVTOOLS "Enable extra CPU new dynarec debug and observability tooling" OFF)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "NetBSD")
     option(AUDIO4 "Use audio(4) as sound backend" ON)
 else()

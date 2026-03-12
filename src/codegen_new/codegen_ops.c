@@ -76,6 +76,40 @@ RecompOpFn recomp_opcodes[512] = {
     // clang-format on
 };
 
+RecompOpFn recomp_opcodes_REPE[512] = {
+    [0x0a4] = ropREP_MOVSB,
+    [0x0a5] = ropREP_MOVSW,
+    [0x0a6] = ropREPE_CMPSB,
+    [0x0a7] = ropREPE_CMPSW,
+    [0x0aa] = ropREP_STOSB,
+    [0x0ab] = ropREP_STOSW,
+    [0x0ae] = ropREPE_SCASB,
+    [0x1a4] = ropREP_MOVSB,
+    [0x1a5] = ropREP_MOVSL,
+    [0x1a6] = ropREPE_CMPSB,
+    [0x1a7] = ropREPE_CMPSL,
+    [0x1aa] = ropREP_STOSB,
+    [0x1ab] = ropREP_STOSL,
+    [0x1ae] = ropREPE_SCASB,
+};
+
+RecompOpFn recomp_opcodes_REPNE[512] = {
+    [0x0a4] = ropREP_MOVSB,
+    [0x0a5] = ropREP_MOVSW,
+    [0x0a6] = ropREPNE_CMPSB,
+    [0x0a7] = ropREPNE_CMPSW,
+    [0x0aa] = ropREP_STOSB,
+    [0x0ab] = ropREP_STOSW,
+    [0x0ae] = ropREPNE_SCASB,
+    [0x1a4] = ropREP_MOVSB,
+    [0x1a5] = ropREP_MOVSL,
+    [0x1a6] = ropREPNE_CMPSB,
+    [0x1a7] = ropREPNE_CMPSL,
+    [0x1aa] = ropREP_STOSB,
+    [0x1ab] = ropREP_STOSL,
+    [0x1ae] = ropREPNE_SCASB,
+};
+
 RecompOpFn recomp_opcodes_0f[512] = {
     // clang-format off
         /*16-bit data*/

@@ -1,6 +1,6 @@
 # Post-SCAS Opportunity Re-rank
 
-> Historical recommendation note (updated 2026-03-09): this rerank produced the later `SAHF` / `LAHF` audit and the recommendation was accepted. Base `0x9e` / `0x9f` has since landed and guest-validated on `Windows 98 SE`, so this document is now a closed decision record rather than the live priority list. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
+> Historical recommendation note (updated 2026-03-12): this rerank produced the later `SAHF` / `LAHF` audit and the recommendation was accepted. Base `0x9e` / `0x9f` has since landed and guest-validated on `Windows 98 SE`, and later branch work also closed the large measured REP string subset, so this document is now a closed decision record rather than the live priority list. For current status, use [new-dynarec-executive-summary.md](./new-dynarec-executive-summary.md), [new-dynarec-changelog.md](./new-dynarec-changelog.md), and [new-dynarec-optimization-overview.md](./new-dynarec-optimization-overview.md).
 
 ## Purpose
 

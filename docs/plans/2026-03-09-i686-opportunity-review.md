@@ -1,6 +1,6 @@
 # 2026-03-09 i686 Opportunity Review
 
-> Historical opportunity-review note (updated 2026-03-09): this document records the strict-i686 ranking state from earlier the same day and the reasoning that fed later narrow trials. Since then, `CMPS`, `SCAS`, and `SAHF` / `LAHF` have all landed and guest-validated on `Windows 98 SE`, while direct `BSF` / `BSR`, direct `0x0f 0xaf`, and guest-facing base `D0`-`D3` `RCL` / `RCR` remain paused. Use the maintained summary docs for current branch status.
+> Historical opportunity-review note (updated 2026-03-12): this document records the strict-i686 ranking state from earlier on 2026-03-09 and the reasoning that fed later narrow trials. Since then, `CMPS`, `SCAS`, `SAHF` / `LAHF`, and the high-payoff REP string subset (`REP MOVS`, `REP STOS`, `REP SCASB`, `REP CMPSB`, `REP CMPSW` / `REP CMPSD`) have all landed and validated on `Windows 98 SE`, while direct `BSF` / `BSR`, direct `0x0f 0xaf`, and guest-facing base `D0`-`D3` `RCL` / `RCR` remain paused. The debug env-var recipes referenced later in this file should now also be read as devtools-only history: current builds need `NEW_DYNAREC_DEVTOOLS=ON` before those probes are active. Use the maintained summary docs for current branch status.
 
 ## Purpose
 

@@ -164,19 +164,25 @@ extern int  new_dynarec_gap_family_logging_enabled(void);
 extern int  new_dynarec_fallback_family_logging_enabled(void);
 extern int  new_dynarec_base_fallback_logging_enabled(void);
 extern int  new_dynarec_0f_fallback_logging_enabled(void);
+extern int  new_dynarec_rep_fallback_logging_enabled(void);
 extern int  new_dynarec_d0d3_compare_enabled_for_site(uint32_t pc, uint8_t opcode);
 extern int  new_dynarec_d0d3_compare_logging_enabled(void);
 extern int  new_dynarec_d0d3_compare_site_logging_enabled(void);
+extern int  new_dynarec_rep_scas_debug_enabled_for_site(uint32_t pc, uint8_t opcode);
+extern int  new_dynarec_rep_scas_debug_logging_enabled(void);
 extern int  new_dynarec_format_stats_summary(char *buffer, size_t size, const new_dynarec_stats_t *stats);
 extern int  new_dynarec_format_3dnow_hit_summary(char *buffer, size_t size, uint8_t opcode);
 extern int  new_dynarec_format_gap_family_summary(char *buffer, size_t size);
 extern int  new_dynarec_format_fallback_family_summary(char *buffer, size_t size);
 extern int  new_dynarec_format_base_fallback_summary(char *buffer, size_t size, uint8_t opcode);
 extern int  new_dynarec_format_0f_fallback_summary(char *buffer, size_t size, uint8_t opcode);
+extern int  new_dynarec_format_rep_fallback_summary(char *buffer, size_t size, uint8_t opcode);
 extern int  new_dynarec_format_d0d3_compare_summary(char *buffer, size_t size);
 extern int  new_dynarec_format_d0d3_compare_site_summary(char *buffer, size_t size, uint32_t index);
 extern int  new_dynarec_format_d0d3_compare_sample_summary(char *buffer, size_t size, uint32_t index);
 extern int  new_dynarec_format_d0d3_compare_bailout_summary(char *buffer, size_t size, uint32_t index);
+extern int  new_dynarec_format_rep_scas_debug_summary(char *buffer, size_t size);
+extern int  new_dynarec_format_rep_scas_debug_site_summary(char *buffer, size_t size, uint32_t index);
 extern void new_dynarec_set_trace_hook(new_dynarec_trace_hook_t hook, void *opaque);
 extern void new_dynarec_set_verify_config(const new_dynarec_verify_config_t *config);
 extern void new_dynarec_get_verify_config(new_dynarec_verify_config_t *out);
@@ -186,6 +192,7 @@ extern void new_dynarec_note_gap_family_hit(new_dynarec_gap_family_t family);
 extern void new_dynarec_note_fallback_family_hit(new_dynarec_fallback_family_t family);
 extern void new_dynarec_note_base_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome);
 extern void new_dynarec_note_0f_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome);
+extern void new_dynarec_note_rep_fallback_opcode_hit(uint8_t opcode, new_dynarec_verify_outcome_t outcome);
 extern void new_dynarec_note_d0d3_compare_site(uint32_t pc, uint32_t packed_compare);
 extern void new_dynarec_note_d0d3_compare_site_bailout(uint32_t pc, uint32_t packed_compare,
                                                        new_dynarec_d0d3_compare_bailout_reason_t reason);
@@ -193,6 +200,7 @@ extern void new_dynarec_note_d0d3_compare_site_zero_count_bailout(uint32_t pc, u
 extern void new_dynarec_note_d0d3_compare_attempt(uint32_t packed_compare, uint32_t original_operand,
                                                   uint32_t direct_result, uint32_t direct_flag_mask,
                                                   uint32_t helper_result, uint32_t helper_flag_mask);
+extern void new_dynarec_note_rep_scas_debug_site(uint32_t pc, uint8_t opcode);
 extern int  new_dynarec_should_defer_marking_new_block(void);
 extern int  new_dynarec_should_remove_aborted_mark_block(int mark_block_initialized, int unexpected_abrt);
 extern int  new_dynarec_has_direct_pmaddwd_recompile(void);
@@ -205,6 +213,8 @@ extern int  new_dynarec_direct_0f_bswap_opcode_count(void);
 extern int  new_dynarec_direct_0f_bitscan_opcode_count(void);
 extern int  new_dynarec_has_direct_base_opcode_recompile(uint8_t opcode);
 extern int  new_dynarec_direct_base_string_opcode_count(void);
+extern int  new_dynarec_has_direct_rep_opcode_recompile(uint16_t opcode);
+extern int  new_dynarec_direct_rep_string_opcode_count(void);
 
 extern void new_dynarec_note_block_marked(uint32_t pc, uint32_t phys, uint32_t detail);
 extern void new_dynarec_note_deferred_block_mark(uint32_t pc, uint32_t phys);

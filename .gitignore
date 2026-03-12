@@ -78,3 +78,5 @@ roms/machines/bp6/bp6ru.bin
 voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
 voodoo-arm64-port/CHANGELOG.md
 voodoo-arm64-port/TESTING-GUIDE.md
+V4_4500_AGP_SD_1.18.rom
+docs/arm64-voodoo-optimization-investigation.md

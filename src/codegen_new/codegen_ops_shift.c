@@ -22,6 +22,17 @@ static uint32_t
 rop_d0d3_rotate_compare(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32,
                         uint32_t op_pc, unsigned width, int variable_count)
 {
+#ifndef NEW_DYNAREC_DEVTOOLS
+    (void) block;
+    (void) ir;
+    (void) opcode;
+    (void) fetchdat;
+    (void) op_32;
+    (void) op_pc;
+    (void) width;
+    (void) variable_count;
+    return 0;
+#else
     const int is_memory = ((fetchdat & 0xc0) != 0xc0);
     uint32_t  packed_compare;
     int       mismatch_jump;
@@ -140,6 +151,7 @@ rop_d0d3_rotate_compare(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint3
 
     codegen_flags_changed = 1;
     return op_pc + 1;
+#endif
 }
 
 static uint32_t
