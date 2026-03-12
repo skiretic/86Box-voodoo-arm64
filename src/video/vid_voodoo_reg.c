@@ -67,6 +67,105 @@ voodoo_reg_log(const char *fmt, ...)
 #    define voodoo_reg_log(fmt, ...)
 #endif
 
+static uint8_t v4_reg_layout_trace_count;
+
+static int
+voodoo_v4_layout_trace_enabled(const voodoo_t *voodoo)
+{
+    return (voodoo->type >= VOODOO_BANSHEE) && (voodoo->fb_mask >= 0x01ffffff);
+}
+
+static const char *
+voodoo_v4_layout_reg_name(uint32_t addr)
+{
+    switch (addr & 0x3fc) {
+        case SST_cmdFifoBaseAddr:
+            return "cmdFifoBaseAddr";
+        case SST_cmdFifoBump:
+            return "cmdFifoBump";
+        case SST_cmdFifoRdPtr:
+            return "cmdFifoRdPtr";
+        case SST_colBufferAddr:
+            return "colBufferAddr";
+        case SST_colBufferStride:
+            return "colBufferStride";
+        case SST_auxBufferAddr:
+            return "auxBufferAddr";
+        case SST_auxBufferStride:
+            return "auxBufferStride";
+        case SST_clipLeftRight1:
+            return "clipLeftRight1";
+        case SST_clipTopBottom1:
+            return "clipTopBottom1";
+        case SST_backPorch:
+            return "backPorch";
+        case SST_videoDimensions:
+            return "videoDimensions";
+        case SST_fbiInit0:
+            return "fbiInit0";
+        case SST_fbiInit1:
+            return "fbiInit1";
+        case SST_fbiInit2:
+            return "fbiInit2";
+        case SST_fbiInit3:
+            return "fbiInit3";
+        case SST_hSync:
+            return "hSync";
+        case SST_vSync:
+            return "vSync";
+        case SST_clutData:
+            return "clutData";
+        case SST_dacData:
+            return "dacData";
+        case SST_scrFilter:
+            return "scrFilter";
+        case SST_hvRetrace:
+            return "hvRetrace";
+        case SST_fbiInit5:
+            return "fbiInit5";
+        case SST_fbiInit6:
+            return "fbiInit6";
+        case SST_swapPending:
+            return "swapPending";
+        case SST_leftOverlayBuf:
+            return "leftOverlayBuf";
+        case SST_sSetupMode:
+            return "sSetupMode";
+        default:
+            return "reg";
+    }
+}
+
+static void
+voodoo_v4_trace_layout(voodoo_t *voodoo, const char *reason, uint32_t val)
+{
+    if (!voodoo_v4_layout_trace_enabled(voodoo) || (v4_reg_layout_trace_count >= 96))
+        return;
+
+    v4_reg_layout_trace_count++;
+    pclog("V4 reg trace[%u]: %s val=%08x draw=%08x colStride=%08x colTile=%u fbWrite=%08x fbRead=%08x aux=%08x auxStride=%08x auxTile=%u front=%08x back=%08x swap=%08x leftOverlay=%08x fbMask=%08x lfbMode=%08x fbzMode=%08x cmdRead=%u cmdWritten=%u\n",
+          v4_reg_layout_trace_count,
+          reason,
+          val,
+          voodoo->params.draw_offset,
+          voodoo->row_width,
+          !!voodoo->col_tiled,
+          voodoo->fb_write_offset,
+          voodoo->fb_read_offset,
+          voodoo->params.aux_offset,
+          voodoo->aux_row_width,
+          !!voodoo->aux_tiled,
+          voodoo->front_offset,
+          voodoo->back_offset,
+          voodoo->swap_offset,
+          voodoo->leftOverlayBuf,
+          voodoo->fb_mask,
+          voodoo->lfbMode,
+          voodoo->params.fbzMode,
+          voodoo->cmd_read,
+          voodoo->cmd_written);
+}
+
 void
 voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
 {
@@ -94,6 +193,14 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
 
     if ((voodoo->fbiInit3 & FBIINIT3_REMAP) && addr < 0x100 && ad21)
         addr |= 0x400;
+
+    if (voodoo_v4_layout_trace_enabled(voodoo) &&
+        ((addr & 0x3fc) >= 0x1e0) &&
+        ((addr & 0x3fc) <= 0x260) &&
+        (v4_reg_layout_trace_count < 96)) {
+        voodoo_v4_trace_layout(voodoo, voodoo_v4_layout_reg_name(addr), val);
+    }
+
     switch (addr) {
         case SST_swapbufferCMD:
             if (voodoo->type >= VOODOO_BANSHEE) {
@@ -123,6 +230,7 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
                     voodoo_wait_for_swap_complete(voodoo);
                 }
 
+                voodoo_v4_trace_layout(voodoo, "swapbufferCMD", val);
                 voodoo->cmd_read++;
                 break;
             }
@@ -677,6 +785,7 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
 #if 0
                 voodoo_reg_log("colorBufferAddr=%06x\n", voodoo->params.draw_offset);
 #endif
+                voodoo_v4_trace_layout(voodoo, "colBufferAddr", val);
             }
             break;
         case SST_colBufferStride:
@@ -695,6 +804,7 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
 #endif
                 }
                 voodoo->params.row_width = voodoo->row_width;
+                voodoo_v4_trace_layout(voodoo, "colBufferStride", val);
             }
             break;
         case SST_auxBufferAddr:
@@ -703,6 +813,7 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
 #if 0
                 pclog("auxBufferAddr=%06x\n", voodoo->params.aux_offset);
 #endif
+                voodoo_v4_trace_layout(voodoo, "auxBufferAddr", val);
             }
             break;
         case SST_auxBufferStride:
@@ -721,6 +832,7 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
 #endif
                 }
                 voodoo->params.aux_row_width = voodoo->aux_row_width;
+                voodoo_v4_trace_layout(voodoo, "auxBufferStride", val);
             }
             break;
 
@@ -1359,6 +1471,7 @@ voodoo_reg_writel(uint32_t addr, uint32_t val, void *priv)
 
         case SST_leftOverlayBuf:
             voodoo->leftOverlayBuf = val;
+            voodoo_v4_trace_layout(voodoo, "leftOverlayBuf", val);
             break;
 
         default:

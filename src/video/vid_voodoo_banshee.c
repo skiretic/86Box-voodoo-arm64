@@ -106,6 +106,7 @@ typedef struct banshee_t {
     uint32_t agpInit0;
     uint32_t dramInit0, dramInit1;
     uint32_t lfbMemoryConfig;
+    uint32_t lfbMemoryTileCompare;
     uint32_t miscInit0, miscInit1;
     uint32_t pciInit0;
     uint32_t vgaInit0, vgaInit1;
@@ -144,12 +145,15 @@ typedef struct banshee_t {
     uint8_t  v4_rom_trace_count;
     uint8_t  v4_mode_trace_count;
     uint8_t  v4_mode_trace_started;
+    uint8_t  v4_lfb_config_trace_count;
+    uint8_t  v4_lfb_compare_trace_count;
     uint32_t v4_mode_last_dacMode;
     uint32_t v4_mode_last_vidProcCfg;
     uint32_t v4_mode_last_vidInFormat;
     uint32_t v4_mode_last_vidScreenSize;
     uint32_t v4_mode_last_vidDesktopStartAddr;
     uint32_t v4_mode_last_vidDesktopOverlayStride;
+    uint32_t v4_lfb_config_last;
     int      v4_mode_last_bpp;
     int      v4_mode_last_rowoffset;
     void   (*v4_mode_last_render)(svga_t *);
@@ -180,6 +184,145 @@ typedef struct banshee_t {
 } banshee_t;
 
 static uint8_t high_base_linear_write_trace_count;
+static uint8_t watched_linear_write_trace_count;
+
+static int
+banshee_lfb_config_is_compare_select(uint32_t val)
+{
+    return !!(val & 0x80000000);
+}
+
+static uint32_t
+banshee_lfb_compare_guess_base(uint32_t val)
+{
+    return (val & 0x1fff) << 12;
+}
+
+static uint32_t
+banshee_v4_visible_height(const banshee_t *banshee)
+{
+    const svga_t *svga = &banshee->svga;
+    const int     height = svga->dispend ? svga->dispend : svga->vdisp;
+
+    return (height > 0) ? (uint32_t) height : 0;
+}
+
+static uint32_t
+banshee_v4_desktop_linear_span_guess(const banshee_t *banshee)
+{
+    const uint32_t height = banshee_v4_visible_height(banshee);
+
+    if (!height || (banshee->svga.rowoffset <= 0))
+        return 0;
+
+    return height * (uint32_t) banshee->svga.rowoffset;
+}
+
+static uint32_t
+banshee_v4_desktop_tiled_span_guess(const banshee_t *banshee)
+{
+    const uint32_t height = banshee_v4_visible_height(banshee);
+
+    if (!height || !banshee->desktop_stride_tiled)
+        return 0;
+
+    return height * banshee->desktop_stride_tiled;
+}
+
+static uint32_t
+banshee_v4_tile_mark_guess(const banshee_t *banshee)
+{
+    return (banshee->vidDesktopStartAddr + banshee_v4_desktop_tiled_span_guess(banshee)) & 0x03fffff0;
+}
+
+static uint32_t
+banshee_v4_aa_mark_guess(const banshee_t *banshee)
+{
+    return (banshee->vidDesktopStartAddr + banshee_v4_desktop_linear_span_guess(banshee)) & 0x03fffff0;
+}
+
+static uint32_t
+banshee_v4_lfb_effective_tile_base(const banshee_t *banshee)
+{
+    const voodoo_t *voodoo = banshee->voodoo;
+
+    if ((banshee->type != TYPE_V4_4500) || banshee->lfbMemoryTileCompare)
+        return voodoo->tile_base;
+
+    if ((banshee->vidDesktopStartAddr >= 0x800000) &&
+        (voodoo->tile_base > banshee->vidDesktopStartAddr) &&
+        ((voodoo->tile_base - banshee->vidDesktopStartAddr) == 0x01000000))
+        return banshee->vidDesktopStartAddr;
+
+    return voodoo->tile_base;
+}
+
+#define V4_WATCH_SURFACE_PAGE_MASK 0xfffff000
+#define V4_WATCH_SURFACE_GOOD_PAGE0 0x00299000
+#define V4_WATCH_SURFACE_GOOD_PAGE1 0x001ed000
+#define V4_WATCH_SURFACE_BAD_PAGE0  0x002de000
+#define V4_WATCH_SURFACE_BAD_PAGE1  0x001ef000
+#define V4_WATCH_SURFACE_GOOD_PAGE2 0x002dc000
+#define V4_WATCH_SURFACE_GOOD_PAGE3 0x00132000
+#define V4_WATCH_SURFACE_BAD_PAGE2  0x00133000
+#define V4_WATCH_SURFACE_BAD_PAGE3  0x002a0000
+
+static const char *
+banshee_watch_surface_label(uint32_t addr)
+{
+    switch (addr & V4_WATCH_SURFACE_PAGE_MASK) {
+        case V4_WATCH_SURFACE_GOOD_PAGE0:
+            return "good0";
+        case V4_WATCH_SURFACE_GOOD_PAGE2:
+            return "good2";
+        case V4_WATCH_SURFACE_GOOD_PAGE3:
+            return "good3";
+        case V4_WATCH_SURFACE_BAD_PAGE0:
+            return "bad0";
+        case V4_WATCH_SURFACE_GOOD_PAGE1:
+            return "good1";
+        case V4_WATCH_SURFACE_BAD_PAGE1:
+            return "bad1";
+        case V4_WATCH_SURFACE_BAD_PAGE2:
+            return "bad2";
+        case V4_WATCH_SURFACE_BAD_PAGE3:
+            return "bad3";
+        default:
+            return "-";
+    }
+}
+
+static int
+banshee_watch_surface_is_bad(uint32_t addr)
+{
+    switch (addr & V4_WATCH_SURFACE_PAGE_MASK) {
+        case V4_WATCH_SURFACE_BAD_PAGE0:
+        case V4_WATCH_SURFACE_BAD_PAGE1:
+        case V4_WATCH_SURFACE_BAD_PAGE2:
+        case V4_WATCH_SURFACE_BAD_PAGE3:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int
+banshee_watch_surface_match(uint32_t addr)
+{
+    switch (addr & V4_WATCH_SURFACE_PAGE_MASK) {
+        case V4_WATCH_SURFACE_GOOD_PAGE0:
+        case V4_WATCH_SURFACE_GOOD_PAGE2:
+        case V4_WATCH_SURFACE_BAD_PAGE0:
+        case V4_WATCH_SURFACE_GOOD_PAGE1:
+        case V4_WATCH_SURFACE_BAD_PAGE1:
+        case V4_WATCH_SURFACE_GOOD_PAGE3:
+        case V4_WATCH_SURFACE_BAD_PAGE2:
+        case V4_WATCH_SURFACE_BAD_PAGE3:
+            return 1;
+        default:
+            return 0;
+    }
+}
 
 enum {
     Init_status          = 0x00,
@@ -1144,7 +1287,13 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             voodoo->write_time = (banshee->agp ? agp_nonburst_time : pci_nonburst_time) + voodoo->burst_time;
             break;
 
-        case Init_lfbMemoryConfig:
+        case Init_lfbMemoryConfig: {
+            const uint32_t old_lfb_config = banshee->lfbMemoryConfig;
+            const uint32_t old_lfb_compare = banshee->lfbMemoryTileCompare;
+            const int      compare_select = banshee_lfb_config_is_compare_select(val);
+
+            if (compare_select)
+                banshee->lfbMemoryTileCompare = val;
             banshee->lfbMemoryConfig = val;
 #if 0
             banshee_log("lfbMemoryConfig=%08x\n", val);
@@ -1154,7 +1303,60 @@ banshee_ext_outl(uint16_t addr, uint32_t val, void *priv)
             voodoo->tile_stride_shift = 10 + ((val >> 13) & 7);
             voodoo->tile_x            = ((val >> 16) & 0x7f) * 128;
             voodoo->tile_x_real       = ((val >> 16) & 0x7f) * 128 * 32;
+            if (banshee_trace_enabled(banshee) &&
+                (banshee->v4_lfb_config_trace_count < 32) &&
+                (!banshee->v4_lfb_config_trace_count || (old_lfb_config != val) || (banshee->v4_lfb_config_last != val))) {
+                banshee->v4_lfb_config_trace_count++;
+                banshee->v4_lfb_config_last = val;
+                pclog("%s trace: lfbMemoryConfig[%u] old=%08x new=%08x sel=%u tileBase=%08x tileStride=%08x tileShift=%u tileX=%08x compareRaw=%08x compareGuessBase=%08x desktopStart=%08x vis=%ux%u rowoffset=%x desktopLinearEndGuess=%08x desktopTiledEndGuess=%08x tileMarkGuess=%08x aaMarkGuess=%08x colBuf=%08x colStride=%08x colTile=%u fbWrite=%08x fbRead=%08x auxBuf=%08x auxStride=%08x auxTile=%u front=%08x back=%08x swap=%08x fbMask=%08x\n",
+                      banshee_trace_label(banshee),
+                      banshee->v4_lfb_config_trace_count,
+                      old_lfb_config,
+                      val,
+                      compare_select,
+                      voodoo->tile_base,
+                      voodoo->tile_stride,
+                      voodoo->tile_stride_shift,
+                      voodoo->tile_x_real,
+                      banshee->lfbMemoryTileCompare,
+                      banshee_lfb_compare_guess_base(banshee->lfbMemoryTileCompare),
+                      banshee->vidDesktopStartAddr,
+                      svga->hdisp,
+                      banshee_v4_visible_height(banshee),
+                      svga->rowoffset,
+                      banshee->vidDesktopStartAddr + banshee_v4_desktop_linear_span_guess(banshee),
+                      banshee->vidDesktopStartAddr + banshee_v4_desktop_tiled_span_guess(banshee),
+                      banshee_v4_tile_mark_guess(banshee),
+                      banshee_v4_aa_mark_guess(banshee),
+                      voodoo->params.draw_offset,
+                      voodoo->row_width,
+                      !!voodoo->col_tiled,
+                      voodoo->fb_write_offset,
+                      voodoo->fb_read_offset,
+                      voodoo->params.aux_offset,
+                      voodoo->aux_row_width,
+                      !!voodoo->aux_tiled,
+                      voodoo->front_offset,
+                      voodoo->back_offset,
+                      voodoo->swap_offset,
+                      voodoo->fb_mask);
+            }
+            if (banshee_trace_enabled(banshee) &&
+                compare_select &&
+                (banshee->v4_lfb_compare_trace_count < 16) &&
+                (!banshee->v4_lfb_compare_trace_count || (old_lfb_compare != val))) {
+                banshee->v4_lfb_compare_trace_count++;
+                pclog("%s trace: lfbTileCompare[%u] old=%08x new=%08x guessBase=%08x desktopStart=%08x tileBaseCurrent=%08x\n",
+                      banshee_trace_label(banshee),
+                      banshee->v4_lfb_compare_trace_count,
+                      old_lfb_compare,
+                      val,
+                      banshee_lfb_compare_guess_base(val),
+                      banshee->vidDesktopStartAddr,
+                      voodoo->tile_base);
+            }
             break;
+        }
 
         case Init_miscInit0:
             banshee->miscInit0    = val;
@@ -2320,15 +2522,16 @@ banshee_read_linear(uint32_t addr, void *priv)
         return rom_read(addr & (banshee->bios_rom.sz - 1), &banshee->bios_rom);
     }
     addr &= svga->decode_mask;
-    if (addr >= voodoo->tile_base) {
+    const uint32_t effective_tile_base = banshee_v4_lfb_effective_tile_base(banshee);
+    if (addr >= effective_tile_base) {
         int x;
         int y;
 
-        addr -= voodoo->tile_base;
+        addr -= effective_tile_base;
         x = addr & (voodoo->tile_stride - 1);
         y = addr >> voodoo->tile_stride_shift;
 
-        addr = voodoo->tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
+        addr = effective_tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
 #if 0
         banshee_log("  Tile rb %08x->%08x %i %i\n", old_addr, addr, x, y);
 #endif
@@ -2360,15 +2563,16 @@ banshee_read_linear_w(uint32_t addr, void *priv)
         return rom_readw(addr & (banshee->bios_rom.sz - 1), &banshee->bios_rom);
     }
     addr &= svga->decode_mask;
-    if (addr >= voodoo->tile_base) {
+    const uint32_t effective_tile_base = banshee_v4_lfb_effective_tile_base(banshee);
+    if (addr >= effective_tile_base) {
         int x;
         int y;
 
-        addr -= voodoo->tile_base;
+        addr -= effective_tile_base;
         x = addr & (voodoo->tile_stride - 1);
         y = addr >> voodoo->tile_stride_shift;
 
-        addr = voodoo->tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
+        addr = effective_tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
 #if 0
         banshee_log("  Tile rb %08x->%08x %i %i\n", old_addr, addr, x, y);
 #endif
@@ -2401,15 +2605,16 @@ banshee_read_linear_l(uint32_t addr, void *priv)
         return rom_readl(addr & (banshee->bios_rom.sz - 1), &banshee->bios_rom);
     }
     addr &= svga->decode_mask;
-    if (addr >= voodoo->tile_base) {
+    const uint32_t effective_tile_base = banshee_v4_lfb_effective_tile_base(banshee);
+    if (addr >= effective_tile_base) {
         int x;
         int y;
 
-        addr -= voodoo->tile_base;
+        addr -= effective_tile_base;
         x = addr & (voodoo->tile_stride - 1);
         y = addr >> voodoo->tile_stride_shift;
 
-        addr = voodoo->tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
+        addr = effective_tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
 #if 0
         banshee_log("  Tile rb %08x->%08x %i %i\n", old_addr, addr, x, y);
 #endif
@@ -2439,15 +2644,16 @@ banshee_write_linear(uint32_t addr, uint8_t val, void *priv)
     banshee_log("write_linear: addr=%08x val=%02x\n", addr, val);
 #endif
     addr &= svga->decode_mask;
-    if (addr >= voodoo->tile_base) {
+    const uint32_t effective_tile_base = banshee_v4_lfb_effective_tile_base(banshee);
+    if (addr >= effective_tile_base) {
         int x;
         int y;
 
-        addr -= voodoo->tile_base;
+        addr -= effective_tile_base;
         x = addr & (voodoo->tile_stride - 1);
         y = addr >> voodoo->tile_stride_shift;
 
-        addr = voodoo->tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
+        addr = effective_tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
 #if 0
         banshee_log("  Tile b %08x->%08x %i %i\n", old_addr, addr, x, y);
 #endif
@@ -2479,15 +2685,16 @@ banshee_write_linear_w(uint32_t addr, uint16_t val, void *priv)
     banshee_log("write_linear: addr=%08x val=%02x\n", addr, val);
 #endif
     addr &= svga->decode_mask;
-    if (addr >= voodoo->tile_base) {
+    const uint32_t effective_tile_base = banshee_v4_lfb_effective_tile_base(banshee);
+    if (addr >= effective_tile_base) {
         int x;
         int y;
 
-        addr -= voodoo->tile_base;
+        addr -= effective_tile_base;
         x = addr & (voodoo->tile_stride - 1);
         y = addr >> voodoo->tile_stride_shift;
 
-        addr = voodoo->tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
+        addr = effective_tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
 #if 0
         banshee_log("  Tile b %08x->%08x %i %i\n", old_addr, addr, x, y);
 #endif
@@ -2530,15 +2737,16 @@ banshee_write_linear_l(uint32_t addr, uint32_t val, void *priv)
 #endif
     addr &= svga->decode_mask;
     decoded_addr = addr;
-    if (addr >= voodoo->tile_base) {
+    const uint32_t effective_tile_base = banshee_v4_lfb_effective_tile_base(banshee);
+    if (addr >= effective_tile_base) {
         int x;
         int y;
 
-        addr -= voodoo->tile_base;
+        addr -= effective_tile_base;
         x = addr & (voodoo->tile_stride - 1);
         y = addr >> voodoo->tile_stride_shift;
 
-        addr = voodoo->tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
+        addr = effective_tile_base + (x & 127) + ((x >> 7) * 128 * 32) + ((y & 31) * 128) + (y >> 5) * voodoo->tile_x_real;
 #if 0
         banshee_log("  Tile %08x->%08x->%08x->%08x %i %i  tile_x=%i\n", old_addr, addr_off, addr2, addr, x, y, voodoo->tile_x_real);
 #endif
@@ -2547,18 +2755,74 @@ banshee_write_linear_l(uint32_t addr, uint32_t val, void *priv)
     if ((high_base_linear_write_trace_count < 64) &&
         (banshee->desktop_addr >= 0x800000) &&
         (addr >= banshee->desktop_addr)) {
+        const uint32_t compare_guess_base = banshee_lfb_compare_guess_base(banshee->lfbMemoryTileCompare);
+        const int      current_tiled = decoded_addr >= voodoo->tile_base;
+        const int      compare_guess_tiled = decoded_addr >= compare_guess_base;
+        const int      alias_applied = effective_tile_base != voodoo->tile_base;
+        const uint32_t desktop_linear_end_guess = banshee->vidDesktopStartAddr + banshee_v4_desktop_linear_span_guess(banshee);
+        const uint32_t desktop_tiled_end_guess  = banshee->vidDesktopStartAddr + banshee_v4_desktop_tiled_span_guess(banshee);
+
         high_base_linear_write_trace_count++;
-        pclog("V4 LFB trace[%u]: orig=%08x decoded=%08x mapped=%08x val=%08x tileBase=%08x tileStride=%08x tileX=%08x desktop=%08x\n",
+        pclog("V4 LFB trace[%u]: orig=%08x decoded=%08x mapped=%08x val=%08x tileBase=%08x effectiveTileBase=%08x aliasApplied=%u currentTiled=%u compareRaw=%08x compareGuessBase=%08x compareGuessTiled=%u tileStride=%08x tileX=%08x desktop=%08x desktopLinearEndGuess=%08x desktopTiledEndGuess=%08x tileMarkGuess=%08x aaMarkGuess=%08x colBuf=%08x colStride=%08x colTile=%u fbWrite=%08x fbRead=%08x auxBuf=%08x auxStride=%08x auxTile=%u front=%08x back=%08x swap=%08x fbMask=%08x\n",
               high_base_linear_write_trace_count,
               orig_addr,
               decoded_addr,
               addr,
               val,
               voodoo->tile_base,
+              effective_tile_base,
+              alias_applied,
+              current_tiled,
+              banshee->lfbMemoryTileCompare,
+              compare_guess_base,
+              compare_guess_tiled,
               voodoo->tile_stride,
               voodoo->tile_x_real,
+              banshee->desktop_addr,
+              desktop_linear_end_guess,
+              desktop_tiled_end_guess,
+              banshee_v4_tile_mark_guess(banshee),
+              banshee_v4_aa_mark_guess(banshee),
+              voodoo->params.draw_offset,
+              voodoo->row_width,
+              !!voodoo->col_tiled,
+              voodoo->fb_write_offset,
+              voodoo->fb_read_offset,
+              voodoo->params.aux_offset,
+              voodoo->aux_row_width,
+              !!voodoo->aux_tiled,
+              voodoo->front_offset,
+              voodoo->back_offset,
+              voodoo->swap_offset,
+              voodoo->fb_mask);
+    }
+
+    if ((watched_linear_write_trace_count < 64) &&
+        (banshee_watch_surface_match(decoded_addr) || banshee_watch_surface_match(addr))) {
+        const uint32_t compare_guess_base = banshee_lfb_compare_guess_base(banshee->lfbMemoryTileCompare);
+        const int      compare_guess_tiled = decoded_addr >= compare_guess_base;
+        const int      watch_bad = banshee_watch_surface_is_bad(decoded_addr) ||
+                              banshee_watch_surface_is_bad(addr);
+
+        if (!watch_bad && (watched_linear_write_trace_count >= 24))
+            goto skip_watch_lfb_trace;
+
+        watched_linear_write_trace_count++;
+        pclog("V4 watch LFB[%u]: orig=%08x decoded=%08x decodedWatch=%s mapped=%08x mappedWatch=%s val=%08x tileBase=%08x compareRaw=%08x compareGuessBase=%08x compareGuessTiled=%u desktop=%08x\n",
+              watched_linear_write_trace_count,
+              orig_addr,
+              decoded_addr,
+              banshee_watch_surface_match(decoded_addr) ? banshee_watch_surface_label(decoded_addr) : "-",
+              addr,
+              banshee_watch_surface_match(addr) ? banshee_watch_surface_label(addr) : "-",
+              val,
+              voodoo->tile_base,
+              banshee->lfbMemoryTileCompare,
+              compare_guess_base,
+              compare_guess_tiled,
               banshee->desktop_addr);
     }
+skip_watch_lfb_trace:
 
     if (addr >= svga->vram_max)
         return;

@@ -18,15 +18,34 @@ Date: 2026-03-11
 12. `Verified:` sampled high-base `screen_to_screen` copies are internally consistent, including later copies that faithfully move zero-filled linear source data into visible desktop tiles.
 13. `Verified:` fresh linear/LFB traces now show writes landing at tiled base `0x01d00000` while desktop scanout and traced `2D` destinations remain at `0x00d00000`, an exact `0x01000000` (`16 MB`) split.
 14. `Verified:` the latest manual screenshots show the remaining `32 MB` desktop failure is inconsistent rather than uniformly broken: some windows, icons, and labels render correctly while other desktop regions remain black or missing.
-15. `Unknown:` which exact path leaves some higher-VRAM source surfaces zero or stale before they are copied into the visible tiled desktop.
-16. `Unknown:` what exact reset-time values should the Voodoo4 device expose for memory and strap-related registers before the ROM touches them further into POST?
-17. `Verified:` 86Box now provides enough of the shared path for ROM POST plus driver-enabled Windows desktop bring-up through common `16-bit` and manually tested common `32-bit` desktop modes once PCI identity, ROM wiring, the ROM-backed subsystem tuple, and the new emulator-side `32 MB` Voodoo4 default are corrected.
-18. `Inferred:` another early PCI config-space mismatch is now less likely than before, because the current `p5a` path does shadow and execute the ROM and the ROM-backed subsystem tuple clears the pre-ext gate.
-19. `Inferred:` the strongest live lead is now a Voodoo4 higher-half linear/LFB or source-surface population mismatch, not a generic tiled scanout failure.
-20. `Unknown:` whether the exact fix is a V4-only linear/LFB higher-half alias/fold or another register/path that should reconcile `0x01d00000` and `0x00d00000`.
-21. `Unknown:` which richer driver-visible Voodoo4/VSA-100 behaviors, if any, still diverge beyond the current desktop baseline.
-22. `Unknown:` whether the declared ROM image size mismatch (`0xa000` declared, `0x10000` dumped) will matter to emulation or is just dump padding.
-23. `Verified:` the tested `V4_4500_AGP_SD_1.18.rom` encodes subsystem pair `121a:0004` at the end of the declared image, and the ROM helper validates PCI `0x2c-0x2f` against that value.
+15. `Verified:` a fresh logged desktop rerun now shows the known-good low linear page `0x00299e80` being populated by both decoded LFB writes and `host_to_screen`, and later nonzero copy sources such as `0x001ec948` and `0x001eb1cc` feeding visible tiled desktop updates.
+16. `Verified:` that same rerun did not reproduce the earlier `0x002de9b0` zero-source sample and did not hit any watched `bad` low linear page.
+17. `Verified:` a fresh logged V4 desktop run now shows the guest explicitly reprogramming `Init_lfbMemoryConfig` to `tileBase=0x01d00000` while `vidDesktopStartAddr` remains `0x00d00000`.
+18. `Verified:` a fresh interaction-time failing source sample now shows low linear page `0x001ef390` still zero while nearby low source `0x001edc10` is populated and repaints correctly.
+19. `Verified:` the latest alias-engaged run still leaves the desktop wrong while damaged-band `screen_to_screen` copies repeatedly pair nonzero low-linear page `0x00132400` with zero pages `0x001332d4` and `0x00133308`.
+20. `Inferred:` that result makes the naive CPU/LFB `+16 MB` fold look secondary rather than sufficient, because aliasing engages immediately yet the live failure still tracks a separate low-linear source-population split.
+21. `Verified:` a later live desktop run also shows a separate direct blanking event from zero low-linear page `0x002a0000`, where `0x002a0084..0x002a0090` overwrite previously nonzero damaged-band desktop pixels at `0x00e90000` with zeros.
+22. `Inferred:` more than one low-linear source family can arrive empty and blank the same visible region, so the remaining bug likely sits upstream of any single watched-page identity.
+23. `Verified:` the previous temporary tracing still had a blind spot: `vid_voodoo_banshee_blitter.c` was not yet directly watching `good3` / `bad2` / `bad3`, and the finite low-linear watch counters could be exhausted early by healthy `good0` traffic.
+24. `Verified:` the current temporary tracing now closes that gap by watching `good3` / `bad2` / `bad3` directly in both tracing files and preserving more watch budget for bad-page families.
+25. `Verified:` a fresh rerun with the narrowed stride-packed host-row sizing change now computes sane `bad3` row completion lengths (`lastByte=12` rather than `65036`) for the traced `srcFmt=0x00000010`, `srcStrideField=16`, `srcXY=0x0000f040` path.
+26. `Verified:` despite that corrected row sizing, the first observed `bad3` writer in the fresh rerun is still `host_to_screen/0x22000003`, and it leaves `0x002a0084..0x002a0090` all zero while the guest supplies nonzero mono upload dwords.
+27. `Verified:` a healthy watched desktop mono overlay path in the same run uses the same `srcFmt=0x00000010` family but a different command/ROP (`0xbb000003`) and still writes nonzero pixels like `0xbfffffff`.
+28. `Inferred:` the `bad3` failure is no longer best explained by host-row byte sizing; the stronger lead is now upstream source-surface population ordering, because the traced `0x22000003` masked mono pass cannot create a nonzero `bad3` surface from an all-zero destination under the current shared `MIX()` semantics.
+29. `Verified:` a follow-up rerun with added row-tail tracing proved that `bad3` is not uniformly zero; the same `0x22000003` producer can leave `0x002a0084` / `0x002a0088` at zero while later words such as `0x002a008c..0x002a00a0` become nonzero in the same row.
+30. `Verified:` that same rerun also showed the paired `screen_to_screen` consumer from `srcBase=0x002a0084`, `srcFmt=0x00050080`, `srcStride=0x80`, `srcXY=0` copying the mixed row head/tail state faithfully into the desktop.
+31. `Verified:` a larger producer-side V4-only experiment that force-normalizes masked mono `0x22000003` uploads to a left-aligned row origin changed the traced launch (`lastByte=4` instead of `12`) but did not improve the visible desktop.
+32. `Verified:` with that larger producer-side normalization active, the row head at `0x002a0084` and `0x002a0088` still remained zero in the failing `bad3` path while later offsets became nonzero.
+33. `Verified:` the same final rerun also reproduced the earlier `bad2` zero-source family at `0x001332d4` and `0x00133308`, so the bug still spans more than one low-linear source family.
+34. `Unknown:` which exact path should seed or otherwise populate the now-reproduced bad low-linear families `0x00133000` and `0x002a0000` before they receive later masked mono overlays or zero-source copies in the same V4 `32 MB` runs.
+35. `Unknown:` what exact reset-time values should the Voodoo4 device expose for memory and strap-related registers before the ROM touches them further into POST?
+36. `Verified:` 86Box now provides enough of the shared path for ROM POST plus driver-enabled Windows desktop bring-up through common `16-bit` and manually tested common `32-bit` desktop modes once PCI identity, ROM wiring, the ROM-backed subsystem tuple, and the new emulator-side `32 MB` Voodoo4 default are corrected.
+37. `Inferred:` another early PCI config-space mismatch is now less likely than before, because the current `p5a` path does shadow and execute the ROM and the ROM-backed subsystem tuple clears the pre-ext gate.
+38. `Inferred:` the strongest live lead is now a Voodoo4 staging-surface population/layout mismatch, not a generic tiled scanout failure, a simple higher-half host-row sizing bug, or a consumer-side readback bug.
+39. `Unknown:` whether the exact fix is a V4-only missing seed/population pass, another register/path that should populate these low-linear staging pages before masked overlays run, or a subtler rule that reconciles producer-side layout with later consumer readback.
+40. `Unknown:` which richer driver-visible Voodoo4/VSA-100 behaviors, if any, still diverge beyond the current desktop baseline.
+41. `Unknown:` whether the declared ROM image size mismatch (`0xa000` declared, `0x10000` dumped) will matter to emulation or is just dump padding.
+42. `Verified:` the tested `V4_4500_AGP_SD_1.18.rom` encodes subsystem pair `121a:0004` at the end of the declared image, and the ROM helper validates PCI `0x2c-0x2f` against that value.
 
 ## Specific Risks
 
@@ -62,6 +81,8 @@ Date: 2026-03-11
 - `Verified:` fresh high-base `2D` traces now show the bad path launching `rectfill`, `host_to_screen`, and `screen_to_screen` operations directly against desktop base `0x00d00000`.
 - `Verified:` sampled `screen_to_screen` copies are behaving consistently with their sources, including cases where zero-filled linear sources are copied into visible desktop tiles.
 - `Verified:` fresh linear/LFB traces simultaneously show writes landing at tiled base `0x01d00000`, which is `16 MB` above the visible desktop base.
+- `Verified:` a fresh logged desktop rerun now shows at least some low linear source surfaces being populated correctly on the `32 MB` path, including `0x00299e80`, `0x001ec948`, and `0x001eb1cc`.
+- `Verified:` that rerun still did not reproduce the earlier `0x002de9b0` zero-source sample.
 - `Unknown:` whether the remaining mismatch sits in linear/LFB writes, zero/stale source-surface population, or desktop scanout interpretation of the higher VRAM region.
 
 ### Higher-half population risk
@@ -136,3 +157,31 @@ Date: 2026-03-11
 - `Verified:` do not treat unverified old branch behavior as hardware fact.
 - `Verified:` label every meaningful conclusion as `Verified`, `Inferred`, or `Unknown`.
 - `Inferred:` treat Banshee/Voodoo3 reuse as the baseline until a concrete ROM trace or source-backed contradiction says otherwise.
+- `Unknown:` whether the watched-band corruption is caused by the V4 `1-bpp` packed `host_to_screen` overlay path (`srcFmt=0x00400000`), by the preceding `32-bpp` low-linear `screen_to_screen` source family from `0x001b8e80`, or by their interaction/order over the same `0x00e9xxxx` desktop band.
+- `Unknown:` whether Voodoo4 expects different handling than the shared Banshee path for the watched-band mono `host_to_screen` overlay semantics, especially when the guest has already programmed `tileBase=0x01d00000` and `desktopStart=0x00d00000`.
+- `Verified:` watched-band mono `host_to_screen` overlays are not zeroing the desktop; they write nonzero pixels like `0xbfffffff`.
+- `Unknown:` why low-linear source page `0x002de9b0` remains zero when copied into visible desktop tiles while nearby page `0x002dcfec` later contains valid repaint data.
+- `Unknown:` whether the bad page `0x002de000` misses a source-population step entirely, gets cleared later than intended, or is populated through a path that differs from the nearby recovery page `0x002dc000`.
+- `Verified:` a later rerun with the new bad-vs-recovery low-linear result tracer did not reproduce the `0x002de9b0`/`0x002dcfec` family; it only produced page-local result hits on the healthy `0x00299e80` path, so the failing family remains conditional rather than universal.
+- `Inferred:` because the bad family remains conditional under the newest instrumentation, the next high-value work is more Voodoo4/VSA-100 research on 2D/LFB/address semantics, not just more manual dragging against the same live trace hooks.
+- `Verified:` the local Win9x `3dfxvs.inf` identifies `PCI\\VEN_121A&DEV_0009&SUBSYS_0004121A&REV_01` as the VSA/Voodoo4 AGP path, which matches the ROM-backed subsystem tuple already needed by the option ROM.
+- `Verified:` external Napalm/VSA-100 documentation describes `vidDesktopStartAddr` as the physical start of the desktop buffer and describes tiled `vidDesktopOverlayStride` as a tile-stride field for the region.
+- `Verified:` the same documentation splits `lfbMemoryConfig` into `lfbMemoryTileCtrl` and `lfbMemoryTileCompare`; the compare field controls the address threshold that decides whether CPU LFB accesses are interpreted as tiled or linear.
+- `Verified:` current 86Box Voodoo4 code does not model a separate `lfbMemoryTileCompare` state; it derives `tile_base` from `Init_lfbMemoryConfig` and remaps all CPU LFB addresses `>= tile_base`.
+- `Verified:` the local VSA driver stack contains strings for `cfgAALfbCtrl`, `locLFBMemCfg`, `lfbTileCompare`, `strideInTiles`, `tileMark`, `tileAddress`, `tileNumber`, `tileRow`, `tileOffset`, `tileScanline`, `tileXOffset`, and `hwcCheckTarget` desktop-overlap checks.
+- `Verified:` external register documentation says the 2D `srcBaseAddr` / `dstBaseAddr` high bit selects tiled addressing, so the current 86Box top-bit tiled selector for 2D blits is source-backed.
+- `Unknown:` whether the missing VSA-100 behavior is specifically the `lfbMemoryTileCompare` threshold, another `cfgAALfbCtrl`-class address-selection rule, or a separate desktop-overlap / surface-placement rule like the ones hinted at by the Win9x driver strings.
+- `Inferred:` the best next code-side hypothesis is no longer a blanket “V4 tiled 2D is wrong.” It is a narrower VSA-100 LFB/address-selection gap that can explain why CPU/LFB traffic sees `0x01d00000` while scanout and 2D destinations remain at `0x00d00000`.
+- `Unknown:` whether older stock references (`1.03.00`, `1.01.01`) or fan-driver families (`3Dhq`, `Mikepedo`, `NuDriver`, `Iceman`, `Wipeaut`, `3dfx Wide`) preserve more reverse-engineering-friendly symbols or change any Win9x display-stack binaries beyond Glide/OpenGL packaging.
+- `Verified:` stock `1.03.00`, stock `1.00.01`, and `Iceman 1.07.02` do change core Win9x display-stack binaries beyond simple packaging, while `NuDriver1` largely does not.
+- `Verified:` `NuDriver7` does change core user-mode display binaries beyond simple packaging, but it does so by inheriting the `Iceman` user-mode branch rather than by introducing an entirely separate binary family.
+- `Unknown:` whether the remaining Voodoo4 desktop corruption is more plausibly tied to stock mini-VDD behavior or to user-mode policy defaults such as overlay and alpha-dither choices, given that `NuDriver7` mixes `Iceman` user-mode binaries with a stock-sized `1.04.01` mini-VDD.
+- `Verified:` stock `glide3x.dll` contains real code that classifies surfaces against a `0x02000000` limit and desktop/FIFO overlap regions (`hwcCheckTarget`), not just strings describing those regions.
+- `Unknown:` how directly that stock `hwcCheckTarget` overlap logic corresponds to the current emulator’s `0x01d00000` vs `0x00d00000` split and whether the missing rule is best modeled in the emulator’s CPU/LFB decode path, desktop-overlap policy, or both.
+- `Verified:` current emulator instrumentation can now log trace-only `tileMarkGuess` / `aaMarkGuess` style boundaries derived from live desktop geometry, which should make the next runtime comparison against the stock `hwcInitVideo` buffer model less speculative.
+- `Verified:` current emulator instrumentation can now also log the live shared color-buffer and aux-buffer placement anchors already maintained by the Voodoo core (`draw_offset`, `fb_write_offset`, `fb_read_offset`, `aux_offset`, row widths, front/back/swap offsets), which should help tell whether the V4 `0x01d00000` target matches a real buffer-placement state.
+- `Verified:` widening the traced Banshee/V4 register block to `0x1e0..0x260` still did not show the idle desktop path programming the classic `colBufferAddr` / `colBufferStride` / `auxBufferAddr` / `auxBufferStride` / `leftOverlayBuf` / `swapbufferCMD` state before the first high-base V4 LFB access.
+- `Verified:` a first minimal V4-only CPU/LFB fold can be made to engage exactly on the traced `tileBase = desktopStart + 0x01000000` split, and it changes the effective tiled base used by the CPU/LFB helpers from `0x01d00000` to `0x00d00000`.
+- `Verified:` that first naive fold did not visibly improve the idle desktop by itself.
+- `Unknown:` whether the real missing V4 rule is still in the CPU/LFB path but requires a subtler relationship than a straight `+16 MB` fold, or whether the visible corruption is mainly downstream in source-surface population even after CPU/LFB aliasing is corrected.
+- `Unknown:` whether `3Dhq 1.09 beta 9` and the `Mikepedo` / `Voodoo45` family contain another genuinely distinct display-stack branch, because the currently available local extraction tools did not fully unpack those packages.

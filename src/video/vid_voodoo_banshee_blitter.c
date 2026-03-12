@@ -126,8 +126,164 @@ bansheeblt_log(const char *fmt, ...)
 
 static uint8_t high_base_2d_trace_count;
 static uint8_t high_base_2d_sample_count;
+static uint8_t watched_linear_surface_trace_count;
+static uint8_t watched_linear_surface_result_trace_count;
+static uint8_t watched_desktop_dest_trace_count;
+static uint8_t watched_desktop_launch_trace_count;
+static uint8_t watched_desktop_result_trace_count;
+static uint8_t watched_host_stride_trace_count;
+
+#define V4_WATCH_SURFACE_PAGE_MASK 0xfffff000
+#define V4_WATCH_SURFACE_GOOD_PAGE0 0x00299000
+#define V4_WATCH_SURFACE_GOOD_PAGE2 0x002dc000
+#define V4_WATCH_SURFACE_BAD_PAGE0  0x002de000
+#define V4_WATCH_SURFACE_GOOD_PAGE1 0x001ed000
+#define V4_WATCH_SURFACE_BAD_PAGE1  0x001ef000
+#define V4_WATCH_SURFACE_GOOD_PAGE3 0x00132000
+#define V4_WATCH_SURFACE_BAD_PAGE2  0x00133000
+#define V4_WATCH_SURFACE_BAD_PAGE3  0x002a0000
+#define V4_WATCH_DEST_PAGE0         0x00e90000
+#define V4_WATCH_DEST_PAGE1         0x00e91000
+#define V4_WATCH_DEST_PAGE2         0x00e92000
+#define V4_WATCH_DEST_PAGE3         0x00e93000
 
 static uint32_t get_addr(voodoo_t *voodoo, int x, int y, int src_notdst, uint32_t src_stride);
+static const char *voodoo_2d_command_name(uint32_t command);
+
+static const char *
+v4_watch_surface_label(uint32_t addr)
+{
+    switch (addr & V4_WATCH_SURFACE_PAGE_MASK) {
+        case V4_WATCH_SURFACE_GOOD_PAGE0:
+            return "good0";
+        case V4_WATCH_SURFACE_GOOD_PAGE2:
+            return "good2";
+        case V4_WATCH_SURFACE_GOOD_PAGE3:
+            return "good3";
+        case V4_WATCH_SURFACE_BAD_PAGE0:
+            return "bad0";
+        case V4_WATCH_SURFACE_GOOD_PAGE1:
+            return "good1";
+        case V4_WATCH_SURFACE_BAD_PAGE1:
+            return "bad1";
+        case V4_WATCH_SURFACE_BAD_PAGE2:
+            return "bad2";
+        case V4_WATCH_SURFACE_BAD_PAGE3:
+            return "bad3";
+        default:
+            return "-";
+    }
+}
+
+static int
+v4_watch_surface_is_bad(uint32_t addr)
+{
+    switch (addr & V4_WATCH_SURFACE_PAGE_MASK) {
+        case V4_WATCH_SURFACE_BAD_PAGE0:
+        case V4_WATCH_SURFACE_BAD_PAGE1:
+        case V4_WATCH_SURFACE_BAD_PAGE2:
+        case V4_WATCH_SURFACE_BAD_PAGE3:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int
+v4_watch_surface_is_bad3(uint32_t addr)
+{
+    return (addr & V4_WATCH_SURFACE_PAGE_MASK) == V4_WATCH_SURFACE_BAD_PAGE3;
+}
+
+static int
+v4_watch_surface_match(uint32_t addr)
+{
+    switch (addr & V4_WATCH_SURFACE_PAGE_MASK) {
+        case V4_WATCH_SURFACE_GOOD_PAGE0:
+        case V4_WATCH_SURFACE_GOOD_PAGE2:
+        case V4_WATCH_SURFACE_BAD_PAGE0:
+        case V4_WATCH_SURFACE_GOOD_PAGE1:
+        case V4_WATCH_SURFACE_BAD_PAGE1:
+        case V4_WATCH_SURFACE_GOOD_PAGE3:
+        case V4_WATCH_SURFACE_BAD_PAGE2:
+        case V4_WATCH_SURFACE_BAD_PAGE3:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int
+v4_watch_dest_match(uint32_t addr)
+{
+    switch (addr & V4_WATCH_SURFACE_PAGE_MASK) {
+        case V4_WATCH_DEST_PAGE0:
+        case V4_WATCH_DEST_PAGE1:
+        case V4_WATCH_DEST_PAGE2:
+        case V4_WATCH_DEST_PAGE3:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static void
+trace_watched_desktop_launch(voodoo_t *voodoo)
+{
+    const uint32_t command = voodoo->banshee_blt.command & COMMAND_CMD_MASK;
+    const int      dst_x0 = voodoo->banshee_blt.dstX;
+    const int      dst_y0 = voodoo->banshee_blt.dstY;
+    const int      dst_x1 = voodoo->banshee_blt.dstX + voodoo->banshee_blt.dstSizeX - 1;
+    const int      dst_y1 = voodoo->banshee_blt.dstY + voodoo->banshee_blt.dstSizeY - 1;
+    uint32_t       corner_addr[4];
+    int            watch_dest = 0;
+
+    if (watched_desktop_launch_trace_count >= 128)
+        return;
+
+    if (!voodoo->banshee_blt.dstBaseAddr_tiled)
+        return;
+
+    if ((voodoo->banshee_blt.dstFormat & DST_FORMAT_COL_MASK) != DST_FORMAT_COL_32_BPP)
+        return;
+
+    if ((voodoo->banshee_blt.dstSizeX <= 0) || (voodoo->banshee_blt.dstSizeY <= 0))
+        return;
+
+    corner_addr[0] = get_addr(voodoo, dst_x0 * 4, dst_y0, 0, 0);
+    corner_addr[1] = get_addr(voodoo, dst_x1 * 4, dst_y0, 0, 0);
+    corner_addr[2] = get_addr(voodoo, dst_x0 * 4, dst_y1, 0, 0);
+    corner_addr[3] = get_addr(voodoo, dst_x1 * 4, dst_y1, 0, 0);
+
+    for (int i = 0; i < 4; i++) {
+        if (v4_watch_dest_match(corner_addr[i])) {
+            watch_dest = 1;
+            break;
+        }
+    }
+
+    if (!watch_dest)
+        return;
+
+    watched_desktop_launch_trace_count++;
+    pclog("V4 watch launch[%u]: cmd=%s/%08x dstBase=%08x dstFmt=%08x dstXY=%08x dstSize=%08x dstCorners=%08x,%08x,%08x,%08x srcBase=%08x srcFmt=%08x srcXY=%08x srcSize=%08x extra=%08x\n",
+          watched_desktop_launch_trace_count,
+          voodoo_2d_command_name(voodoo->banshee_blt.command),
+          command,
+          voodoo->banshee_blt.dstBaseAddr,
+          voodoo->banshee_blt.dstFormat,
+          voodoo->banshee_blt.dstXY,
+          voodoo->banshee_blt.dstSize,
+          corner_addr[0],
+          corner_addr[1],
+          corner_addr[2],
+          corner_addr[3],
+          voodoo->banshee_blt.srcBaseAddr,
+          voodoo->banshee_blt.srcFormat,
+          voodoo->banshee_blt.srcXY,
+          voodoo->banshee_blt.srcSize,
+          voodoo->banshee_blt.commandExtra);
+}
 
 static const char *
 voodoo_2d_command_name(uint32_t command)
@@ -195,15 +351,96 @@ trace_high_base_2d_launch(voodoo_t *voodoo)
 }
 
 static void
+trace_watched_linear_surface_launch(voodoo_t *voodoo)
+{
+    const uint32_t command  = voodoo->banshee_blt.command & COMMAND_CMD_MASK;
+    const uint32_t src_base = voodoo->banshee_blt.srcBaseAddr & voodoo->fb_mask;
+    const uint32_t dst_base = voodoo->banshee_blt.dstBaseAddr & voodoo->fb_mask;
+    const int      watch_src = !voodoo->banshee_blt.srcBaseAddr_tiled && v4_watch_surface_match(src_base);
+    const int      watch_dst = !voodoo->banshee_blt.dstBaseAddr_tiled && v4_watch_surface_match(dst_base);
+    const int      watch_bad = (watch_src && v4_watch_surface_is_bad(src_base)) ||
+                          (watch_dst && v4_watch_surface_is_bad(dst_base));
+
+    if (!watch_src && !watch_dst)
+        return;
+
+    if (watch_bad) {
+        if (watched_linear_surface_trace_count >= 128)
+            return;
+    } else if (watched_linear_surface_trace_count >= 32) {
+        return;
+    }
+
+    watched_linear_surface_trace_count++;
+    pclog("V4 watch 2D[%u]: cmd=%s/%08x srcBase=%08x srcWatch=%s srcFmt=%08x srcStride=%08x srcXY=%08x dstBase=%08x dstWatch=%s dstFmt=%08x dstStride=%08x dstXY=%08x dstSize=%08x extra=%08x\n",
+          watched_linear_surface_trace_count,
+          voodoo_2d_command_name(voodoo->banshee_blt.command),
+          command,
+          src_base,
+          watch_src ? v4_watch_surface_label(src_base) : "-",
+          voodoo->banshee_blt.srcFormat,
+          voodoo->banshee_blt.src_stride,
+          voodoo->banshee_blt.srcXY,
+          dst_base,
+          watch_dst ? v4_watch_surface_label(dst_base) : "-",
+          voodoo->banshee_blt.dstFormat,
+          voodoo->banshee_blt.dst_stride,
+          voodoo->banshee_blt.dstXY,
+          voodoo->banshee_blt.dstSize,
+          voodoo->banshee_blt.commandExtra);
+}
+
+static void
+trace_watched_host_stride_data(voodoo_t *voodoo, uint32_t data, int last_byte)
+{
+    const uint32_t dst_base = voodoo->banshee_blt.dstBaseAddr & voodoo->fb_mask;
+
+    if (watched_host_stride_trace_count >= 32)
+        return;
+
+    if (!v4_watch_surface_is_bad3(dst_base))
+        return;
+
+    if ((voodoo->banshee_blt.command & COMMAND_CMD_MASK) != COMMAND_CMD_HOST_TO_SCREEN_BLT)
+        return;
+
+    if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_COL_MASK) != SRC_FORMAT_COL_1_BPP)
+        return;
+
+    if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_PACKING_MASK) != SRC_FORMAT_PACKING_STRIDE)
+        return;
+
+    watched_host_stride_trace_count++;
+    pclog("V4 watch host stride[%u]: dstBase=%08x dstWatch=%s srcFmt=%08x srcStrideField=%u srcX=%d srcY=%d dstSize=%dx%d lastByte=%d hostCount=%d data=%08x colorBack=%08x colorFore=%08x command=%08x extra=%08x\n",
+          watched_host_stride_trace_count,
+          dst_base,
+          v4_watch_surface_label(dst_base),
+          voodoo->banshee_blt.srcFormat,
+          voodoo->banshee_blt.srcFormat & SRC_FORMAT_STRIDE_MASK,
+          voodoo->banshee_blt.srcX,
+          voodoo->banshee_blt.srcY,
+          voodoo->banshee_blt.dstSizeX,
+          voodoo->banshee_blt.dstSizeY,
+          last_byte,
+          voodoo->banshee_blt.host_data_count,
+          data,
+          voodoo->banshee_blt.colorBack,
+          voodoo->banshee_blt.colorFore,
+          voodoo->banshee_blt.command,
+          voodoo->banshee_blt.commandExtra);
+}
+
+static void
 trace_high_base_2d_result(voodoo_t *voodoo, int use_x_dir, int start_src_x, const uint32_t *pre_src_addr, const uint32_t *pre_src_val, const uint32_t *pre_dst_addr, const uint32_t *pre_dst_val)
 {
     const uint32_t command = voodoo->banshee_blt.command & COMMAND_CMD_MASK;
     const int      sample_len = (voodoo->banshee_blt.dstSizeX < 4) ? voodoo->banshee_blt.dstSizeX : 4;
     int            x_step = 1;
+    int            watch_dest = 0;
     uint32_t       dst_addr[4] = { 0 };
     uint32_t       dst_val[4] = { 0 };
 
-    if (high_base_2d_sample_count >= 24)
+    if (high_base_2d_sample_count >= 96)
         return;
 
     if (!voodoo->banshee_blt.dstBaseAddr_tiled)
@@ -231,6 +468,8 @@ trace_high_base_2d_result(voodoo_t *voodoo, int use_x_dir, int start_src_x, cons
         const int dst_x = voodoo->banshee_blt.dstX + (i * x_step);
         dst_addr[i] = get_addr(voodoo, dst_x * 4, voodoo->banshee_blt.dstY, 0, 0);
         dst_val[i] = *(uint32_t *) &voodoo->vram[dst_addr[i]];
+        if (v4_watch_dest_match(pre_dst_addr[i]) || v4_watch_dest_match(dst_addr[i]))
+            watch_dest = 1;
     }
 
     high_base_2d_sample_count++;
@@ -258,6 +497,195 @@ trace_high_base_2d_result(voodoo_t *voodoo, int use_x_dir, int start_src_x, cons
           dst_addr[1], dst_val[1],
           dst_addr[2], dst_val[2],
           dst_addr[3], dst_val[3],
+          voodoo->banshee_blt.commandExtra);
+
+    if (watch_dest && (watched_desktop_dest_trace_count < 64)) {
+        watched_desktop_dest_trace_count++;
+        pclog("V4 watch dest[%u]: cmd=%s/%08x dst=(%d,%d %dx%d) src=(%d,%d) step=%d srcTile=%u src=%08x@%08x %08x@%08x %08x@%08x %08x@%08x dstBefore=%08x@%08x %08x@%08x %08x@%08x %08x@%08x dstAfter=%08x@%08x %08x@%08x %08x@%08x %08x@%08x extra=%08x\n",
+              watched_desktop_dest_trace_count,
+              voodoo_2d_command_name(voodoo->banshee_blt.command),
+              voodoo->banshee_blt.command,
+              voodoo->banshee_blt.dstX,
+              voodoo->banshee_blt.dstY,
+              voodoo->banshee_blt.dstSizeX,
+              voodoo->banshee_blt.dstSizeY,
+              start_src_x,
+              voodoo->banshee_blt.srcY,
+              x_step,
+              !!voodoo->banshee_blt.srcBaseAddr_tiled,
+              pre_src_addr[0], pre_src_val[0],
+              pre_src_addr[1], pre_src_val[1],
+              pre_src_addr[2], pre_src_val[2],
+              pre_src_addr[3], pre_src_val[3],
+              pre_dst_addr[0], pre_dst_val[0],
+              pre_dst_addr[1], pre_dst_val[1],
+              pre_dst_addr[2], pre_dst_val[2],
+              pre_dst_addr[3], pre_dst_val[3],
+              dst_addr[0], dst_val[0],
+              dst_addr[1], dst_val[1],
+              dst_addr[2], dst_val[2],
+              dst_addr[3], dst_val[3],
+              voodoo->banshee_blt.commandExtra);
+    }
+}
+
+static void
+trace_watched_desktop_result(voodoo_t *voodoo, int use_x_dir, int start_src_x, const uint32_t *pre_src_addr, const uint32_t *pre_src_val, const uint32_t *pre_dst_addr, const uint32_t *pre_dst_val)
+{
+    const uint32_t command = voodoo->banshee_blt.command & COMMAND_CMD_MASK;
+    const int      sample_len = (voodoo->banshee_blt.dstSizeX < 4) ? voodoo->banshee_blt.dstSizeX : 4;
+    int            x_step = 1;
+    int            watch_dest = 0;
+    uint32_t       dst_addr[4] = { 0 };
+    uint32_t       dst_val[4] = { 0 };
+
+    if (watched_desktop_result_trace_count >= 64)
+        return;
+
+    if (!voodoo->banshee_blt.dstBaseAddr_tiled)
+        return;
+
+    if ((voodoo->banshee_blt.dstFormat & DST_FORMAT_COL_MASK) != DST_FORMAT_COL_32_BPP)
+        return;
+
+    if ((command != COMMAND_CMD_SCREEN_TO_SCREEN_BLT) &&
+        (command != COMMAND_CMD_HOST_TO_SCREEN_BLT))
+        return;
+
+    if ((voodoo->banshee_blt.cur_y != 0) || (sample_len <= 0))
+        return;
+
+    if (use_x_dir && (voodoo->banshee_blt.command & COMMAND_DX))
+        x_step = -1;
+
+    for (int i = 0; i < sample_len; i++) {
+        const int dst_x = voodoo->banshee_blt.dstX + (i * x_step);
+
+        dst_addr[i] = get_addr(voodoo, dst_x * 4, voodoo->banshee_blt.dstY, 0, 0);
+        dst_val[i] = *(uint32_t *) &voodoo->vram[dst_addr[i]];
+        if (v4_watch_dest_match(pre_dst_addr[i]) || v4_watch_dest_match(dst_addr[i]))
+            watch_dest = 1;
+    }
+
+    if (!watch_dest)
+        return;
+
+    watched_desktop_result_trace_count++;
+    pclog("V4 watch result[%u]: cmd=%s/%08x dst=(%d,%d %dx%d) src=(%d,%d) step=%d srcTile=%u srcFmt=%08x dstFmt=%08x src=%08x@%08x %08x@%08x %08x@%08x %08x@%08x dstBefore=%08x@%08x %08x@%08x %08x@%08x %08x@%08x dstAfter=%08x@%08x %08x@%08x %08x@%08x %08x@%08x extra=%08x\n",
+          watched_desktop_result_trace_count,
+          voodoo_2d_command_name(voodoo->banshee_blt.command),
+          voodoo->banshee_blt.command,
+          voodoo->banshee_blt.dstX,
+          voodoo->banshee_blt.dstY,
+          voodoo->banshee_blt.dstSizeX,
+          voodoo->banshee_blt.dstSizeY,
+          start_src_x,
+          voodoo->banshee_blt.srcY,
+          x_step,
+          !!voodoo->banshee_blt.srcBaseAddr_tiled,
+          voodoo->banshee_blt.srcFormat,
+          voodoo->banshee_blt.dstFormat,
+          pre_src_addr[0], pre_src_val[0],
+          pre_src_addr[1], pre_src_val[1],
+          pre_src_addr[2], pre_src_val[2],
+          pre_src_addr[3], pre_src_val[3],
+          pre_dst_addr[0], pre_dst_val[0],
+          pre_dst_addr[1], pre_dst_val[1],
+          pre_dst_addr[2], pre_dst_val[2],
+          pre_dst_addr[3], pre_dst_val[3],
+          dst_addr[0], dst_val[0],
+          dst_addr[1], dst_val[1],
+          dst_addr[2], dst_val[2],
+          dst_addr[3], dst_val[3],
+          voodoo->banshee_blt.commandExtra);
+}
+
+static void
+trace_watched_linear_surface_result(voodoo_t *voodoo, int use_x_dir, int start_src_x, const uint32_t *pre_src_addr, const uint32_t *pre_src_val, const uint32_t *pre_dst_addr, const uint32_t *pre_dst_val)
+{
+    const uint32_t command = voodoo->banshee_blt.command & COMMAND_CMD_MASK;
+    const int      sample_len = (voodoo->banshee_blt.dstSizeX < 4) ? voodoo->banshee_blt.dstSizeX : 4;
+    int            x_step = 1;
+    int            watch_dst = 0;
+    const uint32_t dst_base = voodoo->banshee_blt.dstBaseAddr & voodoo->fb_mask;
+    const int      watch_bad = !voodoo->banshee_blt.dstBaseAddr_tiled && v4_watch_surface_is_bad(dst_base);
+    uint32_t       dst_addr[4] = { 0 };
+    uint32_t       dst_val[4] = { 0 };
+    uint32_t       extra_dst_addr[4] = { 0 };
+    uint32_t       extra_dst_val[4] = { 0 };
+
+    if (watch_bad) {
+        if (watched_linear_surface_result_trace_count >= 96)
+            return;
+    } else if (watched_linear_surface_result_trace_count >= 24) {
+        return;
+    }
+
+    if (voodoo->banshee_blt.dstBaseAddr_tiled)
+        return;
+
+    if ((command != COMMAND_CMD_SCREEN_TO_SCREEN_BLT) &&
+        (command != COMMAND_CMD_HOST_TO_SCREEN_BLT))
+        return;
+
+    if ((voodoo->banshee_blt.cur_y != 0) || (sample_len <= 0))
+        return;
+
+    if (use_x_dir && (voodoo->banshee_blt.command & COMMAND_DX))
+        x_step = -1;
+
+    for (int i = 0; i < sample_len; i++) {
+        const int dst_x = voodoo->banshee_blt.dstX + (i * x_step);
+
+        dst_addr[i] = get_addr(voodoo, dst_x * 4, voodoo->banshee_blt.dstY, 0, 0);
+        dst_val[i] = *(uint32_t *) &voodoo->vram[dst_addr[i]];
+        if (v4_watch_surface_match(pre_dst_addr[i]) || v4_watch_surface_match(dst_addr[i]))
+            watch_dst = 1;
+    }
+
+    if (v4_watch_surface_is_bad3(dst_base)) {
+        for (int i = 0; i < 4; i++) {
+            extra_dst_addr[i] = (dst_base + 0x10 + (i * 4)) & voodoo->fb_mask;
+            extra_dst_val[i]  = *(uint32_t *) &voodoo->vram[extra_dst_addr[i]];
+        }
+    }
+
+    if (!watch_dst)
+        return;
+
+    watched_linear_surface_result_trace_count++;
+    pclog("V4 watch linear result[%u]: cmd=%s/%08x dstBase=%08x dstWatch=%s dst=(%d,%d %dx%d) src=(%d,%d) step=%d srcTile=%u srcFmt=%08x dstFmt=%08x src=%08x@%08x %08x@%08x %08x@%08x %08x@%08x dstBefore=%08x@%08x %08x@%08x %08x@%08x %08x@%08x dstAfter=%08x@%08x %08x@%08x %08x@%08x %08x@%08x dstAfterPlus16=%08x@%08x %08x@%08x %08x@%08x %08x@%08x extra=%08x\n",
+          watched_linear_surface_result_trace_count,
+          voodoo_2d_command_name(voodoo->banshee_blt.command),
+          voodoo->banshee_blt.command,
+          dst_base,
+          v4_watch_surface_label(dst_base),
+          voodoo->banshee_blt.dstX,
+          voodoo->banshee_blt.dstY,
+          voodoo->banshee_blt.dstSizeX,
+          voodoo->banshee_blt.dstSizeY,
+          start_src_x,
+          voodoo->banshee_blt.srcY,
+          x_step,
+          !!voodoo->banshee_blt.srcBaseAddr_tiled,
+          voodoo->banshee_blt.srcFormat,
+          voodoo->banshee_blt.dstFormat,
+          pre_src_addr[0], pre_src_val[0],
+          pre_src_addr[1], pre_src_val[1],
+          pre_src_addr[2], pre_src_val[2],
+          pre_src_addr[3], pre_src_val[3],
+          pre_dst_addr[0], pre_dst_val[0],
+          pre_dst_addr[1], pre_dst_val[1],
+          pre_dst_addr[2], pre_dst_val[2],
+          pre_dst_addr[3], pre_dst_val[3],
+          dst_addr[0], dst_val[0],
+          dst_addr[1], dst_val[1],
+          dst_addr[2], dst_val[2],
+          dst_addr[3], dst_val[3],
+          extra_dst_addr[0], extra_dst_val[0],
+          extra_dst_addr[1], extra_dst_val[1],
+          extra_dst_addr[2], extra_dst_val[2],
+          extra_dst_addr[3], extra_dst_val[3],
           voodoo->banshee_blt.commandExtra);
 }
 
@@ -550,6 +978,31 @@ update_src_stride(voodoo_t *voodoo)
     }
 }
 
+static int
+positive_mod(int value, int modulus)
+{
+    int remainder;
+
+    if (modulus <= 0)
+        return 0;
+
+    remainder = value % modulus;
+    if (remainder < 0)
+        remainder += modulus;
+
+    return remainder;
+}
+
+static int
+normalize_masked_mono_host_origin(const voodoo_t *voodoo)
+{
+    return ((voodoo->banshee_blt.command & 0xff000000) == 0x22000000) &&
+           !voodoo->banshee_blt.dstBaseAddr_tiled &&
+           ((voodoo->banshee_blt.dstFormat & DST_FORMAT_COL_MASK) == DST_FORMAT_COL_32_BPP) &&
+           ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_PACKING_MASK) == SRC_FORMAT_PACKING_STRIDE) &&
+           ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_COL_MASK) == SRC_FORMAT_COL_1_BPP);
+}
+
 static void
 end_command(voodoo_t *voodoo)
 {
@@ -711,6 +1164,7 @@ do_screen_to_screen_line(voodoo_t *voodoo, uint8_t *src_p, int use_x_dir, int sr
     int            use_pattern_trans = (voodoo->banshee_blt.command & (COMMAND_PATTERN_MONO | COMMAND_TRANS_MONO)) == (COMMAND_PATTERN_MONO | COMMAND_TRANS_MONO);
     uint8_t        rop               = voodoo->banshee_blt.command >> 24;
     int            src_colorkey;
+    int            trace_watch_sample = 0;
     uint32_t       pre_src_addr[4]   = { 0 };
     uint32_t       pre_src_val[4]    = { 0 };
     uint32_t       pre_dst_addr[4]   = { 0 };
@@ -728,7 +1182,7 @@ do_screen_to_screen_line(voodoo_t *voodoo, uint8_t *src_p, int use_x_dir, int sr
             break;
     }
 
-    if ((high_base_2d_sample_count < 24) &&
+    if ((high_base_2d_sample_count < 96) &&
         (voodoo->banshee_blt.cur_y == 0) &&
         voodoo->banshee_blt.dstBaseAddr_tiled &&
         ((voodoo->banshee_blt.command & COMMAND_CMD_MASK) == COMMAND_CMD_SCREEN_TO_SCREEN_BLT) &&
@@ -749,6 +1203,37 @@ do_screen_to_screen_line(voodoo_t *voodoo, uint8_t *src_p, int use_x_dir, int sr
                 src_x_real = (src_x_real & 127) + ((src_x_real >> 7) * 128 * 32);
 
             pre_src_addr[i] = (src_row_addr + src_x_real) & voodoo->fb_mask;
+            pre_src_val[i] = *(uint32_t *) &src_p[src_x_real];
+            pre_dst_addr[i] = get_addr(voodoo, dst_x * 4, voodoo->banshee_blt.dstY, 0, 0);
+            pre_dst_val[i] = *(uint32_t *) &voodoo->vram[pre_dst_addr[i]];
+        }
+    }
+
+    if ((watched_desktop_result_trace_count < 64) &&
+        (voodoo->banshee_blt.cur_y == 0) &&
+        voodoo->banshee_blt.dstBaseAddr_tiled &&
+        ((voodoo->banshee_blt.dstFormat & DST_FORMAT_COL_MASK) == DST_FORMAT_COL_32_BPP)) {
+        const int      x_step       = (use_x_dir && (voodoo->banshee_blt.command & COMMAND_DX)) ? -1 : 1;
+        const uint32_t src_row_addr = ((uintptr_t) src_p >= (uintptr_t) voodoo->vram &&
+                                       (uintptr_t) src_p <= ((uintptr_t) voodoo->vram + voodoo->fb_mask))
+                                          ? (uint32_t) ((uintptr_t) src_p - (uintptr_t) voodoo->vram)
+                                          : 0xffffffff;
+
+        trace_watch_sample = 1;
+
+        for (int i = 0; i < 4 && i < voodoo->banshee_blt.dstSizeX; i++) {
+            int src_x_real = (src_x * voodoo->banshee_blt.src_bpp) >> 3;
+            int dst_x = voodoo->banshee_blt.dstX + (i * x_step);
+
+            if (use_x_dir)
+                src_x_real = ((start_src_x + (i * x_step)) * voodoo->banshee_blt.src_bpp) >> 3;
+            else
+                src_x_real = ((start_src_x + i) * voodoo->banshee_blt.src_bpp) >> 3;
+
+            if (src_tiled)
+                src_x_real = (src_x_real & 127) + ((src_x_real >> 7) * 128 * 32);
+
+            pre_src_addr[i] = (src_row_addr == 0xffffffff) ? 0xffffffff : ((src_row_addr + src_x_real) & voodoo->fb_mask);
             pre_src_val[i] = *(uint32_t *) &src_p[src_x_real];
             pre_dst_addr[i] = get_addr(voodoo, dst_x * 4, voodoo->banshee_blt.dstY, 0, 0);
             pre_dst_val[i] = *(uint32_t *) &voodoo->vram[pre_dst_addr[i]];
@@ -847,6 +1332,9 @@ do_screen_to_screen_line(voodoo_t *voodoo, uint8_t *src_p, int use_x_dir, int sr
         }
         if (trace_copy_sample)
             trace_high_base_2d_result(voodoo, use_x_dir, start_src_x, pre_src_addr, pre_src_val, pre_dst_addr, pre_dst_val);
+        trace_watched_linear_surface_result(voodoo, use_x_dir, start_src_x, pre_src_addr, pre_src_val, pre_dst_addr, pre_dst_val);
+        if (trace_watch_sample)
+            trace_watched_desktop_result(voodoo, use_x_dir, start_src_x, pre_src_addr, pre_src_val, pre_dst_addr, pre_dst_val);
         voodoo->banshee_blt.srcY += (voodoo->banshee_blt.command & COMMAND_DY) ? -1 : 1;
         voodoo->banshee_blt.dstY += (voodoo->banshee_blt.command & COMMAND_DY) ? -1 : 1;
     } else {
@@ -998,6 +1486,9 @@ do_screen_to_screen_line(voodoo_t *voodoo, uint8_t *src_p, int use_x_dir, int sr
         }
         if (trace_copy_sample)
             trace_high_base_2d_result(voodoo, use_x_dir, start_src_x, pre_src_addr, pre_src_val, pre_dst_addr, pre_dst_val);
+        trace_watched_linear_surface_result(voodoo, use_x_dir, start_src_x, pre_src_addr, pre_src_val, pre_dst_addr, pre_dst_val);
+        if (trace_watch_sample)
+            trace_watched_desktop_result(voodoo, use_x_dir, start_src_x, pre_src_addr, pre_src_val, pre_dst_addr, pre_dst_val);
         voodoo->banshee_blt.srcY += (voodoo->banshee_blt.command & COMMAND_DY) ? -1 : 1;
         voodoo->banshee_blt.dstY += (voodoo->banshee_blt.command & COMMAND_DY) ? -1 : 1;
     }
@@ -1024,6 +1515,10 @@ banshee_do_screen_to_screen_blt(voodoo_t *voodoo)
 static void
 banshee_do_host_to_screen_blt(voodoo_t *voodoo, UNUSED(int count), uint32_t data)
 {
+    const int host_stride_field = voodoo->banshee_blt.srcFormat & SRC_FORMAT_STRIDE_MASK;
+    int src_row_byte_offset = 0;
+    int src_row_bit_offset  = 0;
+
 #if 0
     if (voodoo->banshee_blt.dstBaseAddr == 0xee5194)
         bansheeblt_log("banshee_do_host_to_screen_blt: data=%08x host_data_count=%i src_stride_dest=%i host_data_size_dest=%i\n", data, voodoo->banshee_blt.host_data_count, voodoo->banshee_blt.src_stride_dest, voodoo->banshee_blt.host_data_size_dest);
@@ -1037,11 +1532,22 @@ banshee_do_host_to_screen_blt(voodoo_t *voodoo, UNUSED(int count), uint32_t data
     if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_PACKING_MASK) == SRC_FORMAT_PACKING_STRIDE) {
         int last_byte;
 
-        if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_COL_MASK) == SRC_FORMAT_COL_1_BPP)
-            last_byte = ((voodoo->banshee_blt.srcX & 31) + voodoo->banshee_blt.dstSizeX + 7) >> 3;
-        else
-            last_byte = (voodoo->banshee_blt.srcX & 3) + voodoo->banshee_blt.host_data_size_dest;
+        if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_COL_MASK) == SRC_FORMAT_COL_1_BPP) {
+            src_row_bit_offset  = positive_mod(voodoo->banshee_blt.srcX, host_stride_field << 3);
+            src_row_byte_offset = src_row_bit_offset >> 3;
+            last_byte = src_row_byte_offset + (((src_row_bit_offset & 7) + voodoo->banshee_blt.dstSizeX + 7) >> 3);
+        } else {
+            src_row_byte_offset = positive_mod(voodoo->banshee_blt.srcX, host_stride_field);
+            last_byte           = src_row_byte_offset + voodoo->banshee_blt.host_data_size_dest;
+        }
 
+        if (normalize_masked_mono_host_origin(voodoo)) {
+            src_row_byte_offset = 0;
+            src_row_bit_offset  = 0;
+            last_byte           = voodoo->banshee_blt.host_data_size_dest;
+        }
+
+        trace_watched_host_stride_data(voodoo, data, last_byte);
         *(uint32_t *) &voodoo->banshee_blt.host_data[voodoo->banshee_blt.host_data_count] = data;
         voodoo->banshee_blt.host_data_count += 4;
         if (voodoo->banshee_blt.host_data_count >= last_byte) {
@@ -1050,9 +1556,9 @@ banshee_do_host_to_screen_blt(voodoo_t *voodoo, UNUSED(int count), uint32_t data
 #endif
             if (voodoo->banshee_blt.cur_y < voodoo->banshee_blt.dstSizeY) {
                 if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_COL_MASK) == SRC_FORMAT_COL_1_BPP)
-                    do_screen_to_screen_line(voodoo, &voodoo->banshee_blt.host_data[(voodoo->banshee_blt.srcX >> 3) & 3], 0, voodoo->banshee_blt.srcX & 7, 0);
+                    do_screen_to_screen_line(voodoo, &voodoo->banshee_blt.host_data[src_row_byte_offset], 0, src_row_bit_offset & 7, 0);
                 else
-                    do_screen_to_screen_line(voodoo, &voodoo->banshee_blt.host_data[voodoo->banshee_blt.srcX & 3], 0, 0, 0);
+                    do_screen_to_screen_line(voodoo, &voodoo->banshee_blt.host_data[src_row_byte_offset], 0, 0, 0);
                 voodoo->banshee_blt.cur_y++;
                 if (voodoo->banshee_blt.cur_y == voodoo->banshee_blt.dstSizeY)
                     end_command(voodoo);
@@ -1374,6 +1880,10 @@ banshee_do_screen_to_screen_stretch_blt(voodoo_t *voodoo)
 static void
 banshee_do_host_to_screen_stretch_blt(voodoo_t *voodoo, UNUSED(int count), uint32_t data)
 {
+    const int host_stride_field = voodoo->banshee_blt.srcFormat & SRC_FORMAT_STRIDE_MASK;
+    int src_row_byte_offset = 0;
+    int src_row_bit_offset  = 0;
+
 #if 0
     if (voodoo->banshee_blt.dstBaseAddr == 0xee5194)
         bansheeblt_log("banshee_do_host_to_screen_blt: data=%08x host_data_count=%i src_stride_dest=%i host_data_size_dest=%i\n", data, voodoo->banshee_blt.host_data_count, voodoo->banshee_blt.src_stride_dest, voodoo->banshee_blt.host_data_size_dest);
@@ -1384,7 +1894,22 @@ banshee_do_host_to_screen_stretch_blt(voodoo_t *voodoo, UNUSED(int count), uint3
         data = (data >> 16) | (data << 16);
 
     if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_PACKING_MASK) == SRC_FORMAT_PACKING_STRIDE) {
-        int last_byte = (voodoo->banshee_blt.srcX & 3) + voodoo->banshee_blt.host_data_size_src;
+        int last_byte;
+
+        if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_COL_MASK) == SRC_FORMAT_COL_1_BPP) {
+            src_row_bit_offset  = positive_mod(voodoo->banshee_blt.srcX, host_stride_field << 3);
+            src_row_byte_offset = src_row_bit_offset >> 3;
+            last_byte = src_row_byte_offset + (((src_row_bit_offset & 7) + voodoo->banshee_blt.srcSizeX + 7) >> 3);
+        } else {
+            src_row_byte_offset = positive_mod(voodoo->banshee_blt.srcX, host_stride_field);
+            last_byte           = src_row_byte_offset + voodoo->banshee_blt.host_data_size_src;
+        }
+
+        if (normalize_masked_mono_host_origin(voodoo)) {
+            src_row_byte_offset = 0;
+            src_row_bit_offset  = 0;
+            last_byte           = voodoo->banshee_blt.host_data_size_src;
+        }
 
         *(uint32_t *) &voodoo->banshee_blt.host_data[voodoo->banshee_blt.host_data_count] = data;
         voodoo->banshee_blt.host_data_count += 4;
@@ -1394,9 +1919,9 @@ banshee_do_host_to_screen_stretch_blt(voodoo_t *voodoo, UNUSED(int count), uint3
 #endif
             if (voodoo->banshee_blt.cur_y < voodoo->banshee_blt.dstSizeY) {
                 if ((voodoo->banshee_blt.srcFormat & SRC_FORMAT_COL_MASK) == SRC_FORMAT_COL_1_BPP)
-                    do_screen_to_screen_stretch_line(voodoo, &voodoo->banshee_blt.host_data[(voodoo->banshee_blt.srcX >> 3) & 3], voodoo->banshee_blt.srcX & 7, NULL);
+                    do_screen_to_screen_stretch_line(voodoo, &voodoo->banshee_blt.host_data[src_row_byte_offset], src_row_bit_offset & 7, NULL);
                 else
-                    do_screen_to_screen_stretch_line(voodoo, &voodoo->banshee_blt.host_data[voodoo->banshee_blt.srcX & 3], 0, NULL);
+                    do_screen_to_screen_stretch_line(voodoo, &voodoo->banshee_blt.host_data[src_row_byte_offset], 0, NULL);
                 voodoo->banshee_blt.cur_y++;
                 if (voodoo->banshee_blt.cur_y == voodoo->banshee_blt.dstSizeY)
                     end_command(voodoo);
@@ -1888,6 +2413,8 @@ voodoo_2d_reg_writel(voodoo_t *voodoo, uint32_t addr, uint32_t val)
             voodoo->banshee_blt.command = val;
             voodoo->launch_pending = 1;
             trace_high_base_2d_launch(voodoo);
+            trace_watched_linear_surface_launch(voodoo);
+            trace_watched_desktop_launch(voodoo);
             switch (voodoo->banshee_blt.command & COMMAND_CMD_MASK) {
 
 #if 0
