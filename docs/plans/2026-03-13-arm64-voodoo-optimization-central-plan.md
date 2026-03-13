@@ -243,11 +243,11 @@ Task 3 validation status:
 - focused build verification complete
 - focused signed-release runtime coverage complete for `3DMark99`, `3DMark2000`, and `Unreal Gold timedemo 1`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/include/86box/vid_voodoo_codegen_arm64.h voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
-git commit -m "perf: hoist arm64 voodoo dither setup"
+git commit -m "perf: hoist arm64 voodoo dither base"
 ```
 
 ### Task 4: Trim Remaining Constant Setup Only Where The ABI Stays Stable
