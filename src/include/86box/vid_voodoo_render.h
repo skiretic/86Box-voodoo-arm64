@@ -270,6 +270,16 @@ void voodoo_codegen_close(voodoo_t *voodoo);
         src_b = CLAMP(src_b);                                \
     } while (0)
 
+/*
+ * Output-alpha factors are a separate stage from the RGB blend terms above.
+ * The hardware model expects src_aafunc and dest_aafunc to decide the final
+ * alpha writeback, while RGB color blending keeps using src_afunc/dest_afunc.
+ *
+ * Today the interpreter and both JIT backends only implement the AONE cases
+ * for that final alpha writeback. Keep the interpreter as the source of truth
+ * when expanding coverage so the JITs can mirror one semantic definition.
+ */
+
 void voodoo_render_thread_1(void *param);
 void voodoo_render_thread_2(void *param);
 void voodoo_render_thread_3(void *param);

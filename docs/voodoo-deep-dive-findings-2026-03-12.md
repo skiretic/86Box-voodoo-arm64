@@ -165,6 +165,13 @@ The JITs mirror this reduced behavior:
 - x86-64 explicitly accumulates alpha only for `dest_aafunc == 4` and `src_aafunc == 4`
 - ARM64 does the same
 
+Current implementation detail:
+
+- RGB blending already evaluates the broader `AFUNC_*` factor set for `dest_afunc` and `src_afunc`
+- final output-alpha writeback does not mirror that coverage
+- interpreter output alpha currently only preserves contributions when `dest_aafunc == AFUNC_AONE` and/or `src_aafunc == AFUNC_AONE`
+- x86-64 and ARM64 JIT output-alpha writeback intentionally mirror that same reduced `AONE`-only behavior today
+
 Why this matters:
 
 - alpha planes were important enough to add dedicated support
