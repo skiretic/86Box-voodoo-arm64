@@ -127,8 +127,8 @@ The flush range is narrowed to the actual `code_size` returned by `voodoo_genera
 |----------|------|-------|-------|
 | `x0` | `state` pointer | Pinned | Per-scanline mutable state (ib, ig, ir, ia, z, tex_s, etc.) |
 | `x1` | `params` pointer | Pinned | Render parameters (dBdX, dGdX, color0, fogTable, etc.) |
-| `x2` | `x` (pixel X) | Temp | Starting X coordinate (passed as arg, then overwritten) |
-| `x3` | `real_y` | Temp | Scanline Y (passed as arg, then overwritten) |
+| `x2` | dither RB base / scratch | Temp | Entry arg is otherwise unused after setup; reused to pin `dither_rb` when dithering is enabled |
+| `x3` | `real_y` | Temp | Scanline Y argument, copied into `x24` during setup |
 | `x4-x7` | Scratch | Caller | Temp computations |
 | `x8` | `fb_mem` pointer | Pinned | Framebuffer base address (loaded in prologue) |
 | `x9` | `aux_mem` pointer | Pinned | Auxiliary buffer (depth/alpha) base address |
@@ -139,7 +139,7 @@ The flush range is narrowed to the actual `code_size` returned by `voodoo_genera
 | `x21` | `aminuslookup` pointer | Callee | Address of `aminuslookup[]` (for `255 - alpha`) |
 | `x22` | `neon_00_ff_w` pointer | Callee | Address of NEON constant table |
 | `x23` | `i_00_ff_w` pointer | Callee | Address of scalar `{0, 0xFF}` table |
-| `x24` | `real_y` copy | Callee | Preserved scanline Y (for dither table indexing) |
+| `x24` | `real_y` copy | Callee | Preserved scanline Y for stipple and dither indexing |
 | `x25` | `bilinear_lookup` pointer | Callee | Address of `bilinear_lookup[]` (for texture filtering) |
 | `x26` | `rgb565` pointer | Callee | Pinned pointer to `rgb565[]` LUT for RGB565-to-BGRA32 decode |
 | `x27` | `STATE_x2` loop bound | Callee | Cached copy of `state->x2` (loop termination value) |
@@ -871,9 +871,11 @@ STRH w4, [x8, x14, LSL #1]     // fb_mem[x] = pixel
 **Dither path (4x4 or 2x2):**
 
 ```c
-// Load dither table base pointer
-// x7 = &dither_rb (or &dither_rb2x2)
-MOV x7, #(dither_rb_addr)     // 4 instructions
+// Hoisted setup outside the pixel loop:
+// x2 = &dither_rb (or &dither_rb2x2)
+
+// Enter dither path
+MOV x7, x2
 
 // Extract R, G, B bytes
 UBFX w6, w4, #8, #8           // G
@@ -895,8 +897,10 @@ LSL w11, w11, #4              // G*16 (separate table)
 ADD x7, x7, x5                // x7 += sub-index
 LDRB w13, [x7, x13]           // dithered R
 LDRB w6, [x7, x6]             // dithered B
-// (load G from dither_g table with offset)
-LDRB w11, [x11, x16]          // dithered G
+// Load G from dither_g via its fixed signed displacement from dither_rb
+ADD x11, x7, x11
+SUB x11, x11, #4096           // or #1024 for 2x2
+LDRB w11, [x11]               // dithered G
 
 // Pack RGB565
 LSL w13, w13, #11
@@ -1273,11 +1277,19 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - generated block sizes stayed compact: `49` blocks, `60,884` total emitted bytes, `1242.5` average, `644` min, `1852` max
 - no block rejects were observed from W^X transitions or emit overflow during this run
 
+**Task 3 implementation note (2026-03-13, working tree after `050b7640f`):**
+- the ARM64 JIT now hoists only the `dither_rb` table base pointer into non-loop setup when dithering is enabled
+- `real_y` stays preserved in `x24`, `dither_rb` is pinned in otherwise-dead `x2`, and the green-table offset remains materialized on the original path
+- a broader hoist that also changed `real_y` residency and the green-table addressing regressed signed-release `3DMark99` rendering with visible green/distorted output, so that version was intentionally backed out
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
+- a signed-release `Windows 98 Gaming PC` rerun with `86BOX_VOODOO_ARM64_OPT_STATS=1` looked visually correct and ended with `cache hits=6,628,949`, `misses=74`, `generated blocks=74`, `dithered spans=144,619,994`, `dual_tmu=55,989,702`, and zero reject signals
+- follow-up signed-release coverage also looked visually correct across a full `3DMark2000` demo run and `Unreal Gold timedemo 1`, ending with `cache hits=16,145,549`, `misses=146`, `generated blocks=146`, `dithered spans=343,935,094`, `dual_tmu=179,954,012`, and zero reject signals
+
 **Completed improvements:**
 
 1. **Cache expansion (done):** Cache increased from 8 to 32 slots per odd/even pair (128 total), greatly reducing thrash on games with many render states.
 
-2. **Hot path optimization (done):** Peephole and hoisting optimizations applied (see Optimizations section).
+2. **Task 3 dither setup hoist (working tree):** The dither path no longer rebuilds the `dither_rb` table base inside the per-pixel loop. The green-table lookup still uses the original per-pixel offset materialization because that broader hoist was not yet proven safe.
 
 **Remaining potential improvements:**
 

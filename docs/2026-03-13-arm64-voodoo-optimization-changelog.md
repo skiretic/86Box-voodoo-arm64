@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current head: `9e70b2004`
+Current head: `050b7640f`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Purpose
@@ -95,6 +95,18 @@ Commit: `9e70b2004` `perf: add arm64 voodoo optimization instrumentation`
 - verified the instrumentation through fresh ARM64 debug and signed-release builds
 - captured a signed-release `3DMark99` baseline showing negligible cache misses, dither-heavy rendering, and common dual-TMU usage
 
+### 2026-03-13 - Task 3 dither-setup hoist narrowed and validated in working tree
+
+Commit coverage: working tree after `050b7640f` (not yet committed)
+
+- initial broader hoisting of `real_y` and the green-table path regressed live signed-release rendering with obvious green/distorted output
+- the regression investigation narrowed Task 3 to a safer slice: hoist only the `dither_rb` base pointer, keep `real_y` in `x24`, and leave the green-table offset on the original path
+- pinned `dither_rb` into otherwise-dead `x2` instead of consuming a hotter register
+- preserved the existing optimization instrumentation and verified the narrowed change through fresh ARM64 debug and signed-release rebuilds
+- reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported correct visuals and the run ended with `cache hits=6,628,949`, `misses=74`, `generated blocks=74`, `dithered spans=144,619,994`, `dual_tmu=55,989,702`, and zero reject signals
+- completed follow-up manual validation with a full `3DMark2000` demo run and `Unreal Gold timedemo 1`; user reported both looked correct
+- the follow-up validation run ended with `cache hits=16,145,549`, `misses=146`, `generated blocks=146`, `dithered spans=343,935,094`, `dual_tmu=179,954,012`, and zero reject signals
+
 ## Current Effort Status
 
 Completed so far:
@@ -104,12 +116,12 @@ Completed so far:
 - central optimization plan committed
 - optimization baseline locked
 - optimization instrumentation committed and baseline-captured
+- Task 3 minimal dither-base hoist implemented and manually revalidated in the working tree
 
 Not yet started:
 
-- ARM64 JIT hot-path code changes
-- optimization-phase build validation beyond the existing correctness baseline
-- optimization-phase manual regression runs
+- broader optimization-phase manual regression runs beyond Task 3
+- stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
 
 ## Notes
 

@@ -184,15 +184,15 @@ git commit -m "perf: add arm64 voodoo optimization instrumentation"
 - Modify: `src/include/86box/vid_voodoo_codegen_arm64.h`
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 
-- [ ] **Step 1: Hoist dither table pointer setup into the prologue**
+- [x] **Step 1: Hoist dither table pointer setup into the prologue**
 
-Pin the chosen `dither_rb` base pointer and the matching green-table offset when dithering is enabled.
+Pin the chosen `dither_rb` base pointer when dithering is enabled. A broader attempt that also hoisted the green-table offset and changed `real_y` register residency regressed signed-release rendering on 2026-03-13, so the validated Task 3 slice keeps those pieces on the original known-good path.
 
-- [ ] **Step 2: Remove redundant per-pixel constant materialization**
+- [x] **Step 2: Remove redundant per-pixel constant materialization**
 
-Replace the loop-local pointer rebuild with use of the pinned registers.
+Replace the loop-local `dither_rb` base rebuild with use of the pinned register, while preserving the original per-pixel green-table offset materialization.
 
-- [ ] **Step 3: Verify build and focused runtime coverage**
+- [x] **Step 3: Verify build and focused runtime coverage**
 
 Run:
 
@@ -211,6 +211,37 @@ Focus:
 - no new dither artifacts
 - no obvious RGB565 packing regression
 - no signed-release performance drop
+
+Build verification completed on 2026-03-13:
+
+- `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 3 JIT change
+- `scripts/setup-and-build.sh build` succeeded and re-signed `build/src/86Box.app`
+
+Signed-release rerun completed on 2026-03-13 against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`:
+
+- user reported the rerun looked visually correct through boot and the sampled `3DMark99` demo segment
+- cache hits=`6,628,949`, misses=`74`, rejected=`0`
+- generated blocks=`74`, code bytes total=`88,884`, avg=`1201.1`, min=`648`, max=`1856`
+- spans textured=`116,971,083`, untextured=`27,648,911`
+- spans dithered=`144,619,994`, non-dithered=`0`
+- single-TMU spans=`60,981,381`, dual-TMU spans=`55,989,702`
+- W^X rejects=`0`, emit overflow rejects=`0`
+
+Interpretation constraints:
+
+- this rerun covered a longer session than the Task 2 baseline, so the counters are not a direct performance A/B
+- the useful signal is that the narrowed hoist preserved visual correctness and introduced no new reject signals
+
+Additional manual validation completed on 2026-03-13:
+
+- user reported a full `3DMark2000` demo run looked correct on the same signed build
+- user reported `Unreal Gold timedemo 1` also looked correct, covering a fog/gradient-heavy follow-up scene
+- follow-up run stats ended at `cache hits=16,145,549`, `misses=146`, `generated blocks=146`, `dithered spans=343,935,094`, `dual_tmu=179,954,012`, with zero W^X or emit-overflow rejects
+
+Task 3 validation status:
+
+- focused build verification complete
+- focused signed-release runtime coverage complete for `3DMark99`, `3DMark2000`, and `Unreal Gold timedemo 1`
 
 - [ ] **Step 4: Commit**
 

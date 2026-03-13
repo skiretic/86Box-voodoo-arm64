@@ -74,7 +74,7 @@
  * GPR:
  *   x0  = voodoo_state_t *state   (arg0, pinned)
  *   x1  = voodoo_params_t *params (arg1, pinned)
- *   x2  = x pixel position        (arg2)
+ *   x2  = dither_rb base or scratch (arg2 is otherwise unused after entry)
  *   x3  = real_y                   (arg3)
  *   x4-x7   = scratch (caller-saved)
  *   x8      = fb_mem pointer       (pinned)
@@ -1998,7 +1998,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *
      * AAPCS64: x0=state, x1=params already in place.
      * x2=x (pixel X), x3=real_y
-     * Save real_y into callee-saved register for persistence across loop.
+     * Save real_y into a callee-saved register for reuse by stipple/dither.
      */
 
     /* MOV x24, x3 -- save real_y */
@@ -2046,7 +2046,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         EMIT_MOV_IMM64(23, &i_00_ff_w);
         EMIT_MOV_IMM64(25, &bilinear_lookup);
         EMIT_MOV_IMM64(26, &rgb565);
+        if (dither) {
+            uintptr_t dither_rb_addr = dither2x2 ? (uintptr_t) dither_rb2x2 : (uintptr_t) dither_rb;
 
+            EMIT_MOV_IMM64(2, dither_rb_addr);
+        }
 #undef EMIT_MOV_IMM64
     }
 
@@ -4086,24 +4090,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->fbzMode & FBZ_RGB_WMASK) {
         if (dither) {
             /* ---- Dither path ---- */
-            /* Load dither table base pointer into x7 (skip zero halfwords) */
-            {
-                uintptr_t dither_rb_addr = dither2x2 ? (uintptr_t) dither_rb2x2 : (uintptr_t) dither_rb;
-                uint16_t _dh0 = dither_rb_addr & 0xFFFF;
-                uint16_t _dh1 = (dither_rb_addr >> 16) & 0xFFFF;
-                uint16_t _dh2 = (dither_rb_addr >> 32) & 0xFFFF;
-                uint16_t _dh3 = (dither_rb_addr >> 48) & 0xFFFF;
-                int _df = (_dh0) ? 0 : (_dh1) ? 1 : (_dh2) ? 2 : 3;
-                uint16_t _dfv = (_df == 0) ? _dh0 : (_df == 1) ? _dh1
-                              : (_df == 2) ? _dh2 : _dh3;
-                addlong(ARM64_MOVZ_X_HW(7, _dfv, _df));
-                if (_df < 1 && _dh1)
-                    addlong(ARM64_MOVK_X(7, _dh1, 1));
-                if (_df < 2 && _dh2)
-                    addlong(ARM64_MOVK_X(7, _dh2, 2));
-                if (_df < 3 && _dh3)
-                    addlong(ARM64_MOVK_X(7, _dh3, 3));
-            }
+            /* x2 = pinned dither_rb base, copied into x7 for the indexed loads */
+            addlong(ARM64_MOV_REG_X(7, 2));
 
             /* w5 = real_y (saved in x24 by prologue) */
             addlong(ARM64_MOV_REG(5, 24));
