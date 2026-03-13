@@ -3032,30 +3032,146 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addbyte(0x67);
         addbyte(0xc0);
 
-        addbyte(0x31); /*XOR EAX, EAX */
-        addbyte(0xc0);
+        /* Mirror voodoo_blend_output_alpha() using scalar x86-64 code:
+         * EBX/EDX hold doubled destination/source alpha for the RGB blend path,
+         * so first recover the 8-bit values before evaluating src_aafunc and
+         * dest_aafunc for the final alpha-plane writeback. */
+        addbyte(0x89); /* MOV ECX, EBX */
+        addbyte(0xd9);
+        addbyte(0xd1); /* SHR ECX, 1 */
+        addbyte(0xe9);
+        addbyte(0x89); /* MOV ESI, EDX */
+        addbyte(0xd6);
+        addbyte(0xd1); /* SHR ESI, 1 */
+        addbyte(0xee);
+        addbyte(0x31); /* XOR EDX, EDX */
+        addbyte(0xd2);
 
-        if (dest_aafunc == 4) {
-            addbyte(0xc1); /*SHL EBX, 0x7*/
-            addbyte(0xe3);
-            addbyte(0x07);
-            addbyte(0x01); /*ADD EAX, EBX*/
-            addbyte(0xd8);
+        switch (dest_aafunc) {
+            case AFUNC_AZERO:
+            default:
+                addbyte(0x31); /* XOR EAX, EAX */
+                addbyte(0xc0);
+                break;
+            case AFUNC_ASRC_ALPHA:
+            case AFUNC_A_COLOR:
+                addbyte(0x89); /* MOV EAX, ESI */
+                addbyte(0xf0);
+                break;
+            case AFUNC_ADST_ALPHA:
+                addbyte(0x89); /* MOV EAX, ECX */
+                addbyte(0xc8);
+                break;
+            case AFUNC_AONE:
+                addbyte(0xb8); /* MOV EAX, 0xff */
+                addlong(0xff);
+                break;
+            case AFUNC_AOMSRC_ALPHA:
+            case AFUNC_AOM_COLOR:
+                addbyte(0x89); /* MOV EAX, ESI */
+                addbyte(0xf0);
+                addbyte(0x34); /* XOR AL, 0xff */
+                addbyte(0xff);
+                break;
+            case AFUNC_AOMDST_ALPHA:
+                addbyte(0x89); /* MOV EAX, ECX */
+                addbyte(0xc8);
+                addbyte(0x34); /* XOR AL, 0xff */
+                addbyte(0xff);
+                break;
+            case AFUNC_ASATURATE:
+                addbyte(0x89); /* MOV EAX, ESI */
+                addbyte(0xf0);
+                break;
         }
-
-        if (src_aafunc == 4) {
-            addbyte(0xc1); /*SHL EDX, 0x7*/
-            addbyte(0xe2);
-            addbyte(0x07);
-            addbyte(0x01); /*ADD EAX, EDX*/
-            addbyte(0xd0);
-        }
-
-        addbyte(0xc1); /* SHR EAX, 8 */
-        addbyte(0xc8);
+        addbyte(0x0f); /* IMUL EAX, ECX */
+        addbyte(0xaf);
+        addbyte(0xc1);
+        addbyte(0x89); /* MOV EBX, EAX */
+        addbyte(0xc3);
+        addbyte(0xc1); /* SHR EBX, 8 */
+        addbyte(0xeb);
         addbyte(0x08);
-        addbyte(0x89); /* MOV EDX, EAX */
-        addbyte(0xC2);
+        addbyte(0x83); /* ADD EAX, 1 */
+        addbyte(0xc0);
+        addbyte(0x01);
+        addbyte(0x01); /* ADD EAX, EBX */
+        addbyte(0xd8);
+        addbyte(0xc1); /* SHR EAX, 8 */
+        addbyte(0xe8);
+        addbyte(0x08);
+        addbyte(0x01); /* ADD EDX, EAX */
+        addbyte(0xc2);
+
+        switch (src_aafunc) {
+            case AFUNC_AZERO:
+            default:
+                addbyte(0x31); /* XOR EAX, EAX */
+                addbyte(0xc0);
+                break;
+            case AFUNC_ASRC_ALPHA:
+                addbyte(0x89); /* MOV EAX, ESI */
+                addbyte(0xf0);
+                break;
+            case AFUNC_A_COLOR:
+            case AFUNC_ADST_ALPHA:
+                addbyte(0x89); /* MOV EAX, ECX */
+                addbyte(0xc8);
+                break;
+            case AFUNC_AONE:
+                addbyte(0xb8); /* MOV EAX, 0xff */
+                addlong(0xff);
+                break;
+            case AFUNC_AOMSRC_ALPHA:
+                addbyte(0x89); /* MOV EAX, ESI */
+                addbyte(0xf0);
+                addbyte(0x34); /* XOR AL, 0xff */
+                addbyte(0xff);
+                break;
+            case AFUNC_AOM_COLOR:
+            case AFUNC_AOMDST_ALPHA:
+                addbyte(0x89); /* MOV EAX, ECX */
+                addbyte(0xc8);
+                addbyte(0x34); /* XOR AL, 0xff */
+                addbyte(0xff);
+                break;
+            case AFUNC_ASATURATE:
+                addbyte(0x89); /* MOV EAX, ECX */
+                addbyte(0xc8);
+                addbyte(0x34); /* XOR AL, 0xff */
+                addbyte(0xff);
+                addbyte(0x39); /* CMP ESI, EAX */
+                addbyte(0xc6);
+                addbyte(0x0f); /* CMOVB EAX, ESI */
+                addbyte(0x42);
+                addbyte(0xc6);
+                break;
+        }
+        addbyte(0x0f); /* IMUL EAX, ESI */
+        addbyte(0xaf);
+        addbyte(0xc6);
+        addbyte(0x89); /* MOV EBX, EAX */
+        addbyte(0xc3);
+        addbyte(0xc1); /* SHR EBX, 8 */
+        addbyte(0xeb);
+        addbyte(0x08);
+        addbyte(0x83); /* ADD EAX, 1 */
+        addbyte(0xc0);
+        addbyte(0x01);
+        addbyte(0x01); /* ADD EAX, EBX */
+        addbyte(0xd8);
+        addbyte(0xc1); /* SHR EAX, 8 */
+        addbyte(0xe8);
+        addbyte(0x08);
+        addbyte(0x01); /* ADD EDX, EAX */
+        addbyte(0xc2);
+        addbyte(0xb8); /* MOV EAX, 0xff */
+        addlong(0xff);
+        addbyte(0x39); /* CMP EDX, EAX */
+        addbyte(0xc2);
+        addbyte(0x0f); /* CMOVA EDX, EAX */
+        addbyte(0x47);
+        addbyte(0xd0);
     }
 
     if ((params->fbzMode & (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE)) == (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE)) {

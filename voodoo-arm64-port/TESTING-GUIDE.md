@@ -105,14 +105,33 @@ cmake --preset llvm-macos-aarch64-debug
 cmake --build out/build/llvm-macos-aarch64-debug
 ```
 
+### Current Fresh-Build Workflow (March 13, 2026)
+
+For the current output-alpha parity work, the recommended fresh-build handoff is the signed release app:
+
+```bash
+./scripts/setup-and-build.sh build
+```
+
+Resulting test artifact:
+
+- `build/src/86Box.app`
+
+Session note:
+
+- the active validation environment in this workspace is ARM64
+- x86-64 runtime testing is still unavailable here
+- use the ARM64 signed release build as the real manual validation target for the new output-alpha JIT parity work
+- avoid using the debug app for performance validation; it is much slower and can be mistaken for a JIT regression
+
 ### Code Signing with JIT Entitlements
 
 **macOS requires special entitlements for JIT compilation.** The build process handles this automatically, but if you need to manually sign:
 
 ```bash
 codesign --force --sign - \
-  --entitlements ./src/unix/assets/86Box.entitlements \
-  --deep build/artifacts/86Box.app
+  --entitlements ./src/mac/entitlements.plist \
+  build/src/86Box.app
 ```
 
 **Why this matters:** Without JIT entitlements, macOS blocks write+execute memory pages, causing the JIT to fail silently and fall back to the interpreter.
@@ -283,6 +302,35 @@ Controls how many host threads run the Voodoo pixel pipeline in parallel.
 7. **Framerate**
    - Compare JIT ON vs OFF
    - Expected: JIT should be 5-10x faster than interpreter
+
+### Scenario Checklists
+
+#### Alpha / Blend changes
+
+- First run: `Lands of Lore III`, `Extreme Assault`, `Half-Life 1`
+- Then run: `3DMark99`, `3DMark2000`
+- Check: transparency, HUD overlays, alpha-buffer writes, masked edges, interpreter-vs-JIT visual parity
+
+#### Fog / Depth changes
+
+- Run: `Unreal Gold`, `3DMark99`, `3DMark2000`
+- Check: fog intensity, depth occlusion, Z-fighting, scene-transition stability
+
+#### Texture / TMU changes
+
+- Run: `Unreal Gold`, `Turok: Dinosaur Hunter`
+- Check: bilinear filtering, dual-TMU ordering, texture edge seams, state-transition corruption
+
+#### Tiled-buffer / JIT-cache changes
+
+- Run: `3DMark99`, `3DMark2000`, `Unreal Gold`, `Lands of Lore III`
+- Check: repeated scene transitions, aux/depth/alpha correctness, one-frame corruption after mode changes
+
+#### Render-thread / Concurrency changes
+
+- Start with `render_threads = 1`
+- Only try `render_threads = 2` when investigating a suspected contention issue
+- Check: long-run stability, guest slowdown, frame pacing, corruption that appears after several loops
 
 ---
 

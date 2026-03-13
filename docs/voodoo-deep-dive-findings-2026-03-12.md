@@ -1,6 +1,6 @@
 # Voodoo Deep Dive Findings
 
-Date: 2026-03-12
+Date: 2026-03-13
 Branch: `voodoo-dev`
 Scope: `src/video/vid_voodoo_*`, `src/include/86box/vid_voodoo_*`, and selected 86Box git history related to interpreter/JIT correctness, compatibility, and performance
 
@@ -41,8 +41,8 @@ Non-goals for the same phase:
 
 ## Current Status Snapshot
 
-Status date: 2026-03-12
-Current branch head: `cf16e67c3`
+Status date: 2026-03-13
+Current branch head: `cf16e67c3` plus local uncommitted Task 5-8 notes
 
 Implemented so far:
 
@@ -50,12 +50,12 @@ Implemented so far:
 - JIT cache-key aliasing fixed by separating `col_tiled` and `aux_tiled` in both active JIT cache keys
 - output-alpha behavior documented before code changes
 - interpreter and LFB output-alpha writeback moved from `AONE`-only handling to shared factor-based helper logic
+- x86-64 JIT output-alpha writeback now mirrors the interpreter factor set in the local working tree
+- ARM64 JIT output-alpha writeback now mirrors the interpreter factor set in the local working tree
+- regression-checklist docs are refreshed for alpha/blend, fog/depth, texture/TMU, tiled-buffer/JIT-cache, and render-thread scenarios
 
 Not implemented yet:
 
-- x86-64 JIT output-alpha parity
-- ARM64 JIT output-alpha parity
-- repeatable regression checklist docs
 - final results write-up after manual regression coverage
 
 Verified so far:
@@ -63,14 +63,53 @@ Verified so far:
 - successful ARM64 debug configure
 - successful ARM64 debug build after the cache-key fix
 - successful ARM64 debug build after the interpreter output-alpha fix
+- successful x86-64 syntax-only compile of `src/video/vid_voodoo_render.c` after the Task 5 local JIT change
+- successful ARM64 debug build after the Task 6 local JIT change
 - successful clean ARM64 debug rebuild from a deleted build directory
+- successful signed ARM64 release rebuild via `scripts/setup-and-build.sh build`
 - `3DMark99` full demo smoke loop looked stable in this session
 - `3DMark2000` full demo smoke loop looked stable in this session
+- manual signed-release sanity check restored expected performance after launching the release app instead of the debug app
 
 Still unverified:
 
-- game-specific regression coverage outside the `3DMark99` / `3DMark2000` smoke loops
-- runtime behavior of the new interpreter alpha-factor coverage outside the historically exercised subset
+- full x86-64 build/runtime behavior of the new x86-64 JIT alpha path
+- game-specific regression coverage outside the `3DMark99` / `3DMark2000` smoke loops and the signed-release sanity pass
+- runtime behavior of the new interpreter and JIT alpha-factor coverage outside the historically exercised subset
+
+## Scenario Checklists
+
+Use these as the repeatable first-pass manual checklist before calling a Voodoo correctness change done.
+
+### Alpha / Blend changes
+
+- Run `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1`
+- Compare JIT ON versus OFF for transparency, HUD overlays, alpha-plane writes, and masked effects
+- If visual corruption appears only with JIT ON, repeat with `jit_debug=2` long enough to capture the problematic scene
+
+### Fog / Depth changes
+
+- Run `Unreal Gold`, `3DMark99`, and `3DMark2000`
+- Look for fog intensity mismatches, wrong `FOG_Z` behavior, depth-fighting, and missing occlusion
+- Re-check with more than one camera transition or scene loop before ruling a bug out
+
+### Texture / TMU changes
+
+- Run `Unreal Gold` and `Turok demo`
+- Check dual-TMU ordering, bilinear filtering, texture edge seams, and negate/reverse path behavior
+- Toggle JIT ON versus OFF if the issue looks texture-state dependent
+
+### Tiled-buffer / JIT-cache changes
+
+- Run `3DMark99`, `3DMark2000`, `Unreal Gold`, and `Lands of Lore III`
+- Focus on repeated scene transitions, aux/depth/alpha correctness, and one-frame corruption after state changes
+- Prefer longer loops over single launches because cache aliasing bugs are state-transition sensitive
+
+### Render-thread / Concurrency changes
+
+- Run repeated demo loops with `render_threads = 1` first, then try `2` only if investigating contention-sensitive behavior
+- Watch for hangs, guest slowdowns, frame pacing issues, or corruption that appears only after longer runs
+- Keep `jit_debug=1` available for log capture if a long-run issue appears
 
 ## Architecture Overview
 

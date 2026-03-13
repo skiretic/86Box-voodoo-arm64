@@ -1,8 +1,8 @@
 # Voodoo Known Bug Candidates
 
-Date: 2026-03-12
+Date: 2026-03-13
 Branch: `voodoo-dev`
-Status basis: current local branch state after Tasks 1 through 4 of the gap-closure plan
+Status basis: current local branch state after Tasks 1 through 7 are implemented locally
 
 ## Purpose
 
@@ -20,23 +20,23 @@ The most likely remaining correctness issues are no longer the ones already fixe
 
 The best current bug candidates are:
 
-1. output-alpha blending in the x86-64 JIT still lags the interpreter
-2. output-alpha blending in the ARM64 JIT still lags the interpreter
-3. rare blend-factor combinations in the interpreter are broader now, but still under-validated in real content
+1. newly widened output-alpha parity in both JITs is still under-validated in real runtime content
+2. x86-64 live behavior of the new output-alpha path is still unverified in this workspace
+3. rare blend-factor combinations remain lightly exercised in real games
 4. historically fragile fog, transparency, TMU ordering, depth bias, and render-thread timing paths may still hide edge-case regressions
 
-The broad smoke coverage from `3DMark99` and `3DMark2000` is reassuring, but it does not fully replace game-specific checks like `Extreme Assault` and `Lands of Lore III`.
+The broad smoke coverage from `3DMark99` and `3DMark2000` plus the signed-release sanity pass is reassuring, but it does not fully replace game-specific checks like `Extreme Assault` and `Lands of Lore III`.
 
 ## High-Confidence Remaining Candidates
 
-### 1. x86-64 JIT output-alpha parity is still incomplete
+### 1. JIT output-alpha parity is implemented but still under-validated
 
 Confidence: High
 Why it is still likely:
 
 - the interpreter no longer uses the old `AONE`-only alpha writeback logic
-- the x86-64 JIT still does
-- this is an explicit plan item that has not yet been implemented
+- both JITs now have local parity patches, but those paths have only build-level verification in this session
+- the historically fragile alpha-buffer path still needs runtime evidence in real games
 
 What it could affect:
 
@@ -50,20 +50,20 @@ Best checks:
 - `Extreme Assault`
 - `Half-Life 1`
 
-### 2. ARM64 JIT output-alpha parity is still incomplete
+### 2. x86-64 live validation is still missing
 
 Confidence: High
 Why it is still likely:
 
-- same gap as x86-64, but in the active Apple Silicon backend
-- the ARM64 JIT currently mirrors the old reduced output-alpha handling
-- recent ARM64 JIT history already shows multiple small correctness fixes in nearby pipeline logic
+- the x86-64 JIT parity change has only been syntax-checked locally
+- x86-64 runtime testing remains unavailable in this workspace
+- the x86-64 JIT is older and still a believable source of subtle live-only regressions
 
 What it could affect:
 
-- alpha-plane writes
-- transparency/fog interactions
-- ARM64-only corruption not visible in interpreter mode
+- alpha-plane scenes on x86-64 hosts
+- transparency/HUD behavior
+- regressions that only appear with real cached x86-64 blocks at runtime
 
 Best checks:
 
@@ -71,16 +71,15 @@ Best checks:
 - `Extreme Assault`
 - `Unreal Gold`
 - `3DMark99`
-- `3DMark2000`
 
-### 3. Newly broadened interpreter output-alpha coverage is still under-tested
+### 3. Rare blend-factor combinations are still under-tested
 
 Confidence: Medium-High
 Why it is still likely:
 
-- the interpreter now supports a broader factor vocabulary than before
+- the interpreter and both JITs now support a broader factor vocabulary than before
 - historical notes in this repo indicate the software path had mostly exercised `4 = ONE`
-- the implementation is plausible and build-clean, but runtime evidence is still limited
+- build-level verification is good, but runtime evidence is still limited
 
 What it could affect:
 
@@ -201,20 +200,20 @@ These were strong candidates before this work and are now no longer the top unre
 
 Status: fixed in `cfdda4cae`
 
-### Partially fixed: incomplete output-alpha blending
+### Fixed locally, still awaiting broader validation: incomplete output-alpha blending
 
 Status:
 
 - interpreter and LFB path improved in `cf16e67c3`
-- x86-64 JIT still pending
-- ARM64 JIT still pending
+- x86-64 JIT parity implemented locally and syntax-checked
+- ARM64 JIT parity implemented locally and built on the active ARM64 environment
 
 ## Suggested Next Investigation Order
 
-1. Finish x86-64 JIT output-alpha parity.
-2. Finish ARM64 JIT output-alpha parity.
-3. Run `Lands of Lore III` and `Extreme Assault`.
-4. If those pass, investigate only if a specific game or scene shows a real visual fault.
+1. Run `Lands of Lore III` and `Extreme Assault` on the fresh ARM64 build.
+2. Run `Unreal Gold`, `3DMark99`, and `3DMark2000`.
+3. If those pass, treat x86-64 as build-verified but runtime-unverified until a suitable host is available.
+4. Investigate only if a specific game or scene shows a real visual fault.
 
 ## Bottom Line
 
@@ -224,4 +223,4 @@ The most probable forgotten bugs are not random mysteries. They cluster around:
 - historically fragile fog/transparency/TMU/depth paths
 - timing-sensitive rendering behavior under repeated state churn
 
-If you want the shortest next bug-hunting path, focus on the two JIT output-alpha tasks and use `Lands of Lore III` plus `Extreme Assault` as the first real-game sanity checks.
+If you want the shortest next bug-hunting path, use the fresh ARM64 build to cover `Lands of Lore III`, `Extreme Assault`, `Unreal Gold`, `3DMark99`, and `3DMark2000` before widening scope.

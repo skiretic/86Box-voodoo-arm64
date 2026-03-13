@@ -39,8 +39,8 @@ Non-goals for this phase:
 
 ## Current Execution Status
 
-Status date: 2026-03-12
-Branch head: `cf16e67c3`
+Status date: 2026-03-13
+Branch head: `cf16e67c3` plus local uncommitted Task 5-8 notes
 
 Completed tasks:
 
@@ -48,12 +48,12 @@ Completed tasks:
 - Task 2 `fix: split voodoo jit tiled-mode cache keys` (`cfdda4cae`)
 - Task 3 `docs: capture intended voodoo output-alpha behavior` (`b31534ea2`)
 - Task 4 `fix: complete voodoo interpreter output-alpha blending` (`cf16e67c3`)
+- Task 5 `fix: match voodoo output-alpha blending in x64 jit` (implemented locally, uncommitted)
+- Task 6 `fix: match voodoo output-alpha blending in arm64 jit` (implemented locally, uncommitted)
+- Task 7 `docs: add voodoo regression checklist by scenario` (implemented locally, uncommitted)
 
 Pending tasks:
 
-- Task 5 x86-64 JIT output-alpha parity
-- Task 6 ARM64 JIT output-alpha parity
-- Task 7 regression checklist documentation
 - Task 8 final verification and handoff
 
 Verification completed so far:
@@ -62,18 +62,24 @@ Verification completed so far:
 - `cmake --build out/build/llvm-macos-aarch64-debug` after Task 2
 - `cmake --build out/build/llvm-macos-aarch64-debug` after Task 4
 - clean rebuild: `rm -rf out/build/llvm-macos-aarch64-debug && cmake --preset llvm-macos-aarch64-debug && cmake --build out/build/llvm-macos-aarch64-debug`
+- x86-64 syntax-only verification for `src/video/vid_voodoo_render.c` with `-target x86_64-apple-macos10.13 -fsyntax-only`
+- ARM64 debug build after Task 6: `cmake --build out/build/llvm-macos-aarch64-debug`
+- clean release build and codesign with JIT entitlements via `scripts/setup-and-build.sh build`
 - manual smoke pass: `3DMark99` full demo loop appeared stable
 - manual smoke pass: `3DMark2000` full demo loop appeared stable
+- manual ARM64 signed release validation: user reported testing/performance restored after launching the signed release app instead of the debug build
 
 Verification still pending:
 
-- interactive/manual regressions for `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, and related follow-on checks
-- x86-64 build verification for the Task 5 JIT work
+- deeper interactive/manual regressions for `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000` beyond the initial signed-release sanity pass
+- x86-64 full build/runtime verification for the Task 5 JIT work
+- final commit/handoff notes for Task 8
 
 Environment note:
 
 - ARM64 is the active validation environment in this workspace
 - x86-64 runtime testing is currently unavailable, so Task 5 should not block on x86-64 live execution evidence
+- local branch state currently includes uncommitted Task 5-7 code/doc changes plus Task 8 status updates
 
 ## Test Inventory For This Plan
 

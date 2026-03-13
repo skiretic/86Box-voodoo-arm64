@@ -370,6 +370,9 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 /* SDIV Wd, Wn, Wm (32-bit signed divide) */
 #define ARM64_SDIV(d, n, m) (0x1AC00C00 | Rm(m) | Rn(n) | Rd(d))
 
+/* UDIV Wd, Wn, Wm (32-bit unsigned divide) */
+#define ARM64_UDIV(d, n, m) (0x1AC00800 | Rm(m) | Rn(n) | Rd(d))
+
 /* ========================================================================
  * Section 10: GPR Arithmetic -- Immediate
  * ======================================================================== */
@@ -3942,32 +3945,78 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         /* Pack to unsigned bytes with saturation */
         addlong(ARM64_SQXTUN_8B_8H(0, 0));
 
-        /* Alpha blend for alpha channel:
-         * dest_aafunc and src_aafunc compute the final alpha.
-         * x86-64 ref: lines 3034-3057
-         * w4 = 0, accumulate dest_aa and src_aa contributions. */
-        addlong(ARM64_MOV_ZERO(4));  /* w4 = 0 (accumulator for blended alpha) */
+        /* Mirror voodoo_blend_output_alpha() in scalar ARM64 code:
+         * w5/w12 hold doubled destination/source alpha for the RGB blend path,
+         * so first recover the 8-bit alpha values, then apply the interpreter's
+         * output-alpha factor rules exactly using multiply/divide-by-255. */
+        addlong(ARM64_LSR_IMM(6, 5, 1));   /* w6 = dest_alpha */
+        addlong(ARM64_LSR_IMM(7, 12, 1));  /* w7 = src_alpha */
+        addlong(ARM64_MOV_ZERO(4));        /* w4 = blended alpha accumulator */
+        addlong(ARM64_MOVZ_W(10, 0xff));   /* w10 = 255 divisor/clamp constant */
 
-        if (dest_aafunc == 4) {
-            /* dest_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
-             * destination alpha passes through to the blended output alpha.
-             * w5 holds dst_alpha * 2 (doubled for table indexing), so
-             * (w5 << 7) >> 8 = dst_alpha exactly. Matches x86-64 lines 3037-3042. */
-            addlong(ARM64_LSL_IMM(6, 5, 7));   /* w6 = (dst_alpha*2) << 7; >>8 later gives correct alpha */
-            addlong(ARM64_ADD_REG(4, 4, 6));
+        switch (dest_aafunc) {
+            case AFUNC_AZERO:
+            default:
+                addlong(ARM64_MOV_ZERO(14));
+                break;
+            case AFUNC_ASRC_ALPHA:
+            case AFUNC_A_COLOR:
+            case AFUNC_ASATURATE:
+                addlong(ARM64_MOV_REG(14, 7));
+                break;
+            case AFUNC_ADST_ALPHA:
+                addlong(ARM64_MOV_REG(14, 6));
+                break;
+            case AFUNC_AONE:
+                addlong(ARM64_MOVZ_W(14, 0xff));
+                break;
+            case AFUNC_AOMSRC_ALPHA:
+            case AFUNC_AOM_COLOR:
+                addlong(ARM64_SUB_REG(14, 10, 7));
+                break;
+            case AFUNC_AOMDST_ALPHA:
+                addlong(ARM64_SUB_REG(14, 10, 6));
+                break;
         }
+        addlong(ARM64_MUL(14, 14, 6));
+        addlong(ARM64_UDIV(14, 14, 10));
+        addlong(ARM64_ADD_REG(4, 4, 14));
 
-        if (src_aafunc == 4) {
-            /* src_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
-             * source alpha passes through. w12 = src_alpha * 2, so (w12 << 7) >> 8 = src_alpha exactly. */
-            addlong(ARM64_LSL_IMM(6, 12, 7));  /* w6 = (src_alpha*2) << 7; >>8 later gives correct alpha */
-            addlong(ARM64_ADD_REG(4, 4, 6));
+        switch (src_aafunc) {
+            case AFUNC_AZERO:
+            default:
+                addlong(ARM64_MOV_ZERO(14));
+                break;
+            case AFUNC_ASRC_ALPHA:
+                addlong(ARM64_MOV_REG(14, 7));
+                break;
+            case AFUNC_A_COLOR:
+            case AFUNC_ADST_ALPHA:
+                addlong(ARM64_MOV_REG(14, 6));
+                break;
+            case AFUNC_AONE:
+                addlong(ARM64_MOVZ_W(14, 0xff));
+                break;
+            case AFUNC_AOMSRC_ALPHA:
+                addlong(ARM64_SUB_REG(14, 10, 7));
+                break;
+            case AFUNC_AOM_COLOR:
+            case AFUNC_AOMDST_ALPHA:
+                addlong(ARM64_SUB_REG(14, 10, 6));
+                break;
+            case AFUNC_ASATURATE:
+                addlong(ARM64_SUB_REG(14, 10, 6));       /* w14 = 255 - dest_alpha */
+                addlong(ARM64_CMP_REG(7, 14));
+                addlong(ARM64_CSEL(14, 14, 7, COND_HI)); /* w14 = min(src_alpha, 255 - dest_alpha) */
+                break;
         }
+        addlong(ARM64_MUL(14, 14, 7));
+        addlong(ARM64_UDIV(14, 14, 10));
+        addlong(ARM64_ADD_REG(4, 4, 14));
 
-        /* LSR w4, w4, #8 */
-        addlong(ARM64_LSR_IMM(4, 4, 8));
-        /* w12 = final blended alpha */
-        addlong(ARM64_MOV_REG(12, 4));
+        addlong(ARM64_CMP_IMM(4, 0xFF));
+        addlong(ARM64_CSEL(4, 10, 4, COND_HI)); /* clamp to 0xFF */
+        addlong(ARM64_MOV_REG(12, 4));          /* w12 = final blended alpha */
     }
 
     /* ================================================================
