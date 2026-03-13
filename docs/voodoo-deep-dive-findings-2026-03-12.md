@@ -39,6 +39,39 @@ Non-goals for the same phase:
 - no opportunistic JIT optimization batches mixed into correctness fixes
 - no broad renderer refactor while the correctness holes above are still open
 
+## Current Status Snapshot
+
+Status date: 2026-03-12
+Current branch head: `cf16e67c3`
+
+Implemented so far:
+
+- scope and non-goals locked into the working docs
+- JIT cache-key aliasing fixed by separating `col_tiled` and `aux_tiled` in both active JIT cache keys
+- output-alpha behavior documented before code changes
+- interpreter and LFB output-alpha writeback moved from `AONE`-only handling to shared factor-based helper logic
+
+Not implemented yet:
+
+- x86-64 JIT output-alpha parity
+- ARM64 JIT output-alpha parity
+- repeatable regression checklist docs
+- final results write-up after manual regression coverage
+
+Verified so far:
+
+- successful ARM64 debug configure
+- successful ARM64 debug build after the cache-key fix
+- successful ARM64 debug build after the interpreter output-alpha fix
+- successful clean ARM64 debug rebuild from a deleted build directory
+- `3DMark99` full demo smoke loop looked stable in this session
+- `3DMark2000` full demo smoke loop looked stable in this session
+
+Still unverified:
+
+- game-specific regression coverage outside the `3DMark99` / `3DMark2000` smoke loops
+- runtime behavior of the new interpreter alpha-factor coverage outside the historically exercised subset
+
 ## Architecture Overview
 
 ### Interpreter

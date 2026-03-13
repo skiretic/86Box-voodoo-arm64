@@ -37,6 +37,39 @@ Non-goals for this phase:
 - no opportunistic JIT optimization batches
 - no broad renderer refactor in the same phase
 
+## Current Execution Status
+
+Status date: 2026-03-12
+Branch head: `cf16e67c3`
+
+Completed tasks:
+
+- Task 1 `docs: define voodoo gap-closure scope` (`70c57a2d7`)
+- Task 2 `fix: split voodoo jit tiled-mode cache keys` (`cfdda4cae`)
+- Task 3 `docs: capture intended voodoo output-alpha behavior` (`b31534ea2`)
+- Task 4 `fix: complete voodoo interpreter output-alpha blending` (`cf16e67c3`)
+
+Pending tasks:
+
+- Task 5 x86-64 JIT output-alpha parity
+- Task 6 ARM64 JIT output-alpha parity
+- Task 7 regression checklist documentation
+- Task 8 final verification and handoff
+
+Verification completed so far:
+
+- `cmake --preset llvm-macos-aarch64-debug`
+- `cmake --build out/build/llvm-macos-aarch64-debug` after Task 2
+- `cmake --build out/build/llvm-macos-aarch64-debug` after Task 4
+- clean rebuild: `rm -rf out/build/llvm-macos-aarch64-debug && cmake --preset llvm-macos-aarch64-debug && cmake --build out/build/llvm-macos-aarch64-debug`
+- manual smoke pass: `3DMark99` full demo loop appeared stable
+- manual smoke pass: `3DMark2000` full demo loop appeared stable
+
+Verification still pending:
+
+- interactive/manual regressions for `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, and related follow-on checks
+- x86-64 build verification for the Task 5 JIT work
+
 ## Test Inventory For This Plan
 
 Primary regression set:
