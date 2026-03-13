@@ -31,7 +31,8 @@ typedef struct voodoo_x86_data_t {
     uint32_t textureMode[2];
     uint32_t tLOD[2];
     uint32_t trexInit1;
-    int      is_tiled;
+    int      col_tiled;
+    int      aux_tiled;
 } voodoo_x86_data_t;
 
 #if 0
@@ -3494,7 +3495,7 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     for (uint8_t c = 0; c < 8; c++) {
         data = &voodoo_x86_data[odd_even + c * 4]; //&voodoo_x86_data[odd_even][b];
 
-        if (state->xdir == data->xdir && params->alphaMode == data->alphaMode && params->fbzMode == data->fbzMode && params->fogMode == data->fogMode && params->fbzColorPath == data->fbzColorPath && (voodoo->trexInit1[0] & (1 << 18)) == data->trexInit1 && params->textureMode[0] == data->textureMode[0] && params->textureMode[1] == data->textureMode[1] && (params->tLOD[0] & LOD_MASK) == data->tLOD[0] && (params->tLOD[1] & LOD_MASK) == data->tLOD[1] && ((params->col_tiled || params->aux_tiled) ? 1 : 0) == data->is_tiled) {
+        if (state->xdir == data->xdir && params->alphaMode == data->alphaMode && params->fbzMode == data->fbzMode && params->fogMode == data->fogMode && params->fbzColorPath == data->fbzColorPath && (voodoo->trexInit1[0] & (1 << 18)) == data->trexInit1 && params->textureMode[0] == data->textureMode[0] && params->textureMode[1] == data->textureMode[1] && (params->tLOD[0] & LOD_MASK) == data->tLOD[0] && (params->tLOD[1] & LOD_MASK) == data->tLOD[1] && (params->col_tiled ? 1 : 0) == data->col_tiled && (params->aux_tiled ? 1 : 0) == data->aux_tiled) {
             last_block[odd_even] = b;
             return data->code_block;
         }
@@ -3519,7 +3520,8 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     data->textureMode[1] = params->textureMode[1];
     data->tLOD[0]        = params->tLOD[0] & LOD_MASK;
     data->tLOD[1]        = params->tLOD[1] & LOD_MASK;
-    data->is_tiled       = (params->col_tiled || params->aux_tiled) ? 1 : 0;
+    data->col_tiled      = params->col_tiled ? 1 : 0;
+    data->aux_tiled      = params->aux_tiled ? 1 : 0;
 
     next_block_to_write[odd_even] = (next_block_to_write[odd_even] + 1) & 7;
 
