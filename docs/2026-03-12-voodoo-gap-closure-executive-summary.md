@@ -160,6 +160,7 @@ Not yet completed:
 Related note:
 
 - see `docs/2026-03-12-voodoo-known-bug-candidates.md` for the current ranked shortlist of likely remaining defects
+- ARM64 is the active validation environment for follow-up work; x86-64 runtime testing is currently unavailable in this workspace
 
 ## Recommended Next Step
 

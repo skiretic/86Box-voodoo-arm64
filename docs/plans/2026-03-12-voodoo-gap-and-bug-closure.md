@@ -70,6 +70,11 @@ Verification still pending:
 - interactive/manual regressions for `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, and related follow-on checks
 - x86-64 build verification for the Task 5 JIT work
 
+Environment note:
+
+- ARM64 is the active validation environment in this workspace
+- x86-64 runtime testing is currently unavailable, so Task 5 should not block on x86-64 live execution evidence
+
 ## Test Inventory For This Plan
 
 Primary regression set:
