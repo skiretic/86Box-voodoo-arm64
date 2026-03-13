@@ -305,13 +305,18 @@ voodoo_fb_writew(uint32_t addr, uint16_t val, void *priv)
                 dest_g |= (dest_g >> 6);
                 dest_b |= (dest_b >> 5);
                 dest_a = 0xff;
+                if (params->fbzMode & FBZ_ALPHA_ENABLE)
+                    dest_a = *(uint16_t *) (&voodoo->fb_mem[write_addr_aux & voodoo->fb_mask]);
 
                 ALPHA_BLEND(write_data.r, write_data.g, write_data.b, alpha_data);
+                alpha_data = voodoo_blend_output_alpha(dest_aafunc, src_aafunc, dest_a, alpha_data);
             }
 
             if (params->fbzMode & FBZ_RGB_WMASK)
                 *(uint16_t *) (&voodoo->fb_mem[write_addr & voodoo->fb_mask]) = do_dither(&voodoo->params, write_data, x >> 1, y);
-            if (params->fbzMode & FBZ_DEPTH_WMASK)
+            if ((params->fbzMode & (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE)) == (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE))
+                *(uint16_t *) (&voodoo->fb_mem[write_addr_aux & voodoo->fb_mask]) = alpha_data;
+            else if (params->fbzMode & FBZ_DEPTH_WMASK)
                 *(uint16_t *) (&voodoo->fb_mem[write_addr_aux & voodoo->fb_mask]) = new_depth;
 
 skip_pixel:
@@ -513,13 +518,18 @@ voodoo_fb_writel(uint32_t addr, uint32_t val, void *priv)
                 dest_g |= (dest_g >> 6);
                 dest_b |= (dest_b >> 5);
                 dest_a = 0xff;
+                if (params->fbzMode & FBZ_ALPHA_ENABLE)
+                    dest_a = *(uint16_t *) (&voodoo->fb_mem[write_addr_aux & voodoo->fb_mask]);
 
                 ALPHA_BLEND(write_data.r, write_data.g, write_data.b, alpha_data[c]);
+                alpha_data[c] = voodoo_blend_output_alpha(dest_aafunc, src_aafunc, dest_a, alpha_data[c]);
             }
 
             if (params->fbzMode & FBZ_RGB_WMASK)
                 *(uint16_t *) (&voodoo->fb_mem[write_addr & voodoo->fb_mask]) = do_dither(&voodoo->params, write_data, (x >> 1) + c, y);
-            if (params->fbzMode & FBZ_DEPTH_WMASK)
+            if ((params->fbzMode & (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE)) == (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE))
+                *(uint16_t *) (&voodoo->fb_mem[write_addr_aux & voodoo->fb_mask]) = alpha_data[c];
+            else if (params->fbzMode & FBZ_DEPTH_WMASK)
                 *(uint16_t *) (&voodoo->fb_mem[write_addr_aux & voodoo->fb_mask]) = new_depth;
 
 skip_pixel:

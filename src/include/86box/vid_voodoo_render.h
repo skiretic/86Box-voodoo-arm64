@@ -279,6 +279,45 @@ void voodoo_codegen_close(voodoo_t *voodoo);
  * for that final alpha writeback. Keep the interpreter as the source of truth
  * when expanding coverage so the JITs can mirror one semantic definition.
  */
+static inline uint8_t
+voodoo_alpha_factor_value(int factor, uint8_t src_alpha, uint8_t dest_alpha, int is_src_factor)
+{
+    switch (factor) {
+        case 0x0:
+            return 0;
+        case 0x1:
+            return src_alpha;
+        case 0x2:
+            return is_src_factor ? dest_alpha : src_alpha;
+        case 0x3:
+            return dest_alpha;
+        case 0x4:
+            return 0xff;
+        case 0x5:
+            return 0xff - src_alpha;
+        case 0x6:
+            return is_src_factor ? (0xff - dest_alpha) : (0xff - src_alpha);
+        case 0x7:
+            return 0xff - dest_alpha;
+        case 0xf:
+            if (is_src_factor)
+                return MIN(src_alpha, 0xff - dest_alpha);
+            return src_alpha;
+        default:
+            return 0;
+    }
+}
+
+static inline uint8_t
+voodoo_blend_output_alpha(int dest_alpha_func, int src_alpha_func, uint8_t dest_alpha, uint8_t src_alpha)
+{
+    int blended_alpha = 0;
+
+    blended_alpha += (dest_alpha * voodoo_alpha_factor_value(dest_alpha_func, src_alpha, dest_alpha, 0)) / 255;
+    blended_alpha += (src_alpha * voodoo_alpha_factor_value(src_alpha_func, src_alpha, dest_alpha, 1)) / 255;
+
+    return CLAMP(blended_alpha);
+}
 
 void voodoo_render_thread_1(void *param);
 void voodoo_render_thread_2(void *param);

@@ -1318,9 +1318,7 @@ voodoo_half_triangle(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *
                             dest_b = dithersub_rb2x2[dest_b][real_y & 1][x & 1];
                         }
                         ALPHA_BLEND(src_r, src_g, src_b, src_a);
-
-                        // TODO: Implement proper alpha blending support here for alpha values.
-                        src_a = (((dest_aafunc == 4) ? dest_a * 256 : 0) + ((src_aafunc == 4) ? src_a * 256 : 0)) >> 8;
+                        src_a = voodoo_blend_output_alpha(dest_aafunc, src_aafunc, dest_a, src_a);
                     }
 
                     if (update) {
