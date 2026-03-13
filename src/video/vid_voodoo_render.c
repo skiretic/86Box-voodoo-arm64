@@ -659,6 +659,243 @@ voodoo_tmu_fetch_and_blend(voodoo_t *voodoo, voodoo_params_t *params, voodoo_sta
         state->tex_a[0] ^= 0xff;
 }
 
+#if (defined __aarch64__ || defined _M_ARM64)
+typedef struct voodoo_arm64_opt_stats_t {
+    uint64_t cache_hits;
+    uint64_t cache_misses;
+    uint64_t cache_rejected;
+    uint64_t emit_overflow_rejects;
+    uint64_t wx_write_failures;
+    uint64_t wx_exec_failures;
+    uint64_t generated_blocks;
+    uint64_t code_bytes_total;
+    uint64_t code_bytes_min;
+    uint64_t code_bytes_max;
+    uint64_t textured_spans;
+    uint64_t untextured_spans;
+    uint64_t dithered_spans;
+    uint64_t non_dithered_spans;
+    uint64_t single_tmu_spans;
+    uint64_t dual_tmu_spans;
+} voodoo_arm64_opt_stats_t;
+
+static voodoo_arm64_opt_stats_t voodoo_arm64_opt_stats;
+static mutex_t                 *voodoo_arm64_opt_stats_mutex           = NULL;
+static int                      voodoo_arm64_opt_stats_state           = -1;
+static int                      voodoo_arm64_opt_stats_dump_registered = 0;
+
+static void
+voodoo_arm64_opt_stats_dump_at_exit(void)
+{
+    double    hit_rate;
+    double    avg_code_size;
+    uint64_t  cache_total;
+    uint64_t  generated_blocks;
+    mutex_t  *stats_mutex;
+
+    if (voodoo_arm64_opt_stats_state != 1)
+        return;
+
+    stats_mutex = voodoo_arm64_opt_stats_mutex;
+    if (stats_mutex)
+        thread_wait_mutex(stats_mutex);
+
+    cache_total      = voodoo_arm64_opt_stats.cache_hits + voodoo_arm64_opt_stats.cache_misses;
+    generated_blocks = voodoo_arm64_opt_stats.generated_blocks;
+    hit_rate         = cache_total ? ((double) voodoo_arm64_opt_stats.cache_hits * 100.0) / (double) cache_total : 0.0;
+    avg_code_size    = generated_blocks ? (double) voodoo_arm64_opt_stats.code_bytes_total / (double) generated_blocks : 0.0;
+
+    fprintf(stderr, "VOODOO ARM64 OPT STATS: cache hits=%llu misses=%llu rejected=%llu hit_rate=%.2f%%\n",
+            (unsigned long long) voodoo_arm64_opt_stats.cache_hits,
+            (unsigned long long) voodoo_arm64_opt_stats.cache_misses,
+            (unsigned long long) voodoo_arm64_opt_stats.cache_rejected,
+            hit_rate);
+    fprintf(stderr, "VOODOO ARM64 OPT STATS: generated blocks=%llu code_bytes total=%llu avg=%.1f min=%llu max=%llu\n",
+            (unsigned long long) generated_blocks,
+            (unsigned long long) voodoo_arm64_opt_stats.code_bytes_total,
+            avg_code_size,
+            (unsigned long long) voodoo_arm64_opt_stats.code_bytes_min,
+            (unsigned long long) voodoo_arm64_opt_stats.code_bytes_max);
+    fprintf(stderr, "VOODOO ARM64 OPT STATS: spans textured=%llu untextured=%llu dithered=%llu non_dithered=%llu single_tmu=%llu dual_tmu=%llu\n",
+            (unsigned long long) voodoo_arm64_opt_stats.textured_spans,
+            (unsigned long long) voodoo_arm64_opt_stats.untextured_spans,
+            (unsigned long long) voodoo_arm64_opt_stats.dithered_spans,
+            (unsigned long long) voodoo_arm64_opt_stats.non_dithered_spans,
+            (unsigned long long) voodoo_arm64_opt_stats.single_tmu_spans,
+            (unsigned long long) voodoo_arm64_opt_stats.dual_tmu_spans);
+    fprintf(stderr, "VOODOO ARM64 OPT STATS: rejects wx_write=%llu wx_exec=%llu emit_overflow=%llu\n",
+            (unsigned long long) voodoo_arm64_opt_stats.wx_write_failures,
+            (unsigned long long) voodoo_arm64_opt_stats.wx_exec_failures,
+            (unsigned long long) voodoo_arm64_opt_stats.emit_overflow_rejects);
+
+    if (stats_mutex)
+        thread_release_mutex(stats_mutex);
+}
+
+static int
+voodoo_arm64_opt_stats_enabled(void)
+{
+    const char *env;
+
+    if (voodoo_arm64_opt_stats_state >= 0)
+        return voodoo_arm64_opt_stats_state;
+
+    env = getenv("86BOX_VOODOO_ARM64_OPT_STATS");
+    if (env && env[0] && strcmp(env, "0")) {
+        voodoo_arm64_opt_stats_state = 1;
+        if (!voodoo_arm64_opt_stats_mutex)
+            voodoo_arm64_opt_stats_mutex = thread_create_mutex();
+        if (!voodoo_arm64_opt_stats_mutex) {
+            voodoo_arm64_opt_stats_state = 0;
+            return 0;
+        }
+        if (!voodoo_arm64_opt_stats_dump_registered) {
+            atexit(voodoo_arm64_opt_stats_dump_at_exit);
+            voodoo_arm64_opt_stats_dump_registered = 1;
+        }
+    } else {
+        voodoo_arm64_opt_stats_state = 0;
+    }
+
+    return voodoo_arm64_opt_stats_state;
+}
+
+static void
+voodoo_arm64_opt_stats_init(void)
+{
+    (void) voodoo_arm64_opt_stats_enabled();
+}
+
+static void
+voodoo_arm64_opt_stats_note_cache_hit(void)
+{
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    voodoo_arm64_opt_stats.cache_hits++;
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+
+static void
+voodoo_arm64_opt_stats_note_cache_miss(void)
+{
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    voodoo_arm64_opt_stats.cache_misses++;
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+
+static void
+voodoo_arm64_opt_stats_note_cache_rejected(void)
+{
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    voodoo_arm64_opt_stats.cache_rejected++;
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+
+static void
+voodoo_arm64_opt_stats_note_emit_overflow_reject(void)
+{
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    voodoo_arm64_opt_stats.emit_overflow_rejects++;
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+
+static void
+voodoo_arm64_opt_stats_note_wx_write_failure(void)
+{
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    voodoo_arm64_opt_stats.wx_write_failures++;
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+
+static void
+voodoo_arm64_opt_stats_note_wx_exec_failure(void)
+{
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    voodoo_arm64_opt_stats.wx_exec_failures++;
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+
+static void
+voodoo_arm64_opt_stats_note_generated_block(int code_size)
+{
+    uint64_t size = (uint64_t) code_size;
+
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    voodoo_arm64_opt_stats.generated_blocks++;
+    voodoo_arm64_opt_stats.code_bytes_total += size;
+    if (!voodoo_arm64_opt_stats.code_bytes_min || size < voodoo_arm64_opt_stats.code_bytes_min)
+        voodoo_arm64_opt_stats.code_bytes_min = size;
+    if (size > voodoo_arm64_opt_stats.code_bytes_max)
+        voodoo_arm64_opt_stats.code_bytes_max = size;
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+
+static void
+voodoo_arm64_opt_stats_note_span(const voodoo_t *voodoo, const voodoo_params_t *params)
+{
+    int textured;
+    int dual_tmu_textured;
+
+    if (!voodoo_arm64_opt_stats_enabled())
+        return;
+
+    textured = (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) ? 1 : 0;
+    dual_tmu_textured = textured
+                        && voodoo->dual_tmus
+                        && (params->textureMode[0] & TEXTUREMODE_MASK) != TEXTUREMODE_PASSTHROUGH
+                        && (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) != TEXTUREMODE_LOCAL;
+
+    thread_wait_mutex(voodoo_arm64_opt_stats_mutex);
+    if (textured)
+        voodoo_arm64_opt_stats.textured_spans++;
+    else
+        voodoo_arm64_opt_stats.untextured_spans++;
+
+    if (params->fbzMode & FBZ_DITHER)
+        voodoo_arm64_opt_stats.dithered_spans++;
+    else
+        voodoo_arm64_opt_stats.non_dithered_spans++;
+
+    if (textured) {
+        if (dual_tmu_textured)
+            voodoo_arm64_opt_stats.dual_tmu_spans++;
+        else
+            voodoo_arm64_opt_stats.single_tmu_spans++;
+    }
+    thread_release_mutex(voodoo_arm64_opt_stats_mutex);
+}
+#else
+#    define voodoo_arm64_opt_stats_init() ((void) 0)
+#    define voodoo_arm64_opt_stats_note_cache_hit() ((void) 0)
+#    define voodoo_arm64_opt_stats_note_cache_miss() ((void) 0)
+#    define voodoo_arm64_opt_stats_note_cache_rejected() ((void) 0)
+#    define voodoo_arm64_opt_stats_note_emit_overflow_reject() ((void) 0)
+#    define voodoo_arm64_opt_stats_note_wx_write_failure() ((void) 0)
+#    define voodoo_arm64_opt_stats_note_wx_exec_failure() ((void) 0)
+#    define voodoo_arm64_opt_stats_note_generated_block(code_size) ((void) 0)
+#    define voodoo_arm64_opt_stats_note_span(voodoo, params) ((void) 0)
+#endif
+
 #if (defined __amd64__ || defined _M_X64)
 #    include <86box/vid_voodoo_codegen_x86-64.h>
 #elif (defined __aarch64__ || defined _M_ARM64)
@@ -918,6 +1155,9 @@ voodoo_half_triangle(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *
             goto next_line;
         if (x2 > x && state->xdir < 0)
             goto next_line;
+
+        if (voodoo->use_recompiler)
+            voodoo_arm64_opt_stats_note_span(voodoo, params);
 
         if (SLI_ENABLED) {
             state->fb_mem = fb_mem = (uint16_t *) &voodoo->fb_mem[params->draw_offset + ((real_y >> 1) * params->row_width)];

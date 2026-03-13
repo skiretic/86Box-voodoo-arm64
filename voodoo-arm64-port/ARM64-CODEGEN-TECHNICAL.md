@@ -1239,16 +1239,13 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 **Tools:**
 
-1. **JIT Debug Logging (`jit_debug=1`):**
-   - Logs every cache hit/miss and recompilation.
-   - Useful for understanding render state changes.
+1. **ARM64 optimization stats (`86BOX_VOODOO_ARM64_OPT_STATS=1`):**
+   - Disabled by default.
+   - Dumps a compact summary to `stderr` at process exit.
+   - Reports cache hits, misses, rejected blocks, generated block code size, textured vs non-textured spans, dithered vs non-dithered spans, and single-TMU vs dual-TMU span mix.
+   - Intended for optimization ranking, not correctness validation.
 
-2. **Verify Mode (`jit_debug=2`):**
-   - Runs JIT + interpreter per scanline, compares output.
-   - Catches pixel-level differences.
-   - Very slow, only use when debugging visual corruption.
-
-3. **Disassembly:**
+2. **Disassembly:**
    ```bash
    # Dump generated code block
    objdump -D -b binary -m aarch64 -M no-aliases code_block.bin
@@ -1256,7 +1253,7 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
    Or use an online disassembler like [https://armconverter.com/](https://armconverter.com/).
 
-4. **LLDB Breakpoints:**
+3. **LLDB Breakpoints:**
    ```lldb
    (lldb) br set -a 0x<code_block_address>
    (lldb) register read
@@ -1265,9 +1262,16 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 ### Performance Optimization
 
-**Baseline performance:** ARM64 JIT is 7-10x faster than interpreter on Apple M2/M3 (measured pre-optimization).
+**Baseline performance:** Use the signed ARM64 release app as the performance baseline, not the debug app.
 
-**Optimization status:** Multiple optimization passes completed, removing ~80-100 instructions per pixel. Post-optimization performance has not been formally re-benchmarked but should be significantly higher.
+**Current measurement hook (Task 2):** Before changing the hot path, enable `86BOX_VOODOO_ARM64_OPT_STATS=1` for a targeted run and capture the summary at exit. That establishes whether dithered spans, block misses, and dual-TMU usage are common enough to prioritize first.
+
+**Current baseline observation (2026-03-13, `Windows 98 Gaming PC`, first few minutes of `3DMark99` demo):**
+- cache misses were negligible compared with hits: `49` misses vs `5,292,377` hits
+- dithered spans dominated the workload: `113,315,502` dithered vs `0` non-dithered
+- dual-TMU textured spans were common and slightly exceeded single-TMU textured spans: `49,979,601` dual-TMU vs `42,205,969` single-TMU
+- generated block sizes stayed compact: `49` blocks, `60,884` total emitted bytes, `1242.5` average, `644` min, `1852` max
+- no block rejects were observed from W^X transitions or emit overflow during this run
 
 **Completed improvements:**
 

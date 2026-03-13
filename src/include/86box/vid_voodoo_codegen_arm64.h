@@ -4596,15 +4596,21 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
             && (params->tLOD[1] & LOD_MASK) == data->tLOD[1]
             && (params->col_tiled ? 1 : 0) == data->col_tiled
             && (params->aux_tiled ? 1 : 0) == data->aux_tiled) {
-            if (data->rejected)
+            if (data->rejected) {
+                voodoo_arm64_opt_stats_note_cache_miss();
+                voodoo_arm64_opt_stats_note_cache_rejected();
                 return NULL;
+            }
 
             /* LRU: stamp this slot as most-recently-used */
             data->last_used                  = ++voodoo->jit_generation[odd_even];
             voodoo->jit_last_block[odd_even] = probe;
+            voodoo_arm64_opt_stats_note_cache_hit();
             return data->code_block;
         }
     }
+
+    voodoo_arm64_opt_stats_note_cache_miss();
 
     /* --- Cache miss: find LRU victim --- */
     {
@@ -4623,6 +4629,8 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     if (!arm64_codegen_set_writable(data->code_block)) {
         arm64_codegen_store_cache_key(data, voodoo, params, state, 0, 1);
         data->last_used = 0;
+        voodoo_arm64_opt_stats_note_cache_rejected();
+        voodoo_arm64_opt_stats_note_wx_write_failure();
         return NULL;
     }
 
@@ -4632,17 +4640,22 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
         arm64_codegen_store_cache_key(data, voodoo, params, state, 0, 1);
         data->last_used = 0;
         arm64_codegen_set_executable(data->code_block);
+        voodoo_arm64_opt_stats_note_cache_rejected();
+        voodoo_arm64_opt_stats_note_emit_overflow_reject();
         return NULL;
     }
 
     arm64_codegen_store_cache_key(data, voodoo, params, state, 1, 0);
     data->last_used                  = ++voodoo->jit_generation[odd_even];
     voodoo->jit_last_block[odd_even] = (int) (data - &voodoo_arm64_data[base]);
+    voodoo_arm64_opt_stats_note_generated_block(code_size);
 
     /* W^X: make executable, flush I-cache (narrow range = actual code size) */
     if (!arm64_codegen_set_executable(data->code_block)) {
         arm64_codegen_store_cache_key(data, voodoo, params, state, 0, 1);
         data->last_used = 0;
+        voodoo_arm64_opt_stats_note_cache_rejected();
+        voodoo_arm64_opt_stats_note_wx_exec_failure();
         return NULL;
     }
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -4685,6 +4698,8 @@ voodoo_codegen_init(voodoo_t *voodoo)
 {
     voodoo_arm64_data_t *voodoo_arm64_data;
     uint32_t             slot;
+
+    voodoo_arm64_opt_stats_init();
 
     voodoo->codegen_data = plat_mmap(sizeof(voodoo_arm64_data_t) * BLOCK_NUM * 4, 0);
     if (!voodoo->codegen_data) {
