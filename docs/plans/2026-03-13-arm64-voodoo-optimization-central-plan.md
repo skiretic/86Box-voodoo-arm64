@@ -80,7 +80,7 @@ Relevant state already true before optimization work starts:
 - Modify: `voodoo-arm64-port/TESTING-GUIDE.md`
 - Modify: `docs/2026-03-12-voodoo-gap-closure-executive-summary.md`
 
-- [ ] **Step 1: Record the optimization starting assumptions**
+- [x] **Step 1: Record the optimization starting assumptions**
 
 Document in the relevant docs:
 
@@ -89,7 +89,7 @@ Document in the relevant docs:
 - ARM64 portability target is broader than Apple Silicon alone
 - Windows ARM64 and Linux AArch64 rely on the same ARMv8.0 codegen discipline, but not identical OS runtime mechanics
 
-- [ ] **Step 2: Define the platform matrix explicitly**
+- [x] **Step 2: Define the platform matrix explicitly**
 
 Record three target environments:
 
@@ -99,7 +99,7 @@ Record three target environments:
 
 Also record that 32-bit ARM environments are out of scope.
 
-- [ ] **Step 3: Define optimization stop conditions**
+- [x] **Step 3: Define optimization stop conditions**
 
 State that optimization work pauses if:
 
@@ -107,7 +107,7 @@ State that optimization work pauses if:
 - a change requires ISA features above ARMv8.0
 - a change depends on platform-specific JIT behavior outside current abstractions
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/arm64-voodoo-optimization-investigation.md voodoo-arm64-port/TESTING-GUIDE.md docs/2026-03-12-voodoo-gap-closure-executive-summary.md
@@ -121,7 +121,7 @@ git commit -m "docs: define arm64 voodoo optimization baseline"
 - Modify: `src/video/vid_voodoo_render.c`
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 
-- [ ] **Step 1: Add lightweight measurement counters**
+- [x] **Step 1: Add lightweight measurement counters**
 
 Add counters or trace points for:
 
@@ -133,11 +133,11 @@ Add counters or trace points for:
 
 Keep them behind an existing debug flag or a clearly disabled-by-default instrumentation switch.
 
-- [ ] **Step 2: Surface the counters in a developer-usable way**
+- [x] **Step 2: Surface the counters in a developer-usable way**
 
 Add a logging path or summary dump that can be inspected after targeted runs without changing normal release behavior.
 
-- [ ] **Step 3: Build and capture a baseline**
+- [x] **Step 3: Build and capture a baseline**
 
 Run:
 
@@ -152,7 +152,16 @@ Expected:
 - the instrumentation is inert by default
 - enabling the measurement path produces stable, readable summaries
 
-- [ ] **Step 4: Record baseline observations**
+- [x] **Step 4: Record baseline observations**
+
+Baseline captured on 2026-03-13 from the first few minutes of the signed-release `3DMark99` demo on `Windows 98 Gaming PC`:
+
+- cache hits=`5,292,377`, misses=`49`, rejected=`0`
+- generated blocks=`49`, code bytes total=`60,884`, avg=`1242.5`, min=`644`, max=`1852`
+- spans textured=`92,185,570`, untextured=`21,129,932`
+- spans dithered=`113,315,502`, non-dithered=`0`
+- single-TMU spans=`42,205,969`, dual-TMU spans=`49,979,601`
+- W^X rejects=`0`, emit overflow rejects=`0`
 
 Capture at least:
 
@@ -160,7 +169,7 @@ Capture at least:
 - whether block misses look meaningfully frequent
 - whether dual-TMU spans are common in the active workloads
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/include/86box/vid_voodoo_codegen_arm64.h src/video/vid_voodoo_render.c voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md

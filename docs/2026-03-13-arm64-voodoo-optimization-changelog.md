@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current head: `6a06e41b9`
+Current head: `9e70b2004`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Purpose
@@ -79,6 +79,22 @@ Commit: `6a06e41b9` `docs: add arm64 voodoo optimization plan`
 - encoded ARMv8.0 + NEON as a hard ISA guardrail
 - encoded Apple Silicon, Linux AArch64, and Windows ARM64 as portability targets rather than afterthoughts
 
+### 2026-03-13 - Optimization baseline locked
+
+Commit: `4cab227f1` `docs: define arm64 voodoo optimization baseline`
+
+- recorded that correctness work is complete before optimization
+- made the Apple Silicon / Linux AArch64 / Windows ARM64 portability matrix explicit in the optimization docs
+- recorded optimization stop conditions and kept the widened output-alpha path flagged as correctness-sensitive
+
+### 2026-03-13 - Optimization instrumentation landed and baselined
+
+Commit: `9e70b2004` `perf: add arm64 voodoo optimization instrumentation`
+
+- added disabled-by-default ARM64 optimization stats for cache hits/misses, emitted code size, span texture mix, dither usage, and TMU usage
+- verified the instrumentation through fresh ARM64 debug and signed-release builds
+- captured a signed-release `3DMark99` baseline showing negligible cache misses, dither-heavy rendering, and common dual-TMU usage
+
 ## Current Effort Status
 
 Completed so far:
@@ -86,10 +102,11 @@ Completed so far:
 - correctness baseline established
 - optimization investigation refreshed
 - central optimization plan committed
+- optimization baseline locked
+- optimization instrumentation committed and baseline-captured
 
 Not yet started:
 
-- optimization instrumentation
 - ARM64 JIT hot-path code changes
 - optimization-phase build validation beyond the existing correctness baseline
 - optimization-phase manual regression runs

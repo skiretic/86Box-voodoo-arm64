@@ -2,22 +2,23 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current head: `6a06e41b9`
+Current head: `9e70b2004`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Executive Summary
 
-The ARM64 Voodoo optimization effort is now in the planning-ready state.
+The ARM64 Voodoo optimization effort is now in the early execution state.
 
 - the correctness baseline is already established on `voodoo-dev`
 - the ARM64 optimization investigation has been refreshed against the current backend state
 - a central optimization plan now exists with portability guardrails for Apple Silicon, Linux AArch64, and Windows ARM64
-- no optimization code has been landed yet under this new plan
+- the optimization baseline docs are now locked
+- lightweight ARM64 optimization instrumentation is now landed and baseline data has been captured from a signed-release run
 
 The safest interpretation of current status is:
 
-- execution readiness is high because the completed correctness work, current ARM64 investigation, and central plan are now aligned
-- immediate optimization targets are clear: instrumentation, dither setup hoisting, span-loop register residency, and texture fast-path specialization
+- execution readiness remains high because the completed correctness work, current ARM64 investigation, central plan, and first-wave measurements are now aligned
+- immediate optimization targets are clearer now: dither setup hoisting first, then span-loop register residency, then texture fast-path specialization
 - correctness-sensitive areas remain gated, especially the newly widened output-alpha path
 - cross-platform ARM64 compatibility is a hard constraint, not a later cleanup item
 
@@ -27,15 +28,15 @@ Overall effort progress:
 
 ```text
 Planning complete         [##########] 100%
-Implementation started    [----------]   0%
-Validation complete       [----------]   0%
+Implementation started    [##--------]  20%
+Validation complete       [#---------]  10%
 ```
 
 Execution task progress:
 
 ```text
-Completed  [----------] 0/10   0%
-Pending    [##########] 10/10 100%
+Completed  [##--------] 2/10  20%
+Pending    [########--] 8/10  80%
 ```
 
 Effort phases:
@@ -44,7 +45,7 @@ Effort phases:
 Correctness baseline locked     [##########] 100%
 Investigation refresh           [##########] 100%
 Central optimization plan       [##########] 100%
-Instrumentation                 [----------]   0%
+Instrumentation                 [##########] 100%
 Low-risk hot-path work          [----------]   0%
 Main span-loop work             [----------]   0%
 Higher-risk specialization      [----------]   0%
@@ -68,11 +69,13 @@ Live multi-platform validation  [----------]   0%
 - ARM64 and x86-64 output-alpha parity work is committed
 - the ARM64 JIT cache-key correctness fix for `col_tiled` vs `aux_tiled` is committed
 - the ARM64 optimization investigation has been updated to reflect current backend reality rather than older assumptions
-- the central optimization plan is committed and ready for execution
+- the central optimization plan is committed and now has Task 1 and Task 2 completed
+- the ARM64 optimization baseline docs are locked around the portability matrix and stop conditions
+- lightweight ARM64 measurement hooks are committed and validated through fresh debug and signed-release builds
+- a signed-release `3DMark99` baseline now shows negligible block-cache misses, all-dithered spans in the sampled run, and common dual-TMU usage
 
 ### What has not started yet
 
-- instrumentation for optimization ranking
 - ARM64 JIT code changes for dither setup hoisting
 - register-resident span-loop work
 - texture-fetch fast-path specialization
@@ -94,7 +97,11 @@ That makes measurement-first optimization the right approach. The plan avoids gu
 
 ### 1. Instrumentation first
 
-Add lightweight counters for block-cache behavior, emitted code size, textured spans, dithered spans, and TMU usage so optimization order is based on traces instead of intuition.
+This is now complete. The current baseline from the first few minutes of the signed-release `3DMark99` demo shows:
+
+- cache misses are negligible relative to hits
+- dithered spans dominate the sampled workload
+- dual-TMU textured spans are common
 
 ### 2. Low-risk loop setup cleanup
 
@@ -114,10 +121,11 @@ Split texture fetch into clearer fast and fallback paths, and only then consider
 - x86-64 live runtime testing is still unavailable in this workspace, so cross-backend confidence remains incomplete
 - the macOS ARM64 toolchain still uses `-march=armv8.5-a+simd`, so the plan must continue treating ARMv8.0 as a policy ceiling rather than trusting the active Apple toolchain defaults
 - Linux AArch64 and Windows ARM64 portability are planned for explicitly, but not yet validated through live builds or runtime testing in this workspace
+- the current baseline comes from one representative workload, so optimization ranking is better informed now but not universal across all games
 
 ## Recommended Next Step
 
-Begin with Task 1 and Task 2 of the central plan:
+Begin Task 3 of the central plan:
 
-1. lock the portability matrix and optimization stop conditions in the docs
-2. add lightweight measurement hooks before attempting any hot-path rewrite
+1. hoist dither-table setup out of the ARM64 pixel loop
+2. rebuild and rerun the same signed-release workload to compare code size and behavior against the new baseline

@@ -20,6 +20,8 @@ Current branch status note:
 - `cfdda4cae` already fixed the ARM64 JIT cache-key correctness bug by splitting `col_tiled` and `aux_tiled`
 - `cf16e67c3` and `19b611125` completed interpreter plus ARM64/x86-64 JIT output-alpha parity work
 - `696808439` records the current verification and handoff status in the Voodoo docs
+- `4cab227f1` locks the optimization baseline, portability matrix, and stop conditions
+- `9e70b2004` adds lightweight ARM64 optimization instrumentation and records the first signed-release baseline observations
 - ARM64 signed-release sanity evidence is positive, but broader game-specific runtime coverage is still incomplete
 
 ## Optimization Baseline And Portability Matrix

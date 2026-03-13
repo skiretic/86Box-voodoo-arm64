@@ -222,19 +222,23 @@ Boot from the CD-ROM and follow the standard Windows 98 installation.
 
 This matches the existing behavior on x86-64 builds.
 
-### JIT Debug Logging
+### ARM64 Optimization Stats
 
-For developers and bug reporters:
+For optimization work on the current branch, use the disabled-by-default ARM64 stats switch instead of relying on older `jit_debug` instructions:
 
-1. In the Voodoo card configuration dialog:
-2. Set **JIT Debug Logging**:
-   - **0** (default): Disabled
-   - **1**: Logging enabled (writes to `voodoo_jit.log`)
-   - **2**: Verify mode (runs JIT + interpreter, compares output)
+```bash
+env 86BOX_VOODOO_ARM64_OPT_STATS=1 ./build/src/86Box.app/Contents/MacOS/86Box -P "<vm_directory>"
+```
 
-**Log location:** `<vm_directory>/voodoo_jit.log`
+The summary is written to `stderr` when 86Box exits. It reports:
 
-**Verify mode (level 2):** Runs both JIT and interpreter for every scanline, comparing pixel output. Catches rendering differences but is VERY slow. Use only when debugging visual corruption.
+- cache hits, misses, and rejected blocks
+- emitted code size totals and per-block min/max
+- textured vs non-textured span mix
+- dithered vs non-dithered span mix
+- single-TMU vs dual-TMU span mix
+
+Use this for performance ranking only. For correctness validation, compare JIT ON versus OFF visually on the same workload and prefer the signed ARM64 release app for any performance-sensitive run.
 
 ### Render Thread Count
 
@@ -348,119 +352,38 @@ Controls how many host threads run the Voodoo pixel pipeline in parallel.
 
 ---
 
-## Debug Logging
+## Performance Instrumentation
 
-### Enabling JIT Debug Logs
+### Capturing ARM64 Optimization Stats
 
-1. Set **JIT Debug Logging = 1** in Voodoo configuration
-2. Run your test (game, benchmark, etc.)
-3. Close 86Box
-4. Open `<vm_directory>/voodoo_jit.log`
-
-**Warning:** The log file grows very quickly — every JIT compilation and cache hit is logged. A few minutes of gameplay can produce hundreds of megabytes. Only enable logging when actively debugging, and delete the log file when you're done.
-
-### Log Contents
-
-```
-VOODOO JIT: INIT render_threads=2 use_recompiler=1 jit_debug=1
-VOODOO JIT: GENERATE #1 odd_even=0 block=0 code=0x123456 recomp=1
-  fbzMode=0x00000000 fbzColorPath=0x00000000 alphaMode=0x00000000
-  textureMode[0]=0x00000000 fogMode=0x00000000 xdir=1
-VOODOO JIT: cache HIT #0 odd_even=0 block=0 code=0x123456
-  fbzMode=0x00000000 fbzColorPath=0x00000000 alphaMode=0x00000000
-```
-
-- **INIT**: Configuration at startup (render threads, recompiler state, debug level)
-- **GENERATE**: JIT compiled new code block
-- **cache HIT**: Reused existing compiled block
-- **recomp count**: Total JIT compilations (increases over time)
-
-### Analyzing JIT Logs
-
-Instead of reading the log manually, use the automated analyzer. Two versions are available:
-
-#### C analyzer (recommended for large logs)
-
-Compiled binary — handles 15GB+ logs in seconds via mmap + pthreads. Build once:
+Use the signed ARM64 release app and launch it from Terminal with the stats switch enabled:
 
 ```bash
-cc -O2 -o scripts/analyze-jit-log scripts/analyze-jit-log.c -lpthread
+env 86BOX_VOODOO_ARM64_OPT_STATS=1 ./build/src/86Box.app/Contents/MacOS/86Box -P "<vm_directory>"
 ```
 
-Then run:
+Run the target workload, then fully quit 86Box. The stats summary appears on `stderr` at process exit.
 
-```bash
-./scripts/analyze-jit-log <vm_directory>/voodoo_jit.log
+### How To Read The Summary
+
+Look for lines starting with:
+
+```text
+VOODOO ARM64 OPT STATS:
 ```
 
-#### Python analyzer (original)
+For the current optimization plan, the most important takeaways are:
 
-```bash
-./scripts/analyze-jit-log.py <vm_directory>/voodoo_jit.log
-```
+- whether block misses are frequent enough to prioritize cache work
+- whether dithered spans dominate enough to justify dither-setup hoisting first
+- whether dual-TMU spans are common enough to keep later texture-path specialization high on the list
 
-Works well for smaller logs. May run out of memory on logs larger than ~2GB due to Python string overhead in the Z-value set.
+### Recommended Validation Workflow
 
----
-
-Both versions perform a full pass and report:
-- Configuration (render threads, recompiler state)
-- Block compilation stats (count, cache hits, even/odd balance)
-- Interpreter fallback detection (emit overflow, recompiler disabled)
-- Error scanning (crash indicators, signal faults)
-- Pipeline stage coverage (texture, color, alpha, fog, depth, dither)
-- Pixel output quality (RGB565 diversity)
-- Summary table with a **HEALTHY** / **WARNINGS** / **NOT ACTIVE** verdict
-
-### Verify Mode (Level 2)
-
-**Warning:** Very slow, only use for debugging visual corruption.
-
-When enabled:
-- Saves framebuffer and depth buffer state
-- Runs JIT code for a scanline
-- Saves JIT output, restores original framebuffer and depth buffer
-- Runs interpreter for the same scanline
-- Compares JIT output vs interpreter output pixel-by-pixel
-- Logs mismatches to `voodoo_jit.log`
-
-#### Known limitations of verify mode
-
-Verify mode is useful for catching gross codegen bugs during development, but it has
-inherent limitations that produce **false positive mismatches**:
-
-- **State save/restore is imperfect.** The verify harness saves and restores the major
-  pipeline state (fb_mem, aux_mem, iterators ib/ig/ir/ia/z/w/tmu), but shared state
-  not covered by the save/restore (internal LOD state, texture cache coherence, etc.)
-  can differ between the JIT and interpreter runs, causing the interpreter to operate
-  on subtly different input.
-
-- **Expect ~99% match rate, not 100%.** Testing shows a consistent ~99.2-99.6% match
-  rate. Most diffs (85%) are ±0-1 (rounding differences). About 5% are ±7+ in RGB565,
-  which are artifacts of cascading state differences, not real JIT bugs.
-
-- **"Interpreter fallbacks" are expected.** In verify mode, every scanline runs the
-  interpreter as the comparison reference. The analyzer counts these as "fallbacks" —
-  this is normal and expected (hundreds of millions in a typical run). In jit_debug=1,
-  fallback count should be zero.
-
-- **Stack overflow on long runs (fixed).** The verify mode buffers were originally
-  allocated with `alloca()`, which accumulated on the stack across scanlines and caused
-  SIGBUS crashes. This was fixed by switching to `malloc()`/`free()`.
-
-#### Recommended validation workflow
-
-1. **Use jit_debug=1 for correctness validation.** A HEALTHY verdict at level 1 with
-   zero errors, zero fallbacks, and diverse pipeline coverage confirms JIT correctness.
-   This is the authoritative indicator.
-
-2. **Use jit_debug=2 only for debugging.** If you see visual corruption with the JIT
-   enabled that disappears with the interpreter, use verify mode to narrow down which
-   pipeline configuration is affected. Do not treat the match rate percentage as a
-   quality metric — some false positives are inherent.
-
-3. **Compare JIT ON vs OFF visually.** The ultimate test is whether the game looks
-   correct. Take screenshots with JIT enabled and disabled and compare.
+1. Use the signed ARM64 release app for manual performance-sensitive runs.
+2. Compare JIT ON versus OFF visually for correctness-sensitive changes.
+3. Use `86BOX_VOODOO_ARM64_OPT_STATS=1` for optimization ranking, not as a correctness oracle.
+4. Prefer repeatable benchmark or demo loops so before/after comparisons stay meaningful.
 
 ---
 
@@ -507,18 +430,19 @@ inherent limitations that produce **false positive mismatches**:
      - Recompiler: ON/OFF
      - Bilinear: ON/OFF
      - Render threads: 1/2/4
-     - JIT debug level: 0/1/2
+    - whether the recompiler was ON or OFF
+    - whether `86BOX_VOODOO_ARM64_OPT_STATS=1` was enabled
 
 3. **Reproduction Steps**
    - Game/benchmark name and version
    - Exact steps to trigger the issue
    - Screenshot or screen recording (if visual)
 
-4. **Logs**
-   - Set **JIT Debug Logging = 1**
+4. **Logs / Instrumentation**
    - Reproduce the issue
-   - Run `./scripts/analyze-jit-log <vm_dir>/voodoo_jit.log` (C) or `./scripts/analyze-jit-log.py <vm_dir>/voodoo_jit.log` (Python) and include the output
-   - Attach `voodoo_jit.log` if requested
+   - If this is a performance-ranking or cache-behavior question, rerun from Terminal with `86BOX_VOODOO_ARM64_OPT_STATS=1`
+   - Include the final `VOODOO ARM64 OPT STATS:` lines if available
+   - If this is a correctness issue, include JIT ON vs OFF observations and screenshots
 
 ### Where to Report
 
@@ -557,19 +481,19 @@ First frame in a new scene may stutter briefly (1-3 frames) as the JIT compiles 
 **Cause:** Driver installation issue or JIT bug.
 
 **Solution:**
-1. Enable **JIT Debug Logging = 2** (verify mode)
-2. Check log for pixel mismatches
-3. Try **Recompiler = OFF** to confirm hardware works
-4. Report issue with logs
+1. Try **Recompiler = OFF** to confirm the hardware/driver path works at all
+2. Re-test with the signed ARM64 release app
+3. If the issue is performance-related, rerun with `86BOX_VOODOO_ARM64_OPT_STATS=1`
+4. Report the issue with screenshots and the workload used
 
 ### Issue: Visual corruption (striping, wrong colors)
 
 **Cause:** JIT codegen bug.
 
 **Solution:**
-1. Enable **JIT Debug Logging = 1**
-2. Capture screenshot of corruption
-3. Report with log and screenshot
+1. Capture screenshots with JIT ON and OFF
+2. Note the exact game, scene, and whether the issue appears only with the recompiler enabled
+3. Report with screenshots and reproduction steps
 
 ### Issue: Crash on launch
 

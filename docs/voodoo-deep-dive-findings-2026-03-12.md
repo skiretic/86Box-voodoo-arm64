@@ -112,7 +112,7 @@ Use these as the repeatable first-pass manual checklist before calling a Voodoo 
 
 - Run `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1`
 - Compare JIT ON versus OFF for transparency, HUD overlays, alpha-plane writes, and masked effects
-- If visual corruption appears only with JIT ON, repeat with `jit_debug=2` long enough to capture the problematic scene
+- If visual corruption appears only with JIT ON, repeat the same scene with JIT OFF and capture screenshots plus exact reproduction notes
 
 ### Fog / Depth changes
 
@@ -136,7 +136,7 @@ Use these as the repeatable first-pass manual checklist before calling a Voodoo 
 
 - Run repeated demo loops with `render_threads = 1` first, then try `2` only if investigating contention-sensitive behavior
 - Watch for hangs, guest slowdowns, frame pacing issues, or corruption that appears only after longer runs
-- Keep `jit_debug=1` available for log capture if a long-run issue appears
+- Keep the signed ARM64 release build as the main validation target, and use `86BOX_VOODOO_ARM64_OPT_STATS=1` only when the question is about optimization ranking rather than correctness
 
 ## Architecture Overview
 
