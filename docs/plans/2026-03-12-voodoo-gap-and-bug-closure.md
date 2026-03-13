@@ -40,7 +40,7 @@ Non-goals for this phase:
 ## Current Execution Status
 
 Status date: 2026-03-13
-Branch head: `cf16e67c3` plus local uncommitted Task 5-8 notes
+Branch head: `19b611125`
 
 Completed tasks:
 
@@ -48,13 +48,14 @@ Completed tasks:
 - Task 2 `fix: split voodoo jit tiled-mode cache keys` (`cfdda4cae`)
 - Task 3 `docs: capture intended voodoo output-alpha behavior` (`b31534ea2`)
 - Task 4 `fix: complete voodoo interpreter output-alpha blending` (`cf16e67c3`)
-- Task 5 `fix: match voodoo output-alpha blending in x64 jit` (implemented locally, uncommitted)
-- Task 6 `fix: match voodoo output-alpha blending in arm64 jit` (implemented locally, uncommitted)
-- Task 7 `docs: add voodoo regression checklist by scenario` (implemented locally, uncommitted)
+- Task 5 `fix: match voodoo output-alpha blending in x64 jit` (`19b611125`)
+- Task 6 `fix: match voodoo output-alpha blending in arm64 jit` (`19b611125`)
+- Task 7 `docs: add voodoo regression checklist by scenario` (`3485dda0c`)
+- Task 8 final verification and handoff (recorded in docs on 2026-03-13)
 
 Pending tasks:
 
-- Task 8 final verification and handoff
+- none in this plan
 
 Verification completed so far:
 
@@ -64,6 +65,7 @@ Verification completed so far:
 - clean rebuild: `rm -rf out/build/llvm-macos-aarch64-debug && cmake --preset llvm-macos-aarch64-debug && cmake --build out/build/llvm-macos-aarch64-debug`
 - x86-64 syntax-only verification for `src/video/vid_voodoo_render.c` with `-target x86_64-apple-macos10.13 -fsyntax-only`
 - ARM64 debug build after Task 6: `cmake --build out/build/llvm-macos-aarch64-debug`
+- final Task 8 build verification: `cmake --build out/build/llvm-macos-aarch64-debug` (`ninja: no work to do.`)
 - clean release build and codesign with JIT entitlements via `scripts/setup-and-build.sh build`
 - manual smoke pass: `3DMark99` full demo loop appeared stable
 - manual smoke pass: `3DMark2000` full demo loop appeared stable
@@ -73,13 +75,13 @@ Verification still pending:
 
 - deeper interactive/manual regressions for `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000` beyond the initial signed-release sanity pass
 - x86-64 full build/runtime verification for the Task 5 JIT work
-- final commit/handoff notes for Task 8
+- broader manual game-by-game handoff evidence beyond the existing smoke runs
 
 Environment note:
 
 - ARM64 is the active validation environment in this workspace
 - x86-64 runtime testing is currently unavailable, so Task 5 should not block on x86-64 live execution evidence
-- local branch state currently includes uncommitted Task 5-7 code/doc changes plus Task 8 status updates
+- branch state was clean before the Task 8 doc refresh in this session
 
 ## Test Inventory For This Plan
 
@@ -460,6 +462,13 @@ Record:
 - what remains open
 - what games were run
 - any residual risks
+
+Task 8 result captured on 2026-03-13:
+
+- build verification: fresh `cmake --build out/build/llvm-macos-aarch64-debug` completed successfully with `ninja: no work to do.`
+- ARM64 signed-release sanity evidence: prior `scripts/setup-and-build.sh build` signed-release rebuild plus manual sanity check reported normal performance when launching the signed release app
+- remaining missing manual game coverage: `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold` still need dedicated post-parity runtime coverage; existing smoke evidence remains limited to `3DMark99` and `3DMark2000` plus the signed-release sanity pass
+- remaining x86-64 runtime caveat: x86-64 output-alpha parity is committed and syntax/build-integrated locally, but no x86-64 live runtime validation is available in this workspace
 
 **Step 4: Commit**
 

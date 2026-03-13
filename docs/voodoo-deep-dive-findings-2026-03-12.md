@@ -42,7 +42,7 @@ Non-goals for the same phase:
 ## Current Status Snapshot
 
 Status date: 2026-03-13
-Current branch head: `cf16e67c3` plus local uncommitted Task 5-8 notes
+Current branch head: `19b611125`
 
 Implemented so far:
 
@@ -50,13 +50,14 @@ Implemented so far:
 - JIT cache-key aliasing fixed by separating `col_tiled` and `aux_tiled` in both active JIT cache keys
 - output-alpha behavior documented before code changes
 - interpreter and LFB output-alpha writeback moved from `AONE`-only handling to shared factor-based helper logic
-- x86-64 JIT output-alpha writeback now mirrors the interpreter factor set in the local working tree
-- ARM64 JIT output-alpha writeback now mirrors the interpreter factor set in the local working tree
+- x86-64 JIT output-alpha writeback now mirrors the interpreter factor set on the current branch head
+- ARM64 JIT output-alpha writeback now mirrors the interpreter factor set on the current branch head
 - regression-checklist docs are refreshed for alpha/blend, fog/depth, texture/TMU, tiled-buffer/JIT-cache, and render-thread scenarios
+- final verification and handoff status are recorded in the current docs
 
 Not implemented yet:
 
-- final results write-up after manual regression coverage
+- no further implementation work in this scoped plan
 
 Verified so far:
 
@@ -67,6 +68,7 @@ Verified so far:
 - successful ARM64 debug build after the Task 6 local JIT change
 - successful clean ARM64 debug rebuild from a deleted build directory
 - successful signed ARM64 release rebuild via `scripts/setup-and-build.sh build`
+- successful final Task 8 ARM64 debug build verification on current source state (`ninja: no work to do.`)
 - `3DMark99` full demo smoke loop looked stable in this session
 - `3DMark2000` full demo smoke loop looked stable in this session
 - manual signed-release sanity check restored expected performance after launching the release app instead of the debug app
@@ -76,6 +78,31 @@ Still unverified:
 - full x86-64 build/runtime behavior of the new x86-64 JIT alpha path
 - game-specific regression coverage outside the `3DMark99` / `3DMark2000` smoke loops and the signed-release sanity pass
 - runtime behavior of the new interpreter and JIT alpha-factor coverage outside the historically exercised subset
+
+## Final Verification Status
+
+### Build verification
+
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` from the current branch state succeeded with `ninja: no work to do.`
+- prior clean ARM64 debug rebuild and signed release rebuild remain the strongest build and integration evidence for the touched code paths
+
+### ARM64 signed-release sanity evidence
+
+- `scripts/setup-and-build.sh build` previously produced the signed ARM64 release app with JIT entitlements
+- manual sanity checking reported expected performance once the signed release app was launched instead of the debug build
+- the existing `3DMark99` and `3DMark2000` smoke loops did not reveal obvious regressions
+
+### Remaining missing manual game coverage
+
+- dedicated post-parity runs are still missing for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- optional extended coverage is still missing for `Half-Life 1`, `Turok demo`, `Tomb Raider`, `Need for Speed II: SE` or `III`, and `Carmageddon 2`
+- because those runs are unrecorded, alpha-plane, transparency/HUD, fog, and dual-TMU edge cases remain only partially covered
+
+### Remaining x86-64 runtime caveat
+
+- x86-64 output-alpha parity is committed on `voodoo-dev`, but this workspace still lacks x86-64 live runtime validation
+- local confidence for x86-64 remains limited to syntax/build integration rather than real cached-block execution
+- treat x86-64 as runtime-unverified until a suitable host is available
 
 ## Scenario Checklists
 
