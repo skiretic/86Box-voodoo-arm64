@@ -1,6 +1,6 @@
 # Voodoo ARM64 JIT Testing Guide
 
-A comprehensive guide for building, testing, and verifying the Voodoo ARM64 JIT port on macOS Apple Silicon.
+A comprehensive guide for building, testing, and verifying the Voodoo ARM64 JIT port, with live validation in this workspace currently centered on macOS Apple Silicon.
 
 ## Table of Contents
 
@@ -12,6 +12,20 @@ A comprehensive guide for building, testing, and verifying the Voodoo ARM64 JIT 
 - [Debug Logging](#debug-logging)
 - [What to Look For](#what-to-look-for)
 - [Reporting Issues](#reporting-issues)
+
+---
+
+## Optimization Baseline
+
+- correctness-focused gap-closure work is complete before the ARM64 optimization phase begins
+- remaining manual game-coverage gaps still exist for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- optimize against an ARMv8.0 + NEON baseline only; do not rely on Apple-only ISA or runtime behavior
+- portability targets for the optimization phase are Apple Silicon macOS, Linux AArch64 on 64-bit hosts including Raspberry Pi-class systems, and Windows ARM64 on Snapdragon-class systems
+- 32-bit ARM hosts are out of scope for this optimization phase
+- stop optimization work if interpreter/JIT behavior diverges on the core game matrix, if a change needs ISA features above ARMv8.0 + NEON, or if a change depends on platform-specific JIT behavior outside the current abstractions
+- prefer signed ARM64 release builds for performance validation; use debug builds for diagnosis, not for judging optimization wins
+
+The concrete build commands in this guide are still macOS-focused because that is the live validation environment available in this workspace today. Linux AArch64 and Windows ARM64 remain required portability targets even when they are not the active runtime host.
 
 ---
 

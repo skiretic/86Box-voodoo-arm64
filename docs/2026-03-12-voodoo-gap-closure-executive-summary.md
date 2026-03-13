@@ -20,6 +20,16 @@ The safest interpretation of current status is:
 - interpreter/JIT output-alpha parity is committed on `voodoo-dev`
 - compatibility evidence is improved by the signed-release sanity pass, but still incomplete until broader game coverage is recorded
 
+## Optimization Handoff Constraints
+
+The correctness phase is complete and should be treated as finished work unless a real regression is found during optimization.
+
+- remaining manual game-coverage gaps still exist for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- the newly widened output-alpha path is part of the completed correctness baseline and remains especially regression-sensitive
+- the next phase must target Apple Silicon macOS, Linux AArch64 on 64-bit hosts including Raspberry Pi-class systems, and Windows ARM64 on Snapdragon-class systems
+- 32-bit ARM hosts are out of scope for the ARM64 optimization phase
+- optimization work should pause if interpreter/JIT behavior diverges on the core game matrix, if a candidate change needs ISA features above ARMv8.0 + NEON, or if it depends on platform-specific JIT behavior outside the current abstractions
+
 ## Progress Charts
 
 Task progress:

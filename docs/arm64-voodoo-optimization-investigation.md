@@ -22,6 +22,36 @@ Current branch status note:
 - `696808439` records the current verification and handoff status in the Voodoo docs
 - ARM64 signed-release sanity evidence is positive, but broader game-specific runtime coverage is still incomplete
 
+## Optimization Baseline And Portability Matrix
+
+Before optimization begins:
+
+- the correctness-focused gap-closure work is complete and is the semantic baseline for all ARM64 optimization work
+- remaining manual game-coverage gaps still exist for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- the newly widened output-alpha behavior remains correctness-sensitive and should not be casually optimized without targeted validation
+- signed ARM64 release validation is the preferred performance reference; debug builds remain useful for diagnosis, not speed impressions
+
+Target portability matrix:
+
+- Apple Silicon macOS
+- Linux AArch64, including Raspberry Pi-class hosts running a 64-bit OS
+- Windows ARM64, including Snapdragon-class hosts
+
+Out of scope:
+
+- 32-bit ARM hosts
+
+Portability rule:
+
+- generated code must stay within an ARMv8.0 + NEON baseline across all targets
+- executable-memory, W^X, and I-cache mechanics may differ by OS, but optimization work must stay inside the current platform abstractions rather than depending on Apple-only behavior
+
+Optimization stop conditions:
+
+- pause if interpreter and JIT behavior diverge on the core regression matrix
+- pause if a candidate change requires ISA features newer than ARMv8.0 + NEON
+- pause if a candidate change depends on platform-specific JIT behavior outside the current abstractions
+
 ## Executive Summary
 
 The biggest remaining ARM64 opportunity is not “more NEON” in the abstract. The backend already uses NEON in several places, and some easy wins have already landed since this note was first drafted: `x`/`x2` are now cached in registers across the loop, delta vectors are hoisted in the prologue, the cache uses a 32-entry per-partition layout with an MRU hint, and the pointer-load setup skips zero halfwords on macOS ARM64. The next meaningful gains are still about reducing per-pixel state traffic and unnecessary scalar setup around the span loop.
