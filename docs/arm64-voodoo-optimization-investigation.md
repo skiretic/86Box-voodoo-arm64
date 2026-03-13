@@ -15,19 +15,26 @@ Important limitation:
 
 - This is based on code inspection, not hardware counter profiling. The recommendations below are prioritized by likely payoff and implementation risk, but they should still be validated with measurement.
 
+Current branch status note:
+
+- `cfdda4cae` already fixed the ARM64 JIT cache-key correctness bug by splitting `col_tiled` and `aux_tiled`
+- `cf16e67c3` and `19b611125` completed interpreter plus ARM64/x86-64 JIT output-alpha parity work
+- `696808439` records the current verification and handoff status in the Voodoo docs
+- ARM64 signed-release sanity evidence is positive, but broader game-specific runtime coverage is still incomplete
+
 ## Executive Summary
 
-The biggest ARM64 opportunity is not “more NEON” in the abstract. The backend already uses NEON in several places. The biggest opportunity is to reduce per-pixel state traffic and unnecessary scalar setup around the span loop.
+The biggest remaining ARM64 opportunity is not “more NEON” in the abstract. The backend already uses NEON in several places, and some easy wins have already landed since this note was first drafted: `x`/`x2` are now cached in registers across the loop, delta vectors are hoisted in the prologue, the cache uses a 32-entry per-partition layout with an MRU hint, and the pointer-load setup skips zero halfwords on macOS ARM64. The next meaningful gains are still about reducing per-pixel state traffic and unnecessary scalar setup around the span loop.
 
 The highest-value work, in order:
 
 1. Keep more span state live in registers across the pixel loop instead of reloading/storing it every iteration.
 2. Hoist dither table setup out of the loop; today the dither path rebuilds table addresses inside the per-pixel hot path.
-3. Replace `alookup` / `aminuslookup` loads with synthesized NEON factors where possible.
+3. Replace `alookup` / `aminuslookup` loads with synthesized NEON factors where semantics are trivially preserved.
 4. Split `codegen_texture_fetch()` into more aggressively specialized fast paths for the common textured cases.
 5. Align hot `voodoo_state_t` vector fields so the JIT can use aligned `LDR/STR Q` instead of `ADD + LD1/ST1`.
-6. Reduce short-span overhead from prologue/epilogue and constant materialization.
-7. Improve block-cache lookup and miss behavior, but treat this as second-order compared with span execution cost.
+6. Further reduce short-span overhead from prologue/epilogue and constant materialization.
+7. Improve block-cache lookup and miss behavior, but treat this as second-order compared with span execution cost and as a pure performance follow-up rather than a correctness repair.
 
 ## Current Backend Shape
 
@@ -41,7 +48,7 @@ That matters because register residency is extremely valuable here:
 The generated block:
 
 - saves a large callee-saved set in the prologue (`vid_voodoo_codegen_arm64.h:1966-1985`)
-- materializes several global pointers and constants (`vid_voodoo_codegen_arm64.h:2003-2089`)
+- materializes several global pointers and constants, although pointer loads now skip zero halfwords on macOS ARM64 (`vid_voodoo_codegen_arm64.h:2003-2089`)
 - executes a large per-pixel loop starting at `loop_jump_pos` (`vid_voodoo_codegen_arm64.h:2140-2143`)
 - updates interpolants and counters at the tail (`vid_voodoo_codegen_arm64.h:4220-4370`)
 
@@ -49,7 +56,7 @@ The generated block:
 
 ### Why this is the biggest opportunity
 
-The generated loop currently reloads and stores a lot of span state every pixel:
+The generated loop still reloads and stores a lot of span state every pixel:
 
 - iterated color vector `ib/ig/ir/ia` via `ADD + LD1_V4S + ST1_V4S` (`vid_voodoo_codegen_arm64.h:4244-4254`)
 - `z` (`vid_voodoo_codegen_arm64.h:4256-4266`)
@@ -58,7 +65,8 @@ The generated loop currently reloads and stores a lot of span state every pixel:
 - global `w` (`vid_voodoo_codegen_arm64.h:4288-4296`)
 - `tmu1_s/t` and `tmu1_w` in dual-TMU mode (`vid_voodoo_codegen_arm64.h:4298-4320`)
 - `pixel_count` / `texel_count` (`vid_voodoo_codegen_arm64.h:4323-4343`)
-- `x` (`vid_voodoo_codegen_arm64.h:4352-4365`)
+
+The notable exception is `x`/`x2`: those are already cached in callee-saved registers before the loop and only written back as needed at the tail. That means the next register-residency step is not “start caching loop coordinates,” but “finish the job for the remaining hot interpolants and counters.”
 
 Because the JIT owns the entire span call, many of these values can stay register-resident across iterations and be written back only once at loop exit, or only when a later stage truly needs memory visibility.
 
@@ -66,7 +74,7 @@ Because the JIT owns the entire span call, many of these values can stay registe
 
 Build a “register-resident span core”:
 
-- keep `x`, `x2`, `z`, `w`, `tmu0_w`, and counters in GPRs for the whole loop
+- keep `z`, `w`, `tmu0_w`, and counters in GPRs for the whole loop, building on the existing cached `x`/`x2` baseline
 - keep `ib/ig/ir/ia`, `tmu0_s/t`, and `tmu1_s/t` in NEON registers for the whole loop
 - spill back to `state` once at function exit
 - only materialize temporary stores for fields that are still consumed through memory by existing helper code
@@ -142,6 +150,8 @@ Especially in:
 ### Caveat
 
 `alookup[c + 1]` semantics are sometimes used for rounding/scale behavior, so the scalar alpha path has to preserve the exact `+1` behavior where the current code relies on it.
+
+Because output-alpha parity was recently widened in both JITs, this optimization is no longer just a generic cleanup. The safest path is to target fog and the simpler RGB blend-factor cases first, then leave the newer output-alpha writeback path alone until broader manual regression coverage exists.
 
 ### Expected payoff
 
@@ -219,7 +229,7 @@ Moderate. Less transformative than register residency, but worthwhile and mechan
 Every compiled block:
 
 - saves/restores a wide callee-saved set (`vid_voodoo_codegen_arm64.h:1966-1985`, `4377-4396`)
-- builds global pointers using repeated `MOVZ/MOVK` sequences (`vid_voodoo_codegen_arm64.h:2013-2044`)
+- builds global pointers using repeated `MOVZ/MOVK` sequences, although the current helper already skips zero halfwords (`vid_voodoo_codegen_arm64.h:2013-2044`)
 - loads NEON constants from memory after first materializing their addresses (`vid_voodoo_codegen_arm64.h:2066-2089`)
 
 ### Why this matters
@@ -249,9 +259,13 @@ Moderate, especially for short spans and scenes with lots of tiny triangles.
 - linearly scans again to find the LRU victim (`vid_voodoo_codegen_arm64.h:4557-4568`)
 - flips page protection and flushes I-cache on a miss (`vid_voodoo_codegen_arm64.h:4570-4600`)
 
+That said, the cache is in better shape than older snapshots of this backend: it already has 32 slots per partition, contiguous per-partition layout, an MRU hint, and the `col_tiled` / `aux_tiled` correctness split.
+
 ### Why this is not Priority 1
 
 The lookup is done once per block acquisition in `voodoo_half_triangle()`, not once per pixel (`vid_voodoo_render.c:792`, `943-947`). So this is important, but it will not beat span-loop work in total impact.
+
+It is also no longer standing in for a correctness fix. After the cache-key split landed, remaining work here is about reducing hit/miss overhead, not repairing stale-block aliasing.
 
 ### Recommended direction
 
@@ -272,6 +286,9 @@ This investigation is not saying the ARM64 backend is naive. It already contains
 - `LDP` for paired loads where offsets allow it (`vid_voodoo_codegen_arm64.h:1280-1287`, `1457-1458`, `2132-2133`, `4325-4337`)
 - `TBZ` / `CBZ` patchable branches (`vid_voodoo_codegen_arm64.h:1463-1476`, `2207-2214`, `2294-2314`)
 - hoisted NEON deltas for interpolants (`vid_voodoo_codegen_arm64.h:2097-2119`)
+- cached `x` / `x2` loop coordinates in callee-saved registers before the span loop
+- contiguous per-partition block-cache layout with an MRU probe hint
+- pointer-load helpers that skip zero halfwords instead of always emitting a full `MOVZ/MOVK` chain
 
 So the next round of work should focus less on “replace scalar instructions with NEON everywhere” and more on “remove avoidable setup, branching, and memory traffic.”
 
@@ -289,21 +306,21 @@ Any optimization in these areas should ship with image-based regression testing,
 ### Phase 1: Low-risk / high-confidence wins
 
 1. Hoist dither base pointers and offsets out of the loop.
-2. Replace simple `alookup` / `aminuslookup` loads with synthesized vectors where semantics are straightforward.
-3. Add measurement counters for:
+2. Add measurement counters for:
    - compiled block hits/misses
    - average emitted code size
    - textured vs non-textured spans
    - dithered vs non-dithered spans
+3. Replace simple `alookup` / `aminuslookup` loads with synthesized vectors only in subpaths where exact behavior is easy to prove.
 
 ### Phase 2: Main performance work
 
 4. Build a register-resident span-loop prototype for:
-   - `x`
    - `z`
    - `w`
    - `ib/ig/ir/ia`
    - `tmu0_s/t`
+   - `tmu0_w`
 5. Measure before expanding to dual-TMU and alpha-blend-heavy paths.
 
 ### Phase 3: Structural improvements
@@ -317,8 +334,9 @@ Any optimization in these areas should ship with image-based regression testing,
 If the goal is “best chance of visible speedup per engineering hour,” I would start here:
 
 1. Hoist dither table setup out of the loop.
-2. Convert a subset of `alookup` / `aminuslookup` users to synthesized vectors.
-3. Prototype register-resident `ib/ig/ir/ia`, `z`, `x`, and `tmu0_s/t` across the span loop.
+2. Add a small amount of measurement around textured, dithered, and cache-hit-heavy workloads so later changes are easier to rank.
+3. Prototype register-resident `ib/ig/ir/ia`, `z`, `tmu0_s/t`, and `tmu0_w` across the span loop while keeping the existing cached `x` / `x2` structure.
+4. Only then convert a subset of `alookup` / `aminuslookup` users where the exact output can be proven cheaply.
 
 If the goal is “largest eventual upside,” then the real target is the register-resident span loop plus texture-fetch specialization.
 
