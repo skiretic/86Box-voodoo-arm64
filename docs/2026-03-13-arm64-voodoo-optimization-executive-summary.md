@@ -7,7 +7,7 @@ Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Executive Summary
 
-The ARM64 Voodoo optimization effort is now in the early execution state.
+The ARM64 Voodoo optimization effort is now at final handoff state for the scoped Apple Silicon workspace plan.
 
 - the correctness baseline is already established on `voodoo-dev`
 - the ARM64 optimization investigation has been refreshed against the current backend state
@@ -21,13 +21,14 @@ The ARM64 Voodoo optimization effort is now in the early execution state.
 - Task 7's first texture-fetch fast/fallback split is now committed and manually revalidated on the signed build
 - Task 8's first lookup-factor synthesis slice is now committed, build-verified, and manually validated on the signed build
 - Task 9's hot-state layout repack is now committed and build-verified, with x86-64 syntax integration rechecked against the shared layout
+- Task 10's final validation and handoff evidence is now recorded from fresh macOS builds plus a signed five-title manual matrix
 
 The safest interpretation of current status is:
 
-- execution readiness remains high because the completed correctness work, current ARM64 investigation, central plan, and first-wave measurements are now aligned
-- immediate optimization targets are clearer now: the safe `dither_rb` base hoist first, then span-loop register residency, then texture fast-path specialization
+- the scoped optimization plan is fully executed on this branch
+- Apple Silicon build and signed manual validation evidence is now in place for the full planned handoff set
 - correctness-sensitive areas remain gated, especially the newly widened output-alpha path
-- cross-platform ARM64 compatibility is a hard constraint, not a later cleanup item
+- cross-platform ARM64 compatibility remains a hard constraint, with live Windows ARM64 and Linux AArch64 validation still outside this workspace
 
 ## Progress Charts
 
@@ -35,15 +36,15 @@ Overall effort progress:
 
 ```text
 Planning complete         [##########] 100%
-Implementation started    [#######---]  70%
-Validation complete       [#####-----]  50%
+Implementation complete   [##########] 100%
+Validation complete       [########--]  80%
 ```
 
 Execution task progress:
 
 ```text
-Completed  [########--] 8/10  80%
-Pending    [##--------] 2/10  20%
+Completed  [##########] 10/10 100%
+Pending    [----------] 0/10   0%
 ```
 
 Effort phases:
@@ -55,16 +56,16 @@ Central optimization plan       [##########] 100%
 Instrumentation                 [##########] 100%
 Low-risk hot-path work          [##########] 100%
 Main span-loop work             [##########] 100%
-Higher-risk specialization      [######----]  60%
-Cross-platform validation       [----------]   0%
+Higher-risk specialization      [##########] 100%
+Cross-platform validation       [######----]  60%
 ```
 
 Portability readiness:
 
 ```text
 Apple Silicon assumptions       [##########] 100%
-Linux AArch64 constraints       [########--]  80%
-Windows ARM64 constraints       [########--]  80%
+Linux AArch64 constraints       [#########-]  90%
+Windows ARM64 constraints       [#########-]  90%
 Live multi-platform validation  [----------]   0%
 ```
 
@@ -102,17 +103,22 @@ Live multi-platform validation  [----------]   0%
 - Task 9 now repacks `voodoo_state_t` so `ib/ig/ir/ia`, `tmu0_s/t`, and `tmu1_s/t` land on 16-byte boundaries, and the ARM64 JIT now uses aligned `LDR/STR Q` on the affected hot paths
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 9 layout change
 - the exact plan x86-64 syntax command needed extra local include paths in this workspace, but the corrected x86-64 syntax-only check succeeded without requiring any x86-64 source change because that header already uses `offsetof(...)`
+- Task 10 then revalidated the portability assumptions in source, reran `cmake --preset llvm-macos-aarch64-debug`, reran `cmake --build out/build/llvm-macos-aarch64-debug`, and completed a fresh signed `scripts/setup-and-build.sh build`
+- the final signed manual matrix on March 14, 2026 covered `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`; you reported that all looked okay
+- `/tmp/task10_manual_86box.log` again contained the expected boot line `Illegal instruction 00008B55 (FF)`, and the run exited with `cache hits=23,748,869`, `misses=12,791`, `generated blocks=12,791`, `single_tmu=164,030,936`, `dual_tmu=146,428,389`, and zero reject signals
+- the optional `cmake --preset llvm-win32-aarch64` configure step remains unavailable in this workspace because that preset does not exist here, so Windows ARM64 and Linux AArch64 live validation remain explicit external caveats
 
 ### What has not started yet
 
-- the broader optimization-phase manual runtime validation pass beyond Task 6
+- no further in-workspace tasks remain in the scoped central plan
+- live Linux AArch64 and Windows ARM64 build/runtime validation still need an external host or CI environment
 
 ## Why The Plan Starts Conservatively
 
 The first optimization wave is intentionally conservative because the code now sits on top of recently completed correctness work. In particular:
 
 - output-alpha behavior was only recently widened to match the interpreter more closely
-- manual game coverage is still incomplete for `Extreme Assault` and `Lands of Lore III`; `Unreal Gold` and `Turok` now have fresh signed-run coverage
+- the final Apple Silicon manual matrix now covers `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`, while non-Apple ARM64 validation still remains external
 - platform-specific executable-memory and I-cache mechanics differ across macOS, Linux, and Windows even when the generated ARM64 instructions stay portable
 
 That makes measurement-first optimization the right approach. The plan avoids guessing where the time goes and avoids touching the most correctness-sensitive logic before easier wins are ranked.
@@ -141,24 +147,23 @@ The first slice of this is now in place: the common textured single-TMU loop kee
 
 The second slice is now in place as well: the dual-TMU path now keeps TMU1 state plus the span counters resident without growing the prologue or changing the generated-function ABI.
 
-The next step is to keep Task 8 narrow and finish validation rather than broadening again.
+The scoped plan has now been carried through the final Apple Silicon validation pass.
 
 ## Current Risks
 
-- broader manual runtime coverage is still incomplete beyond the current Task 8 signed-build set
 - x86-64 live runtime testing is still unavailable in this workspace, so cross-backend confidence remains incomplete
 - the macOS ARM64 toolchain still uses `-march=armv8.5-a+simd`, so the plan must continue treating ARMv8.0 as a policy ceiling rather than trusting the active Apple toolchain defaults
-- Linux AArch64 and Windows ARM64 portability are planned for explicitly, but not yet validated through live builds or runtime testing in this workspace
+- the final manual matrix is Apple Silicon-only; Linux AArch64 and Windows ARM64 still are not validated through live builds or runtime testing in this workspace
 - the current baseline comes from one representative workload, so optimization ranking is better informed now but not universal across all games
 
 ## Recommended Next Step
 
-Task 9 is now committed and build-verified. The next safe move is to stop before opening the broader cross-platform validation work in Task 10.
+The scoped optimization plan is complete on `voodoo-dev`. The next safe move is to hand it off as-is unless you want to open a separate follow-up for live Linux AArch64 or Windows ARM64 validation.
 
-The validated Task 9 boundaries are:
+The final validated boundaries are:
 
-1. repack only the hottest vectorized state fields
-2. update shared offset assumptions explicitly rather than relying on incidental layout
-3. keep x86-64 source unchanged unless the shared-layout syntax check proves otherwise
+1. keep the completed correctness baseline closed unless a real regression appears
+2. treat Apple Silicon validation as complete for this branch, but leave live Linux AArch64 and Windows ARM64 validation as separate follow-up work
+3. keep future ARM64 JIT work inside ARMv8.0 + NEON and the existing platform JIT abstractions
 
-This keeps the work focused on the mechanical alignment win without widening into Task 10’s broader platform-validation scope.
+This preserves the final branch as a validated Apple Silicon handoff rather than reopening scope after the central plan is already complete.

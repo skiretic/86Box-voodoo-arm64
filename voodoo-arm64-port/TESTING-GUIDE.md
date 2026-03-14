@@ -18,7 +18,7 @@ A comprehensive guide for building, testing, and verifying the Voodoo ARM64 JIT 
 ## Optimization Baseline
 
 - correctness-focused gap-closure work is complete before the ARM64 optimization phase begins
-- remaining manual game-coverage gaps still exist for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- the March 14, 2026 signed ARM64 validation matrix now covers `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`
 - optimize against an ARMv8.0 + NEON baseline only; do not rely on Apple-only ISA or runtime behavior
 - portability targets for the optimization phase are Apple Silicon macOS, Linux AArch64 on 64-bit hosts including Raspberry Pi-class systems, and Windows ARM64 on Snapdragon-class systems
 - 32-bit ARM hosts are out of scope for this optimization phase
@@ -26,6 +26,10 @@ A comprehensive guide for building, testing, and verifying the Voodoo ARM64 JIT 
 - prefer signed ARM64 release builds for performance validation; use debug builds for diagnosis, not for judging optimization wins
 
 The concrete build commands in this guide are still macOS-focused because that is the live validation environment available in this workspace today. Linux AArch64 and Windows ARM64 remain required portability targets even when they are not the active runtime host.
+
+Current validation caveat:
+
+- this workspace still has no `llvm-win32-aarch64` CMake preset, and Linux AArch64 still needs a real host or CI runner for live validation
 
 ---
 
@@ -137,6 +141,22 @@ Session note:
 - x86-64 runtime testing is still unavailable here
 - use the ARM64 signed release build as the real manual validation target for the new output-alpha JIT parity work
 - avoid using the debug app for performance validation; it is much slower and can be mistaken for a JIT regression
+
+### Final signed validation matrix (March 14, 2026)
+
+Recommended final Apple Silicon sanity set:
+
+- `Extreme Assault`
+- `Lands of Lore III`
+- `Unreal Gold`
+- `3DMark99`
+- `3DMark2000`
+
+Current March 14, 2026 result:
+
+- the signed app built by `scripts/setup-and-build.sh build` looked correct across that full matrix on `Windows 98 Gaming PC`
+- `/tmp/task10_manual_86box.log` contained the expected non-regression boot line `Illegal instruction 00008B55 (FF)`
+- the exit footer reported `cache hits=23,748,869`, `misses=12,791`, `generated blocks=12,791`, `single_tmu=164,030,936`, `dual_tmu=146,428,389`, and zero reject signals
 
 ### Code Signing with JIT Entitlements
 

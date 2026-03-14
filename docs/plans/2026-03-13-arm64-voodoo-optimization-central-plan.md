@@ -643,7 +643,7 @@ git commit -m "perf: align hot voodoo state fields for arm64"
 - Modify: `docs/2026-03-12-voodoo-gap-closure-executive-summary.md`
 - Modify: `voodoo-arm64-port/TESTING-GUIDE.md`
 
-- [ ] **Step 1: Validate platform assumptions explicitly**
+- [x] **Step 1: Validate platform assumptions explicitly**
 
 Confirm the final optimization branch still respects:
 
@@ -651,7 +651,7 @@ Confirm the final optimization branch still respects:
 - Apple Silicon JIT entitlement / W^X flow
 - Windows ARM64 `VirtualProtect` / `FlushInstructionCache` path
 
-- [ ] **Step 2: Run the available build matrix**
+- [x] **Step 2: Run the available build matrix**
 
 Minimum:
 
@@ -668,7 +668,7 @@ cmake --build out/build/llvm-win32-aarch64
 
 Linux AArch64 should be validated on an appropriate host or CI runner rather than guessed from macOS alone.
 
-- [ ] **Step 3: Run the final manual ARM64 matrix**
+- [x] **Step 3: Run the final manual ARM64 matrix**
 
 Minimum final matrix:
 
@@ -685,7 +685,31 @@ Record separately:
 - remaining missing manual game coverage
 - any remaining Windows ARM64 or Linux AArch64 validation caveats
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
+
+Task 10 validation recorded on 2026-03-14:
+
+- source review reconfirmed the intended portability assumptions:
+  - `cmake/flags-gcc-aarch64.cmake` still sets the generic AArch64 baseline to `-march=armv8-a`
+  - the Apple Silicon JIT flow still uses `MAP_JIT` plus `pthread_jit_write_protect_np(...)`
+  - the Windows ARM64 JIT path in `vid_voodoo_codegen_arm64.h` still uses `VirtualProtect(...)` and `FlushInstructionCache(...)`
+- fresh Apple Silicon configure/build verification succeeded:
+  - `cmake --preset llvm-macos-aarch64-debug`
+  - `cmake --build out/build/llvm-macos-aarch64-debug`
+- `scripts/setup-and-build.sh build` succeeded and re-signed `build/src/86Box.app`
+- the optional Windows preset remains unavailable in this workspace:
+  - `cmake --preset llvm-win32-aarch64`
+  - result: `CMake Error: No such preset`
+- Linux AArch64 still needs validation on a real host or CI runner rather than being inferred from macOS
+- the final signed manual matrix against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1` covered `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`; the user reported all looked okay
+- `/tmp/task10_manual_86box.log` again contained the expected boot line `Illegal instruction 00008B55 (FF)`
+- the signed app exited with a fresh stats footer:
+  - cache hits=`23,748,869` misses=`12,791` rejected=`0` hit_rate=`99.95%`
+  - generated blocks=`12,791` code_bytes total=`18,084,496` avg=`1413.8` min=`596` max=`2020`
+  - spans textured=`310,459,325` untextured=`77,908`
+  - spans dithered=`310,537,233` non_dithered=`0`
+  - single-TMU=`164,030,936` dual-TMU=`146,428,389`
+  - rejects wx_write=`0` wx_exec=`0` emit_overflow=`0`
 
 ```bash
 git add docs/arm64-voodoo-optimization-investigation.md docs/2026-03-12-voodoo-gap-closure-executive-summary.md voodoo-arm64-port/TESTING-GUIDE.md

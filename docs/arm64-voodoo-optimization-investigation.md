@@ -22,14 +22,14 @@ Current branch status note:
 - `696808439` records the current verification and handoff status in the Voodoo docs
 - `4cab227f1` locks the optimization baseline, portability matrix, and stop conditions
 - `9e70b2004` adds lightweight ARM64 optimization instrumentation and records the first signed-release baseline observations
-- ARM64 signed-release sanity evidence is positive, but broader game-specific runtime coverage is still incomplete
+- ARM64 signed-release sanity evidence is positive, and the March 14, 2026 signed validation matrix now covers the previously open Apple Silicon game set
 
 ## Optimization Baseline And Portability Matrix
 
 Before optimization begins:
 
 - the correctness-focused gap-closure work is complete and is the semantic baseline for all ARM64 optimization work
-- remaining manual game-coverage gaps still exist for `Extreme Assault` and `Lands of Lore III`; `Unreal Gold` and `Turok` now have fresh signed-run coverage
+- the March 14, 2026 signed validation matrix now covers `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000` on Apple Silicon
 - the newly widened output-alpha behavior remains correctness-sensitive and should not be casually optimized without targeted validation
 - signed ARM64 release validation is the preferred performance reference; debug builds remain useful for diagnosis, not speed impressions
 
@@ -187,7 +187,7 @@ Because output-alpha parity was recently widened in both JITs, this optimization
 
 ### Current Task 8 slice
 
-The 2026-03-14 working tree now applies that narrow first step:
+The current branch now includes that narrow first step:
 
 - non-constant fog synthesizes the `alookup[fog_a + 1]` factor with scalar `fog_a + 1` plus `dup vN.4h, wAlpha`, preserving the exact `+1` semantics
 - the simple RGB blend-factor cases synthesize `src_alpha`, `dst_alpha`, `(255 - src_alpha)`, `(255 - dst_alpha)`, and saturate factors directly from the recovered 8-bit alpha values
@@ -272,6 +272,16 @@ The current branch now applies that narrow repack:
 ### Expected payoff
 
 Moderate. Less transformative than register residency, but worthwhile and mechanically clean.
+
+### Task 10 validation state
+
+The 2026-03-14 validation pass closes the scoped Apple Silicon handoff loop for the current branch:
+
+- source review reconfirmed that the generic AArch64 toolchain file still targets `-march=armv8-a`, while the active macOS preset remains an Apple-local `armv8.5-a+simd` toolchain choice rather than a new codegen requirement
+- the Apple Silicon executable-memory path still relies on `MAP_JIT` plus `pthread_jit_write_protect_np(...)`, and the Windows ARM64 JIT path still uses `VirtualProtect(...)` plus `FlushInstructionCache(...)`
+- fresh `cmake --preset llvm-macos-aarch64-debug`, `cmake --build out/build/llvm-macos-aarch64-debug`, and `scripts/setup-and-build.sh build` runs all succeeded on the current branch
+- the final signed manual matrix (`Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, `3DMark2000`) looked correct on the `Windows 98 Gaming PC` VM, and the run exited with `cache hits=23,748,869`, `misses=12,791`, `generated blocks=12,791`, `single_tmu=164,030,936`, `dual_tmu=146,428,389`, and zero reject signals
+- the remaining caveat is still external validation: this workspace has no `llvm-win32-aarch64` CMake preset, and Linux AArch64 still needs a real host or CI runner
 
 ## Priority 6: Reduce Prologue/Epilogue and Constant Materialization Cost
 

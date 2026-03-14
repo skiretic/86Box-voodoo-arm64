@@ -1351,6 +1351,8 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 9. **Task 9 hot-state layout repack (committed, build-verified):** `voodoo_state_t` now aligns the `ib` and TMU `s/t` hot blocks so the ARM64 backend can use aligned `LDR/STR Q` instead of `ADD + LD1/ST1` on those paths, while x86-64 continues to rely on `offsetof(...)` with no source change.
 
+10. **Task 10 final validation and handoff (recorded):** The branch now has fresh Apple Silicon debug and signed-build verification plus a signed final matrix covering `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`. The remaining portability caveat is live Linux AArch64 / Windows ARM64 validation outside this workspace.
+
 **Remaining potential improvements:**
 
 1. **Profile-guided optimization:** Profile with Instruments (macOS) to find remaining bottlenecks. Known hot spots:
@@ -1361,7 +1363,7 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 3. **Broaden lookup-factor synthesis only after Task 8 validation:** Keep the newer output-alpha writeback path and any less-obvious blend-factor cases off-limits until `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` pass on the signed build.
 
-4. **Cross-platform layout validation:** Task 10 should verify the current ARMv8.0 + NEON assumptions and the shared `voodoo_state_t` layout behavior explicitly on non-Apple ARM64 targets before broader cleanup lands.
+4. **Live non-Apple ARM64 validation:** The source-level portability assumptions are now documented, but real Linux AArch64 and Windows ARM64 builds/runtime coverage still need an external host or CI runner before broader cleanup lands.
 
 ### Code Style Conventions
 

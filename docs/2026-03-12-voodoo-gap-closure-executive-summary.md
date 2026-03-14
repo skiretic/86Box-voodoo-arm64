@@ -12,19 +12,19 @@ Implementation work for the scoped gap-closure plan is complete, and Task 8 now 
 - all 8 planned tasks are complete for the scoped gap-closure work
 - correctness work now covers the interpreter, x86-64 JIT, and ARM64 JIT output-alpha path
 - regression checklist docs are now in place for the main fragile scenarios
-- fresh ARM64 build verification still passes, and the signed release build restored expected performance in manual use, but broader runtime regression evidence is still incomplete
+- fresh ARM64 build verification still passes, and later March 14, 2026 signed-release optimization validation closed the previously open `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold` Apple Silicon game-coverage gaps
 
 The safest interpretation of current status is:
 
 - structural correctness risk from tiled-mode cache-key aliasing is reduced
 - interpreter/JIT output-alpha parity is committed on `voodoo-dev`
-- compatibility evidence is improved by the signed-release sanity pass, but still incomplete until broader game coverage is recorded
+- compatibility evidence is now materially stronger on Apple Silicon because the later signed-release optimization matrix covered `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`, though x86-64 runtime and non-Apple ARM64 validation still remain outside this workspace
 
 ## Optimization Handoff Constraints
 
 The correctness phase is complete and should be treated as finished work unless a real regression is found during optimization.
 
-- remaining manual game-coverage gaps still exist for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- the former manual game-coverage gaps for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold` were later covered during the March 14, 2026 signed ARM64 optimization validation pass
 - the newly widened output-alpha path is part of the completed correctness baseline and remains especially regression-sensitive
 - the next phase must target Apple Silicon macOS, Linux AArch64 on 64-bit hosts including Raspberry Pi-class systems, and Windows ARM64 on Snapdragon-class systems
 - 32-bit ARM hosts are out of scope for the ARM64 optimization phase
@@ -55,7 +55,7 @@ Verification progress:
 
 ```text
 Configure/build checks         [##########] 100%
-Interactive regression runs    [####------]  40%
+Interactive regression runs    [##########] 100%
 Cross-backend parity checks    [######----]  60%
 ```
 
@@ -168,6 +168,7 @@ Outcome:
 - re-ran the final ARM64 debug build verification from the current source state
 - recorded the signed-release sanity evidence separately from broader manual coverage
 - left the remaining manual game gaps and x86-64 runtime caveat explicit in the handoff docs
+- later Apple Silicon optimization validation closed the previously open `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold` manual game gaps on the signed build without reopening correctness work
 
 ## Changelog
 
@@ -210,6 +211,12 @@ Outcome:
 - re-ran `cmake --build out/build/llvm-macos-aarch64-debug`
 - observed `ninja: no work to do.`
 - finalized the handoff with build evidence, signed-release sanity evidence, remaining manual game gaps, and the x86-64 runtime caveat split out explicitly
+
+### 2026-03-14 - Optimization validation closes the remaining Apple Silicon game gaps
+
+- the later signed ARM64 optimization validation matrix covered `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`
+- the user reported that matrix looked correct on the signed build
+- the fresh signed logfile again contained the expected boot line `Illegal instruction 00008B55 (FF)` and exited with `cache hits=23,748,869`, `misses=12,791`, `generated blocks=12,791`, and zero reject signals
 
 ## Verification Log
 

@@ -146,6 +146,7 @@ Completed so far:
 - Task 7 texture-fetch fast/fallback split committed and manually revalidated
 - Task 8 selected lookup-factor synthesis committed and build-verified
 - Task 9 hot-state layout repack committed and build-verified
+- Task 10 cross-platform validation and final handoff recorded
 
 ### 2026-03-13 - Task 5 single-TMU resident state landed
 
@@ -199,7 +200,7 @@ Commit: `3a1dbd08c` `perf: synthesize selected arm64 voodoo blend factors`
 
 ### 2026-03-14 - Task 9 hot-state layout repack landed
 
-Commit: `perf: align hot voodoo state fields for arm64`
+Commit: `a62bf8a66` `perf: align hot voodoo state fields for arm64`
 
 - repacked `voodoo_state_t` with one explicit 8-byte alignment pad after `fb_mem` / `aux_mem`, then grouped `ib/ig/ir/ia`, `tmu0_s/t`, and `tmu1_s/t` into 16-byte-aligned hot blocks
 - updated the ARM64 `STATE_*` offset constants explicitly and kept them guarded with `VOODOO_ASSERT_OFFSET(...)`
@@ -210,8 +211,20 @@ Commit: `perf: align hot voodoo state fields for arm64`
 
 Not yet started:
 
-- broader optimization-phase manual regression runs beyond Task 6
+- live Linux AArch64 and Windows ARM64 build/runtime validation outside this workspace
 - stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
+
+### 2026-03-14 - Task 10 cross-platform validation and final handoff recorded
+
+Commit: `docs: record arm64 voodoo optimization validation results`
+
+- rechecked the source-level portability assumptions: the generic AArch64 toolchain file still targets `-march=armv8-a`, Apple Silicon still uses the `MAP_JIT` plus `pthread_jit_write_protect_np(...)` flow, and the Windows ARM64 JIT path still uses `VirtualProtect(...)` plus `FlushInstructionCache(...)`
+- reran `cmake --preset llvm-macos-aarch64-debug` and `cmake --build out/build/llvm-macos-aarch64-debug`; both succeeded, with only the existing compile/link warnings
+- reran `scripts/setup-and-build.sh build`; it completed a clean rebuild, re-signed `build/src/86Box.app`, and again only showed the existing warning set
+- checked the optional Windows configure command and confirmed that `cmake --preset llvm-win32-aarch64` is not currently available in this workspace because the preset does not exist in `CMakePresets.json`
+- reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; you reported that `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000` all looked correct
+- `/tmp/task10_manual_86box.log` again showed the expected Windows boot line `Illegal instruction 00008B55 (FF)`
+- the run exited with `cache hits=23,748,869`, `misses=12,791`, `generated blocks=12,791`, `code_bytes total=18,084,496`, `spans textured=310,459,325`, `single_tmu=164,030,936`, `dual_tmu=146,428,389`, and zero reject signals
 
 ## Notes
 
