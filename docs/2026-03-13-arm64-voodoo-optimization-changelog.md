@@ -107,6 +107,17 @@ Commit coverage: working tree after `050b7640f` (not yet committed)
 - completed follow-up manual validation with a full `3DMark2000` demo run and `Unreal Gold timedemo 1`; user reported both looked correct
 - the follow-up validation run ended with `cache hits=16,145,549`, `misses=146`, `generated blocks=146`, `dithered spans=343,935,094`, `dual_tmu=179,954,012`, and zero reject signals
 
+### 2026-03-13 - Task 4 prologue helper loads gated in working tree
+
+Commit coverage: working tree after `8b58eba10` (not yet committed)
+
+- audited the remaining unconditional prologue helper loads after Task 3
+- gated `x25` (`bilinear_lookup`) behind bilinear-capable textured blocks
+- gated `x22` (`neon_00_ff_w`) and `x23` (`i_00_ff_w`) behind the dual-TMU trilinear reverse-blend paths that actually consume them
+- preserved the existing register layout and generated-function ABI rather than reworking the hot-path register plan
+- verified the change through fresh ARM64 debug and signed-release rebuilds
+- reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported full-demo `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1` all looked correct, and the run ended with `cache hits=24,421,694`, `misses=234`, `generated blocks=234`, `dithered spans=547,475,548`, `dual_tmu=295,998,696`, and zero reject signals
+
 ## Current Effort Status
 
 Completed so far:
@@ -117,10 +128,11 @@ Completed so far:
 - optimization baseline locked
 - optimization instrumentation committed and baseline-captured
 - Task 3 minimal dither-base hoist implemented and manually revalidated in the working tree
+- Task 4 gated prologue helper loads implemented and manually revalidated in the working tree
 
 Not yet started:
 
-- broader optimization-phase manual regression runs beyond Task 3
+- broader optimization-phase manual regression runs beyond Task 4
 - stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
 
 ## Notes

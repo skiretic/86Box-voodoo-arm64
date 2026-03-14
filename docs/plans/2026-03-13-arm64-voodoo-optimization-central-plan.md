@@ -256,11 +256,11 @@ git commit -m "perf: hoist arm64 voodoo dither base"
 - Modify: `src/include/86box/vid_voodoo_codegen_arm64.h`
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 
-- [ ] **Step 1: Audit prologue constants after the dither change**
+- [x] **Step 1: Audit prologue constants after the dither change**
 
 Identify which pointer or literal loads still dominate short-span setup cost.
 
-- [ ] **Step 2: Apply only ARMv8.0-safe setup improvements**
+- [x] **Step 2: Apply only ARMv8.0-safe setup improvements**
 
 Allowed directions:
 
@@ -270,7 +270,7 @@ Allowed directions:
 
 Do not change the ABI contract of the generated function.
 
-- [ ] **Step 3: Rebuild and compare code size / short-span instrumentation**
+- [x] **Step 3: Rebuild and compare code size / short-span instrumentation**
 
 Run:
 
@@ -283,11 +283,34 @@ Expected:
 - build succeeds
 - emitted code size does not grow unexpectedly for common paths
 
-- [ ] **Step 4: Commit**
+Task 4 slice implemented on 2026-03-13:
+
+- audited the prologue helper loads after Task 3 and identified `x22` (`neon_00_ff_w`), `x23` (`i_00_ff_w`), and `x25` (`bilinear_lookup`) as the clearest feature-gated candidates
+- kept the register map and generated-function ABI unchanged
+- made those helper loads conditional on the block actually using bilinear fetch or dual-TMU trilinear reverse-blend paths
+
+Build verification completed on 2026-03-13:
+
+- `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 4 JIT change
+- `scripts/setup-and-build.sh build` succeeded and re-signed `build/src/86Box.app`
+
+Signed-release runtime validation completed on 2026-03-13 against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`:
+
+- user reported the full `3DMark99` demo looked correct
+- user reported the full `3DMark2000` demo looked correct
+- user reported `Unreal Gold timedemo 1` looked correct
+- cache hits=`24,421,694`, misses=`234`, rejected=`0`
+- generated blocks=`234`, code bytes total=`289,608`, avg=`1237.6`, min=`612`, max=`1856`
+- spans textured=`508,741,370`, untextured=`38,734,178`
+- spans dithered=`547,475,548`, non-dithered=`0`
+- single-TMU spans=`212,742,674`, dual-TMU spans=`295,998,696`
+- W^X rejects=`0`, emit overflow rejects=`0`
+
+- [x] **Step 4: Commit**
 
 ```bash
-git add src/include/86box/vid_voodoo_codegen_arm64.h voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
-git commit -m "perf: reduce arm64 voodoo setup overhead"
+git add src/include/86box/vid_voodoo_codegen_arm64.h docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md docs/2026-03-13-arm64-voodoo-optimization-executive-summary.md docs/2026-03-13-arm64-voodoo-optimization-changelog.md voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
+git commit -m "perf: gate arm64 voodoo setup helper loads"
 ```
 
 ## Chunk 3: Main Span-Loop Work

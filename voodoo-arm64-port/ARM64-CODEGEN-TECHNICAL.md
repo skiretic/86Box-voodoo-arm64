@@ -1285,11 +1285,20 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - a signed-release `Windows 98 Gaming PC` rerun with `86BOX_VOODOO_ARM64_OPT_STATS=1` looked visually correct and ended with `cache hits=6,628,949`, `misses=74`, `generated blocks=74`, `dithered spans=144,619,994`, `dual_tmu=55,989,702`, and zero reject signals
 - follow-up signed-release coverage also looked visually correct across a full `3DMark2000` demo run and `Unreal Gold timedemo 1`, ending with `cache hits=16,145,549`, `misses=146`, `generated blocks=146`, `dithered spans=343,935,094`, `dual_tmu=179,954,012`, and zero reject signals
 
+**Task 4 implementation note (2026-03-13, working tree after `8b58eba10`):**
+- the prologue now keeps `x22` (`neon_00_ff_w`), `x23` (`i_00_ff_w`), and `x25` (`bilinear_lookup`) feature-gated instead of loading them unconditionally for every block
+- `x25` is loaded only for bilinear-capable textured blocks, while `x22`/`x23` are loaded only for the dual-TMU trilinear reverse-blend paths that actually consume them
+- the register assignments and generated-function ABI did not change; only the prologue setup work was trimmed
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
+- a signed-release `Windows 98 Gaming PC` validation run with `86BOX_VOODOO_ARM64_OPT_STATS=1` looked visually correct across full-demo `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1`, ending with `cache hits=24,421,694`, `misses=234`, `generated blocks=234`, `dithered spans=547,475,548`, `dual_tmu=295,998,696`, and zero reject signals
+
 **Completed improvements:**
 
 1. **Cache expansion (done):** Cache increased from 8 to 32 slots per odd/even pair (128 total), greatly reducing thrash on games with many render states.
 
 2. **Task 3 dither setup hoist (working tree):** The dither path no longer rebuilds the `dither_rb` table base inside the per-pixel loop. The green-table lookup still uses the original per-pixel offset materialization because that broader hoist was not yet proven safe.
+
+3. **Task 4 gated helper loads (working tree):** The prologue now skips the `bilinear_lookup`, `neon_00_ff_w`, and `i_00_ff_w` pointer materialization for blocks whose render state cannot reach those helper paths.
 
 **Remaining potential improvements:**
 

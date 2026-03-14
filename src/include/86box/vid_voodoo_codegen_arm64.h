@@ -1911,6 +1911,23 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int depth_jump_pos   = 0;
     int depth_jump_pos2  = 0;
     int loop_jump_pos    = 0;
+    const int uses_texture = params->fbzColorPath & FBZCP_TEXTURE_ENABLED;
+    const int uses_dual_tmu_combine = uses_texture
+                                      && voodoo->dual_tmus
+                                      && ((params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) != TEXTUREMODE_LOCAL)
+                                      && ((params->textureMode[0] & TEXTUREMODE_MASK) != TEXTUREMODE_PASSTHROUGH);
+    const int uses_bilinear_lookup = uses_texture
+                                     && voodoo->bilinear_enabled
+                                     && (((params->textureMode[0] & 6) != 0)
+                                         || (voodoo->dual_tmus && ((params->textureMode[1] & 6) != 0)));
+    const int uses_tc_trilinear_reverse_blend = uses_dual_tmu_combine
+                                                && (((params->textureMode[0] & TEXTUREMODE_TRILINEAR) != 0)
+                                                    || (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) != 0)
+                                                        && tc_sub_clocal_1));
+    const int uses_tca_trilinear_reverse_blend = uses_dual_tmu_combine
+                                                 && (((params->textureMode[0] & TEXTUREMODE_TRILINEAR) != 0)
+                                                     || (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) != 0)
+                                                         && tca_sub_clocal_1));
 
     arm64_codegen_begin_emit();
 
@@ -2042,9 +2059,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         EMIT_MOV_IMM64(19, &logtable);
         EMIT_MOV_IMM64(20, &alookup);
         EMIT_MOV_IMM64(21, &aminuslookup);
-        EMIT_MOV_IMM64(22, &neon_00_ff_w);
-        EMIT_MOV_IMM64(23, &i_00_ff_w);
-        EMIT_MOV_IMM64(25, &bilinear_lookup);
+        if (uses_tc_trilinear_reverse_blend)
+            EMIT_MOV_IMM64(22, &neon_00_ff_w);
+        if (uses_tca_trilinear_reverse_blend)
+            EMIT_MOV_IMM64(23, &i_00_ff_w);
+        if (uses_bilinear_lookup)
+            EMIT_MOV_IMM64(25, &bilinear_lookup);
         EMIT_MOV_IMM64(26, &rgb565);
         if (dither) {
             uintptr_t dither_rb_addr = dither2x2 ? (uintptr_t) dither_rb2x2 : (uintptr_t) dither_rb;

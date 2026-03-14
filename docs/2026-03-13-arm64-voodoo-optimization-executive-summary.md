@@ -76,6 +76,7 @@ Live multi-platform validation  [----------]   0%
 - a signed-release `3DMark99` baseline now shows negligible block-cache misses, all-dithered spans in the sampled run, and common dual-TMU usage
 - Task 3 now hoists only the `dither_rb` table base out of the per-pixel loop by pinning it in otherwise-dead `x2`; `real_y` remains preserved in `x24` and the green-table offset stays on the original path after broader hoisting attempts regressed live rendering
 - fresh debug and signed-release rebuilds both succeed from the Task 3 working tree, and signed-release reruns of `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1` all looked visually correct
+- Task 4 now gates the `x22`/`x23` trilinear helper loads and the `x25` bilinear lookup load so blocks that cannot use those paths stop paying the prologue setup cost, while keeping the generated-function ABI unchanged
 
 ### What has not started yet
 
@@ -109,13 +110,13 @@ This is now complete. The current baseline from the first few minutes of the sig
 
 Task 3 implementation is now in the working tree as a deliberately narrow change: the generated function preserves `real_y` in `x24`, hoists the chosen `dither_rb` base into otherwise-dead `x2`, and leaves the green-table offset on the original path because the broader hoist caused visible green/distorted output during signed-release VM testing.
 
-### 3. Register-resident span core
+### 3. Small prologue gating wins
+
+Task 4’s first safe slice is now in the working tree: helper-pointer materialization for `bilinear_lookup`, `neon_00_ff_w`, and `i_00_ff_w` is no longer unconditional, and the same signed-release validation trio still looked correct.
+
+### 4. Register-resident span core
 
 Keep the hottest remaining span state in registers across the loop, building on the current cached `x` / `x2` baseline.
-
-### 4. Higher-risk specialization only after measurement
-
-Split texture fetch into clearer fast and fallback paths, and only then consider replacing selected `alookup` / `aminuslookup` loads where exact semantics can be proven.
 
 ## Current Risks
 
@@ -129,5 +130,5 @@ Split texture fetch into clearer fast and fallback paths, and only then consider
 
 Finish Task 3 validation from the current working tree:
 
-1. decide whether to capture a stricter like-for-like timed `3DMark99` comparison against the Task 2 baseline, since the current reruns are strongest as correctness/signal checks rather than a performance A/B
-2. move on to the next low-risk optimization task from the central plan
+1. commit the Task 4 gated-helper-load change if we want to preserve this validated checkpoint
+2. then move on to the next low-risk optimization task from the central plan, likely a narrower audit of any remaining always-on helper loads such as `rgb565`
