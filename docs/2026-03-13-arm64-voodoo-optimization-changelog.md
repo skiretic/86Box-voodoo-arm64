@@ -142,9 +142,9 @@ Completed so far:
 - Task 4 gated prologue helper loads committed and manually revalidated
 - Task 5 helper-macro prep committed and build-verified
 
-### 2026-03-13 - Task 5 single-TMU resident state landed in working tree
+### 2026-03-13 - Task 5 single-TMU resident state landed
 
-Commit coverage: working tree after `b4fb0303d` (not yet committed)
+Commit: `9cf474e32` `perf: keep arm64 voodoo single-tmu state in registers`
 
 - added a gated resident-state path for the common textured single-TMU loop, keeping `ib/ig/ir/ia`, `z`, `w`, `tmu0_s/t`, and `tmu0_w` in registers across pixels
 - preserved the cached `w28` / `w27` coordinate handling and left dual-TMU on the original memory-backed path

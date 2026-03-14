@@ -1298,7 +1298,7 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - the corrected encodings were checked against a locally assembled ARM64 probe object before updating the header macros
 - this prep step is build-verified only; no live generated path uses these helpers yet
 
-**Task 5 single-TMU resident-state note (2026-03-13, working tree after `b4fb0303d`):**
+**Task 5 single-TMU resident-state note (2026-03-13, committed in `9cf474e32`):**
 - the common textured single-TMU path now loads `ib/ig/ir/ia` into `v18`, `tmu0_s/t` into `v19`, `tmu0_w` into `x21`, `w` into `x22`, and `z` into `x23` before entering the loop
 - the single-TMU texture fetch path consumes resident TMU0 `s/t/w` instead of reloading them from `state` every pixel
 - the alpha/fog users of iterated alpha, `z`, and `w` also switch to those resident copies on the gated path
@@ -1316,7 +1316,7 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 4. **Task 5 resident-state prep (committed):** The macro layer now has the correct `D0` / `D1` 64-bit scalar/SIMD transfer helpers needed for a register-resident TMU-state design.
 
-5. **Task 5 single-TMU resident state (working tree):** The common textured single-TMU loop now keeps the hottest span state in registers and spills it back once at loop exit instead of round-tripping through memory every pixel.
+5. **Task 5 single-TMU resident state (committed):** The common textured single-TMU loop now keeps the hottest span state in registers and spills it back once at loop exit instead of round-tripping through memory every pixel.
 
 **Remaining potential improvements:**
 
