@@ -83,9 +83,9 @@
  *   x16-x17 = intra-procedure scratch (IP0/IP1)
  *   x19     = logtable pointer     (callee-saved, pinned)
  *   x20     = alookup pointer      (callee-saved, pinned)
- *   x21     = aminuslookup pointer (callee-saved, pinned)
- *   x22     = neon_00_ff_w pointer  (callee-saved, pinned)
- *   x23     = i_00_ff_w pointer    (callee-saved, pinned)
+ *   x21     = aminuslookup pointer or resident tmu0_w (callee-saved)
+ *   x22     = neon_00_ff_w pointer or resident w      (callee-saved)
+ *   x23     = i_00_ff_w pointer or resident z         (callee-saved)
  *   x24     = real_y               (callee-saved copy)
  *   x25     = bilinear_lookup ptr  (callee-saved, pinned)
  *   x26     = rgb565 table pointer  (callee-saved, pinned)
@@ -105,7 +105,10 @@
  *   v13     = color-before-fog copy for ACOLORBEFOREFOG (callee-saved)
  *   v14     = hoisted TMU1 ST deltas {dSdX_1,dTdX_1}    (callee-saved)
  *   v15     = hoisted TMU0 ST deltas {dSdX_0,dTdX_0}    (callee-saved)
- *   v16-v31 = scratch (caller-saved)
+ *   v16-v17 = scratch (caller-saved)
+ *   v18     = resident {ib,ig,ir,ia} on the single-TMU fast path
+ *   v19     = resident {tmu0_s,tmu0_t} on the single-TMU fast path
+ *   v20-v31 = scratch (caller-saved)
  * ======================================================================== */
 
 /*
@@ -1262,12 +1265,15 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
  *   x0 = state, x1 = params (pinned)
  *   x4-x7, x10-x15 = scratch GPR
  *   x19 = logtable pointer (pinned)
+ *   x21 = resident tmu0_w when use_resident_tmu0_state && tmu == 0
  *   x25 = bilinear_lookup pointer (pinned)
  *   v0-v7, v16-v17 = scratch NEON
+ *   v19 = resident {tmu0_s, tmu0_t} when use_resident_tmu0_state && tmu == 0
  *   v8 = neon_01_w (pinned), v9 = neon_ff_w (pinned)
  * ======================================================================== */
 static inline int
-codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int block_pos, int tmu)
+codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int block_pos, int tmu,
+                      int use_resident_tmu0_state)
 {
     (void) voodoo;
 
@@ -1289,7 +1295,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         /* Load S, T, W (64-bit each) for perspective division.
          * TMU0 offsets (496,504,512) fit LDP X signed-7 range; TMU1 (520,528,536) do not.
          * Use LDP for S+T when offset fits, else individual LDR. */
-        if (STATE_tmu_s(tmu) / 8 <= 63) {
+        if (use_resident_tmu0_state && tmu == 0) {
+            addlong(ARM64_FMOV_X_D0(5, 19));
+            addlong(ARM64_FMOV_X_D1(6, 19));
+        } else if (STATE_tmu_s(tmu) / 8 <= 63) {
             /* LDP x5, x6, [x0, #STATE_tmu_s(tmu)] -- S and T paired */
             addlong(ARM64_LDP_OFF_X(5, 6, 0, STATE_tmu_s(tmu)));
         } else {
@@ -1298,7 +1307,11 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         }
 
         /* LDR x7, [x0, #STATE_tmu_w(tmu)] -- load W (64-bit) */
-        addlong(ARM64_LDR_X(7, 0, STATE_tmu_w(tmu)));
+        if (use_resident_tmu0_state && tmu == 0) {
+            addlong(ARM64_MOV_REG_X(7, 21));
+        } else {
+            addlong(ARM64_LDR_X(7, 0, STATE_tmu_w(tmu)));
+        }
 
         /* MOV x4, #(1 << 48) -- dividend for W division
          * MOVZ with hw=3 zeros all other bits. */
@@ -1408,7 +1421,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
         /* Load tmu_s and tmu_t (64-bit).
          * TMU0 offsets fit LDP X signed-7 range; TMU1 do not. */
-        if (STATE_tmu_s(tmu) / 8 <= 63) {
+        if (use_resident_tmu0_state && tmu == 0) {
+            addlong(ARM64_FMOV_X_D0(4, 19));
+            addlong(ARM64_FMOV_X_D1(6, 19));
+        } else if (STATE_tmu_s(tmu) / 8 <= 63) {
             addlong(ARM64_LDP_OFF_X(4, 6, 0, STATE_tmu_s(tmu)));
         } else {
             addlong(ARM64_LDR_X(4, 0, STATE_tmu_s(tmu)));
@@ -1934,6 +1950,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                                                  && (((params->textureMode[0] & TEXTUREMODE_TRILINEAR) != 0)
                                                      || (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) != 0)
                                                          && tca_sub_clocal_1));
+    const int uses_single_tmu_resident_state = uses_texture && !voodoo->dual_tmus;
 
     arm64_codegen_begin_emit();
 
@@ -2082,6 +2099,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
     /* load loop bound STATE_x2 into callee-saved w27 */
     addlong(ARM64_LDR_W(27, 0, STATE_x2));
+
+    if (uses_single_tmu_resident_state) {
+        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
+        addlong(ARM64_LD1_V4S(18, 16));
+        addlong(ARM64_LDR_W(23, 0, STATE_z));
+        addlong(ARM64_LDR_Q(19, 0, STATE_tmu0_s));
+        addlong(ARM64_LDR_X(21, 0, STATE_tmu0_w));
+        addlong(ARM64_LDR_X(22, 0, STATE_w));
+    }
 
     /* ================================================================
      * Load NEON constants into callee-saved V registers
@@ -2319,8 +2345,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         /* MOV w10, #0 -- new_depth = 0 (default if w high bits nonzero) */
         addlong(ARM64_MOV_ZERO(10));
 
-        /* LDR w4, [x0, #(STATE_w + 4)] -- load high 32 bits of w */
-        addlong(ARM64_LDR_W(4, 0, STATE_w + 4));
+        if (uses_single_tmu_resident_state) {
+            addlong(ARM64_LSR_IMM_X(4, 22, 32));
+        } else {
+            /* LDR w4, [x0, #(STATE_w + 4)] -- load high 32 bits of w */
+            addlong(ARM64_LDR_W(4, 0, STATE_w + 4));
+        }
 
         /* UXTH w5, w4 -- extract bits 32..47 of w; if nonzero, w is too large so depth stays 0 */
         addlong(ARM64_UXTH(5, 4));
@@ -2332,7 +2362,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         /* High word is zero. Now compute depth from low 32 bits.
          * LDR w4, [x0, #STATE_w] -- load low 32 bits of w
          */
-        addlong(ARM64_LDR_W(4, 0, STATE_w));
+        if (uses_single_tmu_resident_state) {
+            addlong(ARM64_MOV_REG(4, 22));
+        } else {
+            addlong(ARM64_LDR_W(4, 0, STATE_w));
+        }
 
         /* MOV w10, #0xF001 -- depth = 0xF001 (max if low word also zero-ish) */
         addlong(ARM64_MOVZ_W(10, 0xF001));
@@ -2405,8 +2439,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * depth = state->z >> 12, clamped to [0, 0xFFFF]
      * ================================================================ */
     if (!(params->fbzMode & FBZ_W_BUFFER)) {
-        /* LDR w10, [x0, #STATE_z] */
-        addlong(ARM64_LDR_W(10, 0, STATE_z));
+        if (uses_single_tmu_resident_state) {
+            addlong(ARM64_MOV_REG(10, 23));
+        } else {
+            /* LDR w10, [x0, #STATE_z] */
+            addlong(ARM64_LDR_W(10, 0, STATE_z));
+        }
 
         /* ASR w10, w10, #12 */
         addlong(ARM64_ASR_IMM(10, 10, 12));
@@ -2556,7 +2594,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
         if ((params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL || !voodoo->dual_tmus) {
             /* TMU0 only sampling local colour, or only one TMU */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0, uses_single_tmu_resident_state);
 
             /* FMOV s0, w4 -- move texel to NEON v0 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -2566,7 +2604,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_STR_W(4, 0, STATE_tex_a));
         } else if ((params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH) {
             /* TMU0 in pass-through mode, only sample TMU1 */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, 0);
 
             /* FMOV s0, w4 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -2592,7 +2630,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
              * tc_reverse_blend, tc_add, tc_invert for RGB channels.
              * And tca_* equivalents for alpha channel.
              * ============================================================ */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, 0);
 
             /* FMOV s3, w4 -- TMU1 result in v3 */
             addlong(ARM64_FMOV_S_W(3, 4));
@@ -2793,7 +2831,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             }
 
             /* ---- Now fetch TMU0 ---- */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0, 0);
 
             /* FMOV s0, w4 -- TMU0 result in v0 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -3080,8 +3118,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
     /* Cache iterated BGRA pack in v6 (NEON scratch, free during color combine) */
     if (needs_iter_bgra) {
-        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-        addlong(ARM64_LD1_V4S(6, 16));
+        if (uses_single_tmu_resident_state) {
+            addlong(ARM64_MOV_V(6, 18));
+        } else {
+            addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
+            addlong(ARM64_LD1_V4S(6, 16));
+        }
         addlong(ARM64_SSHR_V4S(6, 6, 12));
         addlong(ARM64_SQXTN_4H_4S(6, 6));
         addlong(ARM64_SQXTUN_8B_8H(6, 6));
@@ -3170,7 +3212,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         switch (a_sel) {
             case A_SEL_ITER_A:
                 /* w14 = CLAMP(state->ia >> 12) */
-                addlong(ARM64_LDR_W(14, 0, STATE_ia));
+                if (uses_single_tmu_resident_state) {
+                    addlong(ARM64_UMOV_W_S(14, 18, 3));
+                } else {
+                    addlong(ARM64_LDR_W(14, 0, STATE_ia));
+                }
                 addlong(ARM64_ASR_IMM(14, 14, 12));
                 /* Clamp to [0, 0xFF] */
                 addlong(ARM64_MOVZ_W(10, 0xFF));
@@ -3205,7 +3251,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_MOV_REG(15, 14));
                 } else {
                     /* Compute CLAMP(state->ia >> 12) */
-                    addlong(ARM64_LDR_W(15, 0, STATE_ia));
+                    if (uses_single_tmu_resident_state) {
+                        addlong(ARM64_UMOV_W_S(15, 18, 3));
+                    } else {
+                        addlong(ARM64_LDR_W(15, 0, STATE_ia));
+                    }
                     addlong(ARM64_ASR_IMM(15, 15, 12));
                     addlong(ARM64_MOVZ_W(10, 0xFF));
                     addlong(ARM64_BIC_REG_ASR(15, 15, 15, 31));  /* zero if negative */
@@ -3218,7 +3268,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_LDRB_IMM(15, 1, PARAMS_color0 + 3));
                 break;
             case CCA_LOCALSELECT_ITER_Z:
-                addlong(ARM64_LDR_W(15, 0, STATE_z));
+                if (uses_single_tmu_resident_state) {
+                    addlong(ARM64_MOV_REG(15, 23));
+                } else {
+                    addlong(ARM64_LDR_W(15, 0, STATE_z));
+                }
                 /* Ensure w10 = 0xFF for clamping if a_sel != ITER_A */
                 if (a_sel != A_SEL_ITER_A) {
                     addlong(ARM64_MOVZ_W(10, 0xFF));
@@ -3415,7 +3469,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     /* Need to compute a_local if not done above */
                     switch (cca_localselect) {
                         case CCA_LOCALSELECT_ITER_A:
-                            addlong(ARM64_LDR_W(4, 0, STATE_ia));
+                            if (uses_single_tmu_resident_state) {
+                                addlong(ARM64_UMOV_W_S(4, 18, 3));
+                            } else {
+                                addlong(ARM64_LDR_W(4, 0, STATE_ia));
+                            }
                             addlong(ARM64_ASR_IMM(4, 4, 12));
                             addlong(ARM64_MOVZ_W(10, 0xFF));
                             addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
@@ -3426,7 +3484,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                             addlong(ARM64_LDRB_IMM(4, 1, PARAMS_color0 + 3));
                             break;
                         case CCA_LOCALSELECT_ITER_Z:
-                            addlong(ARM64_LDR_W(4, 0, STATE_z));
+                            if (uses_single_tmu_resident_state) {
+                                addlong(ARM64_MOV_REG(4, 23));
+                            } else {
+                                addlong(ARM64_LDR_W(4, 0, STATE_z));
+                            }
                             addlong(ARM64_ASR_IMM(4, 4, 20));
                             addlong(ARM64_MOVZ_W(10, 0xFF));
                             addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
@@ -3594,14 +3656,22 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
                 case FOG_Z:
                     /* fog_a = (z >> 20) & 0xff -- match interpreter */
-                    addlong(ARM64_LDR_W(4, 0, STATE_z));
+                    if (uses_single_tmu_resident_state) {
+                        addlong(ARM64_MOV_REG(4, 23));
+                    } else {
+                        addlong(ARM64_LDR_W(4, 0, STATE_z));
+                    }
                     addlong(ARM64_LSR_IMM(4, 4, 20));
                     addlong(ARM64_AND_MASK(4, 4, 8));
                     break;
 
                 case FOG_ALPHA:
                     /* fog_a = CLAMP(ia >> 12) */
-                    addlong(ARM64_LDR_W(4, 0, STATE_ia));
+                    if (uses_single_tmu_resident_state) {
+                        addlong(ARM64_UMOV_W_S(4, 18, 3));
+                    } else {
+                        addlong(ARM64_LDR_W(4, 0, STATE_ia));
+                    }
                     addlong(ARM64_ASR_IMM(4, 4, 12));
                     /* Clamp to [0, 0xFF] */
                     addlong(ARM64_MOVZ_W(10, 0xFF));
@@ -3615,7 +3685,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                      * The interpreter masks BEFORE clamping, so values > 0xFF
                      * wrap to their low byte rather than saturating to 0xFF.
                      * The AND alone is sufficient (result always in [0,255]). */
-                    addlong(ARM64_LDR_W(4, 0, STATE_w + 4));  /* high word of w */
+                    if (uses_single_tmu_resident_state) {
+                        addlong(ARM64_LSR_IMM_X(4, 22, 32));
+                    } else {
+                        addlong(ARM64_LDR_W(4, 0, STATE_w + 4));  /* high word of w */
+                    }
                     addlong(ARM64_AND_MASK(4, 4, 8));          /* & 0xFF */
                     break;
             }
@@ -4305,59 +4379,79 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * x86-64 ref: lines 3256-3445
      * ================================================================== */
 
-    /* ib/ig/ir/ia increment (4 x int32, contiguous at STATE_ib=472).
-     * 472 is not 16-byte aligned, so use ADD+LD1 instead of LDR Q.
-     * RGBA deltas are hoisted in v12 from the prologue. */
-    addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));    /* x16 = &state->ib */
-    addlong(ARM64_LD1_V4S(0, 16));                 /* v0 = {ib, ig, ir, ia} */
-    if (state->xdir > 0) {
-        addlong(ARM64_ADD_V4S(0, 0, 12));
-    } else {
-        addlong(ARM64_SUB_V4S(0, 0, 12));
-    }
-    addlong(ARM64_ST1_V4S(0, 16));  /* store v0 back to [x16] (= &state->ib) */
+    if (uses_single_tmu_resident_state) {
+        addlong(ARM64_LDR_W(5, 1, PARAMS_dZdX));
+        addlong(ARM64_LDR_X(11, 1, PARAMS_tmu0_dWdX));
+        addlong(ARM64_LDR_X(12, 1, PARAMS_dWdX));
 
-    /* Z increment */
-    /* LDR w4, [x0, #STATE_z] */
-    addlong(ARM64_LDR_W(4, 0, STATE_z));
-    /* LDR w5, [x1, #PARAMS_dZdX] */
-    addlong(ARM64_LDR_W(5, 1, PARAMS_dZdX));
-    if (state->xdir > 0) {
-        addlong(ARM64_ADD_REG(4, 4, 5));
+        if (state->xdir > 0) {
+            addlong(ARM64_ADD_V4S(18, 18, 12));
+            addlong(ARM64_ADD_REG(23, 23, 5));
+            addlong(ARM64_ADD_V2D(19, 19, 15));
+            addlong(ARM64_ADD_REG_X(21, 21, 11));
+            addlong(ARM64_ADD_REG_X(22, 22, 12));
+        } else {
+            addlong(ARM64_SUB_V4S(18, 18, 12));
+            addlong(ARM64_SUB_REG(23, 23, 5));
+            addlong(ARM64_SUB_V2D(19, 19, 15));
+            addlong(ARM64_SUB_REG_X(21, 21, 11));
+            addlong(ARM64_SUB_REG_X(22, 22, 12));
+        }
     } else {
-        addlong(ARM64_SUB_REG(4, 4, 5));
-    }
-    addlong(ARM64_STR_W(4, 0, STATE_z));
+        /* ib/ig/ir/ia increment (4 x int32, contiguous at STATE_ib=472).
+         * 472 is not 16-byte aligned, so use ADD+LD1 instead of LDR Q.
+         * RGBA deltas are hoisted in v12 from the prologue. */
+        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));    /* x16 = &state->ib */
+        addlong(ARM64_LD1_V4S(0, 16));                 /* v0 = {ib, ig, ir, ia} */
+        if (state->xdir > 0) {
+            addlong(ARM64_ADD_V4S(0, 0, 12));
+        } else {
+            addlong(ARM64_SUB_V4S(0, 0, 12));
+        }
+        addlong(ARM64_ST1_V4S(0, 16));  /* store v0 back to [x16] (= &state->ib) */
 
-    /* TMU0 s/t increment (64-bit add/sub).
-     * TMU0 ST deltas are hoisted in v15 from the prologue. */
-    addlong(ARM64_LDR_Q(0, 0, STATE_tmu0_s));
-    if (state->xdir > 0) {
-        addlong(ARM64_ADD_V2D(0, 0, 15));
-    } else {
-        addlong(ARM64_SUB_V2D(0, 0, 15));
-    }
-    addlong(ARM64_STR_Q(0, 0, STATE_tmu0_s));
+        /* Z increment */
+        /* LDR w4, [x0, #STATE_z] */
+        addlong(ARM64_LDR_W(4, 0, STATE_z));
+        /* LDR w5, [x1, #PARAMS_dZdX] */
+        addlong(ARM64_LDR_W(5, 1, PARAMS_dZdX));
+        if (state->xdir > 0) {
+            addlong(ARM64_ADD_REG(4, 4, 5));
+        } else {
+            addlong(ARM64_SUB_REG(4, 4, 5));
+        }
+        addlong(ARM64_STR_W(4, 0, STATE_z));
 
-    /* TMU0 W increment (64-bit) */
-    addlong(ARM64_LDR_X(10, 0, STATE_tmu0_w));
-    addlong(ARM64_LDR_X(11, 1, PARAMS_tmu0_dWdX));
-    if (state->xdir > 0) {
-        addlong(ARM64_ADD_REG_X(10, 10, 11));
-    } else {
-        addlong(ARM64_SUB_REG_X(10, 10, 11));
-    }
-    addlong(ARM64_STR_X(10, 0, STATE_tmu0_w));
+        /* TMU0 s/t increment (64-bit add/sub).
+         * TMU0 ST deltas are hoisted in v15 from the prologue. */
+        addlong(ARM64_LDR_Q(0, 0, STATE_tmu0_s));
+        if (state->xdir > 0) {
+            addlong(ARM64_ADD_V2D(0, 0, 15));
+        } else {
+            addlong(ARM64_SUB_V2D(0, 0, 15));
+        }
+        addlong(ARM64_STR_Q(0, 0, STATE_tmu0_s));
 
-    /* Global W increment (64-bit) */
-    addlong(ARM64_LDR_X(10, 0, STATE_w));
-    addlong(ARM64_LDR_X(11, 1, PARAMS_dWdX));
-    if (state->xdir > 0) {
-        addlong(ARM64_ADD_REG_X(10, 10, 11));
-    } else {
-        addlong(ARM64_SUB_REG_X(10, 10, 11));
+        /* TMU0 W increment (64-bit) */
+        addlong(ARM64_LDR_X(10, 0, STATE_tmu0_w));
+        addlong(ARM64_LDR_X(11, 1, PARAMS_tmu0_dWdX));
+        if (state->xdir > 0) {
+            addlong(ARM64_ADD_REG_X(10, 10, 11));
+        } else {
+            addlong(ARM64_SUB_REG_X(10, 10, 11));
+        }
+        addlong(ARM64_STR_X(10, 0, STATE_tmu0_w));
+
+        /* Global W increment (64-bit) */
+        addlong(ARM64_LDR_X(10, 0, STATE_w));
+        addlong(ARM64_LDR_X(11, 1, PARAMS_dWdX));
+        if (state->xdir > 0) {
+            addlong(ARM64_ADD_REG_X(10, 10, 11));
+        } else {
+            addlong(ARM64_SUB_REG_X(10, 10, 11));
+        }
+        addlong(ARM64_STR_X(10, 0, STATE_w));
     }
-    addlong(ARM64_STR_X(10, 0, STATE_w));
 
     /* TMU1 s/t/w if dual TMUs */
     if (voodoo->dual_tmus) {
@@ -4432,6 +4526,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     {
         int32_t loop_offset = loop_jump_pos - block_pos;
         addlong(ARM64_BCOND(loop_offset, COND_NE));
+    }
+
+    if (uses_single_tmu_resident_state) {
+        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
+        addlong(ARM64_ST1_V4S(18, 16));
+        addlong(ARM64_STR_W(23, 0, STATE_z));
+        addlong(ARM64_STR_Q(19, 0, STATE_tmu0_s));
+        addlong(ARM64_STR_X(21, 0, STATE_tmu0_w));
+        addlong(ARM64_STR_X(22, 0, STATE_w));
     }
 
     /* ================================================================
