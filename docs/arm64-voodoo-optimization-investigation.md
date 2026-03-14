@@ -151,7 +151,7 @@ High for dithered workloads, probably low risk, and a good first optimization ev
 
 ### Evidence
 
-The backend pins pointers to `alookup` and `aminuslookup` (`vid_voodoo_codegen_arm64.h:2038-2043`) and uses them repeatedly in fog and alpha blend paths.
+The backend still pins pointers to `alookup` and `aminuslookup` (`vid_voodoo_codegen_arm64.h:2038-2043`) because the tables remain part of the JIT support setup, but the hot-path fog and alpha blend users were the clearest first candidates for direct synthesis.
 
 The tables themselves are simple broadcasts:
 
@@ -184,6 +184,15 @@ Especially in:
 `alookup[c + 1]` semantics are sometimes used for rounding/scale behavior, so the scalar alpha path has to preserve the exact `+1` behavior where the current code relies on it.
 
 Because output-alpha parity was recently widened in both JITs, this optimization is no longer just a generic cleanup. The safest path is to target fog and the simpler RGB blend-factor cases first, then leave the newer output-alpha writeback path alone until broader manual regression coverage exists.
+
+### Current Task 8 slice
+
+The 2026-03-14 working tree now applies that narrow first step:
+
+- non-constant fog synthesizes the `alookup[fog_a + 1]` factor with scalar `fog_a + 1` plus `dup vN.4h, wAlpha`, preserving the exact `+1` semantics
+- the simple RGB blend-factor cases synthesize `src_alpha`, `dst_alpha`, `(255 - src_alpha)`, `(255 - dst_alpha)`, and saturate factors directly from the recovered 8-bit alpha values
+- the newer output-alpha writeback path still consumes the same doubled `w12` / `w5` convention as before and was intentionally not reopened
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` verification succeeded after this slice, and the signed-build/manual alpha-sensitive pass (`Lands of Lore III`, `Extreme Assault`, `Half-Life 1`) also looked correct
 
 ### Expected payoff
 

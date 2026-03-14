@@ -1569,68 +1569,125 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* w7 holds tex_shift, used directly in LSL below */
 
-            /* w13 = T+1 (next row) */
-            addlong(ARM64_MOV_REG(13, 5));
+            if (!state->clamp_s[tmu] && !state->clamp_t[tmu]) {
+                int fast_s_neg_pos;
+                int fast_s_edge_pos;
+                int fast_t_neg_pos;
+                int fast_t_edge_pos;
+                int bilinear_wrap_done;
 
-            /* Clamp or wrap S and T coordinates */
-            if (!state->clamp_s[tmu]) {
-                /* AND w4, w4, params->tex_w_mask[tmu][lod] */
+                /* Fast path: skip wrap correction when S/T are already
+                 * in range and neither coordinate is about to cross the
+                 * bilinear edge sample. */
+                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
+                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
+                addlong(ARM64_CMP_IMM(4, 0));
+                fast_s_neg_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_LT));
+                addlong(ARM64_CMP_REG(4, 15));
+                fast_s_edge_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_CS));
+
+                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
+                addlong(ARM64_LDR_W_REG_LSL2(10, 14, 6));
+                addlong(ARM64_CMP_IMM(5, 0));
+                fast_t_neg_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_LT));
+                addlong(ARM64_CMP_REG(5, 10));
+                fast_t_edge_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_CS));
+
+                addlong(ARM64_ADD_IMM(13, 5, 1));
+                addlong(ARM64_LSL_REG(11, 5, 7));
+                addlong(ARM64_LSL_REG(13, 13, 7));
+                addlong(ARM64_ADD_REG_X_LSL(14, 12, 11, 2));
+                addlong(ARM64_ADD_REG_X_LSL(13, 12, 13, 2));
+                addlong(ARM64_LSL_IMM(11, 4, 2));
+                addlong(ARM64_LDR_D_REG(0, 14, 11));
+                addlong(ARM64_LDR_D_REG(1, 13, 11));
+
+                bilinear_wrap_done = block_pos;
+                addlong(ARM64_B_PLACEHOLDER);
+
+                PATCH_FORWARD_BCOND(fast_s_neg_pos);
+                PATCH_FORWARD_BCOND(fast_s_edge_pos);
+                PATCH_FORWARD_BCOND(fast_t_neg_pos);
+                PATCH_FORWARD_BCOND(fast_t_edge_pos);
+
+                /* Fallback: preserve the existing wrap/edge handling when
+                 * coordinates need correction or touch the bilinear edge. */
                 addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
                 addlong(ARM64_AND_REG(4, 4, 15));
-            }
-
-            /* T1 = T + 1 */
-            addlong(ARM64_ADD_IMM(13, 13, 1));
-
-            if (state->clamp_t[tmu]) {
-                /* Clamp T1 to [0, tex_h_mask] and T0 to [0, tex_h_mask] */
-                /* Load tex_h_mask[tmu][lod] */
+                addlong(ARM64_ADD_IMM(13, 5, 1));
                 addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
+                addlong(ARM64_LDR_W_REG_LSL2(10, 14, 6));
+                addlong(ARM64_AND_REG(13, 13, 10));
+                addlong(ARM64_AND_REG(5, 5, 10));
+                addlong(ARM64_LSL_REG(5, 5, 7));
+                addlong(ARM64_LSL_REG(13, 13, 7));
+                addlong(ARM64_ADD_REG_X_LSL(14, 12, 5, 2));
+                addlong(ARM64_ADD_REG_X_LSL(13, 12, 13, 2));
+                addlong(ARM64_CMP_REG(4, 15));
+                {
+                    int wrap_skip = block_pos;
+                    addlong(ARM64_BCOND_PLACEHOLDER(COND_EQ));
 
-                /* Clamp T1: if negative, 0; if > mask, mask */
-                addlong(ARM64_CMP_IMM(13, 0));
-                addlong(ARM64_CSEL(13, 31, 13, COND_LT));
-                addlong(ARM64_CMP_REG(13, 15));
-                addlong(ARM64_CSEL(13, 15, 13, COND_HI));
+                    addlong(ARM64_LSL_IMM(11, 4, 2));
+                    addlong(ARM64_LDR_D_REG(0, 14, 11));
+                    addlong(ARM64_LDR_D_REG(1, 13, 11));
 
-                /* Clamp T0: if negative, 0; if > mask, mask */
-                addlong(ARM64_CMP_IMM(5, 0));
-                addlong(ARM64_CSEL(5, 31, 5, COND_LT));
-                addlong(ARM64_CMP_REG(5, 15));
-                addlong(ARM64_CSEL(5, 15, 5, COND_HI));
-            } else {
-                /* AND T1 with tex_h_mask */
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
-                addlong(ARM64_AND_REG(13, 13, 15));
-                /* AND T0 with tex_h_mask */
-                addlong(ARM64_AND_REG(5, 5, 15));
-            }
+                    {
+                        int normal_done = block_pos;
+                        addlong(ARM64_B_PLACEHOLDER);
 
-            /* Compute row addresses:
-             * T0_addr = tex_base + (T0 << tex_shift) * 4
-             * T1_addr = tex_base + (T1 << tex_shift) * 4
-             *
-             * x86-64: SHL EBX, CL; SHL EDX, CL
-             *         LEA RBX, [RBP+RBX*4]; LEA RDX, [RBP+RDX*4]
-             *
-             * ARM64: LSL w5, w5, w7; LSL w13, w13, w7
-             *        ADD x13_row0, x12, x5, LSL #2
-             *        ADD x14_row1, x12, x13, LSL #2
-             */
-            addlong(ARM64_LSL_REG(5, 5, 7));
-            addlong(ARM64_LSL_REG(13, 13, 7));
-            /* x13 = row1 address, x14 = row0 address (reuse registers) */
-            addlong(ARM64_ADD_REG_X_LSL(14, 12, 5, 2));   /* x14 = tex_base + T0_offset*4 */
-            addlong(ARM64_ADD_REG_X_LSL(13, 12, 13, 2));  /* x13 = tex_base + T1_offset*4 */
+                        PATCH_FORWARD_BCOND(wrap_skip);
 
-            /* Handle S clamping for bilinear (need S and S+1 texels) */
-            if (state->clamp_s[tmu]) {
+                        addlong(ARM64_LDR_W_REG_LSL2(11, 14, 4));
+                        addlong(ARM64_FMOV_S_W(0, 11));
+                        addlong(ARM64_LDR_W(11, 14, 0));
+                        addlong(ARM64_INS_S(0, 1, 11));
+                        addlong(ARM64_LDR_W_REG_LSL2(11, 13, 4));
+                        addlong(ARM64_FMOV_S_W(1, 11));
+                        addlong(ARM64_LDR_W(11, 13, 0));
+                        addlong(ARM64_INS_S(1, 1, 11));
+
+                        PATCH_FORWARD_B(normal_done);
+                    }
+                }
+
+                PATCH_FORWARD_B(bilinear_wrap_done);
+            } else if (state->clamp_s[tmu]) {
                 /* Load tex_w_mask[tmu][lod] */
                 addlong(ARM64_ADD_IMM_X(15, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 15, 6));
+
+                /* T1 = T + 1 */
+                addlong(ARM64_ADD_IMM(13, 5, 1));
+
+                if (state->clamp_t[tmu]) {
+                    /* Clamp T1 to [0, tex_h_mask] and T0 to [0, tex_h_mask] */
+                    addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
+                    addlong(ARM64_LDR_W_REG_LSL2(10, 14, 6));
+                    addlong(ARM64_CMP_IMM(13, 0));
+                    addlong(ARM64_CSEL(13, 31, 13, COND_LT));
+                    addlong(ARM64_CMP_REG(13, 10));
+                    addlong(ARM64_CSEL(13, 10, 13, COND_HI));
+                    addlong(ARM64_CMP_IMM(5, 0));
+                    addlong(ARM64_CSEL(5, 31, 5, COND_LT));
+                    addlong(ARM64_CMP_REG(5, 10));
+                    addlong(ARM64_CSEL(5, 10, 5, COND_HI));
+                } else {
+                    addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
+                    addlong(ARM64_LDR_W_REG_LSL2(10, 14, 6));
+                    addlong(ARM64_AND_REG(13, 13, 10));
+                    addlong(ARM64_AND_REG(5, 5, 10));
+                }
+
+                addlong(ARM64_LSL_REG(5, 5, 7));
+                addlong(ARM64_LSL_REG(13, 13, 7));
+                addlong(ARM64_ADD_REG_X_LSL(14, 12, 5, 2));
+                addlong(ARM64_ADD_REG_X_LSL(13, 12, 13, 2));
 
                 /* bilinear_shift is in w17 */
 
@@ -1680,45 +1737,53 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                     }
                 }
             } else {
-                /* Non-clamped: check if S wraps at texture edge */
-                addlong(ARM64_ADD_IMM_X(15, 1, PARAMS_tex_w_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 15, 6));
-
-                /* bilinear_shift is in w17 */
-
+                /* Mixed clamp_s=0/clamp_t=1 path keeps the original
+                 * correction logic and only reaches here when T still
+                 * needs explicit clamp handling. */
+                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
+                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
+                addlong(ARM64_AND_REG(4, 4, 15));
+                addlong(ARM64_ADD_IMM(13, 5, 1));
+                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
+                addlong(ARM64_LDR_W_REG_LSL2(10, 14, 6));
+                addlong(ARM64_CMP_IMM(13, 0));
+                addlong(ARM64_CSEL(13, 31, 13, COND_LT));
+                addlong(ARM64_CMP_REG(13, 10));
+                addlong(ARM64_CSEL(13, 10, 13, COND_HI));
+                addlong(ARM64_CMP_IMM(5, 0));
+                addlong(ARM64_CSEL(5, 31, 5, COND_LT));
+                addlong(ARM64_CMP_REG(5, 10));
+                addlong(ARM64_CSEL(5, 10, 5, COND_HI));
+                addlong(ARM64_LSL_REG(5, 5, 7));
+                addlong(ARM64_LSL_REG(13, 13, 7));
+                addlong(ARM64_ADD_REG_X_LSL(14, 12, 5, 2));
+                addlong(ARM64_ADD_REG_X_LSL(13, 12, 13, 2));
                 addlong(ARM64_CMP_REG(4, 15));
                 {
                     int wrap_skip = block_pos;
-                    addlong(ARM64_BCOND_PLACEHOLDER(COND_EQ)); /* if at edge, wrap */
+                    addlong(ARM64_BCOND_PLACEHOLDER(COND_EQ));
 
-                    /* Normal case: S and S+1 contiguous */
-                    /* LSL w4, w4, #2 -- convert texel index to byte offset (4 bytes/texel) */
-                    addlong(ARM64_LSL_IMM(4, 4, 2));
-                    /* LDR d0, [x14, x4] */
-                    addlong(ARM64_LDR_D_REG(0, 14, 4));
-                    addlong(ARM64_LDR_D_REG(1, 13, 4));
+                    addlong(ARM64_LSL_IMM(11, 4, 2));
+                    addlong(ARM64_LDR_D_REG(0, 14, 11));
+                    addlong(ARM64_LDR_D_REG(1, 13, 11));
 
-                    int normal_done = block_pos;
-                    addlong(ARM64_B_PLACEHOLDER);
+                    {
+                        int normal_done = block_pos;
+                        addlong(ARM64_B_PLACEHOLDER);
 
-                    /* Wrap case: S is at edge, S+1 wraps to 0 */
-                    PATCH_FORWARD_BCOND(wrap_skip);
+                        PATCH_FORWARD_BCOND(wrap_skip);
 
-                    /* Load S texel, then load texel at S=0 (wrap), combine */
-                    /* row0[S] */
-                    addlong(ARM64_LDR_W_REG_LSL2(11, 14, 4));
-                    addlong(ARM64_FMOV_S_W(0, 11));
-                    /* row0[0] -- wrapped S+1 */
-                    addlong(ARM64_LDR_W(11, 14, 0));
-                    addlong(ARM64_INS_S(0, 1, 11));  /* v0.S[1] = row0[0] */
-                    /* row1[S] */
-                    addlong(ARM64_LDR_W_REG_LSL2(11, 13, 4));
-                    addlong(ARM64_FMOV_S_W(1, 11));
-                    /* row1[0] */
-                    addlong(ARM64_LDR_W(11, 13, 0));
-                    addlong(ARM64_INS_S(1, 1, 11));
+                        addlong(ARM64_LDR_W_REG_LSL2(11, 14, 4));
+                        addlong(ARM64_FMOV_S_W(0, 11));
+                        addlong(ARM64_LDR_W(11, 14, 0));
+                        addlong(ARM64_INS_S(0, 1, 11));
+                        addlong(ARM64_LDR_W_REG_LSL2(11, 13, 4));
+                        addlong(ARM64_FMOV_S_W(1, 11));
+                        addlong(ARM64_LDR_W(11, 13, 0));
+                        addlong(ARM64_INS_S(1, 1, 11));
 
-                    PATCH_FORWARD_B(normal_done);
+                        PATCH_FORWARD_B(normal_done);
+                    }
                 }
             }
 
@@ -1832,55 +1897,104 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* LSR w5, w5, w6  (T >> (lod + 4)) */
             addlong(ARM64_LSR_REG(5, 5, 6));
 
-            /* Clamp or wrap S */
-            if (state->clamp_s[tmu]) {
-                /* Clamp S to [0, tex_w_mask[tmu][lod]]
-                 * x86-64 uses -0x10 hack with ECX*4. We compute cleanly.
-                 * w11 = original LOD (saved before ADD w6, w6, #4)
-                 */
+            if (!state->clamp_s[tmu] && !state->clamp_t[tmu]) {
+                int fast_s_neg_pos;
+                int fast_s_range_pos;
+                int fast_t_neg_pos;
+                int fast_t_range_pos;
+                int point_wrap_done;
+
+                /* Fast path: when wrap coordinates are already in range we
+                 * can skip the mask/correction work and index directly. */
                 addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
-
-                /* If S < 0, S = 0 */
                 addlong(ARM64_CMP_IMM(4, 0));
-                addlong(ARM64_CSEL(4, 31, 4, COND_LT));
-                /* If S >= mask, S = mask */
+                fast_s_neg_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_LT));
                 addlong(ARM64_CMP_REG(4, 15));
-                addlong(ARM64_CSEL(4, 15, 4, COND_CS));
-            } else {
-                /* AND S with tex_w_mask
-                 * w11 = original LOD
-                 */
+                fast_s_range_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_HI));
+
+                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
+                addlong(ARM64_LDR_W_REG_LSL2(10, 14, 11));
+                addlong(ARM64_CMP_IMM(5, 0));
+                fast_t_neg_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_LT));
+                addlong(ARM64_CMP_REG(5, 10));
+                fast_t_range_pos = block_pos;
+                addlong(ARM64_BCOND_PLACEHOLDER(COND_HI));
+
+                addlong(ARM64_LSL_REG(5, 5, 7));
+                addlong(ARM64_ADD_REG(5, 5, 4));
+                addlong(ARM64_LDR_W_REG_LSL2(4, 12, 5));
+
+                point_wrap_done = block_pos;
+                addlong(ARM64_B_PLACEHOLDER);
+
+                PATCH_FORWARD_BCOND(fast_s_neg_pos);
+                PATCH_FORWARD_BCOND(fast_s_range_pos);
+                PATCH_FORWARD_BCOND(fast_t_neg_pos);
+                PATCH_FORWARD_BCOND(fast_t_range_pos);
+
                 addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
                 addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
                 addlong(ARM64_AND_REG(4, 4, 15));
-            }
-
-            /* Clamp or wrap T */
-            if (state->clamp_t[tmu]) {
                 addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
+                addlong(ARM64_LDR_W_REG_LSL2(10, 14, 11));
+                addlong(ARM64_AND_REG(5, 5, 10));
+                addlong(ARM64_LSL_REG(5, 5, 7));
+                addlong(ARM64_ADD_REG(5, 5, 4));
+                addlong(ARM64_LDR_W_REG_LSL2(4, 12, 5));
 
-                addlong(ARM64_CMP_IMM(5, 0));
-                addlong(ARM64_CSEL(5, 31, 5, COND_LT));
-                addlong(ARM64_CMP_REG(5, 15));
-                addlong(ARM64_CSEL(5, 15, 5, COND_CS));
+                PATCH_FORWARD_B(point_wrap_done);
             } else {
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
-                addlong(ARM64_AND_REG(5, 5, 15));
+                /* Clamp or mixed clamp/wrap modes stay on the validated
+                 * correction path. */
+                if (state->clamp_s[tmu]) {
+                    /* Clamp S to [0, tex_w_mask[tmu][lod]]
+                     * x86-64 uses -0x10 hack with ECX*4. We compute cleanly.
+                     * w11 = original LOD (saved before ADD w6, w6, #4)
+                     */
+                    addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
+                    addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
+
+                    /* If S < 0, S = 0 */
+                    addlong(ARM64_CMP_IMM(4, 0));
+                    addlong(ARM64_CSEL(4, 31, 4, COND_LT));
+                    /* If S >= mask, S = mask */
+                    addlong(ARM64_CMP_REG(4, 15));
+                    addlong(ARM64_CSEL(4, 15, 4, COND_CS));
+                } else {
+                    /* AND S with tex_w_mask
+                     * w11 = original LOD
+                     */
+                    addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
+                    addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
+                    addlong(ARM64_AND_REG(4, 4, 15));
+                }
+
+                /* Clamp or wrap T */
+                if (state->clamp_t[tmu]) {
+                    addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
+                    addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
+
+                    addlong(ARM64_CMP_IMM(5, 0));
+                    addlong(ARM64_CSEL(5, 31, 5, COND_LT));
+                    addlong(ARM64_CMP_REG(5, 15));
+                    addlong(ARM64_CSEL(5, 15, 5, COND_CS));
+                } else {
+                    addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
+                    addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
+                    addlong(ARM64_AND_REG(5, 5, 15));
+                }
+
+                /* Compute linear texel index: (T << tex_shift) + S
+                 * then load texel: tex[tmu][lod][(T << shift) + S]
+                 */
+                addlong(ARM64_LSL_REG(5, 5, 7));
+                addlong(ARM64_ADD_REG(5, 5, 4));
+                addlong(ARM64_LDR_W_REG_LSL2(4, 12, 5));
             }
-
-            /* Compute linear texel index: (T << tex_shift) + S
-             * then load texel: tex[tmu][lod][(T << shift) + S]
-             */
-            /* LSL w5, w5, w7 */
-            addlong(ARM64_LSL_REG(5, 5, 7));
-            /* ADD w5, w5, w4 */
-            addlong(ARM64_ADD_REG(5, 5, 4));
-
-            /* LDR w4, [x12, x5, LSL #2] -- load texel */
-            addlong(ARM64_LDR_W_REG_LSL2(4, 12, 5));
         }
     }
 
@@ -3729,18 +3843,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     break;
             }
 
-            /* fog_a *= 2 (to compensate for the >>1 above) */
-            addlong(ARM64_ADD_REG(4, 4, 4));  /* ADD w4, w4, w4 = w4 << 1 */
-
-            /* Multiply: v3 = v3 * alookup[fog_a + 1] >> 7
+            /* Multiply: v3 = v3 * alookup[fog_a + 1] >> 7.
              *
-             * alookup is a voodoo_neon_reg_t array (16 bytes per entry).
-             * w4 = fog_a * 2, so byte offset = w4 * 8 = fog_a * 16.
-             * The +16 on the LDR advances one entry, loading alookup[fog_a + 1]
-             * (matches the x86-64 +16 byte offset into the next alookup entry). */
-            addlong(ARM64_ADD_REG_X_LSL(5, 20, 4, 3));  /* x5 = x20 + fog_a * 16 */
-            addlong(ARM64_LDR_D(5, 5, 16));             /* v5 = alookup[fog_a + 1].low64 */
-
+             * Preserve the x86-64 +1 semantics exactly, but synthesize the
+             * broadcast factor directly instead of loading alookup[fog_a + 1]. */
+            addlong(ARM64_ADD_IMM(4, 4, 1));   /* w4 = fog_a + 1 */
+            addlong(ARM64_DUP_V4H_GPR(5, 4));  /* v5 = {fog_a + 1, ...} */
             addlong(ARM64_MUL_V4H(3, 3, 5));   /* v3 *= alookup[fog_a + 1] */
             addlong(ARM64_SSHR_V4H(3, 3, 7));  /* v3 >>= 7 (arithmetic) */
 
@@ -3919,9 +4027,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_MOVI_V2D_ZERO(4));
                 break;
             case AFUNC_ASRC_ALPHA:
-                /* v4 = dst * alookup[src_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));  /* x7 = alookup + src_alpha*2*8 */
-                addlong(ARM64_LDR_D(5, 7, 0));               /* v5 = alookup[src_alpha] */
+                /* v4 = dst * src_alpha >> 8 */
+                addlong(ARM64_LSR_IMM(7, 12, 1));            /* w7 = src_alpha */
+                addlong(ARM64_DUP_V4H_GPR(5, 7));            /* v5 = {src_alpha, ...} */
                 addlong(ARM64_MUL_V4H(4, 4, 5));
                 /* Round: add v8 (alookup[1] pinned), add (result>>8), shift >>8 */
                 addlong(ARM64_USHR_V4H(17, 4, 8));
@@ -3938,9 +4046,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
             case AFUNC_ADST_ALPHA:
-                /* v4 = dst * alookup[dst_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v4 = dst * dst_alpha >> 8 */
+                addlong(ARM64_LSR_IMM(7, 5, 1));             /* w7 = dst_alpha */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));           /* v16 = {dst_alpha, ...} */
                 addlong(ARM64_MUL_V4H(4, 4, 16));
                 addlong(ARM64_USHR_V4H(17, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 8));
@@ -3951,9 +4059,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* v4 = dst * 1 = dst (no-op) */
                 break;
             case AFUNC_AOMSRC_ALPHA:
-                /* v4 = dst * aminuslookup[src_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));  /* x7 = aminuslookup + src_alpha*2*8 */
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v4 = dst * (255 - src_alpha) >> 8 */
+                addlong(ARM64_LSR_IMM(7, 12, 1));            /* w7 = src_alpha */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));           /* v16 = {src_alpha, ...} */
+                addlong(ARM64_SUB_V4H(16, 9, 16));           /* v16 = {255 - src_alpha, ...} */
                 addlong(ARM64_MUL_V4H(4, 4, 16));
                 addlong(ARM64_USHR_V4H(17, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 8));
@@ -3971,9 +4080,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_USHR_V4H(4, 4, 8));
                 break;
             case AFUNC_AOMDST_ALPHA:
-                /* v4 = dst * aminuslookup[dst_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v4 = dst * (255 - dst_alpha) >> 8 */
+                addlong(ARM64_LSR_IMM(7, 5, 1));             /* w7 = dst_alpha */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));           /* v16 = {dst_alpha, ...} */
+                addlong(ARM64_SUB_V4H(16, 9, 16));           /* v16 = {255 - dst_alpha, ...} */
                 addlong(ARM64_MUL_V4H(4, 4, 16));
                 addlong(ARM64_USHR_V4H(17, 4, 8));
                 addlong(ARM64_ADD_V4H(4, 4, 8));
@@ -3998,9 +4108,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_MOVI_V2D_ZERO(0));
                 break;
             case AFUNC_ASRC_ALPHA:
-                /* v0 = src * alookup[src_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v0 = src * src_alpha >> 8 */
+                addlong(ARM64_LSR_IMM(7, 12, 1));            /* w7 = src_alpha */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));           /* v16 = {src_alpha, ...} */
                 addlong(ARM64_MUL_V4H(0, 0, 16));
                 addlong(ARM64_USHR_V4H(17, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 8));
@@ -4016,9 +4126,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
             case AFUNC_ADST_ALPHA:
-                /* v0 = src * alookup[dst_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v0 = src * dst_alpha >> 8 */
+                addlong(ARM64_LSR_IMM(7, 5, 1));             /* w7 = dst_alpha */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));           /* v16 = {dst_alpha, ...} */
                 addlong(ARM64_MUL_V4H(0, 0, 16));
                 addlong(ARM64_USHR_V4H(17, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 8));
@@ -4029,9 +4139,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* v0 = src * 1 = src (no-op) */
                 break;
             case AFUNC_AOMSRC_ALPHA:
-                /* v0 = src * aminuslookup[src_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v0 = src * (255 - src_alpha) >> 8 */
+                addlong(ARM64_LSR_IMM(7, 12, 1));            /* w7 = src_alpha */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));           /* v16 = {src_alpha, ...} */
+                addlong(ARM64_SUB_V4H(16, 9, 16));           /* v16 = {255 - src_alpha, ...} */
                 addlong(ARM64_MUL_V4H(0, 0, 16));
                 addlong(ARM64_USHR_V4H(17, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 8));
@@ -4049,9 +4160,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_USHR_V4H(0, 0, 8));
                 break;
             case AFUNC_AOMDST_ALPHA:
-                /* v0 = src * aminuslookup[dst_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v0 = src * (255 - dst_alpha) >> 8 */
+                addlong(ARM64_LSR_IMM(7, 5, 1));             /* w7 = dst_alpha */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));           /* v16 = {dst_alpha, ...} */
+                addlong(ARM64_SUB_V4H(16, 9, 16));           /* v16 = {255 - dst_alpha, ...} */
                 addlong(ARM64_MUL_V4H(0, 0, 16));
                 addlong(ARM64_USHR_V4H(17, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 8));
@@ -4066,9 +4178,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_ADD_REG(6, 6, 6));         /* w6 *= 2 for table index */
                 addlong(ARM64_CMP_REG(12, 6));
                 addlong(ARM64_CSEL(6, 6, 12, COND_HI)); /* w6 = min(src_alpha*2, sat*2) */
-                /* v0 = src * alookup[sat] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 20, 6, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                /* v0 = src * sat >> 8 */
+                addlong(ARM64_LSR_IMM(7, 6, 1));        /* w7 = sat */
+                addlong(ARM64_DUP_V4H_GPR(16, 7));      /* v16 = {sat, ...} */
                 addlong(ARM64_MUL_V4H(0, 0, 16));
                 addlong(ARM64_USHR_V4H(17, 0, 8));
                 addlong(ARM64_ADD_V4H(0, 0, 8));

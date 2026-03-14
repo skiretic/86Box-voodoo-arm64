@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current baseline head before this update: `b4fb0303d`
+Current baseline head before this update: `3d1d48141`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Purpose
@@ -141,6 +141,10 @@ Completed so far:
 - Task 3 minimal dither-base hoist committed and manually revalidated
 - Task 4 gated prologue helper loads committed and manually revalidated
 - Task 5 helper-macro prep committed and build-verified
+- Task 5 single-TMU resident state committed and manually revalidated
+- Task 6 dual-TMU resident state committed and manually revalidated
+- Task 7 texture-fetch fast/fallback split implemented in the working tree and manually revalidated
+- Task 8 selected lookup-factor synthesis implemented in the working tree and build-verified
 
 ### 2026-03-13 - Task 5 single-TMU resident state landed
 
@@ -153,9 +157,9 @@ Commit: `9cf474e32` `perf: keep arm64 voodoo single-tmu state in registers`
 - reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported `3DMark99`, `3DMark2000`, and `Unreal Gold` all looked correct
 - the logfile did not capture a fresh optimization-stats footer for this run, so quantitative comparison remains pending even though the visual validation passed
 
-### 2026-03-13 - Task 6 dual-TMU resident state landed in the working tree
+### 2026-03-13 - Task 6 dual-TMU resident state landed
 
-Commit: not yet committed
+Commit: `3d1d48141` `perf: extend arm64 voodoo resident dual-tmu state`
 
 - extended the resident-state design into the dual-TMU path by keeping `tmu1_s/t` in `v20`, `tmu1_w` in `v23.d[0]`, and the `pixel_count` / `texel_count` pair in `v21.2S`
 - changed `codegen_texture_fetch()` to accept a resident-TMU bitmask so TMU1 can source resident `s/t/w` values without disturbing the already validated TMU0 single-TMU path
@@ -164,9 +168,37 @@ Commit: not yet committed
 - reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo all looked correct
 - the run exited with `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
 
+### 2026-03-14 - Task 7 texture-fetch fast/fallback split manually validated in the working tree
+
+Commit: not yet committed
+
+- split the ARM64 `codegen_texture_fetch()` wrap-mode path into explicit fast and fallback sequences instead of always emitting the correction work inline
+- added direct point-sample fast paths for both the perspective and non-perspective setups when mirrored `S` / `T` coordinates are already in range
+- added a bilinear fast path that only takes the direct adjacent-texel load when `S` / `T` are already in range and not about to cross the edge sample
+- kept clamp handling, mixed clamp/wrap handling, and wrap-edge correction on the validated fallback path rather than widening the new fast path
+- preserved the existing optimization instrumentation, generated-function ABI, resident-TMU mask contract, and correctness-sensitive output-alpha work
+- reran `cmake --build out/build/llvm-macos-aarch64-debug`; it succeeded with only the existing linker/deployment warnings
+- reran `scripts/setup-and-build.sh build`; it completed a clean rebuild and re-signed `build/src/86Box.app`
+- reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; you reported `Unreal Gold`, `Turok demo`, and `3DMark2000` all looked correct
+- `/tmp/task7_manual_86box.log` still contains the expected Windows boot line `Illegal instruction 00008B55 (FF)`, which remains non-regression noise
+- the signed app exited with `cache hits=24,154,831`, `misses=206`, `generated blocks=206`, `code_bytes total=273,268`, `spans textured=499,117,920`, `single_tmu=211,834,339`, `dual_tmu=287,283,581`, and zero reject signals
+
+### 2026-03-14 - Task 8 selected lookup-factor synthesis implemented in the working tree
+
+Commit: not yet committed
+
+- replaced the non-constant fog `alookup[fog_a + 1]` table load with a synthesized `fog_a + 1` NEON broadcast so the existing `+1` scale behavior remains exact
+- replaced the simple RGB alpha-factor table loads with synthesized `src_alpha`, `dst_alpha`, `(255 - src_alpha)`, `(255 - dst_alpha)`, and saturate broadcasts recovered from the same doubled `w12` / `w5` convention already used by the RGB blend path
+- deliberately left the newer output-alpha writeback path, generated-function ABI, resident-TMU mask contract, and instrumentation untouched
+- reran `cmake --build out/build/llvm-macos-aarch64-debug`; it succeeded with only the existing linker/deployment warnings
+- reran `scripts/setup-and-build.sh build`; it completed a clean rebuild and re-signed `build/src/86Box.app`
+- relaunched the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; `/tmp/task8_manual_86box.log` again showed the expected boot line `Illegal instruction 00008B55 (FF)`
+- the run exited with `cache hits=8,823,365`, `misses=52`, `generated blocks=52`, `code_bytes total=75,656`, `spans textured=125,921,769`, `single_tmu=8,262,860`, `dual_tmu=117,658,909`, and zero reject signals
+- you then reported that the alpha-sensitive manual set (`Lands of Lore III`, `Extreme Assault`, `Half-Life 1`) all looked fine, so this slice is now ready for handoff from the working tree
+
 Not yet started:
 
-- broader optimization-phase manual regression runs beyond Task 4
+- broader optimization-phase manual regression runs beyond Task 6
 - stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
 
 ## Notes

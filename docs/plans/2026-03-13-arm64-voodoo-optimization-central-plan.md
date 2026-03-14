@@ -451,11 +451,11 @@ Signed-release runtime validation completed on 2026-03-13 against `Windows 98 Ga
   - single-TMU=`317,023,661` dual-TMU=`292,627,146`
   - rejects wx_write=`0` wx_exec=`0` emit_overflow=`0`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/include/86box/vid_voodoo_codegen_arm64.h voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
-git commit -m "perf: extend arm64 voodoo register-resident span core"
+git commit -m "perf: extend arm64 voodoo resident dual-tmu state"
 ```
 
 ## Chunk 4: Higher-Risk Specialization
@@ -467,7 +467,7 @@ git commit -m "perf: extend arm64 voodoo register-resident span core"
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 - Test/Reference: `src/include/86box/vid_voodoo_codegen_x86-64.h`
 
-- [ ] **Step 1: Isolate the common fast paths**
+- [x] **Step 1: Isolate the common fast paths**
 
 Start with:
 
@@ -475,11 +475,23 @@ Start with:
 - point sample, perspective
 - bilinear with coordinates already in range
 
-- [ ] **Step 2: Keep edge handling in explicit fallback code**
+- [x] **Step 2: Keep edge handling in explicit fallback code**
 
 Do not merge clamp/wrap correction into the new fast path unless measurement proves it is still profitable.
 
-- [ ] **Step 3: Verify textured coverage**
+Task 7 slice implemented on 2026-03-13 in the working tree:
+
+- wrap-mode point sampling now branches to a direct fast path when the mirrored coordinates are already in range, covering both the perspective and non-perspective point-sample setups
+- wrap-mode bilinear fetch now branches to a direct adjacent-texel fast path when `S` / `T` are already in range and not about to cross the bilinear edge sample
+- the validated clamp, mixed clamp/wrap, and wrap-edge correction logic remains on the fallback path instead of being folded into the new fast path
+- `codegen_texture_fetch()` keeps the same generated-function ABI and the existing resident-TMU mask contract from Task 6
+
+Build verification completed on 2026-03-14:
+
+- `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 7 JIT change
+- `scripts/setup-and-build.sh build` succeeded and re-signed `build/src/86Box.app`
+
+- [x] **Step 3: Verify textured coverage**
 
 Run:
 
@@ -492,6 +504,18 @@ Focus:
 - no texture seam regressions
 - no wrap/clamp edge artifacts
 - no dual-TMU ordering regressions
+
+Signed-release runtime validation completed on 2026-03-14 against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`:
+
+- user reported `Unreal Gold`, `Turok demo`, and `3DMark2000` all looked visually correct on the signed build
+- the VM logfile still contains the expected Windows boot line `Illegal instruction 00008B55 (FF)`, which remains non-regression noise
+- the signed app exited with a fresh stats footer:
+  - cache hits=`24,154,831` misses=`206` rejected=`0` hit_rate=`100.00%`
+  - generated blocks=`206` code_bytes total=`273,268` avg=`1326.5` min=`608` max=`2032`
+  - spans textured=`499,117,920` untextured=`38,361,664`
+  - spans dithered=`537,479,584` non_dithered=`0`
+  - single-TMU=`211,834,339` dual-TMU=`287,283,581`
+  - rejects wx_write=`0` wx_exec=`0` emit_overflow=`0`
 
 - [ ] **Step 4: Commit**
 
@@ -507,15 +531,22 @@ git commit -m "perf: specialize arm64 voodoo texture fetch fast paths"
 - Modify: `docs/arm64-voodoo-optimization-investigation.md`
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 
-- [ ] **Step 1: Start with fog and simple RGB blend-factor paths**
+- [x] **Step 1: Start with fog and simple RGB blend-factor paths**
 
 Do not begin with the newer output-alpha writeback path.
 
-- [ ] **Step 2: Preserve exact scale and rounding behavior**
+- [x] **Step 2: Preserve exact scale and rounding behavior**
 
 Explicitly preserve any `alookup[c + 1]` semantics relied on by the current code.
 
-- [ ] **Step 3: Re-run alpha-sensitive games before widening scope**
+Task 8 slice implemented on 2026-03-14 in the working tree:
+
+- non-constant fog now synthesizes the `alookup[fog_a + 1]` broadcast factor with `ADD #1` plus `DUP`, preserving the existing `+1` scale behavior instead of loading the table entry from memory
+- the simple RGB alpha-factor cases now synthesize `src_alpha`, `dst_alpha`, `255 - src_alpha`, `255 - dst_alpha`, and saturate factors directly from the recovered 8-bit scalar alpha values instead of loading `alookup[]` / `aminuslookup[]`
+- the newer output-alpha writeback path, generated-function ABI, resident-TMU mask contract, and existing instrumentation remain unchanged
+- `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 8 JIT change
+
+- [x] **Step 3: Re-run alpha-sensitive games before widening scope**
 
 Manual minimum:
 
@@ -527,6 +558,19 @@ Stop if:
 
 - alpha planes look wrong
 - HUD/transparency diverges from the pre-change baseline
+
+Current signed-run evidence from 2026-03-14:
+
+- the signed app launched successfully against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`
+- `/tmp/task8_manual_86box.log` again contained the expected Windows boot line `Illegal instruction 00008B55 (FF)`
+- the run exited with a fresh stats footer:
+  - cache hits=`8,823,365` misses=`52` rejected=`0` hit_rate=`100.00%`
+  - generated blocks=`52` code_bytes total=`75,656` avg=`1454.9` min=`608` max=`2036`
+  - spans textured=`125,921,769` untextured=`739,325`
+  - spans dithered=`126,661,094` non_dithered=`0`
+  - single-TMU=`8,262,860` dual-TMU=`117,658,909`
+  - rejects wx_write=`0` wx_exec=`0` emit_overflow=`0`
+- user then reported that `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` all looked fine on the signed build
 
 - [ ] **Step 4: Commit**
 

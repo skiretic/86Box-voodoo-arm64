@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current baseline head before this update: `b4fb0303d`
+Current baseline head before this update: `3d1d48141`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Executive Summary
@@ -16,7 +16,10 @@ The ARM64 Voodoo optimization effort is now in the early execution state.
 - lightweight ARM64 optimization instrumentation is now landed and baseline data has been captured from a signed-release run
 - Task 3's ARM64 dither-setup hoist is now committed as a validated minimal slice
 - Task 4's prologue helper-load gating is now committed and manually revalidated
-- Task 5's first real single-TMU resident-state slice is now implemented in the working tree and visually revalidated
+- Task 5's first real single-TMU resident-state slice is now committed and visually revalidated
+- Task 6's dual-TMU resident-state extension is now committed and manually revalidated
+- Task 7's first texture-fetch fast/fallback split is now implemented in the working tree and manually revalidated on the signed build
+- Task 8's first lookup-factor synthesis slice is now implemented in the working tree, build-verified, and manually validated on the signed build
 
 The safest interpretation of current status is:
 
@@ -31,15 +34,15 @@ Overall effort progress:
 
 ```text
 Planning complete         [##########] 100%
-Implementation started    [#####-----]  50%
+Implementation started    [######----]  60%
 Validation complete       [####------]  40%
 ```
 
 Execution task progress:
 
 ```text
-Completed  [#####-----] 5/10  50%
-Pending    [#####-----] 5/10  50%
+Completed  [#######---] 7/10  70%
+Pending    [###-------] 3/10  30%
 ```
 
 Effort phases:
@@ -50,8 +53,8 @@ Investigation refresh           [##########] 100%
 Central optimization plan       [##########] 100%
 Instrumentation                 [##########] 100%
 Low-risk hot-path work          [##########] 100%
-Main span-loop work             [####------]  40%
-Higher-risk specialization      [----------]   0%
+Main span-loop work             [##########] 100%
+Higher-risk specialization      [####------]  40%
 Cross-platform validation       [----------]   0%
 ```
 
@@ -86,13 +89,20 @@ Live multi-platform validation  [----------]   0%
 - Task 6 kept the generated-function ABI and prologue stack shape unchanged by using caller-saved `v20`-`v24` instead of adding more callee-saved pressure
 - fresh debug and signed-release rebuilds succeeded from the Task 6 working tree, and you reported full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo all looked visually correct on the signed build
 - the fresh Task 6 signed-run stats footer was captured on exit, showing `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
+- Task 7 now adds explicit wrap-mode fast paths inside `codegen_texture_fetch()` for point-sampled and bilinear fetches when coordinates are already in range, while leaving clamp, mixed clamp/wrap, and wrap-edge correction on explicit fallback code
+- the Task 7 slice keeps the generated-function ABI stable, preserves the resident-TMU mask contract from Task 6, and does not reopen the correctness-sensitive output-alpha path
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after the Task 7 change
+- you then manually revalidated the signed build on March 14, 2026 with `Unreal Gold`, `Turok demo`, and `3DMark2000`; all looked correct, the expected boot log line `Illegal instruction 00008B55 (FF)` remained non-regression noise, and the exit footer reported `cache hits=24,154,831`, `misses=206`, `generated blocks=206`, `spans textured=499,117,920`, `single_tmu=211,834,339`, `dual_tmu=287,283,581`, and zero reject signals
+- Task 8 now replaces the fog `alookup[fog_a + 1]` load and the simple RGB alpha-factor table loads with synthesized NEON broadcasts while preserving exact `+1` semantics where required
+- the Task 8 slice deliberately leaves the newer output-alpha writeback path, generated-function ABI, resident-TMU mask contract, and instrumentation unchanged
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` both succeeded after the Task 8 change
+- a fresh signed run against `Windows 98 Gaming PC` exited with `cache hits=8,823,365`, `misses=52`, `generated blocks=52`, `spans textured=125,921,769`, `single_tmu=8,262,860`, `dual_tmu=117,658,909`, and zero reject signals; the expected boot log line `Illegal instruction 00008B55 (FF)` remained non-regression noise
+- you then reported that `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` all looked fine, so the narrow Task 8 slice is ready for handoff from the working tree
 
 ### What has not started yet
 
-- texture-fetch fast-path specialization
-- selected lookup-factor synthesis
 - hot-state layout repacking
-- the broader optimization-phase manual runtime validation pass beyond Task 3
+- the broader optimization-phase manual runtime validation pass beyond Task 6
 
 ## Why The Plan Starts Conservatively
 
@@ -128,11 +138,11 @@ The first slice of this is now in place: the common textured single-TMU loop kee
 
 The second slice is now in place as well: the dual-TMU path now keeps TMU1 state plus the span counters resident without growing the prologue or changing the generated-function ABI.
 
-The next step is to keep the same small, bisectable structure while specializing texture-fetch fast paths rather than widening the resident set further.
+The next step is to keep Task 8 narrow and finish validation rather than broadening again.
 
 ## Current Risks
 
-- manual runtime coverage is still incomplete for some historically fragile games, especially `Lands of Lore III` and `Extreme Assault`
+- broader manual runtime coverage is still incomplete beyond the current Task 8 signed-build set
 - x86-64 live runtime testing is still unavailable in this workspace, so cross-backend confidence remains incomplete
 - the macOS ARM64 toolchain still uses `-march=armv8.5-a+simd`, so the plan must continue treating ARMv8.0 as a policy ceiling rather than trusting the active Apple toolchain defaults
 - Linux AArch64 and Windows ARM64 portability are planned for explicitly, but not yet validated through live builds or runtime testing in this workspace
@@ -140,12 +150,12 @@ The next step is to keep the same small, bisectable structure while specializing
 
 ## Recommended Next Step
 
-Move on to Task 7 from the central plan: split `codegen_texture_fetch()` into explicit fast and fallback paths while keeping the same small, bisectable structure used for Tasks 3 through 6.
+Task 8 is now implemented in the working tree, build-verified, and manually validated on the signed build. The next safe move is to either commit this slice as-is or stop here and hand it off without broadening into the output-alpha path or any less-obvious blend-factor cases.
 
-The intended slice is:
+The validated Task 8 boundaries are:
 
-1. specialize only the common textured path first
-2. keep clamp/wrap correction and rarer edge handling on the existing fallback path
-3. verify with `Unreal Gold`, `Turok demo`, and `3DMark2000`
+1. keep the new fog and simple RGB factor synthesis only
+2. leave the newer output-alpha writeback path untouched
+3. stop after the signed-build pass on `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1`
 
-This keeps the next step focused on the largest remaining hot path without reopening the correctness-sensitive output-alpha work or widening the resident-register plan further.
+This keeps the work focused on a provable subset of the lookup-factor loads without reopening the correctness-sensitive output-alpha work or widening the resident-register plan further.

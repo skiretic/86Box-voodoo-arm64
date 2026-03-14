@@ -1306,13 +1306,30 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
 - signed-release visual validation on `Windows 98 Gaming PC` covered `3DMark99`, `3DMark2000`, and `Unreal Gold`; all looked correct, but the logfile did not capture a fresh optimization-stats footer for the run
 
-**Task 6 dual-TMU resident-state note (2026-03-13, working tree):**
+**Task 6 dual-TMU resident-state note (2026-03-13, committed in `3d1d48141`):**
 - the dual-TMU path now loads `tmu1_s/t` into `v20`, `tmu1_w` into `v23.d[0]`, `pixel_count` / `texel_count` into `v21.2S`, and the counter delta into `v22.2S` before entering the loop
 - `codegen_texture_fetch()` now takes a resident-TMU mask so TMU1 can consume resident `s/t/w` through the same helper without changing the validated TMU0 single-TMU behavior
 - dual-TMU loop-tail updates now happen against those resident copies, and the canonical `state` spillback for `tmu1_s/t`, `tmu1_w`, and the counters is deferred to loop exit
 - this slice deliberately uses caller-saved `v20`-`v24`, so the prologue stack frame and generated-function ABI remain unchanged
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
 - signed-release validation on `Windows 98 Gaming PC` covered full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo; all looked correct, and the run exited with `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
+
+**Task 7 texture-fetch split note (2026-03-14, working tree):**
+- wrap-mode point sampling now emits an explicit fast path when mirrored `S` / `T` are already in range, and that fast path is shared by both the perspective and non-perspective point-sample setups
+- wrap-mode bilinear fetch now emits an explicit fast path when `S` / `T` are already in range and neither coordinate is about to cross the adjacent bilinear edge sample
+- clamp handling, mixed clamp/wrap handling, and wrap-edge correction stay on the existing fallback path instead of being folded into the new fast path
+- the change deliberately keeps the generated-function ABI, the resident-TMU mask contract, the existing instrumentation, and the correctness-sensitive output-alpha path unchanged
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
+- signed-release validation on `Windows 98 Gaming PC` then covered `Unreal Gold`, the `Turok` demo, and `3DMark2000`; all looked correct, the logfile still showed the expected Windows boot `Illegal instruction 00008B55 (FF)` line, and the signed app exited with `cache hits=24,154,831`, `misses=206`, `generated blocks=206`, `single_tmu=211,834,339`, `dual_tmu=287,283,581`, and zero reject signals
+
+**Task 8 lookup-factor synthesis note (2026-03-14, working tree):**
+- non-constant fog now synthesizes the `alookup[fog_a + 1]` broadcast factor with scalar `fog_a + 1` plus `DUP`, preserving the existing `+1` semantics instead of loading the table entry from memory
+- the simple RGB blend-factor cases now synthesize `src_alpha`, `dst_alpha`, `(255 - src_alpha)`, `(255 - dst_alpha)`, and saturate factors directly from recovered 8-bit alpha values rather than loading `alookup[]` / `aminuslookup[]`
+- the RGB blend path still keeps the doubled `w12` / `w5` convention that the output-alpha writeback consumes, so the newer output-alpha logic was not reopened
+- the generated-function ABI, resident-TMU mask contract, and existing optimization instrumentation remain unchanged
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` both succeeded after the change
+- the signed app then exited from a fresh `Windows 98 Gaming PC` run with `cache hits=8,823,365`, `misses=52`, `generated blocks=52`, `spans textured=125,921,769`, `single_tmu=8,262,860`, `dual_tmu=117,658,909`, and zero reject signals; the logfile still showed the expected Windows boot `Illegal instruction 00008B55 (FF)` line
+- you then reported that `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` all looked fine on the signed build, so this narrow Task 8 slice is validated without reopening the output-alpha path
 
 **Completed improvements:**
 
@@ -1326,7 +1343,11 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 5. **Task 5 single-TMU resident state (committed):** The common textured single-TMU loop now keeps the hottest span state in registers and spills it back once at loop exit instead of round-tripping through memory every pixel.
 
-6. **Task 6 dual-TMU resident state (working tree):** The dual-TMU path now extends that same idea to TMU1 state and the span counters without growing the prologue or changing the generated-function ABI.
+6. **Task 6 dual-TMU resident state (committed):** The dual-TMU path now extends that same idea to TMU1 state and the span counters without growing the prologue or changing the generated-function ABI.
+
+7. **Task 7 texture-fetch fast/fallback split (working tree, manually validated):** Wrap-mode point-sample and bilinear fetches now branch to explicit in-range fast paths, while clamp handling and wrap-edge correction remain on fallback code.
+
+8. **Task 8 lookup-factor synthesis (working tree, manually validated):** Fog and the simple RGB alpha-factor cases now synthesize broadcast factors directly, while the newer output-alpha writeback path remains untouched and the signed-build alpha-sensitive validation set looked correct.
 
 **Remaining potential improvements:**
 
@@ -1335,6 +1356,8 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
    - SDIV for perspective-correct texture (reciprocal approximation — deferred)
 
 2. **Lazy state updates:** Some state (e.g., `pixel_count`) is updated every pixel but rarely read. Consider batching updates.
+
+3. **Broaden lookup-factor synthesis only after Task 8 validation:** Keep the newer output-alpha writeback path and any less-obvious blend-factor cases off-limits until `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` pass on the signed build.
 
 ### Code Style Conventions
 
