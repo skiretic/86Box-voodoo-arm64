@@ -157,7 +157,7 @@ Commit: `9cf474e32` `perf: keep arm64 voodoo single-tmu state in registers`
 - taught the single-TMU texture fetch plus the alpha/fog users of `ia`, `z`, and `w` to read the resident copies instead of reloading from `state`
 - verified the change through fresh ARM64 debug and signed-release rebuilds
 - reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported `3DMark99`, `3DMark2000`, and `Unreal Gold` all looked correct
-- the logfile did not capture a fresh optimization-stats footer for this run, so quantitative comparison remains pending even though the visual validation passed
+- the logfile did not capture a fresh optimization-stats footer for this run, so this checkpoint initially had only visual validation; a later signed post-plan rerun captured fresh stats with the corrected live-`stderr` workflow
 
 ### 2026-03-13 - Task 6 dual-TMU resident state landed
 
@@ -212,7 +212,24 @@ Commit: `a62bf8a66` `perf: align hot voodoo state fields for arm64`
 Not yet started:
 
 - live Linux AArch64 and Windows ARM64 build/runtime validation outside this workspace
-- stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
+- a strict duration-matched signed-release A/B against the Task 2 baseline
+
+### 2026-03-14 - Like-for-like signed comparison attempt blocked on stderr capture
+
+- reran `cmake --preset llvm-macos-aarch64-debug`, `cmake --build out/build/llvm-macos-aarch64-debug`, and `scripts/setup-and-build.sh build`; all completed successfully again with only the existing warning set
+- relaunched the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`, and the manual workload covered `3DMark99`, `3DMark2000`, `Unreal Gold timedemo 1`, and an additional `Turok` run; the user reported the run completed and 86Box exited normally
+- `/tmp/next_opt_manual_86box.log` captured the expected boot line `Illegal instruction 00008B55 (FF)` but no optimization footer
+- root cause: the ARM64 optimization summary is emitted on `stderr` from `voodoo_arm64_opt_stats_dump_at_exit()` rather than through the emulator logfile path, and the harness session holding that `stderr` stream was interrupted before the footer could be recorded
+- result: this attempted like-for-like comparison did not provide usable quantitative data, so it required a rerun with explicit live `stderr` capture
+
+### 2026-03-14 - Signed follow-up rerun captured with live stderr footer
+
+- relaunched the signed app outside the sandbox with the exact documented command so the live session could preserve `stderr` through process exit
+- first verified the capture path with a short throwaway run, which exited with `cache hits=29,518`, `misses=9`, `generated blocks=9`, and zero reject signals
+- reran the signed app again against `Windows 98 Gaming PC`; the user then performed a shorter comparison pass across the target game set and explicitly chose to treat that shorter sample as good enough if the stats footer captured correctly
+- `/tmp/next_opt_manual_86box.log` again contained the expected boot line `Illegal instruction 00008B55 (FF)`
+- the live exit footer captured successfully with `cache hits=7,288,986`, `misses=193`, `generated blocks=193`, `code_bytes total=251,944`, `spans textured=198,613,282`, `single_tmu=107,925,850`, `dual_tmu=90,687,432`, and zero reject signals
+- this is a signed post-plan sanity comparison with reliable stats capture, not a strict duration-matched A/B against the earlier baseline, because the user intentionally kept each title shorter than the prior longer validation passes
 
 ### 2026-03-14 - Task 10 cross-platform validation and final handoff recorded
 

@@ -1331,6 +1331,12 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - the signed app then exited from a fresh `Windows 98 Gaming PC` run with `cache hits=8,823,365`, `misses=52`, `generated blocks=52`, `spans textured=125,921,769`, `single_tmu=8,262,860`, `dual_tmu=117,658,909`, and zero reject signals; the logfile still showed the expected Windows boot `Illegal instruction 00008B55 (FF)` line
 - you then reported that `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` all looked fine on the signed build, so this narrow Task 8 slice is validated without reopening the output-alpha path
 
+**Post-plan signed follow-up note (2026-03-14):**
+- the exact documented launch command remains the correct way to drive signed manual runs in this workspace
+- the optimization footer is emitted to live `stderr` at process exit, while `-L` still captures only the normal emulator logfile
+- after correcting the capture workflow, a shorter signed sanity pass exited with `cache hits=7,288,986`, `misses=193`, `generated blocks=193`, `code_bytes total=251,944`, `single_tmu=107,925,850`, `dual_tmu=90,687,432`, and zero reject signals
+- treat that sample as post-plan sanity evidence, not as a strict duration-matched performance A/B against the earlier longer signed runs
+
 **Completed improvements:**
 
 1. **Cache expansion (done):** Cache increased from 8 to 32 slots per odd/even pair (128 total), greatly reducing thrash on games with many render states.

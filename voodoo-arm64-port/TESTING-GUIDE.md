@@ -384,6 +384,19 @@ env 86BOX_VOODOO_ARM64_OPT_STATS=1 ./build/src/86Box.app/Contents/MacOS/86Box -P
 
 Run the target workload, then fully quit 86Box. The stats summary appears on `stderr` at process exit.
 
+If you also want the normal emulator logfile, keep `-L`, but do not expect the optimization footer to appear there by itself. `-L` captures the emulator logfile, while the ARM64 optimization summary is emitted to `stderr`.
+
+For a reliable combined capture during signed manual runs, use a terminal command that preserves `stderr` until 86Box exits, for example:
+
+```bash
+env 86BOX_VOODOO_ARM64_OPT_STATS=1 ./build/src/86Box.app/Contents/MacOS/86Box \
+  -L /tmp/86box_manual.log \
+  -P "<vm_directory>" \
+  2>&1 | tee /tmp/86box_manual_console.log
+```
+
+If you are launching from a harnessed terminal session, do not interrupt or kill that session before 86Box exits, or the footer may be lost even if the emulator logfile was written successfully.
+
 ### How To Read The Summary
 
 Look for lines starting with:

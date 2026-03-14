@@ -106,6 +106,7 @@ Live multi-platform validation  [----------]   0%
 - Task 10 then revalidated the portability assumptions in source, reran `cmake --preset llvm-macos-aarch64-debug`, reran `cmake --build out/build/llvm-macos-aarch64-debug`, and completed a fresh signed `scripts/setup-and-build.sh build`
 - the final signed manual matrix on March 14, 2026 covered `Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, and `3DMark2000`; you reported that all looked okay
 - `/tmp/task10_manual_86box.log` again contained the expected boot line `Illegal instruction 00008B55 (FF)`, and the run exited with `cache hits=23,748,869`, `misses=12,791`, `generated blocks=12,791`, `single_tmu=164,030,936`, `dual_tmu=146,428,389`, and zero reject signals
+- a later March 14, 2026 signed follow-up rerun also confirmed the corrected live-`stderr` capture path: after a short proof run, a shorter multi-title sanity pass exited with `cache hits=7,288,986`, `misses=193`, `generated blocks=193`, `single_tmu=107,925,850`, `dual_tmu=90,687,432`, and zero reject signals
 - the optional `cmake --preset llvm-win32-aarch64` configure step remains unavailable in this workspace because that preset does not exist here, so Windows ARM64 and Linux AArch64 live validation remain explicit external caveats
 
 ### What has not started yet
@@ -154,7 +155,7 @@ The scoped plan has now been carried through the final Apple Silicon validation 
 - x86-64 live runtime testing is still unavailable in this workspace, so cross-backend confidence remains incomplete
 - the macOS ARM64 toolchain still uses `-march=armv8.5-a+simd`, so the plan must continue treating ARMv8.0 as a policy ceiling rather than trusting the active Apple toolchain defaults
 - the final manual matrix is Apple Silicon-only; Linux AArch64 and Windows ARM64 still are not validated through live builds or runtime testing in this workspace
-- the current baseline comes from one representative workload, so optimization ranking is better informed now but not universal across all games
+- the current baseline comes from one representative workload, and the recorded post-plan follow-up sample is shorter than the earlier long-form validation passes, so optimization ranking is better informed now but not universal across all games
 
 ## Recommended Next Step
 

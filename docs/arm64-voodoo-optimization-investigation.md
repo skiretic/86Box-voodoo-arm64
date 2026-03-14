@@ -281,6 +281,7 @@ The 2026-03-14 validation pass closes the scoped Apple Silicon handoff loop for 
 - the Apple Silicon executable-memory path still relies on `MAP_JIT` plus `pthread_jit_write_protect_np(...)`, and the Windows ARM64 JIT path still uses `VirtualProtect(...)` plus `FlushInstructionCache(...)`
 - fresh `cmake --preset llvm-macos-aarch64-debug`, `cmake --build out/build/llvm-macos-aarch64-debug`, and `scripts/setup-and-build.sh build` runs all succeeded on the current branch
 - the final signed manual matrix (`Extreme Assault`, `Lands of Lore III`, `Unreal Gold`, `3DMark99`, `3DMark2000`) looked correct on the `Windows 98 Gaming PC` VM, and the run exited with `cache hits=23,748,869`, `misses=12,791`, `generated blocks=12,791`, `single_tmu=164,030,936`, `dual_tmu=146,428,389`, and zero reject signals
+- a later March 14, 2026 signed follow-up rerun also captured a shorter live-session stats sample successfully with the corrected `stderr` workflow, exiting with `cache hits=7,288,986`, `misses=193`, `generated blocks=193`, `single_tmu=107,925,850`, `dual_tmu=90,687,432`, and zero reject signals
 - the remaining caveat is still external validation: this workspace has no `llvm-win32-aarch64` CMake preset, and Linux AArch64 still needs a real host or CI runner
 
 ## Priority 6: Reduce Prologue/Epilogue and Constant Materialization Cost

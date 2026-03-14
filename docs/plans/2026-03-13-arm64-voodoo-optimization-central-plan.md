@@ -384,7 +384,9 @@ Signed-release runtime validation completed on 2026-03-13 against `Windows 98 Ga
 
 - user reported `3DMark99`, `3DMark2000`, and `Unreal Gold` all looked visually correct on the signed build
 - the expected Windows boot log line `Illegal instruction 00008B55 (FF)` remained present and is not a regression signal
-- the logfile footer did not capture a fresh optimization-stats summary for this run, so strict quantitative comparison remains pending
+- the logfile footer did not capture a fresh optimization-stats summary for this run, so this checkpoint initially had only visual validation
+- a later signed post-plan rerun on 2026-03-14 captured fresh live-session stats with the corrected `stderr` workflow: `cache hits=7,288,986`, `misses=193`, `generated blocks=193`, `code_bytes total=251,944`, `single_tmu=107,925,850`, `dual_tmu=90,687,432`, and zero reject signals
+- that later rerun was intentionally shorter per title than the earlier longer validation passes, so it is useful signed-run sanity evidence rather than a strict duration-matched A/B against the Task 2 baseline
 
 - [x] **Step 5: Commit**
 
