@@ -1059,28 +1059,28 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
 #define STATE_tex          240  /* [2][9] ptr array, stride 72 per TMU */
 #define STATE_fb_mem       456
 #define STATE_aux_mem      464
-#define STATE_ib           472  /* base of {ib,ig,ir,ia} NEON block.
+#define STATE_ib           480  /* base of {ib,ig,ir,ia} NEON block.
                                  * These 4 x int32 are contiguous in voodoo_state_t
-                                 * so LD1 {Vt.4S}, [x16] loads all 4 in one shot. */
-#define STATE_ia           484
-#define STATE_z            488
-#define STATE_new_depth    492
+                                 * and now 16-byte aligned for LDR/STR Q. */
+#define STATE_ia           492
 #define STATE_tmu0_s       496
 #define STATE_tmu0_t       504
-#define STATE_tmu0_w       512
-#define STATE_tmu1_s       520
-#define STATE_tmu1_t       528
-#define STATE_tmu1_w       536
-#define STATE_w            544
-#define STATE_pixel_count  552
-#define STATE_texel_count  556
-#define STATE_x            560
-#define STATE_x2           564
-#define STATE_x_tiled      568
-#define STATE_w_depth      572
-#define STATE_ebp_store    580
-#define STATE_lod_frac     588  /* [2] array, stride 4 */
-#define STATE_stipple      596
+#define STATE_tmu1_s       512
+#define STATE_tmu1_t       520
+#define STATE_z            528
+#define STATE_new_depth    532
+#define STATE_tmu0_w       536
+#define STATE_tmu1_w       544
+#define STATE_w            552
+#define STATE_pixel_count  560
+#define STATE_texel_count  564
+#define STATE_x            568
+#define STATE_x2           572
+#define STATE_x_tiled      576
+#define STATE_w_depth      580
+#define STATE_ebp_store    588
+#define STATE_lod_frac     596  /* [2] array, stride 4 */
+#define STATE_stipple      604
 
 /* voodoo_params_t offsets (base register: x1) */
 #define PARAMS_dBdX         48  /* base of {dB,dG,dR,dA,dZ}dX block */
@@ -1302,8 +1302,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
          * ============================================================ */
 
         /* Load S, T, W (64-bit each) for perspective division.
-         * TMU0 offsets (496,504,512) fit LDP X signed-7 range; TMU1 (520,528,536) do not.
-         * Use LDP for S+T when offset fits, else individual LDR. */
+         * The repacked hot-state layout keeps both TMU0 and TMU1 S/T pairs
+         * within the LDP X signed-7 range, so the non-resident path can pair
+         * them directly when resident state is unavailable. */
         if (use_resident_tmu_state) {
             addlong(ARM64_FMOV_X_D0(5, tmu ? 20 : 19));
             addlong(ARM64_FMOV_X_D1(6, tmu ? 20 : 19));
@@ -1432,8 +1433,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
          * LOD = lod_min >> 8
          * ============================================================ */
 
-        /* Load tmu_s and tmu_t (64-bit).
-         * TMU0 offsets fit LDP X signed-7 range; TMU1 do not. */
+        /* Load tmu_s and tmu_t (64-bit). The repacked hot-state layout keeps
+         * both TMU S/T pairs within the LDP X signed-7 range. */
         if (use_resident_tmu_state) {
             addlong(ARM64_FMOV_X_D0(4, tmu ? 20 : 19));
             addlong(ARM64_FMOV_X_D1(6, tmu ? 20 : 19));
@@ -2233,8 +2234,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     addlong(ARM64_LDR_W(27, 0, STATE_x2));
 
     if (uses_single_tmu_resident_state) {
-        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-        addlong(ARM64_LD1_V4S(18, 16));
+        addlong(ARM64_LDR_Q(18, 0, STATE_ib));
         addlong(ARM64_LDR_W(23, 0, STATE_z));
         addlong(ARM64_LDR_Q(19, 0, STATE_tmu0_s));
         addlong(ARM64_LDR_X(21, 0, STATE_tmu0_w));
@@ -2242,8 +2242,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     } else if (uses_dual_tmu_resident_state) {
         /* The pixel loop makes no calls, so caller-saved v20-v24 can carry
          * dual-TMU-only resident state without changing the generated ABI. */
-        addlong(ARM64_ADD_IMM_X(16, 0, STATE_tmu1_s));
-        addlong(ARM64_LD1_V4S(20, 16));
+        addlong(ARM64_LDR_Q(20, 0, STATE_tmu1_s));
         addlong(ARM64_LDR_X(10, 0, STATE_tmu1_w));
         addlong(ARM64_MOVI_V2D_ZERO(23));
         addlong(ARM64_FMOV_D0_X(23, 10));
@@ -3270,8 +3269,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         if (uses_single_tmu_resident_state) {
             addlong(ARM64_MOV_V(6, 18));
         } else {
-            addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-            addlong(ARM64_LD1_V4S(6, 16));
+            addlong(ARM64_LDR_Q(6, 0, STATE_ib));
         }
         addlong(ARM64_SSHR_V4S(6, 6, 12));
         addlong(ARM64_SQXTN_4H_4S(6, 6));
@@ -4545,17 +4543,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_SUB_REG_X(22, 22, 12));
         }
     } else {
-        /* ib/ig/ir/ia increment (4 x int32, contiguous at STATE_ib=472).
-         * 472 is not 16-byte aligned, so use ADD+LD1 instead of LDR Q.
-         * RGBA deltas are hoisted in v12 from the prologue. */
-        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));    /* x16 = &state->ib */
-        addlong(ARM64_LD1_V4S(0, 16));                 /* v0 = {ib, ig, ir, ia} */
+        /* ib/ig/ir/ia increment (4 x int32, contiguous and 16-byte aligned at
+         * STATE_ib). RGBA deltas are hoisted in v12 from the prologue. */
+        addlong(ARM64_LDR_Q(0, 0, STATE_ib));         /* v0 = {ib, ig, ir, ia} */
         if (state->xdir > 0) {
             addlong(ARM64_ADD_V4S(0, 0, 12));
         } else {
             addlong(ARM64_SUB_V4S(0, 0, 12));
         }
-        addlong(ARM64_ST1_V4S(0, 16));  /* store v0 back to [x16] (= &state->ib) */
+        addlong(ARM64_STR_Q(0, 0, STATE_ib));
 
         /* Z increment */
         /* LDR w4, [x0, #STATE_z] */
@@ -4610,17 +4606,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_SUB_V2D(23, 23, 24));
         }
     } else if (voodoo->dual_tmus) {
-        /* TMU1 s/t (128-bit NEON).
-         * STATE_tmu1_s = 520, not 16-byte aligned -- use ADD+LD1/ST1.
+        /* TMU1 s/t (128-bit NEON, now 16-byte aligned at STATE_tmu1_s).
          * TMU1 ST deltas are hoisted in v14 from the prologue. */
-        addlong(ARM64_ADD_IMM_X(16, 0, STATE_tmu1_s)); /* x16 = &state->tmu1_s */
-        addlong(ARM64_LD1_V4S(0, 16));                  /* v0 = {tmu1_s_lo, tmu1_s_hi, tmu1_t_lo, tmu1_t_hi} */
+        addlong(ARM64_LDR_Q(0, 0, STATE_tmu1_s)); /* v0 = {tmu1_s_lo, tmu1_s_hi, tmu1_t_lo, tmu1_t_hi} */
         if (state->xdir > 0) {
             addlong(ARM64_ADD_V2D(0, 0, 14));
         } else {
             addlong(ARM64_SUB_V2D(0, 0, 14));
         }
-        addlong(ARM64_ST1_V4S(0, 16)); /* store back via x16 = &state->tmu1_s */
+        addlong(ARM64_STR_Q(0, 0, STATE_tmu1_s));
 
         /* TMU1 W (64-bit) */
         addlong(ARM64_LDR_X(10, 0, STATE_tmu1_w));
@@ -4686,15 +4680,13 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     }
 
     if (uses_single_tmu_resident_state) {
-        addlong(ARM64_ADD_IMM_X(16, 0, STATE_ib));
-        addlong(ARM64_ST1_V4S(18, 16));
+        addlong(ARM64_STR_Q(18, 0, STATE_ib));
         addlong(ARM64_STR_W(23, 0, STATE_z));
         addlong(ARM64_STR_Q(19, 0, STATE_tmu0_s));
         addlong(ARM64_STR_X(21, 0, STATE_tmu0_w));
         addlong(ARM64_STR_X(22, 0, STATE_w));
     } else if (uses_dual_tmu_resident_state) {
-        addlong(ARM64_ADD_IMM_X(16, 0, STATE_tmu1_s));
-        addlong(ARM64_ST1_V4S(20, 16));
+        addlong(ARM64_STR_Q(20, 0, STATE_tmu1_s));
         addlong(ARM64_FMOV_X_D0(10, 23));
         addlong(ARM64_STR_X(10, 0, STATE_tmu1_w));
         addlong(ARM64_STR_D(21, 0, STATE_pixel_count));

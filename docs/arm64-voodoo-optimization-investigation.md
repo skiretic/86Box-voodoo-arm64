@@ -237,10 +237,10 @@ High on textured scenes, particularly when bilinear filtering is active. This is
 
 ### Evidence
 
-The backend explicitly calls out unaligned hot fields:
+The backend explicitly called out unaligned hot fields:
 
-- `STATE_ib = 472`, so it uses `ADD + LD1/ST1` rather than `LDR/STR Q` (`vid_voodoo_codegen_arm64.h:4244-4254`)
-- `STATE_tmu1_s = 520`, again using `ADD + LD1/ST1` (`vid_voodoo_codegen_arm64.h:4300-4310`)
+- `STATE_ib = 472`, which forced `ADD + LD1/ST1` rather than `LDR/STR Q`
+- `STATE_tmu1_s = 520`, which had the same problem for TMU1 `s/t`
 
 The source struct is in `src/video/vid_voodoo_render.c`, with these fields embedded in a larger mixed-layout state object (`vid_voodoo_render.c:39-83`).
 
@@ -258,6 +258,16 @@ Aligned `LDR/STR Q` is simpler for the code generator and usually a better fit f
 ### Caveat
 
 This change touches layout, so it should be done carefully and validated against all code using `offsetof()`-style assumptions. Still, because the backend already depends on exact offsets, this is a reasonable optimization lever.
+
+### Current Task 9 slice
+
+The current branch now applies that narrow repack:
+
+- `voodoo_state_t` inserts one explicit 8-byte alignment pad after `fb_mem` / `aux_mem`, then groups `ib/ig/ir/ia`, `tmu0_s/t`, and `tmu1_s/t` into aligned hot blocks
+- `STATE_ib` moves to `480` and `STATE_tmu1_s` moves to `512`, letting the ARM64 JIT switch those hot paths over to `LDR/STR Q`
+- the ARM64 offset constants were re-verified explicitly via `VOODOO_ASSERT_OFFSET(...)`
+- the x86-64 header did not need source changes because it already uses `offsetof(voodoo_state_t, ...)`
+- fresh ARM64 rebuild verification succeeded, and a workspace-corrected x86-64 syntax-only check also succeeded
 
 ### Expected payoff
 

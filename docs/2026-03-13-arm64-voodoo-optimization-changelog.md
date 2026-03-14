@@ -143,8 +143,9 @@ Completed so far:
 - Task 5 helper-macro prep committed and build-verified
 - Task 5 single-TMU resident state committed and manually revalidated
 - Task 6 dual-TMU resident state committed and manually revalidated
-- Task 7 texture-fetch fast/fallback split implemented in the working tree and manually revalidated
-- Task 8 selected lookup-factor synthesis implemented in the working tree and build-verified
+- Task 7 texture-fetch fast/fallback split committed and manually revalidated
+- Task 8 selected lookup-factor synthesis committed and build-verified
+- Task 9 hot-state layout repack committed and build-verified
 
 ### 2026-03-13 - Task 5 single-TMU resident state landed
 
@@ -168,9 +169,9 @@ Commit: `3d1d48141` `perf: extend arm64 voodoo resident dual-tmu state`
 - reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo all looked correct
 - the run exited with `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
 
-### 2026-03-14 - Task 7 texture-fetch fast/fallback split manually validated in the working tree
+### 2026-03-14 - Task 7 texture-fetch fast/fallback split landed
 
-Commit: not yet committed
+Commit: `3a1dbd08c` `perf: synthesize selected arm64 voodoo blend factors`
 
 - split the ARM64 `codegen_texture_fetch()` wrap-mode path into explicit fast and fallback sequences instead of always emitting the correction work inline
 - added direct point-sample fast paths for both the perspective and non-perspective setups when mirrored `S` / `T` coordinates are already in range
@@ -183,9 +184,9 @@ Commit: not yet committed
 - `/tmp/task7_manual_86box.log` still contains the expected Windows boot line `Illegal instruction 00008B55 (FF)`, which remains non-regression noise
 - the signed app exited with `cache hits=24,154,831`, `misses=206`, `generated blocks=206`, `code_bytes total=273,268`, `spans textured=499,117,920`, `single_tmu=211,834,339`, `dual_tmu=287,283,581`, and zero reject signals
 
-### 2026-03-14 - Task 8 selected lookup-factor synthesis implemented in the working tree
+### 2026-03-14 - Task 8 selected lookup-factor synthesis landed
 
-Commit: not yet committed
+Commit: `3a1dbd08c` `perf: synthesize selected arm64 voodoo blend factors`
 
 - replaced the non-constant fog `alookup[fog_a + 1]` table load with a synthesized `fog_a + 1` NEON broadcast so the existing `+1` scale behavior remains exact
 - replaced the simple RGB alpha-factor table loads with synthesized `src_alpha`, `dst_alpha`, `(255 - src_alpha)`, `(255 - dst_alpha)`, and saturate broadcasts recovered from the same doubled `w12` / `w5` convention already used by the RGB blend path
@@ -194,7 +195,18 @@ Commit: not yet committed
 - reran `scripts/setup-and-build.sh build`; it completed a clean rebuild and re-signed `build/src/86Box.app`
 - relaunched the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; `/tmp/task8_manual_86box.log` again showed the expected boot line `Illegal instruction 00008B55 (FF)`
 - the run exited with `cache hits=8,823,365`, `misses=52`, `generated blocks=52`, `code_bytes total=75,656`, `spans textured=125,921,769`, `single_tmu=8,262,860`, `dual_tmu=117,658,909`, and zero reject signals
-- you then reported that the alpha-sensitive manual set (`Lands of Lore III`, `Extreme Assault`, `Half-Life 1`) all looked fine, so this slice is now ready for handoff from the working tree
+- you then reported that the alpha-sensitive manual set (`Lands of Lore III`, `Extreme Assault`, `Half-Life 1`) all looked fine, so this slice is now ready for handoff
+
+### 2026-03-14 - Task 9 hot-state layout repack landed
+
+Commit: `perf: align hot voodoo state fields for arm64`
+
+- repacked `voodoo_state_t` with one explicit 8-byte alignment pad after `fb_mem` / `aux_mem`, then grouped `ib/ig/ir/ia`, `tmu0_s/t`, and `tmu1_s/t` into 16-byte-aligned hot blocks
+- updated the ARM64 `STATE_*` offset constants explicitly and kept them guarded with `VOODOO_ASSERT_OFFSET(...)`
+- switched the affected ARM64 hot paths from `ADD + LD1/ST1` to aligned `LDR/STR Q` for `ib` and `tmu1_s`
+- reran `cmake --build out/build/llvm-macos-aarch64-debug`; it succeeded with only the existing linker/deployment warnings
+- the exact plan x86-64 syntax-only command failed in this workspace before reaching the shared-layout check because it omitted local include paths for headers such as `cpu.h`
+- reran a minimally corrected x86-64 syntax-only command with the required local include paths; it succeeded, and `src/include/86box/vid_voodoo_codegen_x86-64.h` required no source edit because it already uses `offsetof(voodoo_state_t, ...)`
 
 Not yet started:
 

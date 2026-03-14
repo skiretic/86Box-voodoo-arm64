@@ -18,8 +18,9 @@ The ARM64 Voodoo optimization effort is now in the early execution state.
 - Task 4's prologue helper-load gating is now committed and manually revalidated
 - Task 5's first real single-TMU resident-state slice is now committed and visually revalidated
 - Task 6's dual-TMU resident-state extension is now committed and manually revalidated
-- Task 7's first texture-fetch fast/fallback split is now implemented in the working tree and manually revalidated on the signed build
-- Task 8's first lookup-factor synthesis slice is now implemented in the working tree, build-verified, and manually validated on the signed build
+- Task 7's first texture-fetch fast/fallback split is now committed and manually revalidated on the signed build
+- Task 8's first lookup-factor synthesis slice is now committed, build-verified, and manually validated on the signed build
+- Task 9's hot-state layout repack is now committed and build-verified, with x86-64 syntax integration rechecked against the shared layout
 
 The safest interpretation of current status is:
 
@@ -34,15 +35,15 @@ Overall effort progress:
 
 ```text
 Planning complete         [##########] 100%
-Implementation started    [######----]  60%
-Validation complete       [####------]  40%
+Implementation started    [#######---]  70%
+Validation complete       [#####-----]  50%
 ```
 
 Execution task progress:
 
 ```text
-Completed  [#######---] 7/10  70%
-Pending    [###-------] 3/10  30%
+Completed  [########--] 8/10  80%
+Pending    [##--------] 2/10  20%
 ```
 
 Effort phases:
@@ -54,7 +55,7 @@ Central optimization plan       [##########] 100%
 Instrumentation                 [##########] 100%
 Low-risk hot-path work          [##########] 100%
 Main span-loop work             [##########] 100%
-Higher-risk specialization      [####------]  40%
+Higher-risk specialization      [######----]  60%
 Cross-platform validation       [----------]   0%
 ```
 
@@ -97,11 +98,13 @@ Live multi-platform validation  [----------]   0%
 - the Task 8 slice deliberately leaves the newer output-alpha writeback path, generated-function ABI, resident-TMU mask contract, and instrumentation unchanged
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` both succeeded after the Task 8 change
 - a fresh signed run against `Windows 98 Gaming PC` exited with `cache hits=8,823,365`, `misses=52`, `generated blocks=52`, `spans textured=125,921,769`, `single_tmu=8,262,860`, `dual_tmu=117,658,909`, and zero reject signals; the expected boot log line `Illegal instruction 00008B55 (FF)` remained non-regression noise
-- you then reported that `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` all looked fine, so the narrow Task 8 slice is ready for handoff from the working tree
+- you then reported that `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` all looked fine, so the narrow Task 8 slice is ready for handoff
+- Task 9 now repacks `voodoo_state_t` so `ib/ig/ir/ia`, `tmu0_s/t`, and `tmu1_s/t` land on 16-byte boundaries, and the ARM64 JIT now uses aligned `LDR/STR Q` on the affected hot paths
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 9 layout change
+- the exact plan x86-64 syntax command needed extra local include paths in this workspace, but the corrected x86-64 syntax-only check succeeded without requiring any x86-64 source change because that header already uses `offsetof(...)`
 
 ### What has not started yet
 
-- hot-state layout repacking
 - the broader optimization-phase manual runtime validation pass beyond Task 6
 
 ## Why The Plan Starts Conservatively
@@ -150,12 +153,12 @@ The next step is to keep Task 8 narrow and finish validation rather than broaden
 
 ## Recommended Next Step
 
-Task 8 is now implemented in the working tree, build-verified, and manually validated on the signed build. The next safe move is to either commit this slice as-is or stop here and hand it off without broadening into the output-alpha path or any less-obvious blend-factor cases.
+Task 9 is now committed and build-verified. The next safe move is to stop before opening the broader cross-platform validation work in Task 10.
 
-The validated Task 8 boundaries are:
+The validated Task 9 boundaries are:
 
-1. keep the new fog and simple RGB factor synthesis only
-2. leave the newer output-alpha writeback path untouched
-3. stop after the signed-build pass on `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1`
+1. repack only the hottest vectorized state fields
+2. update shared offset assumptions explicitly rather than relying on incidental layout
+3. keep x86-64 source unchanged unless the shared-layout syntax check proves otherwise
 
-This keeps the work focused on a provable subset of the lookup-factor loads without reopening the correctness-sensitive output-alpha work or widening the resident-register plan further.
+This keeps the work focused on the mechanical alignment win without widening into Task 10’s broader platform-validation scope.

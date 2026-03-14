@@ -479,7 +479,7 @@ Start with:
 
 Do not merge clamp/wrap correction into the new fast path unless measurement proves it is still profitable.
 
-Task 7 slice implemented on 2026-03-13 in the working tree:
+Task 7 slice landed on 2026-03-14 in `3a1dbd08c`:
 
 - wrap-mode point sampling now branches to a direct fast path when the mirrored coordinates are already in range, covering both the perspective and non-perspective point-sample setups
 - wrap-mode bilinear fetch now branches to a direct adjacent-texel fast path when `S` / `T` are already in range and not about to cross the bilinear edge sample
@@ -517,7 +517,7 @@ Signed-release runtime validation completed on 2026-03-14 against `Windows 98 Ga
   - single-TMU=`211,834,339` dual-TMU=`287,283,581`
   - rejects wx_write=`0` wx_exec=`0` emit_overflow=`0`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/include/86box/vid_voodoo_codegen_arm64.h voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
@@ -539,7 +539,7 @@ Do not begin with the newer output-alpha writeback path.
 
 Explicitly preserve any `alookup[c + 1]` semantics relied on by the current code.
 
-Task 8 slice implemented on 2026-03-14 in the working tree:
+Task 8 slice landed on 2026-03-14 in `3a1dbd08c`:
 
 - non-constant fog now synthesizes the `alookup[fog_a + 1]` broadcast factor with `ADD #1` plus `DUP`, preserving the existing `+1` scale behavior instead of loading the table entry from memory
 - the simple RGB alpha-factor cases now synthesize `src_alpha`, `dst_alpha`, `255 - src_alpha`, `255 - dst_alpha`, and saturate factors directly from the recovered 8-bit scalar alpha values instead of loading `alookup[]` / `aminuslookup[]`
@@ -572,7 +572,7 @@ Current signed-run evidence from 2026-03-14:
   - rejects wx_write=`0` wx_exec=`0` emit_overflow=`0`
 - user then reported that `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` all looked fine on the signed build
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/include/86box/vid_voodoo_codegen_arm64.h docs/arm64-voodoo-optimization-investigation.md voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
@@ -589,7 +589,7 @@ git commit -m "perf: synthesize selected arm64 voodoo blend factors"
 - Modify: `src/include/86box/vid_voodoo_codegen_x86-64.h`
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 
-- [ ] **Step 1: Repack only the hottest vectorized state fields**
+- [x] **Step 1: Repack only the hottest vectorized state fields**
 
 Target:
 
@@ -597,11 +597,11 @@ Target:
 - `tmu0_s/t`
 - `tmu1_s/t`
 
-- [ ] **Step 2: Update all offset assumptions explicitly**
+- [x] **Step 2: Update all offset assumptions explicitly**
 
 Do not rely on incidental layout stability. Re-verify every `STATE_*` offset touched by the change.
 
-- [ ] **Step 3: Rebuild ARM64 and syntax-check x86-64 integration if needed**
+- [x] **Step 3: Rebuild ARM64 and syntax-check x86-64 integration if needed**
 
 Run:
 
@@ -615,7 +615,21 @@ Expected:
 - ARM64 build succeeds
 - x86-64 syntax integration remains clean if shared offsets or state assumptions changed
 
-- [ ] **Step 4: Commit**
+Task 9 slice implemented on 2026-03-14:
+
+- `voodoo_state_t` now inserts one explicit 8-byte alignment pad after `fb_mem` / `aux_mem`, then groups `ib/ig/ir/ia`, `tmu0_s/t`, and `tmu1_s/t` so those hot vectorized blocks land on 16-byte boundaries
+- the ARM64 JIT now switches the affected `ib` and `tmu1_s` hot paths from `ADD + LD1/ST1` to aligned `LDR/STR Q`
+- the shared offset constants in `vid_voodoo_codegen_arm64.h` were updated explicitly and remain guarded by `VOODOO_ASSERT_OFFSET(...)`
+- `src/include/86box/vid_voodoo_codegen_x86-64.h` required no source edit because it already uses `offsetof(voodoo_state_t, ...)` instead of copied offset constants
+
+Verification completed on 2026-03-14:
+
+- `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 9 layout change
+- the exact plan syntax-check command failed in this workspace before parsing the shared layout because it does not include the local header search paths needed for `cpu.h`
+- a minimally corrected x86-64 syntax-only check succeeded:
+  - `clang -target x86_64-apple-macos10.13 -fsyntax-only -Iout/build/llvm-macos-aarch64-debug/src/include -Isrc -Isrc/include -Isrc/cpu -Isrc/codegen_new -Iincludes/private -Iincludes/public -I/opt/homebrew/include/freetype2 -I/opt/homebrew/include src/video/vid_voodoo_render.c`
+
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/video/vid_voodoo_render.c src/include/86box/vid_voodoo_codegen_arm64.h src/include/86box/vid_voodoo_codegen_x86-64.h voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md

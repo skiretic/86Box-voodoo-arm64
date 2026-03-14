@@ -71,14 +71,15 @@ typedef struct voodoo_state_t {
 
     uint16_t *fb_mem, *aux_mem;
 
+    /* Keep the hottest vectorized blocks 16-byte aligned for ARM64. */
+    int64_t hot_vec_align_pad;
+
     int32_t ib, ig, ir, ia;
-    int32_t z;
-
-    int32_t new_depth;
-
     int64_t tmu0_s, tmu0_t;
-    int64_t tmu0_w;
     int64_t tmu1_s, tmu1_t;
+    int32_t z;
+    int32_t new_depth;
+    int64_t tmu0_w;
     int64_t tmu1_w;
     int64_t w;
 

@@ -1314,7 +1314,7 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
 - signed-release validation on `Windows 98 Gaming PC` covered full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo; all looked correct, and the run exited with `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
 
-**Task 7 texture-fetch split note (2026-03-14, working tree):**
+**Task 7 texture-fetch split note (2026-03-14, committed in `3a1dbd08c`):**
 - wrap-mode point sampling now emits an explicit fast path when mirrored `S` / `T` are already in range, and that fast path is shared by both the perspective and non-perspective point-sample setups
 - wrap-mode bilinear fetch now emits an explicit fast path when `S` / `T` are already in range and neither coordinate is about to cross the adjacent bilinear edge sample
 - clamp handling, mixed clamp/wrap handling, and wrap-edge correction stay on the existing fallback path instead of being folded into the new fast path
@@ -1322,7 +1322,7 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
 - signed-release validation on `Windows 98 Gaming PC` then covered `Unreal Gold`, the `Turok` demo, and `3DMark2000`; all looked correct, the logfile still showed the expected Windows boot `Illegal instruction 00008B55 (FF)` line, and the signed app exited with `cache hits=24,154,831`, `misses=206`, `generated blocks=206`, `single_tmu=211,834,339`, `dual_tmu=287,283,581`, and zero reject signals
 
-**Task 8 lookup-factor synthesis note (2026-03-14, working tree):**
+**Task 8 lookup-factor synthesis note (2026-03-14, committed in `3a1dbd08c`):**
 - non-constant fog now synthesizes the `alookup[fog_a + 1]` broadcast factor with scalar `fog_a + 1` plus `DUP`, preserving the existing `+1` semantics instead of loading the table entry from memory
 - the simple RGB blend-factor cases now synthesize `src_alpha`, `dst_alpha`, `(255 - src_alpha)`, `(255 - dst_alpha)`, and saturate factors directly from recovered 8-bit alpha values rather than loading `alookup[]` / `aminuslookup[]`
 - the RGB blend path still keeps the doubled `w12` / `w5` convention that the output-alpha writeback consumes, so the newer output-alpha logic was not reopened
@@ -1345,9 +1345,11 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 6. **Task 6 dual-TMU resident state (committed):** The dual-TMU path now extends that same idea to TMU1 state and the span counters without growing the prologue or changing the generated-function ABI.
 
-7. **Task 7 texture-fetch fast/fallback split (working tree, manually validated):** Wrap-mode point-sample and bilinear fetches now branch to explicit in-range fast paths, while clamp handling and wrap-edge correction remain on fallback code.
+7. **Task 7 texture-fetch fast/fallback split (committed, manually validated):** Wrap-mode point-sample and bilinear fetches now branch to explicit in-range fast paths, while clamp handling and wrap-edge correction remain on fallback code.
 
-8. **Task 8 lookup-factor synthesis (working tree, manually validated):** Fog and the simple RGB alpha-factor cases now synthesize broadcast factors directly, while the newer output-alpha writeback path remains untouched and the signed-build alpha-sensitive validation set looked correct.
+8. **Task 8 lookup-factor synthesis (committed, manually validated):** Fog and the simple RGB alpha-factor cases now synthesize broadcast factors directly, while the newer output-alpha writeback path remains untouched and the signed-build alpha-sensitive validation set looked correct.
+
+9. **Task 9 hot-state layout repack (committed, build-verified):** `voodoo_state_t` now aligns the `ib` and TMU `s/t` hot blocks so the ARM64 backend can use aligned `LDR/STR Q` instead of `ADD + LD1/ST1` on those paths, while x86-64 continues to rely on `offsetof(...)` with no source change.
 
 **Remaining potential improvements:**
 
@@ -1358,6 +1360,8 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 2. **Lazy state updates:** Some state (e.g., `pixel_count`) is updated every pixel but rarely read. Consider batching updates.
 
 3. **Broaden lookup-factor synthesis only after Task 8 validation:** Keep the newer output-alpha writeback path and any less-obvious blend-factor cases off-limits until `Lands of Lore III`, `Extreme Assault`, and `Half-Life 1` pass on the signed build.
+
+4. **Cross-platform layout validation:** Task 10 should verify the current ARMv8.0 + NEON assumptions and the shared `voodoo_state_t` layout behavior explicitly on non-Apple ARM64 targets before broader cleanup lands.
 
 ### Code Style Conventions
 
