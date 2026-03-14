@@ -1306,6 +1306,14 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
 - signed-release visual validation on `Windows 98 Gaming PC` covered `3DMark99`, `3DMark2000`, and `Unreal Gold`; all looked correct, but the logfile did not capture a fresh optimization-stats footer for the run
 
+**Task 6 dual-TMU resident-state note (2026-03-13, working tree):**
+- the dual-TMU path now loads `tmu1_s/t` into `v20`, `tmu1_w` into `v23.d[0]`, `pixel_count` / `texel_count` into `v21.2S`, and the counter delta into `v22.2S` before entering the loop
+- `codegen_texture_fetch()` now takes a resident-TMU mask so TMU1 can consume resident `s/t/w` through the same helper without changing the validated TMU0 single-TMU behavior
+- dual-TMU loop-tail updates now happen against those resident copies, and the canonical `state` spillback for `tmu1_s/t`, `tmu1_w`, and the counters is deferred to loop exit
+- this slice deliberately uses caller-saved `v20`-`v24`, so the prologue stack frame and generated-function ABI remain unchanged
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
+- signed-release validation on `Windows 98 Gaming PC` covered full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo; all looked correct, and the run exited with `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
+
 **Completed improvements:**
 
 1. **Cache expansion (done):** Cache increased from 8 to 32 slots per odd/even pair (128 total), greatly reducing thrash on games with many render states.
@@ -1317,6 +1325,8 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 4. **Task 5 resident-state prep (committed):** The macro layer now has the correct `D0` / `D1` 64-bit scalar/SIMD transfer helpers needed for a register-resident TMU-state design.
 
 5. **Task 5 single-TMU resident state (committed):** The common textured single-TMU loop now keeps the hottest span state in registers and spills it back once at loop exit instead of round-tripping through memory every pixel.
+
+6. **Task 6 dual-TMU resident state (working tree):** The dual-TMU path now extends that same idea to TMU1 state and the span counters without growing the prologue or changing the generated-function ABI.
 
 **Remaining potential improvements:**
 

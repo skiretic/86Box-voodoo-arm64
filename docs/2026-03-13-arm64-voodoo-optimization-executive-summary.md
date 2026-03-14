@@ -82,12 +82,13 @@ Live multi-platform validation  [----------]   0%
 - Task 4's fresh debug and signed-release rebuilds succeeded, and the same signed-release validation trio still looked visually correct before commit
 - Task 5 prep corrected the ARM64 `D0` / `D1` 64-bit GPR<->SIMD transfer helper encodings and added the missing low-lane helpers so the resident-state work could proceed without guessing at scalar-vector lane moves
 - Task 5's first single-TMU resident-state slice now keeps `ib/ig/ir/ia`, `z`, `w`, `tmu0_s/t`, and `tmu0_w` in registers across the common textured single-TMU loop while leaving dual-TMU on the original path
-- fresh debug and signed-release rebuilds succeeded from the Task 5 working tree, and you reported `3DMark99`, `3DMark2000`, and `Unreal Gold` all looked visually correct on the signed build
-- the fresh Task 5 signed-run stats footer was not captured in the logfile, so quantitative comparison is still pending even though the visual validation passed
+- Task 6 now extends that resident model into the dual-TMU path by keeping `tmu1_s/t`, `tmu1_w`, and the `pixel_count` / `texel_count` counters in caller-saved NEON registers across the loop, then spilling them back once on exit
+- Task 6 kept the generated-function ABI and prologue stack shape unchanged by using caller-saved `v20`-`v24` instead of adding more callee-saved pressure
+- fresh debug and signed-release rebuilds succeeded from the Task 6 working tree, and you reported full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo all looked visually correct on the signed build
+- the fresh Task 6 signed-run stats footer was captured on exit, showing `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
 
 ### What has not started yet
 
-- dual-TMU resident span-loop work
 - texture-fetch fast-path specialization
 - selected lookup-factor synthesis
 - hot-state layout repacking
@@ -98,7 +99,7 @@ Live multi-platform validation  [----------]   0%
 The first optimization wave is intentionally conservative because the code now sits on top of recently completed correctness work. In particular:
 
 - output-alpha behavior was only recently widened to match the interpreter more closely
-- manual game coverage is still incomplete for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- manual game coverage is still incomplete for `Extreme Assault` and `Lands of Lore III`; `Unreal Gold` and `Turok` now have fresh signed-run coverage
 - platform-specific executable-memory and I-cache mechanics differ across macOS, Linux, and Windows even when the generated ARM64 instructions stay portable
 
 That makes measurement-first optimization the right approach. The plan avoids guessing where the time goes and avoids touching the most correctness-sensitive logic before easier wins are ranked.
@@ -125,11 +126,13 @@ Task 4’s first safe slice is now committed: helper-pointer materialization for
 
 The first slice of this is now in place: the common textured single-TMU loop keeps the hottest remaining span state in registers across the loop while preserving the cached `x` / `x2` baseline and leaving dual-TMU on the original path.
 
-The next step is to extend that resident model to dual-TMU and counter-heavy paths without giving up the current small, bisectable structure.
+The second slice is now in place as well: the dual-TMU path now keeps TMU1 state plus the span counters resident without growing the prologue or changing the generated-function ABI.
+
+The next step is to keep the same small, bisectable structure while specializing texture-fetch fast paths rather than widening the resident set further.
 
 ## Current Risks
 
-- manual runtime coverage is still incomplete for the games most likely to catch alpha-plane, transparency, fog, and dual-TMU regressions
+- manual runtime coverage is still incomplete for some historically fragile games, especially `Lands of Lore III` and `Extreme Assault`
 - x86-64 live runtime testing is still unavailable in this workspace, so cross-backend confidence remains incomplete
 - the macOS ARM64 toolchain still uses `-march=armv8.5-a+simd`, so the plan must continue treating ARMv8.0 as a policy ceiling rather than trusting the active Apple toolchain defaults
 - Linux AArch64 and Windows ARM64 portability are planned for explicitly, but not yet validated through live builds or runtime testing in this workspace
@@ -137,7 +140,12 @@ The next step is to extend that resident model to dual-TMU and counter-heavy pat
 
 ## Recommended Next Step
 
-Finish Task 3 validation from the current working tree:
+Move on to Task 7 from the central plan: split `codegen_texture_fetch()` into explicit fast and fallback paths while keeping the same small, bisectable structure used for Tasks 3 through 6.
 
-1. commit the Task 4 gated-helper-load change if we want to preserve this validated checkpoint
-2. then move on to the next low-risk optimization task from the central plan, likely a narrower audit of any remaining always-on helper loads such as `rgb565`
+The intended slice is:
+
+1. specialize only the common textured path first
+2. keep clamp/wrap correction and rarer edge handling on the existing fallback path
+3. verify with `Unreal Gold`, `Turok demo`, and `3DMark2000`
+
+This keeps the next step focused on the largest remaining hot path without reopening the correctness-sensitive output-alpha work or widening the resident-register plan further.

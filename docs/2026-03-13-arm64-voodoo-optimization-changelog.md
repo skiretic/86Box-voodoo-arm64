@@ -153,10 +153,20 @@ Commit: `9cf474e32` `perf: keep arm64 voodoo single-tmu state in registers`
 - reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported `3DMark99`, `3DMark2000`, and `Unreal Gold` all looked correct
 - the logfile did not capture a fresh optimization-stats footer for this run, so quantitative comparison remains pending even though the visual validation passed
 
+### 2026-03-13 - Task 6 dual-TMU resident state landed in the working tree
+
+Commit: not yet committed
+
+- extended the resident-state design into the dual-TMU path by keeping `tmu1_s/t` in `v20`, `tmu1_w` in `v23.d[0]`, and the `pixel_count` / `texel_count` pair in `v21.2S`
+- changed `codegen_texture_fetch()` to accept a resident-TMU bitmask so TMU1 can source resident `s/t/w` values without disturbing the already validated TMU0 single-TMU path
+- kept the prologue and generated-function ABI stable by using caller-saved `v20`-`v24` instead of adding new callee-saved pressure
+- verified the change through fresh ARM64 debug and signed-release rebuilds
+- reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo all looked correct
+- the run exited with `cache hits=29,427,145`, `misses=356`, `generated blocks=356`, `dithered spans=661,054,648`, `single_tmu=317,023,661`, `dual_tmu=292,627,146`, and zero reject signals
+
 Not yet started:
 
 - broader optimization-phase manual regression runs beyond Task 4
-- dual-TMU resident-loop extension
 - stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
 
 ## Notes

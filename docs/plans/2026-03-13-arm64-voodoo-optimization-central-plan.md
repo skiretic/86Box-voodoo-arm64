@@ -40,7 +40,7 @@ Relevant state already true before optimization work starts:
 - ARM64 and x86-64 JIT output-alpha parity are committed
 - the ARM64 JIT cache-key correctness issue for `col_tiled` vs `aux_tiled` is fixed
 - ARM64 signed-release sanity evidence is positive
-- broader manual runtime coverage is still incomplete for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- broader manual runtime coverage is still incomplete for `Extreme Assault` and `Lands of Lore III`; `Unreal Gold` and `Turok` now have fresh signed-run coverage
 - x86-64 live runtime validation remains unavailable in this workspace
 
 ## Guardrails
@@ -399,7 +399,7 @@ git commit -m "perf: keep arm64 voodoo single-tmu span state in registers"
 - Modify: `src/include/86box/vid_voodoo_codegen_arm64.h`
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 
-- [ ] **Step 1: Extend the register-resident model to TMU1 and counters**
+- [x] **Step 1: Extend the register-resident model to TMU1 and counters**
 
 Cover:
 
@@ -408,23 +408,48 @@ Cover:
 - `pixel_count`
 - `texel_count`
 
-- [ ] **Step 2: Reassess prologue register pressure after the extension**
+- dual-TMU textured blocks now preload `tmu1_s/t` into caller-saved `v20`, `tmu1_w` into `v23.d[0]`, `pixel_count` / `texel_count` into `v21.2S`, and the dual-TMU counter delta into `v22.2S`
+- `codegen_texture_fetch()` now takes a resident-TMU bitmask so TMU1 can source its resident `s/t/w` values without disturbing the validated TMU0 single-TMU path
+- the dual-TMU loop tail increments and spills those values once at loop exit instead of round-tripping them through `state` every pixel
 
-If saved-register pressure becomes too high, simplify allocation before adding more features.
+- [x] **Step 2: Reassess prologue register pressure after the extension**
 
-- [ ] **Step 3: Verify on the historically fragile matrix**
+Result:
+
+- prologue stack size and the generated-function ABI stayed unchanged
+- the new dual-TMU resident slice uses caller-saved `v20`-`v24`, so no additional callee-saved NEON or GPR save/restore traffic was introduced
+
+- [x] **Step 3: Verify on the current signed-release validation set**
 
 Run:
 
+- `3DMark99`
+- `3DMark2000`
 - `Unreal Gold`
-- `Lands of Lore III`
-- `Extreme Assault`
+- `Turok` demo
 
 Focus:
 
 - dual-TMU correctness
-- transparency/HUD behavior
-- alpha-plane correctness
+- fog-heavy correctness
+- no visual regression on the previously validated single-TMU path
+
+Build verification completed on 2026-03-13:
+
+- `cmake --build out/build/llvm-macos-aarch64-debug` succeeded
+- `scripts/setup-and-build.sh build` succeeded and re-signed `build/src/86Box.app`
+
+Signed-release runtime validation completed on 2026-03-13 against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`:
+
+- user reported full-run `3DMark99`, `3DMark2000`, `Unreal Gold`, and the fog-heavy `Turok` demo all looked correct
+- the expected Windows boot log line `Illegal instruction 00008B55 (FF)` remained present and is not a regression signal
+- the run exited with a fresh stats footer:
+  - cache hits=`29,427,145` misses=`356` rejected=`0` hit_rate=`100.00%`
+  - generated blocks=`356` code_bytes total=`438,876` avg=`1232.8` min=`608` max=`1888`
+  - spans textured=`609,650,807` untextured=`51,519,041`
+  - spans dithered=`661,054,648` non_dithered=`115,200`
+  - single-TMU=`317,023,661` dual-TMU=`292,627,146`
+  - rejects wx_write=`0` wx_exec=`0` emit_overflow=`0`
 
 - [ ] **Step 4: Commit**
 

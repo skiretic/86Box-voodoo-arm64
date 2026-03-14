@@ -29,7 +29,7 @@ Current branch status note:
 Before optimization begins:
 
 - the correctness-focused gap-closure work is complete and is the semantic baseline for all ARM64 optimization work
-- remaining manual game-coverage gaps still exist for `Extreme Assault`, `Lands of Lore III`, and `Unreal Gold`
+- remaining manual game-coverage gaps still exist for `Extreme Assault` and `Lands of Lore III`; `Unreal Gold` and `Turok` now have fresh signed-run coverage
 - the newly widened output-alpha behavior remains correctness-sensitive and should not be casually optimized without targeted validation
 - signed ARM64 release validation is the preferred performance reference; debug builds remain useful for diagnosis, not speed impressions
 

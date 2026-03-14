@@ -108,7 +108,12 @@
  *   v16-v17 = scratch (caller-saved)
  *   v18     = resident {ib,ig,ir,ia} on the single-TMU fast path
  *   v19     = resident {tmu0_s,tmu0_t} on the single-TMU fast path
- *   v20-v31 = scratch (caller-saved)
+ *   v20     = resident {tmu1_s,tmu1_t} on the dual-TMU resident path
+ *   v21     = resident {pixel_count,texel_count} on the dual-TMU resident path
+ *   v22     = resident {1,texel_inc} counter delta on the dual-TMU resident path
+ *   v23     = resident {tmu1_w,0} on the dual-TMU resident path
+ *   v24     = resident {tmu1_dWdX,0} on the dual-TMU resident path
+ *   v25-v31 = scratch (caller-saved)
  * ======================================================================== */
 
 /*
@@ -1265,17 +1270,21 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
  *   x0 = state, x1 = params (pinned)
  *   x4-x7, x10-x15 = scratch GPR
  *   x19 = logtable pointer (pinned)
- *   x21 = resident tmu0_w when use_resident_tmu0_state && tmu == 0
+ *   x21 = resident tmu0_w when resident_tmu_state_mask keeps TMU0 in registers
  *   x25 = bilinear_lookup pointer (pinned)
  *   v0-v7, v16-v17 = scratch NEON
- *   v19 = resident {tmu0_s, tmu0_t} when use_resident_tmu0_state && tmu == 0
+ *   v19 = resident {tmu0_s, tmu0_t} when resident_tmu_state_mask keeps TMU0 in registers
+ *   v20 = resident {tmu1_s, tmu1_t} when resident_tmu_state_mask keeps TMU1 in registers
+ *   v23 = resident {tmu1_w,0} when resident_tmu_state_mask keeps TMU1 in registers
  *   v8 = neon_01_w (pinned), v9 = neon_ff_w (pinned)
  * ======================================================================== */
 static inline int
 codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int block_pos, int tmu,
-                      int use_resident_tmu0_state)
+                      int resident_tmu_state_mask)
 {
     (void) voodoo;
+
+    const int use_resident_tmu_state = resident_tmu_state_mask & (1 << tmu);
 
     if (params->textureMode[tmu] & 1) {
         /* ============================================================
@@ -1295,9 +1304,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         /* Load S, T, W (64-bit each) for perspective division.
          * TMU0 offsets (496,504,512) fit LDP X signed-7 range; TMU1 (520,528,536) do not.
          * Use LDP for S+T when offset fits, else individual LDR. */
-        if (use_resident_tmu0_state && tmu == 0) {
-            addlong(ARM64_FMOV_X_D0(5, 19));
-            addlong(ARM64_FMOV_X_D1(6, 19));
+        if (use_resident_tmu_state) {
+            addlong(ARM64_FMOV_X_D0(5, tmu ? 20 : 19));
+            addlong(ARM64_FMOV_X_D1(6, tmu ? 20 : 19));
         } else if (STATE_tmu_s(tmu) / 8 <= 63) {
             /* LDP x5, x6, [x0, #STATE_tmu_s(tmu)] -- S and T paired */
             addlong(ARM64_LDP_OFF_X(5, 6, 0, STATE_tmu_s(tmu)));
@@ -1307,8 +1316,12 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         }
 
         /* LDR x7, [x0, #STATE_tmu_w(tmu)] -- load W (64-bit) */
-        if (use_resident_tmu0_state && tmu == 0) {
-            addlong(ARM64_MOV_REG_X(7, 21));
+        if (use_resident_tmu_state) {
+            if (tmu == 0) {
+                addlong(ARM64_MOV_REG_X(7, 21));
+            } else {
+                addlong(ARM64_FMOV_X_D0(7, 23));
+            }
         } else {
             addlong(ARM64_LDR_X(7, 0, STATE_tmu_w(tmu)));
         }
@@ -1421,9 +1434,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
         /* Load tmu_s and tmu_t (64-bit).
          * TMU0 offsets fit LDP X signed-7 range; TMU1 do not. */
-        if (use_resident_tmu0_state && tmu == 0) {
-            addlong(ARM64_FMOV_X_D0(4, 19));
-            addlong(ARM64_FMOV_X_D1(6, 19));
+        if (use_resident_tmu_state) {
+            addlong(ARM64_FMOV_X_D0(4, tmu ? 20 : 19));
+            addlong(ARM64_FMOV_X_D1(6, tmu ? 20 : 19));
         } else if (STATE_tmu_s(tmu) / 8 <= 63) {
             addlong(ARM64_LDP_OFF_X(4, 6, 0, STATE_tmu_s(tmu)));
         } else {
@@ -1951,6 +1964,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                                                      || (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) != 0)
                                                          && tca_sub_clocal_1));
     const int uses_single_tmu_resident_state = uses_texture && !voodoo->dual_tmus;
+    const int uses_dual_tmu_resident_state   = uses_texture && voodoo->dual_tmus;
+    const int texel_count_increment          = (((params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH)
+                                       || ((params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL))
+                                                  ? 1
+                                                  : 2;
 
     arm64_codegen_begin_emit();
 
@@ -2107,6 +2125,23 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_LDR_Q(19, 0, STATE_tmu0_s));
         addlong(ARM64_LDR_X(21, 0, STATE_tmu0_w));
         addlong(ARM64_LDR_X(22, 0, STATE_w));
+    } else if (uses_dual_tmu_resident_state) {
+        /* The pixel loop makes no calls, so caller-saved v20-v24 can carry
+         * dual-TMU-only resident state without changing the generated ABI. */
+        addlong(ARM64_ADD_IMM_X(16, 0, STATE_tmu1_s));
+        addlong(ARM64_LD1_V4S(20, 16));
+        addlong(ARM64_LDR_X(10, 0, STATE_tmu1_w));
+        addlong(ARM64_MOVI_V2D_ZERO(23));
+        addlong(ARM64_FMOV_D0_X(23, 10));
+        addlong(ARM64_LDR_D(21, 0, STATE_pixel_count));
+        addlong(ARM64_MOVI_V4S_ZERO(22));
+        addlong(ARM64_MOVZ_W(10, 1));
+        addlong(ARM64_INS_S(22, 0, 10));
+        addlong(ARM64_MOVZ_W(10, texel_count_increment));
+        addlong(ARM64_INS_S(22, 1, 10));
+        addlong(ARM64_LDR_X(10, 1, PARAMS_tmu1_dWdX));
+        addlong(ARM64_MOVI_V2D_ZERO(24));
+        addlong(ARM64_FMOV_D0_X(24, 10));
     }
 
     /* ================================================================
@@ -2594,7 +2629,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
         if ((params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL || !voodoo->dual_tmus) {
             /* TMU0 only sampling local colour, or only one TMU */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0, uses_single_tmu_resident_state);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0, uses_single_tmu_resident_state ? 1 : 0);
 
             /* FMOV s0, w4 -- move texel to NEON v0 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -2604,7 +2639,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_STR_W(4, 0, STATE_tex_a));
         } else if ((params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH) {
             /* TMU0 in pass-through mode, only sample TMU1 */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, 0);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, uses_dual_tmu_resident_state ? 2 : 0);
 
             /* FMOV s0, w4 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -2630,7 +2665,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
              * tc_reverse_blend, tc_add, tc_invert for RGB channels.
              * And tca_* equivalents for alpha channel.
              * ============================================================ */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, 0);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, uses_dual_tmu_resident_state ? 2 : 0);
 
             /* FMOV s3, w4 -- TMU1 result in v3 */
             addlong(ARM64_FMOV_S_W(3, 4));
@@ -4454,7 +4489,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     }
 
     /* TMU1 s/t/w if dual TMUs */
-    if (voodoo->dual_tmus) {
+    if (uses_dual_tmu_resident_state) {
+        if (state->xdir > 0) {
+            addlong(ARM64_ADD_V2D(20, 20, 14));
+            addlong(ARM64_ADD_V2D(23, 23, 24));
+        } else {
+            addlong(ARM64_SUB_V2D(20, 20, 14));
+            addlong(ARM64_SUB_V2D(23, 23, 24));
+        }
+    } else if (voodoo->dual_tmus) {
         /* TMU1 s/t (128-bit NEON).
          * STATE_tmu1_s = 520, not 16-byte aligned -- use ADD+LD1/ST1.
          * TMU1 ST deltas are hoisted in v14 from the prologue. */
@@ -4479,7 +4522,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     }
 
     /* Pixel and texel count increments */
-    if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
+    if (uses_dual_tmu_resident_state) {
+        addlong(ARM64_ADD_V2S(21, 21, 22));
+    } else if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
         /* ADD x7, x0, #STATE_pixel_count -- base for LDP/STP (offset exceeds imm7 range) */
         addlong(ARM64_ADD_IMM_X(7, 0, STATE_pixel_count));
         /* LDP w4, w5, [x7] -- load pixel_count and texel_count */
@@ -4535,6 +4580,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_STR_Q(19, 0, STATE_tmu0_s));
         addlong(ARM64_STR_X(21, 0, STATE_tmu0_w));
         addlong(ARM64_STR_X(22, 0, STATE_w));
+    } else if (uses_dual_tmu_resident_state) {
+        addlong(ARM64_ADD_IMM_X(16, 0, STATE_tmu1_s));
+        addlong(ARM64_ST1_V4S(20, 16));
+        addlong(ARM64_FMOV_X_D0(10, 23));
+        addlong(ARM64_STR_X(10, 0, STATE_tmu1_w));
+        addlong(ARM64_STR_D(21, 0, STATE_pixel_count));
     }
 
     /* ================================================================
