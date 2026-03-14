@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current head: `050b7640f`
+Current baseline head before this update: `9072af755`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Executive Summary
@@ -14,7 +14,9 @@ The ARM64 Voodoo optimization effort is now in the early execution state.
 - a central optimization plan now exists with portability guardrails for Apple Silicon, Linux AArch64, and Windows ARM64
 - the optimization baseline docs are now locked
 - lightweight ARM64 optimization instrumentation is now landed and baseline data has been captured from a signed-release run
-- Task 3's ARM64 dither-setup hoist is now implemented in the working tree as a validated minimal slice and fresh-build verified
+- Task 3's ARM64 dither-setup hoist is now committed as a validated minimal slice
+- Task 4's prologue helper-load gating is now committed and manually revalidated
+- Task 5 prep work has started with corrected `D0` / `D1` scalar-vector lane-transfer helpers in the working tree
 
 The safest interpretation of current status is:
 
@@ -29,15 +31,15 @@ Overall effort progress:
 
 ```text
 Planning complete         [##########] 100%
-Implementation started    [###-------]  30%
-Validation complete       [##--------]  20%
+Implementation started    [####------]  40%
+Validation complete       [###-------]  30%
 ```
 
 Execution task progress:
 
 ```text
-Completed  [###-------] 3/10  30%
-Pending    [#######---] 7/10  70%
+Completed  [####------] 4/10  40%
+Pending    [######----] 6/10  60%
 ```
 
 Effort phases:
@@ -47,8 +49,8 @@ Correctness baseline locked     [##########] 100%
 Investigation refresh           [##########] 100%
 Central optimization plan       [##########] 100%
 Instrumentation                 [##########] 100%
-Low-risk hot-path work          [#####-----]  50%
-Main span-loop work             [----------]   0%
+Low-risk hot-path work          [##########] 100%
+Main span-loop work             [#---------]  10%
 Higher-risk specialization      [----------]   0%
 Cross-platform validation       [----------]   0%
 ```
@@ -75,12 +77,14 @@ Live multi-platform validation  [----------]   0%
 - lightweight ARM64 measurement hooks are committed and validated through fresh debug and signed-release builds
 - a signed-release `3DMark99` baseline now shows negligible block-cache misses, all-dithered spans in the sampled run, and common dual-TMU usage
 - Task 3 now hoists only the `dither_rb` table base out of the per-pixel loop by pinning it in otherwise-dead `x2`; `real_y` remains preserved in `x24` and the green-table offset stays on the original path after broader hoisting attempts regressed live rendering
-- fresh debug and signed-release rebuilds both succeed from the Task 3 working tree, and signed-release reruns of `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1` all looked visually correct
+- Task 3's fresh debug and signed-release rebuilds succeeded, and signed-release reruns of `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1` all looked visually correct before commit
 - Task 4 now gates the `x22`/`x23` trilinear helper loads and the `x25` bilinear lookup load so blocks that cannot use those paths stop paying the prologue setup cost, while keeping the generated-function ABI unchanged
+- Task 4's fresh debug and signed-release rebuilds succeeded, and the same signed-release validation trio still looked visually correct before commit
+- Task 5 prep has corrected the ARM64 `D0` / `D1` 64-bit GPR<->SIMD transfer helper encodings and added the missing low-lane helpers so the resident-state work can proceed without guessing at scalar-vector lane moves
 
 ### What has not started yet
 
-- register-resident span-loop work
+- register-resident span-loop work beyond the helper-macro prep
 - texture-fetch fast-path specialization
 - selected lookup-factor synthesis
 - hot-state layout repacking
@@ -108,15 +112,17 @@ This is now complete. The current baseline from the first few minutes of the sig
 
 ### 2. Low-risk loop setup cleanup
 
-Task 3 implementation is now in the working tree as a deliberately narrow change: the generated function preserves `real_y` in `x24`, hoists the chosen `dither_rb` base into otherwise-dead `x2`, and leaves the green-table offset on the original path because the broader hoist caused visible green/distorted output during signed-release VM testing.
+Task 3 is now committed as a deliberately narrow change: the generated function preserves `real_y` in `x24`, hoists the chosen `dither_rb` base into otherwise-dead `x2`, and leaves the green-table offset on the original path because the broader hoist caused visible green/distorted output during signed-release VM testing.
 
 ### 3. Small prologue gating wins
 
-Task 4’s first safe slice is now in the working tree: helper-pointer materialization for `bilinear_lookup`, `neon_00_ff_w`, and `i_00_ff_w` is no longer unconditional, and the same signed-release validation trio still looked correct.
+Task 4’s first safe slice is now committed: helper-pointer materialization for `bilinear_lookup`, `neon_00_ff_w`, and `i_00_ff_w` is no longer unconditional, and the same signed-release validation trio still looked correct.
 
 ### 4. Register-resident span core
 
 Keep the hottest remaining span state in registers across the loop, building on the current cached `x` / `x2` baseline.
+
+The immediate prep step for that work is also in place: the backend now has correct `D0` / `D1` 64-bit GPR<->SIMD transfer helpers available so the resident TMU-state design does not have to invent ad hoc lane-move encodings mid-change.
 
 ## Current Risks
 

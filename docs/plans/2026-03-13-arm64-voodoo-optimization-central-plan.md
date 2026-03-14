@@ -32,7 +32,7 @@ This central plan is driven by:
 
 Status date: 2026-03-13
 Branch: `voodoo-dev`
-Latest committed head when this plan was authored: `696808439`
+Latest committed head when this plan was last updated: `9072af755`
 
 Relevant state already true before optimization work starts:
 
@@ -321,6 +321,11 @@ git commit -m "perf: gate arm64 voodoo setup helper loads"
 - Modify: `src/include/86box/vid_voodoo_codegen_arm64.h`
 - Modify: `voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md`
 - Test/Reference: `src/video/vid_voodoo_render.c`
+
+Preparation note recorded on 2026-03-13:
+
+- correct `D0` / `D1` 64-bit GPR<->SIMD transfer helpers now exist in `vid_voodoo_codegen_arm64.h` as a build-verified prep step for the resident-state work
+- this prep is intentionally limited to encoding correctness and does not yet change any active generated code path
 
 - [ ] **Step 1: Preserve the existing `x` / `x2` cached-register design**
 

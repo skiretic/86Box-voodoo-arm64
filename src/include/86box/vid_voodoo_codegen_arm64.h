@@ -1019,11 +1019,17 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
  * Section 30: NEON GPR<->SIMD Transfer (Additional)
  * ======================================================================== */
 
-/* FMOV Xd, Vn.D[1] */
-#define ARM64_FMOV_X_D1(d, n) (0x9E660000 | Rn(n) | Rd(d))
+/* FMOV Xd, Vn.D[0] */
+#define ARM64_FMOV_X_D0(d, n) (0x9E660000 | Rn(n) | Rd(d))
 
-/* FMOV Vd.D[1], Xn */
-#define ARM64_FMOV_D1_X(d, n) (0x9E670000 | Rn(n) | Rd(d))
+/* FMOV Vd.D[0], Xn */
+#define ARM64_FMOV_D0_X(d, n) (0x9E670000 | Rn(n) | Rd(d))
+
+/* FMOV Xd, Vn.D[1] */
+#define ARM64_FMOV_X_D1(d, n) (0x9EAE0000 | Rn(n) | Rd(d))
+
+/* MOV Vd.D[1], Xn */
+#define ARM64_FMOV_D1_X(d, n) (0x4E181C00 | Rn(n) | Rd(d))
 
 /* SADDLP Vd.2S, Vn.4H */
 #define ARM64_SADDLP_2S_4H(d, n) (0x0E602800 | Rn(n) | Rd(d))

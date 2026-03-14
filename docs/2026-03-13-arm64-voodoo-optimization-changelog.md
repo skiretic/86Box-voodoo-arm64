@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current head: `050b7640f`
+Current baseline head before this update: `9072af755`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Purpose
@@ -95,9 +95,10 @@ Commit: `9e70b2004` `perf: add arm64 voodoo optimization instrumentation`
 - verified the instrumentation through fresh ARM64 debug and signed-release builds
 - captured a signed-release `3DMark99` baseline showing negligible cache misses, dither-heavy rendering, and common dual-TMU usage
 
-### 2026-03-13 - Task 3 dither-setup hoist narrowed and validated in working tree
+### 2026-03-13 - Task 3 dither-setup hoist landed
 
-Commit coverage: working tree after `050b7640f` (not yet committed)
+Commit: `f79452a07` `perf: hoist arm64 voodoo dither base`
+Docs synced in: `8b58eba10` `docs: mark task3 arm64 dither hoist complete`
 
 - initial broader hoisting of `real_y` and the green-table path regressed live signed-release rendering with obvious green/distorted output
 - the regression investigation narrowed Task 3 to a safer slice: hoist only the `dither_rb` base pointer, keep `real_y` in `x24`, and leave the green-table offset on the original path
@@ -107,9 +108,9 @@ Commit coverage: working tree after `050b7640f` (not yet committed)
 - completed follow-up manual validation with a full `3DMark2000` demo run and `Unreal Gold timedemo 1`; user reported both looked correct
 - the follow-up validation run ended with `cache hits=16,145,549`, `misses=146`, `generated blocks=146`, `dithered spans=343,935,094`, `dual_tmu=179,954,012`, and zero reject signals
 
-### 2026-03-13 - Task 4 prologue helper loads gated in working tree
+### 2026-03-13 - Task 4 prologue helper loads gated
 
-Commit coverage: working tree after `8b58eba10` (not yet committed)
+Commit: `9072af755` `perf: gate arm64 voodoo setup helper loads`
 
 - audited the remaining unconditional prologue helper loads after Task 3
 - gated `x25` (`bilinear_lookup`) behind bilinear-capable textured blocks
@@ -117,6 +118,16 @@ Commit coverage: working tree after `8b58eba10` (not yet committed)
 - preserved the existing register layout and generated-function ABI rather than reworking the hot-path register plan
 - verified the change through fresh ARM64 debug and signed-release rebuilds
 - reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported full-demo `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1` all looked correct, and the run ended with `cache hits=24,421,694`, `misses=234`, `generated blocks=234`, `dithered spans=547,475,548`, `dual_tmu=295,998,696`, and zero reject signals
+
+### 2026-03-13 - Task 5 resident-state prep corrected lane-move helpers in working tree
+
+Commit coverage: working tree after `9072af755` (not yet committed)
+
+- corrected the existing `ARM64_FMOV_X_D1` / `ARM64_FMOV_D1_X` helper encodings so they match real `D[1]` transfers instead of aliasing `D[0]`
+- added the missing `ARM64_FMOV_X_D0` / `ARM64_FMOV_D0_X` helpers so the backend has both low-lane and high-lane 64-bit scalar/SIMD transfer forms available
+- verified the encodings against a locally assembled ARM64 probe object before updating the header macros
+- reran `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build`; both succeeded with only the existing linker/deployment warnings
+- kept the change intentionally preparatory only: no active generated code path consumes the corrected helpers yet, so no new signed-runtime validation was required at this checkpoint
 
 ## Current Effort Status
 
@@ -127,12 +138,14 @@ Completed so far:
 - central optimization plan committed
 - optimization baseline locked
 - optimization instrumentation committed and baseline-captured
-- Task 3 minimal dither-base hoist implemented and manually revalidated in the working tree
-- Task 4 gated prologue helper loads implemented and manually revalidated in the working tree
+- Task 3 minimal dither-base hoist committed and manually revalidated
+- Task 4 gated prologue helper loads committed and manually revalidated
+- Task 5 helper-macro prep build-verified in the working tree
 
 Not yet started:
 
 - broader optimization-phase manual regression runs beyond Task 4
+- actual Task 5 resident-loop implementation
 - stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
 
 ## Notes
