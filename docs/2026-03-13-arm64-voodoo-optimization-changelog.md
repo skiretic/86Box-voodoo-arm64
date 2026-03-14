@@ -2,7 +2,7 @@
 
 Date: 2026-03-13
 Branch: `voodoo-dev`
-Current baseline head before this update: `9072af755`
+Current baseline head before this update: `b4fb0303d`
 Plan: `docs/plans/2026-03-13-arm64-voodoo-optimization-central-plan.md`
 
 ## Purpose
@@ -119,9 +119,9 @@ Commit: `9072af755` `perf: gate arm64 voodoo setup helper loads`
 - verified the change through fresh ARM64 debug and signed-release rebuilds
 - reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported full-demo `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1` all looked correct, and the run ended with `cache hits=24,421,694`, `misses=234`, `generated blocks=234`, `dithered spans=547,475,548`, `dual_tmu=295,998,696`, and zero reject signals
 
-### 2026-03-13 - Task 5 resident-state prep corrected lane-move helpers in working tree
+### 2026-03-13 - Task 5 resident-state prep corrected lane-move helpers
 
-Commit coverage: working tree after `9072af755` (not yet committed)
+Commit: `b4fb0303d` `refactor: prep arm64 voodoo resident-state helpers`
 
 - corrected the existing `ARM64_FMOV_X_D1` / `ARM64_FMOV_D1_X` helper encodings so they match real `D[1]` transfers instead of aliasing `D[0]`
 - added the missing `ARM64_FMOV_X_D0` / `ARM64_FMOV_D0_X` helpers so the backend has both low-lane and high-lane 64-bit scalar/SIMD transfer forms available
@@ -140,12 +140,23 @@ Completed so far:
 - optimization instrumentation committed and baseline-captured
 - Task 3 minimal dither-base hoist committed and manually revalidated
 - Task 4 gated prologue helper loads committed and manually revalidated
-- Task 5 helper-macro prep build-verified in the working tree
+- Task 5 helper-macro prep committed and build-verified
+
+### 2026-03-13 - Task 5 single-TMU resident state landed in working tree
+
+Commit coverage: working tree after `b4fb0303d` (not yet committed)
+
+- added a gated resident-state path for the common textured single-TMU loop, keeping `ib/ig/ir/ia`, `z`, `w`, `tmu0_s/t`, and `tmu0_w` in registers across pixels
+- preserved the cached `w28` / `w27` coordinate handling and left dual-TMU on the original memory-backed path
+- taught the single-TMU texture fetch plus the alpha/fog users of `ia`, `z`, and `w` to read the resident copies instead of reloading from `state`
+- verified the change through fresh ARM64 debug and signed-release rebuilds
+- reran the signed app against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`; the user reported `3DMark99`, `3DMark2000`, and `Unreal Gold` all looked correct
+- the logfile did not capture a fresh optimization-stats footer for this run, so quantitative comparison remains pending even though the visual validation passed
 
 Not yet started:
 
 - broader optimization-phase manual regression runs beyond Task 4
-- actual Task 5 resident-loop implementation
+- dual-TMU resident-loop extension
 - stricter like-for-like signed-release VM timing comparison against the Task 2 baseline
 
 ## Notes

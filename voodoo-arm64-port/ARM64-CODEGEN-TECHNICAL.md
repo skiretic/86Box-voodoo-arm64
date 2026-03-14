@@ -1292,11 +1292,19 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 - fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
 - a signed-release `Windows 98 Gaming PC` validation run with `86BOX_VOODOO_ARM64_OPT_STATS=1` looked visually correct across full-demo `3DMark99`, full-demo `3DMark2000`, and `Unreal Gold timedemo 1`, ending with `cache hits=24,421,694`, `misses=234`, `generated blocks=234`, `dithered spans=547,475,548`, `dual_tmu=295,998,696`, and zero reject signals
 
-**Task 5 prep note (2026-03-13, working tree after `9072af755`):**
+**Task 5 prep note (2026-03-13, committed in `b4fb0303d`):**
 - the backend now has explicit `ARM64_FMOV_X_D0`, `ARM64_FMOV_D0_X`, `ARM64_FMOV_X_D1`, and `ARM64_FMOV_D1_X` helpers for 64-bit GPR<->SIMD transfers
 - the previous `D1` helper names were not safe to build on for resident-state work because they encoded `D0` transfers instead of true `D[1]` moves
 - the corrected encodings were checked against a locally assembled ARM64 probe object before updating the header macros
 - this prep step is build-verified only; no live generated path uses these helpers yet
+
+**Task 5 single-TMU resident-state note (2026-03-13, working tree after `b4fb0303d`):**
+- the common textured single-TMU path now loads `ib/ig/ir/ia` into `v18`, `tmu0_s/t` into `v19`, `tmu0_w` into `x21`, `w` into `x22`, and `z` into `x23` before entering the loop
+- the single-TMU texture fetch path consumes resident TMU0 `s/t/w` instead of reloading them from `state` every pixel
+- the alpha/fog users of iterated alpha, `z`, and `w` also switch to those resident copies on the gated path
+- loop-tail updates happen against the resident copies, and the canonical `state` spillback is deferred to loop exit so post-block visibility stays intact
+- fresh `cmake --build out/build/llvm-macos-aarch64-debug` and `scripts/setup-and-build.sh build` runs both succeeded after this change
+- signed-release visual validation on `Windows 98 Gaming PC` covered `3DMark99`, `3DMark2000`, and `Unreal Gold`; all looked correct, but the logfile did not capture a fresh optimization-stats footer for the run
 
 **Completed improvements:**
 
@@ -1306,7 +1314,9 @@ Two quirks in the x86-64 reference were discovered during ARM64 port:
 
 3. **Task 4 gated helper loads (committed):** The prologue now skips the `bilinear_lookup`, `neon_00_ff_w`, and `i_00_ff_w` pointer materialization for blocks whose render state cannot reach those helper paths.
 
-4. **Task 5 resident-state prep (working tree):** The macro layer now has the correct `D0` / `D1` 64-bit scalar/SIMD transfer helpers needed for a register-resident TMU-state design.
+4. **Task 5 resident-state prep (committed):** The macro layer now has the correct `D0` / `D1` 64-bit scalar/SIMD transfer helpers needed for a register-resident TMU-state design.
+
+5. **Task 5 single-TMU resident state (working tree):** The common textured single-TMU loop now keeps the hottest span state in registers and spills it back once at loop exit instead of round-tripping through memory every pixel.
 
 **Remaining potential improvements:**
 

@@ -327,11 +327,11 @@ Preparation note recorded on 2026-03-13:
 - correct `D0` / `D1` 64-bit GPR<->SIMD transfer helpers now exist in `vid_voodoo_codegen_arm64.h` as a build-verified prep step for the resident-state work
 - this prep is intentionally limited to encoding correctness and does not yet change any active generated code path
 
-- [ ] **Step 1: Preserve the existing `x` / `x2` cached-register design**
+- [x] **Step 1: Preserve the existing `x` / `x2` cached-register design**
 
 Do not rework loop-coordinate handling first. Build on the current `w28` / `w27` approach.
 
-- [ ] **Step 2: Keep the hottest remaining span state in registers**
+- [x] **Step 2: Keep the hottest remaining span state in registers**
 
 Target first:
 
@@ -343,11 +343,11 @@ Target first:
 
 Write back only where later code truly needs memory visibility.
 
-- [ ] **Step 3: Keep the first prototype limited**
+- [x] **Step 3: Keep the first prototype limited**
 
 Restrict the first pass to common single-TMU paths before extending to dual-TMU or unusual blend-heavy cases.
 
-- [ ] **Step 4: Verify build plus core game coverage**
+- [x] **Step 4: Verify build plus core game coverage**
 
 Run:
 
@@ -368,7 +368,25 @@ Focus:
 - no depth/fog drift
 - stable performance compared with the signed-release baseline
 
-- [ ] **Step 5: Commit**
+Task 5 slice implemented on 2026-03-13:
+
+- added a gated single-TMU resident-state path that keeps `ib/ig/ir/ia`, `z`, `tmu0_s/t`, `tmu0_w`, and `w` live in registers across the loop
+- preserved the existing cached `w28` / `w27` `x` / `x2` design and left the dual-TMU path on the original memory-backed flow
+- switched the single-TMU texture fetch, alpha/fog users, and loop tail to consume the resident copies instead of reloading from `state` every pixel
+- spillback of the resident state now happens once on loop exit so generated-function ABI and post-block state visibility remain unchanged
+
+Build verification completed on 2026-03-13:
+
+- `cmake --build out/build/llvm-macos-aarch64-debug` succeeded after the Task 5 JIT change
+- `scripts/setup-and-build.sh build` succeeded and re-signed `build/src/86Box.app`
+
+Signed-release runtime validation completed on 2026-03-13 against `Windows 98 Gaming PC` with `86BOX_VOODOO_ARM64_OPT_STATS=1`:
+
+- user reported `3DMark99`, `3DMark2000`, and `Unreal Gold` all looked visually correct on the signed build
+- the expected Windows boot log line `Illegal instruction 00008B55 (FF)` remained present and is not a regression signal
+- the logfile footer did not capture a fresh optimization-stats summary for this run, so strict quantitative comparison remains pending
+
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/include/86box/vid_voodoo_codegen_arm64.h voodoo-arm64-port/ARM64-CODEGEN-TECHNICAL.md
