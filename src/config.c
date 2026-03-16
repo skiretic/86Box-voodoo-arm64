@@ -355,7 +355,7 @@ load_machine(void)
         /* Migrate renamed machines. */
         for (i = 0; machine_migrations[i].old; i++) {
             if (!strcmp(p, machine_migrations[i].old)) {
-                machine      = machine_get_machine_from_internal_name(machine_migrations[i].new);
+                machine = machine_get_machine_from_internal_name(machine_migrations[i].new);
                 if (machine != -1) {
                     migrate_from = p;
                     if (machine_migrations[i].new_bios) {
@@ -533,6 +533,10 @@ load_video(void)
         } else if (!strcmp(p, "c&t_69000")) {
             p = (char *) malloc((strlen("chips_69000") + 1) * sizeof(char));
             strcpy(p, "chips_69000");
+            free_p = 1;
+        } else if (!strcmp(p, "cl_gd5428_boca_isa")) {
+            p = (char *) malloc((strlen("cl_gd5422_boca_isa") + 1) * sizeof(char));
+            strcpy(p, "cl_gd5422_boca_isa");
             free_p = 1;
         }
         gfxcard[0] = video_get_video_from_internal_name(p);
@@ -3297,19 +3301,20 @@ save_image_file(char *cat, char *var, char *src)
     }
 
     if (strstr(src, "ioctl://") == src)
-        sprintf(temp, "%s", src);
+        snprintf(temp, 2048, "%s", src);
     else if (!strnicmp(src, usr_path, strlen(usr_path)))
-        sprintf(temp, "%s%s", prefix, &src[strlen(usr_path)]);
+        snprintf(temp, 2048, "%s%s", prefix, &src[strlen(usr_path)]);
     /* Do not relativize to root. */
     else if ((above2 != NULL) && (above3 != NULL) && !strnicmp(src, above2, strlen(above2)))
-        sprintf(temp, "../../%s%s", prefix, &src[strlen(above2)]);
+        snprintf(temp, 2048, "%s../../%s", prefix, &src[strlen(above2)]);
     /* Do not relativize to root. */
     else if ((above != NULL) && (above2 != NULL) && !strnicmp(src, above, strlen(above)))
-        sprintf(temp, "../%s%s", prefix, &src[strlen(above)]);
+        snprintf(temp, 2048, "%s../%s", prefix, &src[strlen(above)]);
     else if (!strnicmp(src, exe_path, strlen(exe_path)))
-        sprintf(temp, "<exe_path>/%s%s", prefix, &src[strlen(exe_path)]);
+        snprintf(temp, 2048, "%s<exe_path>/%s", prefix, &src[strlen(exe_path)]);
     else
-        sprintf(temp, "%s%s", prefix, src);
+        snprintf(temp, 2048, "%s%s", prefix, src);
+    temp[2047] = 0x00;
 
     ini_section_set_string(cat, var, temp);
 

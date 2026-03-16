@@ -7690,7 +7690,7 @@ const machine_t machines[] = {
     /* Has AMIKey 'F' or MR BIOS 'M' KBC firmware, we give it the latter
        for the sake of keyboard controller diversity. */
     {
-        .name              = "[OPTi 495SX] DataExpert SX495",
+        .name              = "[OPTi 495SX] DataExpert OPTI-495SX",
         .internal_name     = "ami495",
         .type              = MACHINE_TYPE_386DX_486,
         .chipset           = MACHINE_CHIPSET_OPTI_495SX,
@@ -8212,7 +8212,7 @@ const machine_t machines[] = {
     },
     /* Uses an Intel KBC with Phoenix MultiKey KBC firmware. */
     {
-        .name              = "[SiS 461] DEC DECpc LPV",
+        .name              = "[SiS 461] DEC DECpc LPV+",
         .internal_name     = "decpclpv",
         .type              = MACHINE_TYPE_486,
         .chipset           = MACHINE_CHIPSET_SIS_461,
@@ -8235,7 +8235,7 @@ const machine_t machines[] = {
         .flags     = MACHINE_IDE | MACHINE_VIDEO | MACHINE_APM,
         .ram       = {
             .min  = 1024,
-            .max  = 32768,
+            .max  = 65536,
             .step = 1024
         },
         .nvrmask                  = 127,
@@ -8833,6 +8833,54 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
+    /* Has JetKey V5.0 KBC Firmware which clones an AMI 'H'.
+       The board was also seen 2003 with a -F string. */
+    {
+        .name              = "[ALi M1429] Olystar LIL1429",
+        .internal_name     = "ali1429",
+        .type              = MACHINE_TYPE_486_S2,
+        .chipset           = MACHINE_CHIPSET_ALI_M1429,
+        .init              = machine_at_ali1429_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SOCKET3,
+            .block       = CPU_BLOCK_NONE,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
+            .min_multi   = 0,
+            .max_multi   = 0
+        },
+        .bus_flags = MACHINE_VLB,
+        .flags     = MACHINE_FLAGS_NONE,
+        .ram       = {
+            .min  = 1024,
+            .max  = 32768,
+            .step = 1024
+        },
+        .nvrmask                  = 127,
+        .jumpered_ecp_dma         = 0,
+        .default_jumpered_ecp_dma = -1,
+        .kbc_device               = &kbc_at_device,
+        .kbc_params               = KBC_VEN_AMI | 0x00004800,
+        .nvr_device               = &nvr_at_device,
+        .nvr_params               = NVR_AT,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x000004f0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = NULL,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = NULL,
+        .snd_device               = NULL,
+        .net_device               = NULL
+    },
     /* Uses an ACER/NEC 90M002A (UPD82C42C, 8042 clone) with unknown firmware (V4.01H). */
     {
         .name              = "[ALi M1429G] Acer A1G",
@@ -8903,54 +8951,6 @@ const machine_t machines[] = {
         },
         .bus_flags = MACHINE_VLB,
         .flags     = MACHINE_APM,
-        .ram       = {
-            .min  = 1024,
-            .max  = 32768,
-            .step = 1024
-        },
-        .nvrmask                  = 127,
-        .jumpered_ecp_dma         = 0,
-        .default_jumpered_ecp_dma = -1,
-        .kbc_device               = &kbc_at_device,
-        .kbc_params               = KBC_VEN_AMI | 0x00004800,
-        .nvr_device               = &nvr_at_device,
-        .nvr_params               = NVR_AT,
-        .sio_device               = NULL,
-        .sio_params               = 0x00000000,
-        .kbc_p1                   = 0x000004f0,
-        .gpio                     = 0xffffffff,
-        .gpio_acpi                = 0xffffffff,
-        .device                   = NULL,
-        .kbd_device               = NULL,
-        .fdc_device               = NULL,
-        .vid_device               = NULL,
-        .snd_device               = NULL,
-        .net_device               = NULL
-    },
-    /* Has JetKey V5.0 KBC Firmware which clones an AMI 'H'.
-       The board was also seen 2003 with a -F string. */
-    {
-        .name              = "[ALi M1429] Olystar LIL1429",
-        .internal_name     = "ali1429",
-        .type              = MACHINE_TYPE_486_S2,
-        .chipset           = MACHINE_CHIPSET_ALI_M1429,
-        .init              = machine_at_ali1429_init,
-        .p1_handler        = machine_generic_p1_handler,
-        .gpio_handler      = NULL,
-        .available_flag    = MACHINE_AVAILABLE,
-        .gpio_acpi_handler = NULL,
-        .cpu               = {
-            .package     = CPU_PKG_SOCKET3,
-            .block       = CPU_BLOCK_NONE,
-            .min_bus     = 25000000,
-            .max_bus     = 50000000,
-            .min_voltage = 5000,
-            .max_voltage = 5000,
-            .min_multi   = 0,
-            .max_multi   = 0
-        },
-        .bus_flags = MACHINE_VLB,
-        .flags     = MACHINE_FLAGS_NONE,
         .ram       = {
             .min  = 1024,
             .max  = 32768,
@@ -9372,10 +9372,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9405,53 +9405,6 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
-    /* Has AMIKey-2 'H' KBC firmware. */
-    {
-        .name              = "[OPTi 499] Alaris Cobalt LPX",
-        .internal_name     = "cobalt",
-        .type              = MACHINE_TYPE_486_S3,
-        .chipset           = MACHINE_CHIPSET_OPTI_499,
-        .init              = machine_at_cobalt_init,
-        .p1_handler        = machine_generic_p1_handler,
-        .gpio_handler      = NULL,
-        .available_flag    = MACHINE_AVAILABLE,
-        .gpio_acpi_handler = NULL,
-        .cpu               = {
-            .package     = CPU_PKG_SOCKET3 | CPU_PKG_486BL,
-            .block       = CPU_BLOCK(CPU_P24T),
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
-            .min_multi   = 0,
-            .max_multi   = 0
-        },
-        .bus_flags = MACHINE_PS2_VLB,
-        .flags     = MACHINE_VIDEO | MACHINE_IDE_DUAL,
-        .ram       = {
-            .min  = 1024,
-            .max  = 65536,
-            .step = 1024
-        },
-        .nvrmask                  = 127,
-        .jumpered_ecp_dma         = 0,
-        .default_jumpered_ecp_dma = -1,
-        .kbc_device               = &kbc_at_device,
-        .kbc_params               = KBC_VEN_AMI | 0x00004800,
-        .nvr_device               = &nvr_at_device,
-        .nvr_params               = NVR_AT,
-        .sio_device               = NULL,
-        .sio_params               = 0x00000000,
-        .kbc_p1                   = 0x00000cf0,
-        .gpio                     = 0xffffffff,
-        .gpio_acpi                = 0xffffffff,
-        .device                   = NULL,
-        .kbd_device               = NULL,
-        .fdc_device               = NULL,
-        .vid_device               = &gd5428_vlb_onboard_device,
-        .snd_device               = NULL,
-        .net_device               = NULL
-    },
     /* This has an AMIKey-2, which is an updated version of type 'H'. */
     {
         .name              = "[ALi M1429G] ECS AL486",
@@ -9466,10 +9419,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9514,10 +9467,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9561,10 +9514,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9608,10 +9561,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9655,10 +9608,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9688,6 +9641,53 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
+    /* Has AMIKey-2 'H' KBC firmware. */
+    {
+        .name              = "[OPTi 499] Alaris Cobalt LPX",
+        .internal_name     = "cobalt",
+        .type              = MACHINE_TYPE_486_S3,
+        .chipset           = MACHINE_CHIPSET_OPTI_499,
+        .init              = machine_at_cobalt_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SOCKET3 | CPU_PKG_486BL,
+            .block       = CPU_BLOCK(CPU_P24T),
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
+            .min_multi   = 0,
+            .max_multi   = 0
+        },
+        .bus_flags = MACHINE_PS2_VLB,
+        .flags     = MACHINE_VIDEO | MACHINE_IDE_DUAL,
+        .ram       = {
+            .min  = 1024,
+            .max  = 65536,
+            .step = 1024
+        },
+        .nvrmask                  = 127,
+        .jumpered_ecp_dma         = 0,
+        .default_jumpered_ecp_dma = -1,
+        .kbc_device               = &kbc_at_device,
+        .kbc_params               = KBC_VEN_AMI | 0x00004800,
+        .nvr_device               = &nvr_at_device,
+        .nvr_params               = NVR_AT,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x00000cf0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = NULL,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = &gd5428_vlb_onboard_device,
+        .snd_device               = NULL,
+        .net_device               = NULL
+    },
     /* Version 1.0 has an AMIKEY-2, version 2.0 has a VIA VT82C42N KBC. */
     {
         .name              = "[OPTi 895] Jetway J-403TG",
@@ -9702,10 +9702,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9751,10 +9751,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9800,10 +9800,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK(CPU_Cx5x86),
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 2
         },
@@ -9847,10 +9847,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9894,10 +9894,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9941,10 +9941,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -9988,10 +9988,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10035,10 +10035,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10082,10 +10082,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10115,53 +10115,6 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
-    /* Has MR BIOS V307UT KBC firmware, which, bizarrely enough, is actually  a genuine AMI 'H'. */
-    {
-        .name              = "[SiS 471] SiS VL-BUS 471 REV. A1",
-        .internal_name     = "px471",
-        .type              = MACHINE_TYPE_486_S3,
-        .chipset           = MACHINE_CHIPSET_SIS_471,
-        .init              = machine_at_px471_init,
-        .p1_handler        = machine_generic_p1_handler,
-        .gpio_handler      = NULL,
-        .available_flag    = MACHINE_AVAILABLE,
-        .gpio_acpi_handler = NULL,
-        .cpu               = {
-            .package     = CPU_PKG_SOCKET3,
-            .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
-            .min_multi   = 0,
-            .max_multi   = 0
-        },
-        .bus_flags = MACHINE_VLB,
-        .flags     = MACHINE_IDE | MACHINE_APM,
-        .ram       = {
-            .min  = 1024,
-            .max  = 131072,
-            .step = 1024
-        },
-        .nvrmask                  = 127,
-        .jumpered_ecp_dma         = 0,
-        .default_jumpered_ecp_dma = -1,
-        .kbc_device               = &kbc_at_device,
-        .kbc_params               = KBC_VEN_AMI | 0x00004800,
-        .nvr_device               = &nvr_at_device,
-        .nvr_params               = NVR_AT,
-        .sio_device               = NULL,
-        .sio_params               = 0x00000000,
-        .kbc_p1                   = 0x000004f0,
-        .gpio                     = 0xffffffff,
-        .gpio_acpi                = 0xffffffff,
-        .device                   = NULL,
-        .kbd_device               = NULL,
-        .fdc_device               = NULL,
-        .vid_device               = NULL,
-        .snd_device               = NULL,
-        .net_device               = NULL
-    },
     /* TriGem AMIBIOS Pre-Color with TriGem AMI 'Z' keyboard controller */
     {
         .name              = "[SiS 471] TriGem 486G (Olympia-K)",
@@ -10176,10 +10129,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10209,6 +10162,53 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
+    /* Has MR BIOS V307UT KBC firmware, which, bizarrely enough, is actually  a genuine AMI 'H'. */
+    {
+        .name              = "[SiS 471] Unknown VL-BUS 471 REV. A1",
+        .internal_name     = "px471",
+        .type              = MACHINE_TYPE_486_S3,
+        .chipset           = MACHINE_CHIPSET_SIS_471,
+        .init              = machine_at_px471_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SOCKET3,
+            .block       = CPU_BLOCK_NONE,
+            .min_bus     = 20000000, /* assumed */
+            .max_bus     = 50000000, /* assumed */
+            .min_voltage = 3300, /* assumed */
+            .max_voltage = 5000,
+            .min_multi   = 0,
+            .max_multi   = 0
+        },
+        .bus_flags = MACHINE_VLB,
+        .flags     = MACHINE_IDE | MACHINE_APM,
+        .ram       = {
+            .min  = 1024,
+            .max  = 131072,
+            .step = 1024
+        },
+        .nvrmask                  = 127,
+        .jumpered_ecp_dma         = 0,
+        .default_jumpered_ecp_dma = -1,
+        .kbc_device               = &kbc_at_device,
+        .kbc_params               = KBC_VEN_AMI | 0x00004800,
+        .nvr_device               = &nvr_at_device,
+        .nvr_params               = NVR_AT,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x000004f0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = NULL,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = NULL,
+        .snd_device               = NULL,
+        .net_device               = NULL
+    },
 
     /* 486 machines - Socket 3 PCI */
     /* 486 machines which utilize the PCI bus */
@@ -10227,10 +10227,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10274,10 +10274,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10321,10 +10321,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10369,10 +10369,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10416,10 +10416,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10449,57 +10449,6 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
-    /* Has the ALi M1487/9's on-chip keyboard controller which clones a standard AT
-       KBC.
-       The BIOS string always ends in -U, but the BIOS will send AMIKey commands 0xCA
-       and 0xCB if command 0xA1 returns a letter in the 0x5x or 0x7x ranges, so I'm
-       going to give it an AMI 'U' KBC. */
-    {
-        .name              = "[ALi M1489] AMI WinBIOS 486 PCI",
-        .internal_name     = "win486pci",
-        .type              = MACHINE_TYPE_486_S3_PCI,
-        .chipset           = MACHINE_CHIPSET_ALI_M1489,
-        .init              = machine_at_win486pci_init,
-        .p1_handler        = machine_generic_p1_handler,
-        .gpio_handler      = NULL,
-        .available_flag    = MACHINE_AVAILABLE,
-        .gpio_acpi_handler = NULL,
-        .cpu               = {
-            .package     = CPU_PKG_SOCKET3,
-            .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
-            .min_multi   = 0,
-            .max_multi   = 0
-        },
-        .bus_flags = MACHINE_PCI,
-        .flags     = MACHINE_IDE_DUAL | MACHINE_APM,
-        .ram       = {
-            .min  = 1024,
-            .max  = 65536,
-            .step = 1024
-        },
-        .nvrmask                  = 255,
-        .jumpered_ecp_dma         = MACHINE_DMA_DISABLED | MACHINE_DMA_1 | MACHINE_DMA_3,
-        .default_jumpered_ecp_dma = 3,
-        .kbc_device               = NULL,
-        .kbc_params               = 0x00005500,
-        .nvr_device               = &nvr_at_device,
-        .nvr_params               = NVR_AT,
-        .sio_device               = NULL,
-        .sio_params               = 0x00000000,
-        .kbc_p1                   = 0x000004f0,
-        .gpio                     = 0xffffffff,
-        .gpio_acpi                = 0xffffffff,
-        .device                   = NULL,
-        .kbd_device               = NULL,
-        .fdc_device               = NULL,
-        .vid_device               = NULL,
-        .snd_device               = NULL,
-        .net_device               = NULL
-    },
     /* Has an ALi M5042 keyboard controller with Phoenix MultiKey/42 v1.40 firmware. */
     {
         .name              = "[ALi M1489] ESA TF-486",
@@ -10514,10 +10463,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10565,10 +10514,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10598,6 +10547,57 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
+    /* Has the ALi M1487/9's on-chip keyboard controller which clones a standard AT
+       KBC.
+       The BIOS string always ends in -U, but the BIOS will send AMIKey commands 0xCA
+       and 0xCB if command 0xA1 returns a letter in the 0x5x or 0x7x ranges, so I'm
+       going to give it an AMI 'U' KBC. */
+    {
+        .name              = "[ALi M1489] Unknown PCI486 V1-HJ3",
+        .internal_name     = "win486pci",
+        .type              = MACHINE_TYPE_486_S3_PCI,
+        .chipset           = MACHINE_CHIPSET_ALI_M1489,
+        .init              = machine_at_win486pci_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SOCKET3,
+            .block       = CPU_BLOCK_NONE,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
+            .min_multi   = 0,
+            .max_multi   = 0
+        },
+        .bus_flags = MACHINE_PCI,
+        .flags     = MACHINE_IDE_DUAL | MACHINE_APM,
+        .ram       = {
+            .min  = 1024,
+            .max  = 65536,
+            .step = 1024
+        },
+        .nvrmask                  = 255,
+        .jumpered_ecp_dma         = MACHINE_DMA_DISABLED | MACHINE_DMA_1 | MACHINE_DMA_3,
+        .default_jumpered_ecp_dma = 3,
+        .kbc_device               = NULL,
+        .kbc_params               = 0x00005500,
+        .nvr_device               = &nvr_at_device,
+        .nvr_params               = NVR_AT,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x000004f0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = NULL,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = NULL,
+        .snd_device               = NULL,
+        .net_device               = NULL
+    },
     /* This has an AMIKey-2, which is an updated version of type 'H'. */
     {
         .name              = "[i420EX] Advanced Integration Research 486PI",
@@ -10612,10 +10612,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10659,10 +10659,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 33333333,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10706,10 +10706,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10739,53 +10739,6 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
-    /* This has the Phoenix MultiKey KBC firmware. */
-    {
-        .name              = "[i420EX] Intel Classic/PCI ED (Ninja)",
-        .internal_name     = "ninja",
-        .type              = MACHINE_TYPE_486_S3_PCI,
-        .chipset           = MACHINE_CHIPSET_INTEL_420EX,
-        .init              = machine_at_ninja_init,
-        .p1_handler        = machine_generic_p1_handler,
-        .gpio_handler      = NULL,
-        .available_flag    = MACHINE_AVAILABLE,
-        .gpio_acpi_handler = NULL,
-        .cpu               = {
-            .package     = CPU_PKG_SOCKET3,
-            .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
-            .min_multi   = 0,
-            .max_multi   = 0
-        },
-        .bus_flags = MACHINE_PCI,
-        .flags     = MACHINE_PS2_KBC | MACHINE_IDE | MACHINE_APM,
-        .ram       = {
-            .min  = 1024,
-            .max  = 131072,
-            .step = 1024
-        },
-        .nvrmask                  = 127,
-        .jumpered_ecp_dma         = MACHINE_DMA_DISABLED,
-        .default_jumpered_ecp_dma = 4,
-        .kbc_device               = &kbc_at_device,
-        .kbc_params               = KBC_VEN_PHOENIX | 0x00012900, /* Guess. */
-        .nvr_device               = &nvr_at_device,
-        .nvr_params               = NVR_AT_ZERO_DEFAULT,
-        .sio_device               = NULL,
-        .sio_params               = 0x00000000,
-        .kbc_p1                   = 0x00000cf0,
-        .gpio                     = 0xffffffff,
-        .gpio_acpi                = 0xffffffff,
-        .device                   = NULL,
-        .kbd_device               = NULL,
-        .fdc_device               = NULL,
-        .vid_device               = NULL,
-        .snd_device               = NULL,
-        .net_device               = NULL
-    },
     /* absolutely no KBC info */
     {
         .name              = "[i420EX] ICS SB486P",
@@ -10800,10 +10753,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10833,6 +10786,53 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
+    /* This has the Phoenix MultiKey KBC firmware. */
+    {
+        .name              = "[i420EX] Intel Classic/PCI ED (Ninja)",
+        .internal_name     = "ninja",
+        .type              = MACHINE_TYPE_486_S3_PCI,
+        .chipset           = MACHINE_CHIPSET_INTEL_420EX,
+        .init              = machine_at_ninja_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SOCKET3,
+            .block       = CPU_BLOCK_NONE,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
+            .min_multi   = 0,
+            .max_multi   = 0
+        },
+        .bus_flags = MACHINE_PCI,
+        .flags     = MACHINE_PS2_KBC | MACHINE_IDE | MACHINE_APM,
+        .ram       = {
+            .min  = 1024,
+            .max  = 131072,
+            .step = 1024
+        },
+        .nvrmask                  = 127,
+        .jumpered_ecp_dma         = MACHINE_DMA_DISABLED,
+        .default_jumpered_ecp_dma = 4,
+        .kbc_device               = &kbc_at_device,
+        .kbc_params               = KBC_VEN_PHOENIX | 0x00012900, /* Guess. */
+        .nvr_device               = &nvr_at_device,
+        .nvr_params               = NVR_AT_ZERO_DEFAULT,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x00000cf0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = NULL,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = NULL,
+        .snd_device               = NULL,
+        .net_device               = NULL
+    },
     /* According to another string seen on the UH19 website, this has AMI 'H' KBC. */
     {
         .name              = "[i420TX] AMI Super Voyager PCI",
@@ -10847,10 +10847,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10897,10 +10897,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 5000,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10944,10 +10944,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 33333333,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -10992,10 +10992,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11039,10 +11039,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11087,10 +11087,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000, /* assumed */
+            .max_bus     = 33333333, /* assumed */
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11134,10 +11134,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3_PC330,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 25000000,
-            .max_bus     = 33333333,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 2.0,
             .max_multi   = 3.0
         },
@@ -11182,10 +11182,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11230,10 +11230,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11265,7 +11265,7 @@ const machine_t machines[] = {
     },
     /* This has an AMIKey-2, which is type 'H'. */
     {
-        .name              = "[SiS 496] ASUS PVI-486SP3C",
+        .name              = "[SiS 496] ASUS PVI-486SP3",
         .internal_name     = "486sp3c",
         .type              = MACHINE_TYPE_486_S3_PCI,
         .chipset           = MACHINE_CHIPSET_SIS_496,
@@ -11277,10 +11277,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11324,10 +11324,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11371,10 +11371,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 40000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11418,10 +11418,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11466,10 +11466,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11514,10 +11514,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK(CPU_i486SX, CPU_i486DX, CPU_Am486SX, CPU_Am486DX),
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11550,7 +11550,7 @@ const machine_t machines[] = {
     /* According to MrKsoft, his real 4DPS has an AMIKey-2, which is an updated version
        of type 'H'. There are other variants of the board with Holtek HT6542B KBCs. */
     {
-        .name              = "[SiS 496] Zida Tomato 4DP",
+        .name              = "[SiS 496] Zida Tomato 4DPS",
         .internal_name     = "4dps",
         .type              = MACHINE_TYPE_486_S3_PCI,
         .chipset           = MACHINE_CHIPSET_SIS_496,
@@ -11562,10 +11562,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11609,10 +11609,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11657,10 +11657,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11705,10 +11705,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 20000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11752,10 +11752,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11799,10 +11799,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 33333333,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11847,10 +11847,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000, /* assumed */
+            .max_bus     = 50000000, /* assumed */
+            .min_voltage = 3300, /* assumed */
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11895,10 +11895,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11942,10 +11942,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000, /* assumed */
+            .max_bus     = 50000000, /* assumed */
+            .min_voltage = 3300, /* assumed */
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -11989,10 +11989,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -12037,10 +12037,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -12072,7 +12072,7 @@ const machine_t machines[] = {
     },
     /* Has a VIA VT82C42N KBC. */
     {
-        .name              = "[VIA VT82C496G] FIC VIP-IO2",
+        .name              = "[VIA VT82C496G] FIC 486-VIP-IO2",
         .internal_name     = "486vipio2",
         .type              = MACHINE_TYPE_486_S3_PCI,
         .chipset           = MACHINE_CHIPSET_VIA_VT82C496G,
@@ -12084,10 +12084,10 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_SOCKET3,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
-            .min_voltage = 0,
-            .max_voltage = 0,
+            .min_bus     = 25000000,
+            .max_bus     = 50000000,
+            .min_voltage = 3300,
+            .max_voltage = 5000,
             .min_multi   = 0,
             .max_multi   = 0
         },
@@ -12136,7 +12136,7 @@ const machine_t machines[] = {
             .package     = CPU_PKG_STPC,
             .block       = CPU_BLOCK_NONE,
             .min_bus     = 66666667,
-            .max_bus     = 75000000,
+            .max_bus     = 66666667,
             .min_voltage = 0,
             .max_voltage = 0,
             .min_multi   = 1.0,
@@ -12193,8 +12193,8 @@ const machine_t machines[] = {
         .bus_flags = MACHINE_PS2_PCI,
         .flags     = MACHINE_IDE_DUAL | MACHINE_APM | MACHINE_PCI_INTERNAL, /* Machine has internal video: ST STPC Atlas */
         .ram       = {
-            .min  = 32768,
-            .max  = 163840,
+            .min  = 8192,
+            .max  = 131072,
             .step = 8192
         },
         .nvrmask                  = 255,
@@ -12241,8 +12241,8 @@ const machine_t machines[] = {
         .bus_flags = MACHINE_PS2_PCI | MACHINE_BUS_USB,
         .flags     = MACHINE_IDE_DUAL | MACHINE_APM | MACHINE_PCI_INTERNAL | MACHINE_USB, /* Machine has internal video: ST STPC Atlas */
         .ram       = {
-            .min  = 32768,
-            .max  = 163840,
+            .min  = 8192,
+            .max  = 131072,
             .step = 8192
         },
         .nvrmask                  = 255,
@@ -12289,9 +12289,9 @@ const machine_t machines[] = {
         .bus_flags = MACHINE_PS2,
         .flags     = MACHINE_IDE | MACHINE_APM | MACHINE_PCI_INTERNAL, /* Machine has internal video: ST STPC Atlas and NIC: Realtek RTL8139C+ */
         .ram       = {
-            .min  = 32768,
+            .min  = 8192,
             .max  = 131072,
-            .step = 32768
+            .step = 8192
         },
         .nvrmask                  = 255,
         .jumpered_ecp_dma         = 0,
@@ -14329,6 +14329,54 @@ const machine_t machines[] = {
     },
 
     /* UMC 889x */
+    /* Compaq Presario 7100 Series, using MiTAC/Trigon PL5600D (586). */
+    /* Has a VIA VT82C42N KBC. */
+    {
+        .name              = "[UMC 889x] Compaq Presario 7100 Series 586",
+        .internal_name     = "pl5600d",
+        .type              = MACHINE_TYPE_SOCKET5,
+        .chipset           = MACHINE_CHIPSET_UMC_UM8890BF,
+        .init              = machine_at_pl5600d_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SOCKET5_7,
+            .block       = CPU_BLOCK_NONE,
+            .min_bus     = 40000000,
+            .max_bus     = 66666667,
+            .min_voltage = 3380,
+            .max_voltage = 3600,
+            .min_multi   = 1.5,
+            .max_multi   = 2.0
+        },
+        .bus_flags = MACHINE_PS2_PCI,
+        .flags     = MACHINE_IDE_DUAL | MACHINE_VIDEO | MACHINE_SOUND | MACHINE_APM,
+        .ram       = {
+            .min  = 8192,
+            .max  = 131072,
+            .step = 8192
+        },
+        .nvrmask                  = 127,
+        .jumpered_ecp_dma         = MACHINE_DMA_DISABLED | MACHINE_DMA_1 | MACHINE_DMA_3,
+        .default_jumpered_ecp_dma = 3,
+        .kbc_device               = &kbc_at_device,
+        .kbc_params               = KBC_VEN_VIA | 0x00424600,
+        .nvr_device               = &nvr_at_device,
+        .nvr_params               = NVR_AT,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x00000cf0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = NULL,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = &s3_phoenix_trio64_onboard_pci_device,
+        .snd_device               = &ess_1688_device, /* Onboard variant not yet emulated */
+        .net_device               = NULL
+    },
     /* This has an AMIKey-2, which is type 'H'. */
     {
         .name              = "[UMC 889x] Shuttle HOT-539",
@@ -14381,7 +14429,7 @@ const machine_t machines[] = {
     /* This has AST KBC firmware, likely a Phoenix variant since the BIOS */
     /* calls KBC command D5h to read the KBC revision. */
     {
-        .name              = "[VLSI SuperCore] AST Bravo MS P/90",
+        .name              = "[VLSI SuperCore] AST Bravo MS/MS-T/MS-L (Rattler)",
         .internal_name     = "bravoms586",
         .type              = MACHINE_TYPE_SOCKET5,
         .chipset           = MACHINE_CHIPSET_VLSI_SUPERCORE,
@@ -19669,6 +19717,54 @@ const machine_t machines[] = {
         .snd_device               = NULL,
         .net_device               = NULL
     },
+    /* Has an SM(S)C FDC37C932 Super I/O chip with on-chip KBC with AMI
+       MegaKey (revision '5') KBC firmware. */
+    {
+        .name              = "[i440FX] Advanced Integration Research (AIR) P6KDI",
+        .internal_name     = "p6kdi",
+        .type              = MACHINE_TYPE_SLOT1,
+        .chipset           = MACHINE_CHIPSET_INTEL_440FX,
+        .init              = machine_at_p6kdi_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SLOT1,
+            .block       = CPU_BLOCK_NONE,
+            .min_bus     = 60000000,
+            .max_bus     = 66666667,
+            .min_voltage = 2800,
+            .max_voltage = 3500,
+            .min_multi   = 1.5,
+            .max_multi   = 4.5
+        },
+        .bus_flags = MACHINE_PS2_PCI | MACHINE_BUS_USB,
+        .flags     = MACHINE_IDE_DUAL | MACHINE_APM | MACHINE_USB, /* Machine has internal SCSI: Adaptec unknown (possibly AIC-7880) */
+        .ram       = {
+            .min  = 8192,
+            .max  = 1048576,
+            .step = 8192
+        },
+        .nvrmask                  = 255,
+        .jumpered_ecp_dma         = 0,
+        .default_jumpered_ecp_dma = -1,
+        .kbc_device               = NULL,
+        .kbc_params               = 0x00000000,
+        .nvr_device               = NULL,
+        .nvr_params               = 0x00000000,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x00000cf0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = &p6kdi_device,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = NULL,
+        .snd_device               = NULL,
+        .net_device               = NULL
+    },
     /* The base board has a Holtek HT6542B KBC which emulates the AMIKEY-2 'H' KBC firmware. */
     {
         .name              = "[i440FX] ASUS P/I-P65UP5 (C-PKND)",
@@ -19751,6 +19847,54 @@ const machine_t machines[] = {
         .kbc_params               = KBC_VEN_HOLTEK | 0x00004800,
         .nvr_device               = &nvr_at_device,
         .nvr_params               = NVR_AT,
+        .sio_device               = NULL,
+        .sio_params               = 0x00000000,
+        .kbc_p1                   = 0x00000cf0,
+        .gpio                     = 0xffffffff,
+        .gpio_acpi                = 0xffffffff,
+        .device                   = NULL,
+        .kbd_device               = NULL,
+        .fdc_device               = NULL,
+        .vid_device               = NULL,
+        .snd_device               = NULL,
+        .net_device               = NULL
+    },
+    /* Has a Winbond W83977AF Super I/O chip, which the on-chip KBC of should have the
+       AMIKey-2 KBC firmware. */
+    {
+        .name              = "[i440FX] FIC KN-6010",
+        .internal_name     = "fickn6010",
+        .type              = MACHINE_TYPE_SLOT1,
+        .chipset           = MACHINE_CHIPSET_INTEL_440FX,
+        .init              = machine_at_fickn6010_init,
+        .p1_handler        = machine_generic_p1_handler,
+        .gpio_handler      = NULL,
+        .available_flag    = MACHINE_AVAILABLE,
+        .gpio_acpi_handler = NULL,
+        .cpu               = {
+            .package     = CPU_PKG_SLOT1,
+            .block       = CPU_BLOCK_NONE,
+            .min_bus     = 66666667,
+            .max_bus     = 66666667,
+            .min_voltage = 2800,
+            .max_voltage = 3500,
+            .min_multi   = 1.5,
+            .max_multi   = 5.0
+        },
+        .bus_flags = MACHINE_PS2_PCI | MACHINE_BUS_USB,
+        .flags     = MACHINE_IDE_DUAL | MACHINE_APM | MACHINE_USB,
+        .ram       = {
+            .min  = 8192,
+            .max  = 786432,
+            .step = 8192
+        },
+        .nvrmask                  = 255,
+        .jumpered_ecp_dma         = 0,
+        .default_jumpered_ecp_dma = -1,
+        .kbc_device               = NULL,
+        .kbc_params               = 0x00004800,
+        .nvr_device               = NULL,
+        .nvr_params               = 0x00000000,
         .sio_device               = NULL,
         .sio_params               = 0x00000000,
         .kbc_p1                   = 0x00000cf0,
