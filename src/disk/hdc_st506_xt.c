@@ -84,6 +84,7 @@
 #include <86box/pic.h>
 #include <86box/hdc.h>
 #include <86box/hdd.h>
+#include <86box/hdd_audio.h>
 
 #define ST506_XT_TYPE_XEBEC              0
 #define ST506_XT_TYPE_WDXT_GEN           1
@@ -526,6 +527,9 @@ st506_callback(void *priv)
                         double seek_us = hdd_seek_get_time(&hdd[drive->hdd_num], 0, HDD_OP_SEEK, 0, 0.0);
                         timer_advance_u64(&dev->timer, (uint64_t)(seek_us * TIMER_USEC));
 
+                        hdd_audio_seek(&hdd[drive->hdd_num], 0);
+                        hdd[drive->hdd_num].cur_cylinder = 0;
+
                         dev->cylinder   = dev->cyl_off;
                         drive->cylinder = dev->cylinder;
                         dev->state      = STATE_DONE;
@@ -917,6 +921,10 @@ write_error:
                             if (get_sector(dev, drive, &addr)) {
                                 double seek_us = hdd_seek_get_time(&hdd[drive->hdd_num], addr, HDD_OP_SEEK, 0, 0.0);
                                 timer_advance_u64(&dev->timer, (uint64_t)(seek_us * TIMER_USEC));
+
+                                uint16_t new_cylinder = (uint16_t) dev->cylinder;
+                                hdd_audio_seek(&hdd[drive->hdd_num], new_cylinder);
+                                hdd[drive->hdd_num].cur_cylinder = new_cylinder;
 
                                 dev->state      = STATE_DONE;
                             } else {
@@ -1791,7 +1799,7 @@ st506_init(const device_t *info)
             dev->bios_addr = device_get_config_hex20("bios_addr");
             break;
 
-        case ST506_XT_TYPE_VICTOR_V86P: /* Victor V86P (RLL) */
+        case ST506_XT_TYPE_VICTOR_V86P: /* Victor V86P Fixed Disk Adapter (RLL) */
             fn = VICTOR_V86P_BIOS_FILE;
             break;
 
@@ -2310,7 +2318,7 @@ const device_t st506_xt_xebec_device = {
 };
 
 const device_t st506_xt_wdxt_gen_device = {
-    .name          = "Western Digital WDXT-GEN (MFM)",
+    .name          = "WDXT-GEN (MFM)",
     .internal_name = "st506_xt_gen",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_WDXT_GEN,
@@ -2324,7 +2332,7 @@ const device_t st506_xt_wdxt_gen_device = {
 };
 
 const device_t st506_xt_dtc5150x_device = {
-    .name          = "DTC 5150X MFM Fixed Disk Adapter",
+    .name          = "DTC 5150X (MFM)",
     .internal_name = "st506_xt_dtc5150x",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_DTC_5150X,
@@ -2338,7 +2346,7 @@ const device_t st506_xt_dtc5150x_device = {
 };
 
 const device_t st506_xt_st11_m_device = {
-    .name          = "ST-11M MFM Fixed Disk Adapter",
+    .name          = "ST-11M (MFM)",
     .internal_name = "st506_xt_st11_m",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_ST11M,
@@ -2352,7 +2360,7 @@ const device_t st506_xt_st11_m_device = {
 };
 
 const device_t st506_xt_st11_r_device = {
-    .name          = "ST-11R RLL Fixed Disk Adapter",
+    .name          = "ST-11R (RLL)",
     .internal_name = "st506_xt_st11_r",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_ST11R,
@@ -2366,7 +2374,7 @@ const device_t st506_xt_st11_r_device = {
 };
 
 const device_t st506_xt_wd1002a_wx1_device = {
-    .name          = "WD1002A-WX1 MFM Fixed Disk Adapter",
+    .name          = "WD1002A-WX1 (MFM)",
     .internal_name = "st506_xt_wd1002a_wx1",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_WD1002A_WX1,
@@ -2380,7 +2388,7 @@ const device_t st506_xt_wd1002a_wx1_device = {
 };
 
 const device_t st506_xt_wd1002a_wx1_nobios_device = {
-    .name          = "WD1002A-WX1 MFM Fixed Disk Adapter (No BIOS)",
+    .name          = "WD1002A-WX1 (MFM) (No BIOS)",
     .internal_name = "st506_xt_wd1002a_wx1",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_WD1002A_WX1_NOBIOS,
@@ -2394,7 +2402,7 @@ const device_t st506_xt_wd1002a_wx1_nobios_device = {
 };
 
 const device_t st506_xt_wd1002a_27x_device = {
-    .name          = "WD1002A-27X RLL Fixed Disk Adapter",
+    .name          = "WD1002A-27X (RLL)",
     .internal_name = "st506_xt_wd1002a_27x",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_WD1002A_27X,
@@ -2408,7 +2416,7 @@ const device_t st506_xt_wd1002a_27x_device = {
 };
 
 const device_t st506_xt_wd1004a_wx1_device = {
-    .name          = "WD1004A-WX1 MFM Fixed Disk Adapter",
+    .name          = "WD1004A-WX1 (MFM)",
     .internal_name = "st506_xt_wd1004a_wx1",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_WD1004A_WX1,
@@ -2422,7 +2430,7 @@ const device_t st506_xt_wd1004a_wx1_device = {
 };
 
 const device_t st506_xt_wd1004_27x_device = {
-    .name          = "WD1004-27X RLL Fixed Disk Adapter",
+    .name          = "WD1004-27X (RLL)",
     .internal_name = "st506_xt_wd1004_27x",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_WD1004_27X,
@@ -2436,7 +2444,7 @@ const device_t st506_xt_wd1004_27x_device = {
 };
 
 const device_t st506_xt_wd1004a_27x_device = {
-    .name          = "WD1004a-27X RLL Fixed Disk Adapter",
+    .name          = "WD1004a-27X (RLL)",
     .internal_name = "st506_xt_wd1004a_27x",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_WD1004A_27X,
@@ -2450,7 +2458,7 @@ const device_t st506_xt_wd1004a_27x_device = {
 };
 
 const device_t st506_xt_victor_v86p_device = {
-    .name          = "Victor V86P RLL Fixed Disk Adapter",
+    .name          = "Victor V86P Fixed Disk Adapter (RLL)",
     .internal_name = "st506_xt_victor_v86p",
     .flags         = DEVICE_ISA,
     .local         = (HDD_BUS_MFM << 8) | ST506_XT_TYPE_VICTOR_V86P,

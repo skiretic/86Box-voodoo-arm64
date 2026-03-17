@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
-"PO-Revision-Date: 2026-03-10 14:03+0000\n"
-"Last-Translator: BlueRain-debug <bluerain.debug@gmail.com>\n"
+"PO-Revision-Date: 2026-03-11 16:31+0000\n"
+"Last-Translator: Alexander Babikov <lemondrops358@gmail.com>\n"
 "Language-Team: Chinese (Simplified Han script) <https://weblate.86box.net/"
 "projects/86box/86box/zh_Hans/>\n"
 "Language: zh-CN\n"
@@ -662,7 +662,7 @@ msgid "MO:"
 msgstr "磁光盘:"
 
 msgid "Removable disk drives"
-msgstr "可移动磁盘（ZIP）驱动器"
+msgstr "可移动磁盘驱动器"
 
 msgid "Removable disks:"
 msgstr "可移动磁盘:"
@@ -722,13 +722,13 @@ msgid "Speed"
 msgstr "速度"
 
 msgid "Removable disk %1 (%2): %3"
-msgstr "可移动磁盘 (ZIP) %1 (%2): %3"
+msgstr "可移动磁盘 %1 (%2): %3"
 
 msgid "&Removable disk %1 (%2): %3"
-msgstr "可移动磁盘(&R) (ZIP) %1 (%2): %3"
+msgstr "可移动磁盘(&R) %1 (%2): %3"
 
 msgid "Removable disk images"
-msgstr "可移动磁盘 (ZIP) 映像"
+msgstr "可移动磁盘映像"
 
 msgid "Tape %1 (%2): %3"
 msgstr "磁带%1 (%2)：%3"
@@ -1060,14 +1060,9 @@ msgstr "%1 是将 PCL 文件转换为 PDF 所需要的库。\n\n使用通用 PCL
 msgid "Don't show this message again"
 msgstr "不要再显示此消息"
 
-msgid "Don't exit"
-msgstr "不退出"
-
+#, fuzzy
 msgid "Reset"
 msgstr "重置"
-
-msgid "Don't reset"
-msgstr "不重置"
 
 msgid "CD-ROM images"
 msgstr "光盘映像"
@@ -1573,9 +1568,6 @@ msgstr "DMF (2048 簇)"
 msgid "2.88 MB"
 msgstr "2.88 MB"
 
-msgid "ZIP 100"
-msgstr "ZIP 100"
-
 msgid "3.5\" 128 MB (ISO 10090)"
 msgstr "3.5 英寸 128 MB (ISO 10090)"
 
@@ -1702,8 +1694,8 @@ msgstr "光标/冰球(&C)"
 msgid "&Pen"
 msgstr "笔(&P)"
 
-msgid "&Host CD/DVD Drive (%1:)"
-msgstr "主机 CD/DVD 驱动器 (%1:) (&H)"
+msgid "&Host CD/DVD Drive (%1)"
+msgstr "主机 CD/DVD 驱动器 (%1) (&H)"
 
 msgid "&Connected"
 msgstr "已连接(&C)"
