@@ -162,6 +162,7 @@
 
 #define IS_ARCH(m, a) ((machines[m].bus_flags & (a)) ? 1 : 0)
 #define IS_AT(m)      (((machines[m].bus_flags & (MACHINE_BUS_ISA16 | MACHINE_BUS_EISA | MACHINE_BUS_VLB | MACHINE_BUS_MCA | MACHINE_BUS_PCI | MACHINE_BUS_PCMCIA | MACHINE_BUS_AGP | MACHINE_BUS_AC97)) && !(machines[m].bus_flags & MACHINE_PC98)) ? 1 : 0)
+#define IS_MCA(m)     ((machines[m].bus_flags & (MACHINE_BUS_MCA | MACHINE_BUS_MCA32)) ? 1 : 0)
 
 #define CPU_BLOCK(...) \
     (const uint8_t[])  \
@@ -1038,6 +1039,7 @@ extern int             machine_at_8500tuc_init(const machine_t *);
 extern const device_t  d943_device;
 #endif
 extern int             machine_at_d943_init(const machine_t *);
+extern int             machine_at_op47_init(const machine_t *);
 
 /* i430VX */
 extern int             machine_at_gw2kma_init(const machine_t *);

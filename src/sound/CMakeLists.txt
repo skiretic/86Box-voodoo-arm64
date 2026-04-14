@@ -18,7 +18,8 @@
 add_library(snd OBJECT
     sound.c
     snd_opl.c
-    snd_opl_nuked.c
+    snd_opl2_nuked.c
+    snd_opl3_nuked.c
     snd_opl_ymfm.cpp
     snd_resid.cpp
     midi.c
@@ -47,6 +48,7 @@ add_library(snd OBJECT
     snd_mmb.c
     snd_mpu401.c
     snd_pas16.c
+    snd_saaym.c
     snd_sn76489.c
     snd_ssi2001.c
     snd_wss.c
