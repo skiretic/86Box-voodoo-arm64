@@ -62,6 +62,7 @@ static const struct {
     { &lpt_prt_pcl_device       },
     { &lpt_plip_device          },
     { &lpt_hasp_savquest_device },
+    { &lpt_loopback_device      },
     { NULL                      }
   // clang-format on
 };
@@ -176,6 +177,16 @@ lpt_devices_close(void)
 {
     for (uint8_t i = 0; i < PARALLEL_MAX; i++)
         memset(&(lpt_devs[i]), 0x00, sizeof(lpt_device_t));
+}
+
+void
+lpt_devices_reset(void)
+{
+    device_close_by_flags(DEVICE_LPT);
+
+    lpt_devices_close();
+
+    lpt_devices_init();
 }
 
 static uint8_t
@@ -949,12 +960,15 @@ lpt_init(const device_t *info)
 {
     lpt_t *dev = (lpt_t *) calloc(1, sizeof(lpt_t));
     int orig_inst   = next_inst;
+    int dev_inst    = device_get_instance();
 
     const uint16_t default_ports[PARALLEL_MAX] = { LPT1_ADDR, LPT2_ADDR, LPT_MDA_ADDR, LPT4_ADDR };
     const uint8_t  default_irqs[PARALLEL_MAX]  = { LPT1_IRQ, LPT2_IRQ, LPT_MDA_IRQ, LPT4_IRQ };
 
     if (info->local & 0xFFF00000)
         next_inst = PARALLEL_MAX - 1;
+    else if (dev_inst > 0)
+        next_inst = dev_inst - 1;
 
     dev->id = next_inst;
 
@@ -1000,6 +1014,8 @@ lpt_init(const device_t *info)
                     lpt_port_setup(dev, default_ports[dev->id]);
                     lpt_port_irq(dev, default_irqs[dev->id]);
                 }
+                if (dev_inst > 0)
+                    next_inst          = orig_inst;
             }
 
             dev->fifo       = fifo16_init();

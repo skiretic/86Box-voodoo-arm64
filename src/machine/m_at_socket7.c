@@ -809,7 +809,7 @@ machine_at_presario2240_init(const machine_t *model)
     pci_register_slot(0x13, PCI_CARD_NORMAL,      1, 2, 3, 4);
 
     if (gfxcard[0] == VID_INTERNAL)
-        device_add(&s3_trio64v2_dx_onboard_pci_device);
+        device_add(machine_get_vid_device(machine));
 
     device_add(&i430vx_device);
     device_add(&piix3_device);
@@ -839,7 +839,7 @@ machine_at_presario4500_init(const machine_t *model)
     pci_register_slot(0x13, PCI_CARD_NORMAL,      1, 2, 3, 4);
 
     if (gfxcard[0] == VID_INTERNAL)
-        device_add(&s3_trio64v2_dx_onboard_pci_device);
+        device_add(machine_get_vid_device(machine));
 
     device_add(&i430vx_device);
     device_add(&piix3_device);
@@ -1542,7 +1542,11 @@ machine_at_thunderbolt_init(const machine_t *model)
     device_add(&piix4_device);
     device_add_params(&fdc37c93x_device, (void *) (FDC37XXX5 | FDC37C93X_NORMAL | FDC37C93X_NO_NVR));
     device_add(&intel_flash_bxt_device);
+    device_add(&lm78_device); /* no reporting in BIOS */    
     spd_register(SPD_TYPE_SDRAM, 0x3, 128);
+
+    if (sound_card_current[0] == SOUND_INTERNAL)
+        machine_snd = device_add(machine_get_snd_device(machine));
 
     return ret;
 }

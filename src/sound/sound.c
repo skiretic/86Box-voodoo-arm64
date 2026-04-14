@@ -48,11 +48,12 @@ typedef struct {
     void *priv;
 } sound_handler_t;
 
-int sound_card_current[SOUND_CARD_MAX] = { 0, 0, 0, 0 };
-int sound_pos_global                   = 0;
-int music_pos_global                   = 0;
-int wavetable_pos_global               = 0;
-int sound_gain                         = 0;
+int  sound_card_current[SOUND_CARD_MAX] = { 0, 0, 0, 0 };
+int  sound_pos_global                   = 0;
+int  music_pos_global                   = 0;
+int  wavetable_pos_global               = 0;
+int  sound_gain                         = 0;
+char sound_output_device[512]           = { 0 };
 
 static sound_handler_t sound_handlers[8];
 static sound_handler_t music_handlers[8];
@@ -116,19 +117,13 @@ static const SOUND_CARD sound_cards[] = {
     /* ISA */
     { &adgold_device                },
     { &cms_device                   },
-    { &ess_688_device               },
-    { &ess_ess0100_pnp_device       },
-    { &ess_ess0968_pnp_688_device   },
-    { &ess_1688_device              },
-    { &ess_ess0102_pnp_device       },
-    { &ess_ess0968_pnp_device       },
     { &ssi2001_device               },
     { &thunderboard_device          },
     { &mmb_device                   },
 #ifdef USE_LIBSERIALPORT /*The following devices required LIBSERIALPORT*/
     { &opl2board_device             },
 #endif
-    { &pasplus_device               },
+    { &pas_device                   },
     { &sb_1_device                  },
     { &sb_15_device                 },
     { &sb_2_device                  },
@@ -136,6 +131,7 @@ static const SOUND_CARD sound_cards[] = {
     { &sb_pro_v2_device             },
     { &entertainer_device           },
     { &pssj_isa_device              },
+    { &saaym_device                 },
     { &tndy_device                  },
     /* ISA/Sidecar */
     { &adlib_device                 },
@@ -156,6 +152,12 @@ static const SOUND_CARD sound_cards[] = {
     { &cs4232_device                },
     { &cs4235_device                },
     { &cs4236b_device               },
+    { &ess_688_device               },
+    { &ess_ess0100_pnp_device       },
+    { &ess_ess0968_pnp_688_device   },
+    { &ess_1688_device              },
+    { &ess_ess0102_pnp_device       },
+    { &ess_ess0968_pnp_device       },
     { &gus_device                   },
     { &gus_v37_device               },
     { &gus_max_device               },
@@ -163,6 +165,7 @@ static const SOUND_CARD sound_cards[] = {
     { &mirosound_pcm10_device       },
     { &opti_82c930_device           },
     { &opti_82c931_device           },
+    { &pasplus_device               },
     { &pas16_device                 },
     { &pas16d_device                },
     { &sb_16_device                 },
