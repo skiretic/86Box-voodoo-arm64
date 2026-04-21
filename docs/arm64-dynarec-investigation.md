@@ -1,24 +1,24 @@
 # ARM64 New Dynarec Investigation
 
 ## Resume Here
-- Current objective: static ARM64 source audit complete; use this document as the planning handoff for implementation sequencing, validation design, and slice scoping.
-- Exact next file/module: none for source discovery; planning should start from `Decision-Ready Plan`, `Running Prioritized Backlog`, and `Findings Summary`.
+- Current objective: static ARM64 source audit complete and delta-reviewed against current `HEAD`; use this document as the planning handoff for implementation sequencing, validation design, and slice scoping.
+- Exact next file/module: none for source discovery; planning should start from `Decision-Ready Plan`, `Running Prioritized Backlog`, `Findings Summary`, and the current-HEAD delta note in `U-012`.
 - Next 3 concrete actions:
-  1. Start the implementation-planning pass from `S-01`, `S-02`, `S-03`, and `A-013`, keeping `A-021` explicitly tail-ranked unless workload evidence later promotes it.
+  1. Start the implementation-planning pass from `S-01`, `S-02`, `S-03`, and `A-013`, explicitly treating `F-019` and `F-020` as already fixed at current `HEAD` and keeping `A-021` / `A-022` tail-ranked unless workload evidence later promotes them.
   2. Draft future validation plans for `S-01`, `S-02`/`A-013`, and `S-03`, explicitly recording intended logfile and metadata destinations before any runtime work is attempted.
-  3. Decide whether `A-011` stays bundled inside `S-02` or is staged immediately after the direct imm-store hook work once the written plan is assembled.
+  3. Decide whether `A-011` stays bundled inside `S-02` or is staged immediately after the direct imm-store hook work once the written plan is assembled, and whether `A-022` belongs in the main plan or only in benchmarking-prep notes.
 - Active blockers:
   - No runtime evidence collected in this investigation by design; remaining open questions are measurement-only and must stay plan-only until explicitly approved.
-  - `src/codegen_new/codegen_timing.c` does not exist at HEAD `4687f433c`; any telemetry follow-up must start from `src/codegen_new/codegen_block.c` and `src/codegen_new/codegen.h` instead.
-  - No implementation plan has been written yet; this document is now the completed static-audit handoff artifact for that next phase.
+  - `src/codegen_new/codegen_timing.c` does not exist at HEAD `2e725bf5d`; any telemetry follow-up must start from `src/codegen_new/codegen_block.c` and `src/codegen_new/codegen.h` instead.
+  - No implementation plan has been written yet; this document is now the completed static-audit and post-sync-delta handoff artifact for that next phase.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
-- Current continuation checkpoint: 2026-04-21 16:52:32 EDT
+- Current continuation checkpoint: 2026-04-21 17:18:28 EDT
 - Repository: `/Users/anthony/projects/code/86Box-voodoo-arm64`
 - Branch: `ndr-analysis`
-- HEAD: `4687f433c3ccdd3dbbaebb92bcbc1c7fde0f0c57`
-- Note: current HEAD moved forward only through docs-only investigation commits; the analyzed source tree still matches the earlier code state referenced in prior units.
+- HEAD: `2e725bf5d65de5e6778f722e645200ffdb4029c1`
+- Note: current HEAD moved forward through docs-only investigation commits, an upstream sync merge, and the focused post-sync delta review in `U-012`; the implementation ordering remains unchanged, but the JIT-wrapper hazard and missing ARM64 `MOV` truncation cases are now fixed at baseline.
 - Mission: investigate ARM64-specific issues in the new dynarec that may cause `performance loss`, `incorrect behavior/instability`, or `avoidable fallback/churn`, and end with a prioritized improvement plan backed by evidence.
 
 ## Goals
@@ -55,7 +55,7 @@
 | Executable allocator / branch envelope | `src/codegen_new/codegen_allocator.c`, `src/codegen_new/codegen_allocator.h` | Proves generated ARM64 blocks and helper stubs live inside a single contiguous executable arena, which sharply constrains which relative branches and calls should always be reachable. | `E-013`, `E-035`, `E-036` |
 | Reg writeback / imm-store contract | `src/codegen_new/codegen_reg.c`, `src/codegen_new/codegen_ir_defs.h` | Defines the generic direct-immediate-store hooks and shows why the ARM64 backend currently cannot opt into the same dead-end `MOV_IMM` fast path as x86-64. | `E-021`, `E-043`, `E-044` |
 | Dynarec integration boundary | `src/cpu/386_dynarec.c`, `src/cpu/386_dynarec_ops.c` | Governs block lookup/validation/end conditions and can reveal avoidable recompile churn or cache invalidation behavior observable on ARM64 as backend symptoms. | `E-009` |
-| Shared control-flow / flag-helper producers | `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_ops_jump.c`, `src/codegen_new/codegen_ops_helpers.c`, `src/codegen_new/codegen_ops_helpers.h`, `src/codegen_new/codegen_ops_shift.c`, `src/codegen_new/codegen_ops_arith.c`, `src/codegen_new/codegen_ops_misc.c`, `src/codegen_new/codegen_ops_stack.c`, `src/codegen_new/codegen.c` | Determines how often the shared frontend emits `codegen_exit_rout` jumps, helper-result calls, instruction callbacks, far-control-transfer helpers, and flag-helper wrappers that map onto ARM64 branch/call weak spots. | `E-052`, `E-053`, `E-054`, `E-056`, `E-057`, `E-058`, `E-059`, `E-060`, `E-061`, `E-062`, `E-063`, `E-064`, `E-065` |
+| Shared control-flow / flag-helper producers and wrapper layer | `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_ops_jump.c`, `src/codegen_new/codegen_ops_helpers.c`, `src/codegen_new/codegen_ops_helpers.h`, `src/codegen_new/codegen_ops_shift.c`, `src/codegen_new/codegen_ops_arith.c`, `src/codegen_new/codegen_ops_misc.c`, `src/codegen_new/codegen_ops_stack.c`, `src/codegen_new/codegen_ops_jit_wrappers.h`, `src/codegen_new/codegen.c` | Determines how often the shared frontend emits `codegen_exit_rout` jumps, helper-result calls, instruction callbacks, far-control-transfer helpers, and the wrapper layer that now makes address-taken flag helpers safe JIT call targets on ARM64. | `E-052`, `E-053`, `E-054`, `E-056`, `E-057`, `E-058`, `E-059`, `E-060`, `E-061`, `E-062`, `E-063`, `E-064`, `E-065`, `E-066`, `E-071` |
 
 ## Hypothesis Register
 | Hypothesis ID | Status | Statement | Initial basis | Planned tie-break / next step |
@@ -96,6 +96,7 @@
 | P2 | A-019 | pending | Investigate reducing `uop_CALL_FUNC_RESULT` fallback density in `codegen_ops_branch.c` by reusing already-materialized flag state or tightening `FLAGS_UNKNOWN` rebuild paths before helper calls. | Medium on flag-heavy branch workloads; could cut ARM64 helper-call traffic beyond `A-013`. | High: shared flag semantics are subtle and mistakes risk silent control-flow bugs. | Static flag-provenance audit now; future branch-matrix validation plan only with logfile/metadata capture. | Roll back if the optimization duplicates logic already encoded in uops or risks semantic drift across corner cases. |
 | P2 | A-020 | pending | Investigate bounded fast paths for shared `flags_rebuild` / `get_cf()` users in `codegen_ops_shift.c` and `codegen_ops_arith.c` so helper calls can be skipped when flag provenance is already materialized. | Medium on rotate/carry-heavy integer code; broader if helper-call cost still dominates after `A-013`. | High: carry/overflow semantics are delicate across ADC/SBB/rotate families. | Static flag-provenance audit now; future arithmetic/shift matrix validation plan only with logfile/metadata capture. | Roll back if the fast path duplicates existing flag machinery or risks silent semantic drift. |
 | P2 | A-021 | pending | If post-`A-013` traces still show far-control-transfer or flag-serialization hotness, investigate bounded cleanup of `loadcs` / `loadcsjmp` and `flags_rebuild_c` / `flags_rebuild` tail helpers in `codegen_ops_misc.c`, `codegen_ops_jump.c`, and `codegen_ops_stack.c`. | Low-medium on niche kernel/OS/runtime code; mostly a tail optimization after cheaper ARM64 helper dispatch exists. | High: segment-transfer and flag-serialization semantics are delicate, and general workloads may never need it. | Future directed plan only: far `JMP/CALL/RET/IRET`, `PUSHF/PUSHFD`, `STC/CLC/CMC`, with logfile/metadata destinations declared before execution. | Roll back or defer if traces show those opcodes are rare or if `A-013` already removes most visible cost. |
+| P2 | A-022 | pending | If repeatable same-process benchmarking becomes important, move the round-robin eviction probe into resettable state and clear it in `codegen_init()` / `codegen_reset()`. | Low runtime win, medium measurement-hygiene gain because eviction order becomes reproducible across dynarec resets as well as within one process. | Low: bounded allocator-local cleanup. | Future directed plan only: repeated same-process reset/recompile cycles with explicit logfile/metadata destinations, comparing eviction-order stability before vs after. | Roll back or defer if dirty/purgable reuse dominates enough that `codegen_delete_random_block()` rarely executes or if process-scoped probe continuity proves intentional. |
 
 ## Findings Summary
 - F-001: The ARM64 new dynarec backend surface compiled for `ARCH STREQUAL "arm64"` is currently constrained to four translation units (`codegen_backend_arm64.c`, `_ops.c`, `_uops.c`, `_imm.c`), with additional ARM64 ABI/register definitions in headers and the runtime block-management boundary in `386_dynarec.c`. Confidence: high. Impact estimate: high for investigation prioritization because it bounds the code surface that can directly cause ARM64 backend-specific regressions. Evidence: `E-001`, `E-002`, `E-004`, `E-005`, `E-009`.
@@ -116,6 +117,9 @@
 - F-016: Shared unroll policy and churn flags systematically suppress the cheapest no-exit control-flow path exactly where ARM64 recompiles are already expensive. `codegen_can_unroll()` immediately returns false for `CODEBLOCK_BYTE_MASK`, forward/out-of-block targets, and other non-local cases; `codegen_can_unroll_full()` further caps unrolling at `1000` uops, `200` register references, and `10` iterations; and `ropJE_common()` / `ropJNE_common()` still carry a comment that JE/JNE unrolling is disabled because the code can “take the wrong turn.” Because dirty-list recompiles promote blocks into `BYTE_MASK`, this shared policy directly couples `F-008` churn escalation to more ARM64 `codegen_exit_rout` traffic. Severity: medium-high. Confidence: high. Expected user-visible impact: high on dirty/recompiled branch-heavy blocks and equality-test loops, where control flow repeatedly falls back to the global exit path instead of staying in-block. Likely reproduction conditions: recompiled tight loops, equality-heavy branch code, blocks with high uop density or version-reference count, and workloads that trigger `BYTE_MASK`. Candidate implementation files: `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_ops_helpers.c`, `src/codegen_new/codegen_ops_helpers.h`, `src/codegen_new/codegen_block.c`. Rollback trigger: if deeper audit proves the unroll suppression is semantically required for most hot paths or if restoring it reintroduces control-flow mismatches. Evidence: `E-053`, `E-054`, `E-055`, `E-058`.
 - F-017: Shared helper-call pressure remains broad even outside the branch module. `codegen_ops_shift.c` contains `28` `uop_CALL_FUNC(ir, flags_rebuild)` sites plus `3` direct zero-count exits to `codegen_exit_rout`, while `codegen_ops_arith.c` hides a `uop_CALL_FUNC_RESULT(..., CF_SET)` helper behind `get_cf()` and calls that wrapper `38` times across carry-dependent arithmetic. This does not outrank `F-015`, but it means `A-013` has immediate leverage across multiple integer-op families and that any later helper-elimination work should not stay branch-only. Severity: medium. Confidence: high. Expected user-visible impact: medium on rotate/carry-heavy code and moderate reinforcement of ARM64 helper-call overhead in general integer workloads. Likely reproduction conditions: ADC/SBB-heavy code, rotate-heavy loops, and churn paths that also activate `CODEBLOCK_NO_IMMEDIATES` shift scaffolding. Candidate implementation files: `src/codegen_new/codegen_ops_shift.c`, `src/codegen_new/codegen_ops_arith.c`, `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64_uops.c`. Rollback trigger: if future workload telemetry shows these families are rare in representative traces or if `A-013` already removes most of the user-visible cost. Evidence: `E-059`, `E-060`, `E-061`.
 - F-018: The remaining unexamined shared helper producers are tail-ranked rather than new first-order slices. Static ranking over `codegen_ops_misc.c`, `codegen_ops_jump.c`, and `codegen_ops_stack.c` finds only `6`, `6`, and `2` helper/exit sites respectively. `codegen_ops_misc.c` concentrates them in carry-preserving `INC/DEC` rebuilds, far `FF /5` jumps, and `CLC/CMC/STC`; `codegen_ops_jump.c` concentrates them in far control transfer (`JMP far`, `RETF`, `IRET`) while its near backward jumps already use the direct-return/unroll path; `codegen_ops_stack.c` only rebuilds flags for `PUSHF` / `PUSHFD`. Severity: low-medium. Confidence: high. Expected user-visible impact: low on general workloads, with niche relevance for privileged/far-control-transfer-heavy guests. Likely reproduction conditions: DOS extenders, kernels, monitors, or guests that frequently execute far returns/jumps or serialize flags with `PUSHF` / `PUSHFD` / `STC` / `CLC` / `CMC`. Candidate implementation files: none ahead of the existing backlog; if future traces justify it, revisit `src/codegen_new/codegen_ops_misc.c`, `src/codegen_new/codegen_ops_jump.c`, `src/codegen_new/codegen_ops_stack.c`, and `src/codegen_new/codegen_backend_arm64_ops.c`. Rollback trigger: if future telemetry shows far-control-transfer or flag-stack traffic materially hotter than this static tail ranking suggests. Evidence: `E-062`, `E-063`, `E-064`, `E-065`.
+- F-019: Current HEAD already fixes a real ARM64 correctness hazard in shared flag-helper dispatch. `codegen_ops_jit_wrappers.h` now adds `__attribute__((noinline, used))` wrappers around the address-taken `static __inline` flag helpers in `x86_flags.h`, and the affected shared producer modules include that wrapper header instead of handing raw inline-helper addresses to `uop_CALL_FUNC*`. This removes a plausible ARM64/linker-optimization failure mode where emitted JIT code could call a merged or eliminated helper symbol. Severity: high before fix; current HEAD status: fixed upstream. Confidence: high. Expected user-visible impact: medium-high stability gain on helper-heavy control-flow and flag-rebuild paths, but no direct performance win. Likely reproduction conditions: ARM64 builds where compiler/linker optimization folds or suppresses out-of-line copies of `flags_rebuild*` or `ZF_SET` / `CF_SET` / `NF_SET` / `PF_SET` / `VF_SET`. Candidate implementation files: none for the next planning wave unless new unwrapped address-taken inline helpers are discovered; current coverage lives in `src/codegen_new/codegen_ops_jit_wrappers.h`, `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_ops_shift.c`, `src/codegen_new/codegen_ops_arith.c`, `src/codegen_new/codegen_ops_misc.c`, and `src/codegen_new/codegen_ops_stack.c`. Rollback trigger: if later audit finds other `static __inline` helpers still passed to `uop_CALL_FUNC*` without a wrapper or if the wrapper layer introduces symbol/visibility regressions. Evidence: `E-066`, `E-067`, `E-071`.
+- F-020: Current HEAD also closes one missing ARM64 `MOV` truncation gap. `codegen_MOV()` now handles `W<-L`, `B<-L`, and `B<-W` with `BFI` instead of falling through to `fatal()`, removing one latent backend correctness/instability path from the earlier audit baseline. Severity: medium-high before fix; current HEAD status: fixed upstream. Confidence: high. Expected user-visible impact: low-medium but important for stability because the previous failure mode was backend fatal/abort on legal register-size combinations. Likely reproduction conditions: IR flows that copy a wider integer virtual register into 16-bit or 8-bit destinations during ARM64 lowering. Candidate implementation files: none for the current plan unless broader ARM64 `MOV` normalization work is later taken up in `src/codegen_new/codegen_backend_arm64_uops.c`. Rollback trigger: if later lowering audits expose additional size-pair holes or if the new `BFI` forms prove semantically wrong for any subregister case. Evidence: `E-068`.
+- F-021: Upstream deterministic round-robin block eviction improves allocator noise, but current HEAD still keeps the probe state across `codegen_reset()` / `codegen_init()`. `codegen_delete_random_block()` now advances a `static int evict_probe`, yet neither init nor reset clears it, so eviction order is only deterministic within a process lifetime rather than across dynarec resets. Severity: low. Confidence: high. Expected user-visible impact: low direct runtime impact, medium measurement-hygiene impact for repeatability. Likely reproduction conditions: long-running same-process benchmarking or repeated reset/reinit cycles that exhaust the free list after dirty/purgable reuse fails. Candidate implementation files: `src/codegen_new/codegen_block.c`. Rollback trigger: if later instrumentation shows this fallback path is too cold to justify follow-up or if keeping process-scoped probe continuity is found to be intentional. Evidence: `E-069`, `E-070`, `E-072`.
 
 ## Progress Log
 | Completed analysis unit | Key finding ID(s) | Evidence link(s) | Estimated impact | Decision ID | Follow-up action ID(s) |
@@ -132,6 +136,7 @@
 | U-009 control-flow policy/support audit (`codegen_ops_helpers.c/h`, `codegen_ops_jump.c`, `codegen_ops_shift.c`, `codegen.c`, `codegen_block.c`) | `F-015`, `F-016` | `E-054`, `E-055`, `E-056`, `E-057`, `E-058` | High for prioritization: linked dirty-block policy and shared unroll limits directly to the branch-heavy ARM64 cost multipliers | `D-015` | `A-010`, `A-013`, `A-014`, `A-018`, `A-019` |
 | U-010 secondary shared flag-helper producer audit (`codegen_ops_shift.c`, `codegen_ops_arith.c`) | `F-017` | `E-059`, `E-060`, `E-061` | Medium-high: proved that branch is not the only shared helper-call source, but that the next tier is still best addressed first by `A-013` rather than riskier semantic rewrites | `D-016` | `A-013`, `A-019`, `A-020` |
 | U-011 remaining tail-producer sweep (`codegen_ops_misc.c`, `codegen_ops_stack.c`, residual `codegen_ops_jump.c`) | `F-018` | `E-062`, `E-063`, `E-064`, `E-065` | Medium for prioritization: closes the static source sweep and prevents over-promoting low-density helper sites into standalone early slices | `D-017`, `D-018` | `A-013`, `A-021` |
+| U-012 post-sync delta review (`codegen_ops_jit_wrappers.h`, shared `codegen_ops_*`, `codegen_backend_arm64_uops.c`, `codegen_block.c`) | `F-019`, `F-020`, `F-021` | `E-066`, `E-067`, `E-068`, `E-069`, `E-070`, `E-071`, `E-072` | Medium for planning fidelity: current HEAD closes two correctness hazards and adds one low-priority reproducibility nit without changing implementation order | `D-019`, `D-020` | `A-013`, `A-022` |
 
 ## Decision Ledger
 | Decision ID | Option chosen | Alternatives rejected | Rationale | Evidence | Reversal trigger |
@@ -154,6 +159,8 @@
 | D-016 | Keep shift/arithmetic helper-elimination work as a later shared-frontend slice behind `A-013`. | Promote `A-020` ahead of the ARM64-local relative-call/jump work. | The shift/arithmetic helper density is real, but `A-013` improves every existing helper family immediately with backend-local risk, while `A-020` would touch delicate carry/rotate semantics. | `E-059`, `E-060`, `E-061` | Reverse if future traces still show helper-call overhead dominating after `A-013` is addressed. |
 | D-017 | Treat `codegen_ops_misc.c`, `codegen_ops_jump.c`, and `codegen_ops_stack.c` as tail producers that mainly strengthen `A-013`, not as new dedicated first-wave slices. | Promote a new dedicated misc/jump/stack helper slice into the first planning wave. | The remaining modules have only `6`, `6`, and `2` helper/exit sites respectively, concentrated in far control transfer and flag serialization rather than dense branch/shift/arithmetic hot paths. | `E-062`, `E-063`, `E-064`, `E-065` | Reverse if future traces show far-control-transfer or flag-stack traffic materially hotter than the static ranking suggests. |
 | D-018 | Declare the static ARM64 new-dynarec source audit complete and move next to implementation planning instead of further source discovery. | Continue source-by-source static discovery before planning. | Every suggested ARM64 backend module plus the remaining shared helper producers has now been inspected, and the final tail sweep did not uncover a new slice that outranks the current backlog. | `E-052`, `E-059`, `E-062`, `E-063`, `E-064`, `E-065` | Reverse only if later code changes land substantial new ARM64 backend/frontend logic before planning begins. |
+| D-019 | Keep the implementation order unchanged after the upstream sync: `S-01`, `S-02`, `S-03`, then `A-013`. | Re-open backlog ordering because current HEAD landed the wrapper and `MOV` truncation fixes. | The upstream wrapper and `MOV` truncation patches remove two correctness gaps from the current baseline, but they do not materially change helper-call density, the direct imm-store gap, recompile churn, or the JIT-local call/jump ranking that drives the top slices. | `E-066`, `E-068`, `E-039`, `E-043` | Reverse if later synced code materially changes ARM64 helper dispatch, the imm-store contract, or churn policy again. |
+| D-020 | Record the round-robin eviction probe reset issue as a low-priority measurement-hygiene backlog item (`A-022`), not a new early slice. | Promote allocator eviction cleanup into the first planning wave; ignore it entirely. | The issue is real and low-risk to fix, but it only affects a fallback path and mostly changes benchmark reproducibility rather than first-order ARM64 user-visible behavior. | `E-069`, `E-070`, `E-072` | Reverse if future benchmarking depends on reset-level determinism or if free-list exhaustion proves hot enough to matter user-visibly. |
 
 ## Evidence Index
 | Evidence ID | Reference | Exact location | Related IDs | Why it matters |
@@ -223,6 +230,13 @@
 | E-063 | `src/codegen_new/codegen_ops_stack.c` | lines 382-422 | `F-018`, `D-017` | Shows `stack` is mostly direct load/store lowering; only `PUSHF` / `PUSHFD` call `flags_rebuild`. |
 | E-064 | `src/codegen_new/codegen_ops_jump.c` | lines 17-29, 57-81, and 195-289 | `F-018`, `D-017` | Shows near backward jumps already use the direct-return/unroll path, while the helper calls in `jump` are concentrated in far control transfers (`loadcsjmp`, `loadcs`). |
 | E-065 | repo query over remaining tail producer files | 2026-04-21 static count using `rg -c "uop_CALL_FUNC\\(|uop_CALL_FUNC_RESULT\\(|uop_JMP\\(ir, codegen_exit_rout\\)|uop_CMP_IMM_JZ\\(ir, .*codegen_exit_rout\\)|uop_CMP_IMM_JNZ\\(ir, .*codegen_exit_rout\\)"` over `codegen_ops_misc.c`, `codegen_ops_stack.c`, and `codegen_ops_jump.c` returned `misc:6`, `jump:6`, `stack:2` | `F-018`, `D-017`, `D-018` | Gives the numeric tail ranking needed to close the static sweep without inventing another first-order slice. |
+| E-066 | `src/codegen_new/codegen_ops_jit_wrappers.h` | lines 1-68 | `F-019`, `D-019` | Defines the `noinline, used` wrapper layer for JIT-callable flag helpers and records the exact ARM64/linker optimization hazard it fixes. |
+| E-067 | `src/cpu/x86_flags.h` | lines 60-61, 119-120, 186-187, 245-246, 408-409, and 496-525 | `F-019` | Shows the underlying flag-test and flag-rebuild helpers are `static __inline`, explaining why taking their address directly is unsafe for JIT function-pointer use. |
+| E-068 | `src/codegen_new/codegen_backend_arm64_uops.c` | lines 1170-1177 | `F-020`, `D-019` | Shows current HEAD now handles three previously missing ARM64 `MOV` truncation cases instead of falling through to `fatal()`. |
+| E-069 | `src/codegen_new/codegen_block.c` | lines 436-446 | `F-021`, `D-020` | Shows round-robin eviction now advances a function-local static `evict_probe`, making the algorithm deterministic within one process. |
+| E-070 | `src/codegen_new/codegen_block.c` | lines 218-258 | `F-021`, `D-020` | Shows `codegen_init()` and `codegen_reset()` rebuild block state without clearing `evict_probe`, so determinism does not extend across dynarec resets. |
+| E-071 | repo query over `src/codegen_new` | 2026-04-21 `rg -n "codegen_ops_jit_wrappers.h|uop_CALL_FUNC\\(ir, (flags_rebuild|flags_rebuild_c)\\)|uop_CALL_FUNC_RESULT\\(ir, [^,]+, (CF_SET|NF_SET|PF_SET|VF_SET|ZF_SET)\\)" src/codegen_new` returned wrapper-header includes in `branch`, `shift`, `arith`, `misc`, and `stack`, with no remaining direct raw flag-helper JIT call sites | `F-019`, `D-019` | Confirms the wrapper layer is actually adopted across the affected shared producer modules rather than existing as unused scaffolding. |
+| E-072 | `src/codegen_new/codegen_block.c` | lines 184-207 | `F-021`, `D-020` | Shows `codegen_delete_random_block()` is only reached after free-list exhaustion and failed dirty/purgable reuse, keeping the eviction probe issue in the measurement-hygiene tier. |
 
 ## Analysis Units
 
@@ -467,7 +481,7 @@
   - The executable allocator maps one contiguous arena of `MEM_BLOCK_NR * MEM_BLOCK_SIZE`, which is ~120MB and therefore wholly inside ARM64's +/-128MB unconditional branch reach.
   - `codegen_reg_write_imm()` already expects four backend imm-store hooks; x86-64 satisfies that contract, but ARM64 still does not.
   - `codegen_backend_arm64.h` has drifted from the actual ops surface: it advertises `host_arm64_STRB_IMM_W` and `host_arm64_LDR_LITERAL_*`, while the active low-level header exports `host_arm64_STRB_IMM` and no literal-load implementation exists at this continuation point.
-  - The suggested `src/codegen_new/codegen_timing.c` module is absent at HEAD `96806d27d`; timing hooks currently surface through `codegen_block.c` and `codegen.h` instead.
+  - The suggested `src/codegen_new/codegen_timing.c` module is absent at both the original audited checkpoint and current HEAD `2e725bf5d`; timing hooks currently surface through `codegen_block.c` and `codegen.h` instead.
 - Risk points:
   - `R-011`: JIT-local range guarantees make the missing relative-call/jump fast path a concrete missed optimization, not just a speculative idea (`F-011`).
   - `R-012`: the imm-store contract gap is broad enough to justify its own slice because it blocks a generic IR optimization end-to-end (`F-013`).
@@ -721,8 +735,73 @@
 - Confidence: high.
 - Impact estimate: medium for planning readiness, because this unit closes the last remaining static source sweep and prevents overcommitting to low-density tail modules.
 
+### U-012 post-sync delta review (`codegen_ops_jit_wrappers.h`, shared `codegen_ops_*`, `codegen_backend_arm64_uops.c`, `codegen_block.c`)
+- Timestamp: 2026-04-21 17:18:28 EDT
+- What this unit covers: the focused current-HEAD recheck required after upstream sync moved the branch beyond the finished static-audit baseline.
+- What it does:
+  - Re-audits the new `codegen_ops_jit_wrappers.h` layer and its adoption in the shared flag-helper producer modules.
+  - Rechecks the ARM64 `codegen_MOV()` lowering changes that landed after the original audit closeout.
+  - Reviews the new deterministic round-robin block-eviction change in `codegen_block.c` to decide whether it affects ARM64 planning priorities.
+- ARM64-specific logic observed:
+  - `codegen_ops_jit_wrappers.h` now creates stable `noinline, used` call targets around address-taken `static __inline` flag helpers, and the affected producer modules include that header instead of passing raw inline-helper addresses into `uop_CALL_FUNC*`.
+  - ARM64 `codegen_MOV()` now covers `W<-L`, `B<-L`, and `B<-W` truncation pairs with `BFI`, reducing one latent fatal path in the backend.
+  - The new round-robin eviction logic improves intra-run determinism, but the function-local `evict_probe` state survives `codegen_init()` and `codegen_reset()`, so reproducibility does not extend across resets within the same process.
+- Risk points:
+  - `R-023`: the wrapper layer removes a real ARM64 correctness hazard from the current baseline, so planning should not allocate a new slice to it unless later audits uncover more unwrapped address-taken inline helpers (`F-019`).
+  - `R-024`: the missing ARM64 `MOV` truncation gap has narrowed at current HEAD, reducing one earlier latent backend correctness risk from the audit baseline (`F-020`).
+  - `R-025`: block eviction is still only process-deterministic, not reset-deterministic, so measurement reproducibility remains slightly incomplete (`F-021`).
+- Code examples:
+  - New wrapper site with underlying inline target (`src/codegen_new/codegen_ops_jit_wrappers.h:24-33` and `src/cpu/x86_flags.h:496-525`):
+    ```c
+    static JIT_WRAPPER void
+    jit_flags_rebuild(void)
+    {
+        flags_rebuild();
+    }
+    ...
+    static __inline void
+    flags_rebuild(void)
+    {
+        if (cpu_state.flags_op != FLAGS_UNKNOWN) {
+    ```
+    Why it matters: current HEAD now routes JIT-callable flag rebuilds through a stable out-of-line symbol instead of taking the address of a `static __inline` body directly.
+  - New ARM64 truncation coverage (`src/codegen_new/codegen_backend_arm64_uops.c:1170-1175`):
+    ```c
+    } else if (REG_IS_W(dest_size) && REG_IS_L(src_size)) {
+        host_arm64_BFI(block, dest_reg, src_reg, 0, 16);
+    } else if (REG_IS_B(dest_size) && REG_IS_L(src_size)) {
+        host_arm64_BFI(block, dest_reg, src_reg, 0, 8);
+    } else if (REG_IS_B(dest_size) && REG_IS_W(src_size)) {
+        host_arm64_BFI(block, dest_reg, src_reg, 0, 8);
+    }
+    ```
+    Why it matters: three previously unhandled truncation paths no longer fall through to `fatal()`.
+  - Partially deterministic eviction state (`src/codegen_new/codegen_block.c:438-446` and `218-258`):
+    ```c
+    static int evict_probe = 0;
+    ...
+    evict_probe = (block_nr + 1) & BLOCK_MASK;
+    ```
+    ```c
+    void codegen_reset(void)
+    {
+        ...
+        memset(codeblock, 0, BLOCK_SIZE * sizeof(codeblock_t));
+    }
+    ```
+    Why it matters: the round-robin state is advanced, but it is never reset alongside the rest of dynarec block state.
+- Candidate fixes (proposal only; no implementation here):
+  - Treat the wrapper and `MOV` truncation fixes as resolved baseline, not as new planning slices.
+  - `A-022`: if benchmarking reproducibility becomes important, move `evict_probe` into resettable file scope and clear it from `codegen_init()` / `codegen_reset()`.
+  - Keep the implementation order unchanged: `S-01`, `S-02`, `S-03`, then `A-013`.
+- New/updated hypotheses:
+  - No new hypothesis IDs added in this unit.
+  - `H-004`, `H-006`, and `H-009` remain open; `U-012` only changes the current-HEAD baseline, not the runtime-only tie-breaks for those hypotheses.
+- Confidence: high.
+- Impact estimate: medium for planning fidelity, because this unit aligns the finished audit with current HEAD and removes two stale correctness concerns without reopening the broader backlog.
+
 ## Known Unknowns
-- Static source sweep is complete; remaining unknowns are runtime-only.
+- Static source sweep and current-HEAD delta review are complete; remaining unknowns are runtime-only except for the optional allocator reproducibility cleanup in `A-022`.
 - Whether recent historical ARM64 regressions were accompanied by preserved logfiles and metadata on disk; no historical run was referenced in this session, so logfile/metadata status remains unknown.
 - Whether hot compiled blocks regularly end up more than 1MB from `codegen_exit_rout`, or whether block reuse keeps most hot paths close enough that `F-012` matters less than the static structure suggests.
 - Whether ARM64 helper-heavy workloads are bottlenecked more by absolute-call materialization (`F-011`), long abort branches (`F-012`), or compile/recompile churn (`F-008` / `F-009`).
@@ -733,11 +812,31 @@
 - Whether stack layouts can realistically grow enough to trigger `F-014` without deliberate stress, or whether that slice should remain correctness hygiene rather than a hot bug fix.
 - Whether any existing workload is known to emit `UOP_MMX_ENTER` near a mem-block boundary often enough to make `F-005` user-visible today.
 - Whether far-control-transfer or flag-serialization-heavy workloads are common enough to justify `A-021` after `A-013`, or whether the tail-module helper sites should remain a purely ranked footnote.
+- Whether making round-robin eviction reset-deterministic is worth a cleanup patch for benchmarking hygiene, or whether `codegen_delete_random_block()` is too cold for `A-022` to matter in practice.
 
 ## Rejected Hypotheses
 - H-005 rejected at 2026-04-20 22:58:23 EDT: `codegen_allocator_clean_blocks()` is not freeing or invalidating helper memory. `src/codegen_new/codegen_allocator.c:190-200` shows an ARM64-only `__clear_cache()` loop over generated blocks, which makes the ARM64 init/epilogue call sites a cache-coherency requirement rather than a lifetime bug. Evidence: `E-012`, `E-013`.
 
 ## State Snapshot
+### Snapshot 2026-04-21 17:18:28 EDT
+- Current focus: static ARM64 audit complete and delta-reviewed against current HEAD; handoff ready for implementation planning
+- Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`, `U-005`, `U-006`, `U-007`, `U-008`, `U-009`, `U-010`, `U-011`, `U-012`
+- Active findings: `F-001` through `F-021`
+- Active decisions: `D-001` through `D-020`
+- Active hypotheses:
+  - `H-001` parked
+  - `H-002` parked
+  - `H-003` confirmed
+  - `H-004` open
+  - `H-005` rejected
+  - `H-006` open
+  - `H-007` confirmed
+  - `H-008` confirmed
+  - `H-009` open
+  - `H-010` confirmed
+  - `H-011` confirmed
+- Next commit-ready investigation move: none required for source discovery; start the written implementation plan from `S-01`, `S-02`, `S-03`, and `A-013`, treating `F-019` / `F-020` as current-HEAD fixes and keeping `A-022` as optional measurement-hygiene follow-up.
+
 ### Snapshot 2026-04-21 16:52:32 EDT
 - Current focus: static ARM64 source audit complete; handoff ready for implementation planning
 - Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`, `U-005`, `U-006`, `U-007`, `U-008`, `U-009`, `U-010`, `U-011`
@@ -938,24 +1037,26 @@
 - `A-019` flag-helper reduction should remain a later shared-frontend slice: the branch producer density now justifies investigating it, but it is still riskier than the simpler ARM64-local call/jump improvements.
 - `A-020` shift/arithmetic flag-helper elimination should stay behind `A-013` as well; the new evidence broadens the helper-call problem, but the lowest-risk answer is still to cheapen helper dispatch before rewriting flag semantics.
 - `A-021` should stay behind `A-013` and the existing shared-frontend work; the final tail sweep showed `misc` / `jump` / `stack` helper sites are real but too sparse and niche to justify a dedicated early slice.
+- Current HEAD already includes the wrapper fix captured in `F-019` and the missing ARM64 `MOV` truncation coverage in `F-020`, so the implementation plan should treat those as resolved baseline rather than as new slices.
+- `A-022` is intentionally outside the main wave; it can improve benchmarking reproducibility, but it does not change expected end-user performance or correctness nearly as much as `S-01`, `S-02`, `S-03`, or `A-013`.
 - `S-03` should still come after `S-01` and ideally after an initial `S-02` design pass, because the churn slice is the most policy-heavy and benefits from having the lower-level ARM64 cost model already improved.
 
 ## Session Delta
 - Added/changed in this session:
-  - Advanced HEAD to `4687f433c3ccdd3dbbaebb92bcbc1c7fde0f0c57` through docs-only investigation continuation, preserving the earlier checkpoints while keeping the source-under-analysis unchanged.
-  - Refreshed the ARM64/shared-producer file map to include the final tail modules `src/codegen_new/codegen_ops_misc.c` and `src/codegen_new/codegen_ops_stack.c`.
-  - Completed `U-011` for `codegen_ops_misc.c`, `codegen_ops_stack.c`, and the residual `codegen_ops_jump.c` ranking pass, closing the remaining static source sweep.
-  - Added finding `F-018`, decisions `D-017` and `D-018`, evidence `E-062` through `E-065`, and backlog item `A-021`, proving that the remaining helper producers are real but tail-ranked and do not outrank the existing slices.
-  - Converted `Resume Here`, `Known Unknowns`, `State Snapshot`, and `Session Delta` from “next investigation unit” form into a planning-ready handoff that explicitly marks the static audit complete.
+  - Advanced the audited baseline to HEAD `2e725bf5d65de5e6778f722e645200ffdb4029c1` after the upstream sync merge and completed `U-012`, a focused delta review over the new wrapper layer, ARM64 `MOV` lowering changes, and block-eviction updates.
+  - Refreshed `Resume Here`, `Scope`, the ARM64/shared file map, `Running Prioritized Backlog`, `State Snapshot`, `Decision-Ready Plan`, and `Session Delta` so the document now describes current HEAD rather than the pre-sync docs-only checkpoint.
+  - Added findings `F-019` through `F-021`, decisions `D-019` and `D-020`, evidence `E-066` through `E-072`, progress entry `U-012`, and backlog item `A-022`.
+  - Recorded that current HEAD already fixes the ARM64 JIT-wrapper hazard and the missing ARM64 `MOV` truncation cases, while the round-robin eviction change remains only partly reset-deterministic.
 - Unresolved:
   - No runtime validation plan has been executed; all validation remains plan-only, and no historical run logfile/metadata pair was referenced in this investigation.
   - `H-004`, `H-006`, and `H-009` remain open because churn frequency, FP-round hotness, and far-branch prevalence are runtime-only questions at this point.
   - The JE/JNE “wrong turn” root cause is still unknown, so `A-018` remains deliberately behind lower-risk ARM64-local slices.
-  - Future telemetry work still needs a new anchor because `src/codegen_new/codegen_timing.c` does not exist at HEAD `4687f433c`.
+  - Whether `A-022` is worth implementing remains open; it is currently classified as measurement hygiene rather than a first-order ARM64 slice.
+  - Future telemetry work still needs a new anchor because `src/codegen_new/codegen_timing.c` does not exist at HEAD `2e725bf5d`.
 - Exact first commands/files for next session:
-  - `nl -ba docs/arm64-dynarec-investigation.md | sed -n '74,170p'`
-  - `nl -ba docs/arm64-dynarec-investigation.md | sed -n '911,961p'`
-  - `rg -n "S-01|S-02|S-03|A-013|A-021|F-018|D-017|D-018" docs/arm64-dynarec-investigation.md`
+  - `rg -n "Running Prioritized Backlog|Findings Summary|Decision-Ready Plan|Session Delta" docs/arm64-dynarec-investigation.md`
+  - `rg -n "S-01|S-02|S-03|A-013|A-022|F-019|F-020|F-021|U-012" docs/arm64-dynarec-investigation.md`
+  - `sed -n '1,140p' docs/arm64-dynarec-investigation.md`
   - File focus: `docs/arm64-dynarec-investigation.md`
-- Recommended immediate next investigation unit: none. Recommended immediate next phase: implementation planning from `S-01`, `S-02`, `S-03`, and `A-013`, with `F-018` retained as the tail-ranking guardrail.
-- Broader issue inventory sufficient for multi-slice implementation planning: yes. The static audit now appears complete and broad enough to support multi-slice implementation planning without another discovery pass.
+- Recommended immediate next investigation unit: none. Recommended immediate next phase: implementation planning from `S-01`, `S-02`, `S-03`, and `A-013`, using `U-012` only as the current-HEAD guardrail against reopening already fixed upstream items.
+- Broader issue inventory sufficient for multi-slice implementation planning: yes. The static audit plus current-HEAD delta review now appears complete and broad enough to support multi-slice implementation planning without another discovery pass.
