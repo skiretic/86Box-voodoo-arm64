@@ -21,7 +21,7 @@ cp "$KIT_DIR/MICROSTR.EXE" "$STAGE_DIR/"
 cp "$SRC_DIR/README.TXT" "$STAGE_DIR/README.TXT"
 cp "$SRC_DIR/SCRIPTS/"*.BAT "$STAGE_DIR/SCRIPTS/"
 
-# Win98/DOS batch parsing is most reliable with CRLF endings.
+# Win98/DOS command parser is most reliable with CRLF endings for BAT/TXT assets.
 awk '{ sub(/\r$/, ""); printf "%s\r\n", $0 }' "$STAGE_DIR/README.TXT" > "$STAGE_DIR/README.TXT.crlf"
 mv "$STAGE_DIR/README.TXT.crlf" "$STAGE_DIR/README.TXT"
 for bat in "$STAGE_DIR"/SCRIPTS/*.BAT; do
@@ -30,6 +30,7 @@ for bat in "$STAGE_DIR"/SCRIPTS/*.BAT; do
 done
 
 rm -f "$OUT_ISO"
+# Joliet keeps long names readable from Win98 Explorer while preserving DOS compatibility.
 hdiutil makehybrid \
     -iso -joliet \
     -default-volume-name "WIN98MICRO" \

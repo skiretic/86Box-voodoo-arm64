@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <stdint.h>
 
+/* Keep runtime Win98-safe: kernel32-only entry path, no UCRT/MSVCRT dependency. */
 #define IMM_STORE_ITERS_DEFAULT 600000UL
 #define BRANCH_ITERS_DEFAULT    2200000UL
 #define MMX_ITERS_DEFAULT       800000UL
@@ -113,6 +114,7 @@ phase_imm_store(uint32_t iters)
         ARR_WORDS = 32768,
         ARR_MASK  = ARR_WORDS - 1
     };
+    /* Working-set churn here targets immediate store lowering and address generation paths. */
     uint32_t *arr = (uint32_t *) VirtualAlloc(NULL, ARR_WORDS * sizeof(uint32_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
     if (!arr)
@@ -139,6 +141,7 @@ phase_imm_store(uint32_t iters)
 static uint32_t
 phase_branch_helper(uint32_t iters)
 {
+    /* Branch-heavy state machine to stress conditional path patching/dispatch behavior. */
     uint32_t i;
     uint32_t x     = 0x31415926U;
     uint32_t y     = 0x27182818U;
@@ -207,6 +210,7 @@ static uint32_t
 phase_mmx_touch(uint32_t iters)
 {
 #if defined(__i386__)
+    /* MMX uops are intentionally touched to exercise MMX enter/exit related codegen. */
     uint32_t i;
     uint32_t a   = 0x89abcdefU;
     uint32_t b   = 0x10203040U;
@@ -245,6 +249,7 @@ phase_smc_touch(uint32_t iters)
 {
     uint32_t i;
     uint32_t chk = 0x11223344U;
+    /* Writable+executable buffer deliberately mutates code bytes each iteration (SMC churn). */
     uint8_t *buf = (uint8_t *) VirtualAlloc(NULL, 16U, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 
     if (!buf)
@@ -316,6 +321,7 @@ _start(void)
 
     tiny_write_line("MICROSTRESS_START");
 
+    /* Fold phase checksums into one short signature so VM-side reporting stays compact. */
     chk = run_phase("imm_store", IMM_STORE_ITERS_DEFAULT / div, phase_imm_store, &err);
     if (err)
         ExitProcess(3U);
