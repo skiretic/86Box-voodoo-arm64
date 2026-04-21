@@ -17,6 +17,13 @@
 - `A-022` remains optional measurement hygiene and stays out of wave 1.
 - Wave-1 execution order is fixed: `S-01` -> `S-02` -> `S-03` -> `A-013`.
 
+## Execution Status (Current)
+- Current branch/head: `ndr-analysis` @ `d88433828`
+- `S-01` status: completed
+  - Implemented `codegen_MMX_ENTER()` stale-buffer patch-site fix in `src/codegen_new/codegen_backend_arm64_uops.c`.
+  - WL-05 validation passed in quick/normal/smc modes on canonical VM profile.
+- Next in queue: `S-02a` (`A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` enablement).
+
 ## Recommended Execution Order and Scope Boundaries
 1. `S-01` (correctness guardrail; smallest write set; unblocker for safe backend work)
 2. `S-02` (direct imm-store fast path plus bounded immediate materialization improvements)
@@ -39,20 +46,25 @@ What explicitly waits until after wave 1:
 - `A-014`, `A-018`, `A-019`, `A-020`, `A-021`, `A-022`
 - Also defer non-wave slices from the audit backlog unless a wave slice hard-dep appears during implementation.
 
-Recommended first patch:
-- `S-01`: fix `codegen_MMX_ENTER()` branch patching to use `block_write_data`.
+Original first patch (completed):
+- `S-01`: fixed `codegen_MMX_ENTER()` branch patching to use `block_write_data`.
 
-Recommended first file to edit:
+Recommended next patch:
+- `S-02a`: add ARM64 direct imm-store hooks and enable `CODEGEN_BACKEND_HAS_MOV_IMM`.
+
+Recommended next files to edit:
+- `src/codegen_new/codegen_backend_arm64.h`
 - `src/codegen_new/codegen_backend_arm64_uops.c`
 
-Exact first commands for the next implementation session:
+Exact next commands for the next implementation session:
 ```bash
 cd /Users/anthony/projects/code/86Box-voodoo-arm64
 git rev-parse --abbrev-ref HEAD
 git rev-parse --short HEAD
-rg -n "S-01|S-02|S-03|A-013|F-019|F-020|A-022" docs/arm64-dynarec-investigation.md docs/arm64-dynarec-wave1-implementation-plan.md
+rg -n "S-02|A-012|CODEGEN_BACKEND_HAS_MOV_IMM|codegen_direct_write_8_imm|codegen_direct_write_16_imm|codegen_direct_write_32_imm|codegen_direct_write_32_imm_stack" docs/arm64-dynarec-wave1-implementation-plan.md src/codegen_new/codegen_backend_arm64.h src/codegen_new/codegen_backend_arm64_uops.c src/codegen_new/codegen_reg.c src/codegen_new/codegen_ir_defs.h
 sed -n '1,220p' docs/arm64-dynarec-wave1-implementation-plan.md
-rg -n "codegen_MMX_ENTER|host_arm64_branch_set_offset\\(.*block->data\\[block_pos\\]" src/codegen_new/codegen_backend_arm64_uops.c
+sed -n '500,570p' src/codegen_new/codegen_reg.c
+sed -n '900,940p' src/codegen_new/codegen_ir_defs.h
 ```
 
 ## Cross-Slice Validation Framework

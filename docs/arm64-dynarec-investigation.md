@@ -12,6 +12,14 @@
   - `src/codegen_new/codegen_timing.c` does not exist at HEAD `2e725bf5d`; any telemetry follow-up must start from `src/codegen_new/codegen_block.c` and `src/codegen_new/codegen.h` instead.
   - No implementation plan has been written yet; this document is now the completed static-audit and post-sync-delta handoff artifact for that next phase.
 
+### Post-Investigation Status Update (2026-04-21)
+- Historical note: this file remains canonical static-audit record and reflects investigation snapshot state.
+- Live execution plan now exists at [docs/arm64-dynarec-wave1-implementation-plan.md](./arm64-dynarec-wave1-implementation-plan.md).
+- Execution progress after investigation handoff:
+  - `S-01` implemented (ARM64 `codegen_MMX_ENTER()` patch target corrected to `block_write_data`) at commit `d88433828`.
+  - `WL-05` Win98 microstress baselines validated in quick/normal/smc modes and recorded in wave-1 plan.
+  - Current next execution slice is `S-02a` (`A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` enablement).
+
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
 - Current continuation checkpoint: 2026-04-21 17:18:28 EDT

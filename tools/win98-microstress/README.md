@@ -1,6 +1,7 @@
 # WL-05 Win98 Microstress
 
 Deterministic Win98-friendly console workload for targeted dynarec validation.
+Current build is Win98-safe CRT-free binary (imports `KERNEL32.dll` only).
 
 Source file:
 - `microstress_win98.c`
@@ -82,3 +83,7 @@ D:\SCRIPTS\MRUN.BAT D:
 - Treat any `MICROSTRESS_ERROR` line or nonzero exit code as failure.
 - Capture stdout into workload artifacts using the existing wave-1 naming rules.
 - Keep VM profile fixed when comparing checksums across runs.
+- Validated canonical baseline totals (`2026-04-21`, K6-2 canonical VM):
+  - quick (`MRUNQ`): `45db7b65`
+  - normal (`MRUN`): `2520dd5e`
+  - smc (`MRUNS`): `b86f22a1`
