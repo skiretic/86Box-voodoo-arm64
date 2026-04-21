@@ -61,6 +61,7 @@
 #    define OPCODE_AND_IMM            (0x024 << 23)
 #    define OPCODE_ANDS_IMM           (0x0e4 << 23)
 #    define OPCODE_EOR_IMM            (0x0a4 << 23)
+#    define OPCODE_MOVN_W             (0x025 << 23)
 #    define OPCODE_MOVK_W             (0x0e5 << 23)
 #    define OPCODE_MOVK_X             (0x1e5 << 23)
 #    define OPCODE_MOVZ_W             (0x0a5 << 23)
@@ -277,6 +278,16 @@ static inline int
 imm_is_imm16(uint32_t imm_data)
 {
     if (!(imm_data & 0xffff0000) || !(imm_data & 0x0000ffff))
+        return 1;
+    return 0;
+}
+
+static inline int
+imm_is_movn16(uint32_t imm_data)
+{
+    /* MOVN can materialize a 32-bit immediate in one instruction when one halfword is
+       all ones, because non-selected halfwords are also filled with ones. */
+    if ((imm_data & 0xffff0000u) == 0xffff0000u || (imm_data & 0x0000ffffu) == 0x0000ffffu)
         return 1;
     return 0;
 }
@@ -1531,9 +1542,21 @@ host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
 void
 host_arm64_mov_imm(codeblock_t *block, int reg, uint32_t imm_data)
 {
+    uint32_t imm_encoding;
+
+    /* Fast-path constants that fit a single MOVZ lane update. */
     if (imm_is_imm16(imm_data))
         host_arm64_MOVZ_IMM(block, reg, imm_data);
-    else {
+    /* S-02b: use MOVN for one-lane "all ones" patterns to avoid MOVZ+MOVK. */
+    else if (imm_is_movn16(imm_data)) {
+        int hw = ((imm_data & 0xffff0000u) == 0xffff0000u) ? 0 : 1;
+        uint32_t movn_imm = hw ? ((~imm_data >> 16) & 0xffffu) : ((~imm_data) & 0xffffu);
+        codegen_addlong(block, OPCODE_MOVN_W | MOV_WIDE_HW(hw) | IMM16(movn_imm) | Rd(reg));
+    } else if ((imm_encoding = host_arm64_find_imm(imm_data)) != 0) {
+        /* S-02b: logical-immediate encoding emits one ORR-immediate from WZR. */
+        codegen_addlong(block, OPCODE_ORR_IMM | Rd(reg) | Rn(REG_WZR) | IMM_LOGICAL(imm_encoding));
+    } else {
+        /* Conservative fallback preserves existing behavior when no single-op form exists. */
         host_arm64_MOVZ_IMM(block, reg, imm_data & 0xffff);
         host_arm64_MOVK_IMM(block, reg, imm_data & 0xffff0000);
     }
