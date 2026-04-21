@@ -295,6 +295,7 @@ run_phase(const char *name, uint32_t iters, uint32_t (*fn)(uint32_t), uint32_t *
     tiny_write("PHASE_START ");
     tiny_write_line(name);
     chk = fn(iters);
+    /* Checksum 0 is reserved as an internal error sentinel for allocation/exec failures. */
     if (chk == 0U) {
         tiny_write("MICROSTRESS_ERROR phase=");
         tiny_write(name);
@@ -313,6 +314,7 @@ _start(void)
     const char *cmd = GetCommandLineA();
     int         quick_mode = tiny_contains(cmd, "--quick");
     int         enable_smc = tiny_contains(cmd, "--smc");
+    /* Quick mode keeps turnaround fast for smoke checks while preserving deterministic totals. */
     uint32_t    div = quick_mode ? 8U : 1U;
     uint32_t    total = 0x13572468U;
     uint32_t    chk;
