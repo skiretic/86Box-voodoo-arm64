@@ -57,6 +57,63 @@ int inrecomp                = 0;
 int cpu_block_end           = 0;
 int cpu_end_block_after_ins = 0;
 
+/* S-03a telemetry is observability-only: counters/logging around churn paths with
+   no behavior changes to block policy or execution decisions. */
+static int dynarec_s03a_env_init          = 0;
+static int dynarec_s03a_stats_enabled     = 0;
+static int dynarec_s03a_telemetry_enabled = 0;
+
+static uint64_t dynarec_s03a_exec_calls              = 0;
+static uint64_t dynarec_s03a_valid_block_hits        = 0;
+static uint64_t dynarec_s03a_dirty_mask_conflicts    = 0;
+static uint64_t dynarec_s03a_dirty_list_hits         = 0;
+static uint64_t dynarec_s03a_promote_byte_mask       = 0;
+static uint64_t dynarec_s03a_promote_no_immediates   = 0;
+static uint64_t dynarec_s03a_recompiled_execs        = 0;
+static uint64_t dynarec_s03a_recompile_rebuild_paths = 0;
+
+static int
+dynarec_s03a_env_on(const char *name)
+{
+    const char *v = getenv(name);
+    if (!v || !*v)
+        return 0;
+    if (!strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "FALSE") || !strcmp(v, "off") || !strcmp(v, "OFF"))
+        return 0;
+    return 1;
+}
+
+static void
+dynarec_s03a_init_env(void)
+{
+    if (dynarec_s03a_env_init)
+        return;
+
+    dynarec_s03a_stats_enabled     = dynarec_s03a_env_on("86BOX_NEW_DYNAREC_STATS");
+    dynarec_s03a_telemetry_enabled = dynarec_s03a_env_on("86BOX_NEW_DYNAREC_TELEMETRY");
+    dynarec_s03a_env_init          = 1;
+}
+
+static void
+dynarec_s03a_log_summary(const char *tag)
+{
+    if (!dynarec_s03a_stats_enabled)
+        return;
+
+    pclog("DYNAREC_S03A_SUMMARY tag=%s exec_calls=%" PRIu64 " valid_hits=%" PRIu64 " dirty_conflicts=%" PRIu64
+          " dirty_list_hits=%" PRIu64 " promote_byte_mask=%" PRIu64 " promote_no_immediates=%" PRIu64
+          " recompiled_execs=%" PRIu64 " rebuild_paths=%" PRIu64 "\n",
+          tag,
+          dynarec_s03a_exec_calls,
+          dynarec_s03a_valid_block_hits,
+          dynarec_s03a_dirty_mask_conflicts,
+          dynarec_s03a_dirty_list_hits,
+          dynarec_s03a_promote_byte_mask,
+          dynarec_s03a_promote_no_immediates,
+          dynarec_s03a_recompiled_execs,
+          dynarec_s03a_recompile_rebuild_paths);
+}
+
 #ifdef ENABLE_386_DYNAREC_LOG
 int x386_dynarec_do_log = ENABLE_386_DYNAREC_LOG;
 
@@ -406,6 +463,9 @@ exec386_dynarec_dyn(void)
 #    endif
     int valid_block = 0;
 
+    dynarec_s03a_init_env();
+    dynarec_s03a_exec_calls++;
+
 #    ifdef USE_NEW_DYNAREC
     if (!cpu_state.abrt)
 #    else
@@ -445,6 +505,7 @@ exec386_dynarec_dyn(void)
         }
 
         if (valid_block && (block->page_mask & *block->dirty_mask)) {
+            dynarec_s03a_dirty_mask_conflicts++;
 #    ifdef USE_NEW_DYNAREC
             codegen_check_flush(page, page->dirty_mask, phys_addr);
             if (block->valid && (block->flags & CODEBLOCK_IN_DIRTY_LIST))
@@ -475,6 +536,7 @@ exec386_dynarec_dyn(void)
             if ((block->phys_2 ^ phys_addr_2) & ~0xfff)
                 valid_block = 0;
             else if (block->page_mask2 & *block->dirty_mask2) {
+                dynarec_s03a_dirty_mask_conflicts++;
 #    ifdef USE_NEW_DYNAREC
                 codegen_check_flush(page_2, page_2->dirty_mask, phys_addr_2);
                 if (block->valid && (block->flags & CODEBLOCK_IN_DIRTY_LIST))
@@ -490,11 +552,30 @@ exec386_dynarec_dyn(void)
         }
 #    ifdef USE_NEW_DYNAREC
         if (valid_block && (block->flags & CODEBLOCK_IN_DIRTY_LIST)) {
+            const uint16_t flags_before = block->flags;
+            const int had_byte_mask     = !!(block->flags & CODEBLOCK_BYTE_MASK);
+            const int had_no_immediates = !!(block->flags & CODEBLOCK_NO_IMMEDIATES);
+
+            dynarec_s03a_dirty_list_hits++;
             block->flags &= ~CODEBLOCK_WAS_RECOMPILED;
-            if (block->flags & CODEBLOCK_BYTE_MASK)
+            if (had_byte_mask) {
+                if (!had_no_immediates)
+                    dynarec_s03a_promote_no_immediates++;
                 block->flags |= CODEBLOCK_NO_IMMEDIATES;
-            else
+            } else {
+                dynarec_s03a_promote_byte_mask++;
                 block->flags |= CODEBLOCK_BYTE_MASK;
+            }
+
+            if (dynarec_s03a_telemetry_enabled) {
+                pclog("DYNAREC_S03A_TRANSITION phys=%08x pc=%08x dirty=1 action=%s flags_before=%04x flags_after=%04x\n",
+                      block->phys,
+                      block->pc,
+                      had_byte_mask ? "NO_IMMEDIATES" : "BYTE_MASK",
+                      (unsigned) flags_before,
+                      (unsigned) block->flags);
+            }
+            dynarec_s03a_log_summary("transition");
         }
         if (valid_block && (block->flags & CODEBLOCK_WAS_RECOMPILED) && (block->flags & CODEBLOCK_STATIC_TOP) && block->TOP != (cpu_state.TOP & 7))
 #    else
@@ -518,6 +599,8 @@ exec386_dynarec_dyn(void)
     if (valid_block && block->was_recompiled)
 #    endif
     {
+        dynarec_s03a_valid_block_hits++;
+        dynarec_s03a_recompiled_execs++;
         void (*code)(void) = (void *) &block->data[BLOCK_START];
 
 #    ifndef USE_NEW_DYNAREC
@@ -535,6 +618,8 @@ exec386_dynarec_dyn(void)
             cpu_state.pc &= 0xffff;
 #    endif
     } else if (valid_block && !cpu_state.abrt) {
+        dynarec_s03a_valid_block_hits++;
+        dynarec_s03a_recompile_rebuild_paths++;
 #    ifdef USE_NEW_DYNAREC
         start_pc                 = cs + cpu_state.pc;
         const int max_block_size = (block->flags & CODEBLOCK_BYTE_MASK) ? ((128 - 25) - (start_pc & 0x3f)) : 1000;
@@ -741,6 +826,10 @@ exec386_dynarec_dyn(void)
     else
         cpu_state.oldpc = cpu_state.pc;
 #    endif
+
+    /* Keep log volume bounded while still providing progress snapshots for long runs. */
+    if ((dynarec_s03a_exec_calls & 0x3ffu) == 0)
+        dynarec_s03a_log_summary("periodic");
 }
 
 void

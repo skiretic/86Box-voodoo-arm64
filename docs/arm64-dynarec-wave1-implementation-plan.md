@@ -23,7 +23,7 @@
   - comment cleanup/compaction is allowed later, after behavior is validated and stable.
 
 ## Execution Status (Current)
-- Current branch/head: `ndr-analysis` @ `1b2185e94`
+- Current branch/head: `ndr-analysis` @ `1b2185e94` (`S-03a` telemetry implementation in progress)
 
 ### Slice Status Table (Authoritative)
 | Slice | Status | Notes |
@@ -32,7 +32,7 @@
 | `S-02a` | Completed | `A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` landed. |
 | `S-02b` | Completed | `A-011` landed: bounded `host_arm64_mov_imm()` now tries `MOVN` and logical-immediate `ORR` before `MOVZ/MOVK` fallback. |
 | `S-02` overall | Completed | `S-02a` + `S-02b` code landed and validation gate passed (WL-05 + workload checks). |
-| `S-03` | Pending (next) | Next slice after `S-02` closure. |
+| `S-03` | In progress (`S-03a`) | Telemetry/counter plumbing underway; no policy behavior change in this phase. |
 | `A-013` | Not started | Must wait until `S-03` closure per locked order. |
 
 ### Order Lock (Do Not Skip)
@@ -66,7 +66,7 @@ Original first patch (completed):
 - `S-01`: fixed `codegen_MMX_ENTER()` branch patching to use `block_write_data`.
 
 Recommended next patch:
-- `S-03a`: add/confirm minimal state/observability support needed for churn-policy decision support (no behavior change yet).
+- `S-03a`: finalize state/observability support and host-log telemetry capture plumbing (no behavior change yet).
 
 Recommended next files to edit:
 - `src/cpu/386_dynarec.c`
@@ -546,7 +546,7 @@ Secondary profile policy (optional):
   - dedicated SMC-sensitive validation plan with explicit abort/invalidation observation.
   - include guardrails: if mismatch, abort test and treat as rollback signal.
 - Performance-check plan:
-  - plan-only churn observation (`recompile count`, `BYTE_MASK`/`NO_IMMEDIATES` transition frequency); no benchmark execution in this session.
+  - host-log churn observation (`recompile count`, `BYTE_MASK`/`NO_IMMEDIATES` transition frequency) using `DYNAREC_S03A_TRANSITION` and `DYNAREC_S03A_SUMMARY`.
 - Rollback criteria:
   - any self-modifying-code correctness anomaly, churn increase, or instability tied to policy change.
 
@@ -643,7 +643,11 @@ Secondary profile policy (optional):
   - build/sign/JIT/smoke gates pass
 
 ## Next Execution Session Handoff
-- Start with `S-03a` state/observability plumbing in `src/cpu/386_dynarec.c` (and only supporting changes needed in `src/codegen_new/codegen_block.c`).
+- Start with telemetry capture run:
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh s03a`
+  - capture printed `run_dir` and `logfile`
+  - run guest workloads, then review host log for `DYNAREC_S03A_*` lines
+- `S-03b` policy work must not start until `S-03a` telemetry review is complete.
 - Keep changes scoped to one slice at a time and do not overlap slice commits.
 - Do not reopen static investigation unless a slice hits a hard blocker.
 - Do not run benchmarking without explicit approval; runtime plans in this doc remain plan-level guidance.
