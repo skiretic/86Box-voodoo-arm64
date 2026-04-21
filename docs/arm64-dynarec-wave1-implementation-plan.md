@@ -18,11 +18,22 @@
 - Wave-1 execution order is fixed: `S-01` -> `S-02` -> `S-03` -> `A-013`.
 
 ## Execution Status (Current)
-- Current branch/head: `ndr-analysis` @ `d88433828`
-- `S-01` status: completed
-  - Implemented `codegen_MMX_ENTER()` stale-buffer patch-site fix in `src/codegen_new/codegen_backend_arm64_uops.c`.
-  - WL-05 validation passed in quick/normal/smc modes on canonical VM profile.
-- Next in queue: `S-02a` (`A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` enablement).
+- Current branch/head: `ndr-analysis` @ `ce8e485bd`
+
+### Slice Status Table (Authoritative)
+| Slice | Status | Notes |
+| --- | --- | --- |
+| `S-01` | Completed | `codegen_MMX_ENTER()` stale-buffer patch-site fix landed; WL-05 quick/normal/smc baselines validated. |
+| `S-02a` | Completed | `A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` landed. |
+| `S-02b` | Pending (next) | `A-011` bounded `host_arm64_mov_imm()` improvements not started. |
+| `S-02` overall | In progress | Considered complete only when `S-02a` + `S-02b` + S-02 validation gate are all green. |
+| `S-03` | Not started | Must wait until full `S-02` closure. |
+| `A-013` | Not started | Must wait until `S-03` closure per locked order. |
+
+### Order Lock (Do Not Skip)
+- Fixed order remains mandatory: `S-01` -> `S-02` -> `S-03` -> `A-013`.
+- Current executable next step is only: `S-02b`, then full `S-02` validation closeout.
+- No `S-03` or `A-013` implementation work may start before `S-02` is marked complete.
 
 ## Recommended Execution Order and Scope Boundaries
 1. `S-01` (correctness guardrail; smallest write set; unblocker for safe backend work)
@@ -50,7 +61,7 @@ Original first patch (completed):
 - `S-01`: fixed `codegen_MMX_ENTER()` branch patching to use `block_write_data`.
 
 Recommended next patch:
-- `S-02a`: add ARM64 direct imm-store hooks and enable `CODEGEN_BACKEND_HAS_MOV_IMM`.
+- `S-02b`: implement bounded `host_arm64_mov_imm()` improvements (`MOVN` + logical-immediate path), then run `S-02` validation closeout.
 
 Recommended next files to edit:
 - `src/codegen_new/codegen_backend_arm64.h`
