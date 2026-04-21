@@ -17,8 +17,13 @@
 - Live execution plan now exists at [docs/arm64-dynarec-wave1-implementation-plan.md](./arm64-dynarec-wave1-implementation-plan.md).
 - Execution progress after investigation handoff:
   - `S-01` implemented (ARM64 `codegen_MMX_ENTER()` patch target corrected to `block_write_data`) at commit `d88433828`.
-  - `WL-05` Win98 microstress baselines validated in quick/normal/smc modes and recorded in wave-1 plan.
-  - Current next execution slice is `S-02a` (`A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` enablement).
+  - `S-02a` implemented (`A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM`) at commit `626abd938`.
+  - `S-02b` implemented (`A-011` bounded `host_arm64_mov_imm()` with `MOVN` + logical-immediate path) at commit `1b2185e94`.
+  - `S-02` validation gate recorded in wave-1 plan:
+    - `WL-05` quick/normal/smc all `status=OK` with locked totals.
+    - 3DMark99 full completed stable (no crash/hang/visual corruption), score captured for trend only.
+    - Quake III demo four captured (`1260 frames, 37.4 seconds: 33.7 fps`).
+  - Current next execution slice is `S-03a` (state/observability plumbing) per locked order.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
