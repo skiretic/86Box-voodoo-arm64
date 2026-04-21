@@ -210,6 +210,23 @@ Secondary profile policy (optional):
     - prints `MICROSTRESS_DONE`
   - failure marker: nonzero exit code or any `MICROSTRESS_ERROR` line.
 
+### WL-05 Baseline Anchor (Validated)
+- Validation checkpoint date: `2026-04-21`
+- VM profile: `k6_2_233_canonical`
+- Quick command path: `D:\SCRIPTS\MRUNQ.BAT D:`
+- Accepted quick baseline lines:
+  - `MICROSTRESS_DONE total=45db7b65`
+  - `MICRO_SUMMARY status=OK mode=quick log=C:\PERF_LOG\wl05-micro.log`
+- Normal command path: `D:\SCRIPTS\MRUN.BAT D:`
+- Accepted normal baseline lines:
+  - `MICROSTRESS_DONE total=2520dd5e`
+  - `MICRO_SUMMARY status=OK mode=normal log=C:\PERF_LOG\wl05-micro.log`
+- SMC command path: `D:\SCRIPTS\MRUNS.BAT D:`
+- Accepted SMC baseline lines:
+  - `MICROSTRESS_DONE total=b86f22a1`
+  - `MICRO_SUMMARY status=OK mode=smc log=C:\PERF_LOG\wl05-micro.log`
+- Reporting contract: for routine runs, only these two lines are required from the VM console.
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`

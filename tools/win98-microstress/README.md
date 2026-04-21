@@ -35,8 +35,10 @@ Or compile directly:
 
 ```bash
 i686-w64-mingw32-gcc -O2 -march=i586 -mmmx -s \
+  -fno-stack-protector -ffreestanding -nostdlib \
+  -Wl,-e,_start -Wl,--subsystem,console \
   -o tools/win98-microstress/MICROSTR.EXE \
-  tools/win98-microstress/microstress_win98.c
+  tools/win98-microstress/microstress_win98.c -lkernel32
 ```
 
 ## Build ISO Kit (recommended)

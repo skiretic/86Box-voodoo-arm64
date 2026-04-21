@@ -1,15 +1,94 @@
 #include <windows.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #define IMM_STORE_ITERS_DEFAULT 600000UL
 #define BRANCH_ITERS_DEFAULT    2200000UL
 #define MMX_ITERS_DEFAULT       800000UL
 #define SMC_ITERS_DEFAULT       120000UL
 
-typedef uint32_t (__cdecl *smc_fn_t)(void);
+typedef uint32_t(__cdecl *smc_fn_t)(void);
+
+static size_t
+tiny_strlen(const char *s)
+{
+    size_t n = 0;
+    while (s[n] != '\0')
+        n++;
+    return n;
+}
+
+static int
+tiny_contains(const char *s, const char *needle)
+{
+    size_t i;
+    size_t nlen = tiny_strlen(needle);
+    size_t slen = tiny_strlen(s);
+
+    if (nlen == 0 || slen < nlen)
+        return 0;
+
+    for (i = 0; i <= (slen - nlen); i++) {
+        size_t j;
+        int    ok = 1;
+        for (j = 0; j < nlen; j++) {
+            if (s[i + j] != needle[j]) {
+                ok = 0;
+                break;
+            }
+        }
+        if (ok)
+            return 1;
+    }
+
+    return 0;
+}
+
+static void
+tiny_write(const char *s)
+{
+    DWORD written = 0;
+    HANDLE h      = GetStdHandle(STD_OUTPUT_HANDLE);
+    WriteFile(h, s, (DWORD) tiny_strlen(s), &written, NULL);
+}
+
+static void
+tiny_write_line(const char *s)
+{
+    tiny_write(s);
+    tiny_write("\r\n");
+}
+
+static void
+hex8(uint32_t v, char out[9])
+{
+    static const char hex[] = "0123456789abcdef";
+    int               i;
+    for (i = 0; i < 8; i++) {
+        int shift = (7 - i) * 4;
+        out[i]    = hex[(v >> shift) & 0xF];
+    }
+    out[8] = '\0';
+}
+
+static void
+u32_to_dec(uint32_t v, char out[16])
+{
+    char tmp[16];
+    int  i = 0;
+    int  j = 0;
+    if (v == 0U) {
+        out[0] = '0';
+        out[1] = '\0';
+        return;
+    }
+    while (v > 0U && i < 15) {
+        tmp[i++] = (char) ('0' + (v % 10U));
+        v /= 10U;
+    }
+    while (i > 0)
+        out[j++] = tmp[--i];
+    out[j] = '\0';
+}
 
 static uint32_t
 rotl32(uint32_t x, uint32_t r)
@@ -25,40 +104,42 @@ lcg32(uint32_t x)
 }
 
 static uint32_t
-phase_imm_store(unsigned long iters)
+phase_imm_store(uint32_t iters)
 {
-    unsigned long i;
+    uint32_t i;
     uint32_t seed = 0x1234abcdU;
     uint32_t chk  = 0x9e3779b9U;
     enum {
         ARR_WORDS = 32768,
         ARR_MASK  = ARR_WORDS - 1
     };
-    uint32_t *arr = (uint32_t *) calloc(ARR_WORDS, sizeof(uint32_t));
+    uint32_t *arr = (uint32_t *) VirtualAlloc(NULL, ARR_WORDS * sizeof(uint32_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
     if (!arr)
         return 0U;
 
+    for (i = 0; i < ARR_WORDS; i++)
+        arr[i] = 0U;
+
     for (i = 0; i < iters; i++) {
         uint32_t idx = (seed >> 7) & ARR_MASK;
-        uint32_t val = seed ^ 0xa5a5a5a5U ^ ((uint32_t) i * 2654435761U);
-
+        uint32_t val = seed ^ 0xa5a5a5a5U ^ (i * 2654435761U);
         arr[idx] = val;
-        chk ^= rotl32(arr[(idx + 37U) & ARR_MASK] + val + (uint32_t) i, (uint32_t) (i & 31U));
+        chk ^= rotl32(arr[(idx + 37U) & ARR_MASK] + val + i, (i & 31U));
         seed = lcg32(seed);
     }
 
     for (i = 0; i < ARR_WORDS; i++)
-        chk ^= rotl32(arr[i] + (uint32_t) i, (uint32_t) (i & 31U));
+        chk ^= rotl32(arr[i] + i, (i & 31U));
 
-    free(arr);
+    VirtualFree(arr, 0U, MEM_RELEASE);
     return chk;
 }
 
 static uint32_t
-phase_branch_helper(unsigned long iters)
+phase_branch_helper(uint32_t iters)
 {
-    unsigned long i;
+    uint32_t i;
     uint32_t x     = 0x31415926U;
     uint32_t y     = 0x27182818U;
     uint32_t state = 1U;
@@ -66,7 +147,6 @@ phase_branch_helper(unsigned long iters)
 
     for (i = 0; i < iters; i++) {
         uint32_t t = x ^ rotl32(y, state);
-
         switch (state & 7U) {
             case 0:
                 if (t & 1U)
@@ -86,7 +166,7 @@ phase_branch_helper(unsigned long iters)
                 if ((t & 255U) == 0x5aU)
                     chk ^= 0x13579bdfU;
                 else
-                    chk += rotl32(t, (uint32_t) (i & 31U));
+                    chk += rotl32(t, (i & 31U));
                 state ^= t;
                 break;
             case 3:
@@ -117,18 +197,17 @@ phase_branch_helper(unsigned long iters)
                 state = state ^ 0x01010101U;
                 break;
         }
-
-        chk ^= rotl32(x + y + t + state, (uint32_t) ((i ^ state) & 31U));
+        chk ^= rotl32(x + y + t + state, ((i ^ state) & 31U));
     }
 
     return chk ^ x ^ y ^ state;
 }
 
 static uint32_t
-phase_mmx_touch(unsigned long iters)
+phase_mmx_touch(uint32_t iters)
 {
 #if defined(__i386__)
-    unsigned long i;
+    uint32_t i;
     uint32_t a   = 0x89abcdefU;
     uint32_t b   = 0x10203040U;
     uint32_t out = 0U;
@@ -143,132 +222,127 @@ phase_mmx_touch(unsigned long iters)
             : "=r"(out)
             : "r"(a), "r"(b)
             : "mm0", "mm1");
-
-        chk ^= rotl32(out + (uint32_t) i, (uint32_t) (i & 31U));
+        chk ^= rotl32(out + i, (i & 31U));
         a = lcg32(a ^ out);
         b = lcg32(b + 0x9e3779b9U);
     }
-
     __asm__ volatile("emms");
     return chk;
 #else
-    unsigned long i;
+    uint32_t i;
     uint32_t x   = 0x55aa55aaU;
     uint32_t chk = 0x0badc0deU;
-
     for (i = 0; i < iters; i++) {
         x = lcg32(x);
-        chk ^= rotl32(x, (uint32_t) (i & 31U));
+        chk ^= rotl32(x, (i & 31U));
     }
-
     return chk ^ 0x4d4d5821U;
 #endif
 }
 
 static uint32_t
-phase_smc_touch(unsigned long iters)
+phase_smc_touch(uint32_t iters)
 {
-    unsigned long i;
+    uint32_t i;
     uint32_t chk = 0x11223344U;
     uint8_t *buf = (uint8_t *) VirtualAlloc(NULL, 16U, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
 
     if (!buf)
         return 0U;
 
-    buf[0] = 0xB8; /* mov eax, imm32 */
+    buf[0] = 0xB8;
     *(uint32_t *) &buf[1] = 0U;
-    buf[5] = 0xC3; /* ret */
+    buf[5] = 0xC3;
 
     for (i = 0; i < iters; i++) {
-        uint32_t imm  = 0x600d0000U ^ ((uint32_t) i * 1103515245U);
+        uint32_t imm  = 0x600d0000U ^ (i * 1103515245U);
         uint32_t rval;
-
         *(uint32_t *) &buf[1] = imm;
         FlushInstructionCache(GetCurrentProcess(), buf, 6U);
-
         rval = ((smc_fn_t) buf)();
-        chk ^= rotl32(rval + (uint32_t) i, (uint32_t) (i & 31U));
+        chk ^= rotl32(rval + i, (i & 31U));
     }
 
     VirtualFree(buf, 0U, MEM_RELEASE);
     return chk;
 }
 
-static int
-run_phase(const char *name, uint32_t *out_checksum, uint32_t (*fn)(unsigned long), unsigned long iters)
+static void
+emit_phase_end(const char *name, uint32_t checksum, uint32_t iters)
 {
-    uint32_t checksum;
-
-    printf("PHASE_START %s\n", name);
-    fflush(stdout);
-
-    checksum = fn(iters);
-    if (checksum == 0U) {
-        printf("MICROSTRESS_ERROR phase=%s checksum=00000000\n", name);
-        fflush(stdout);
-        return 1;
-    }
-
-    *out_checksum = checksum;
-    printf("PHASE_END %s checksum=%08lx iters=%lu\n", name, (unsigned long) checksum, iters);
-    fflush(stdout);
-    return 0;
+    char hx[9];
+    char dec[16];
+    tiny_write("PHASE_END ");
+    tiny_write(name);
+    tiny_write(" checksum=");
+    hex8(checksum, hx);
+    tiny_write(hx);
+    tiny_write(" iters=");
+    u32_to_dec(iters, dec);
+    tiny_write(dec);
+    tiny_write("\r\n");
 }
 
-int
-main(int argc, char **argv)
+static uint32_t
+run_phase(const char *name, uint32_t iters, uint32_t (*fn)(uint32_t), uint32_t *err)
 {
-    int enable_smc = 0;
-    int quick_mode = 0;
-    int i;
-    uint32_t total = 0x13572468U;
+    uint32_t chk;
+    tiny_write("PHASE_START ");
+    tiny_write_line(name);
+    chk = fn(iters);
+    if (chk == 0U) {
+        tiny_write("MICROSTRESS_ERROR phase=");
+        tiny_write(name);
+        tiny_write_line(" checksum=00000000");
+        *err = 1U;
+        return 0U;
+    }
+    emit_phase_end(name, chk, iters);
+    *err = 0U;
+    return chk;
+}
 
-    for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--smc"))
-            enable_smc = 1;
-        else if (!strcmp(argv[i], "--quick"))
-            quick_mode = 1;
-        else if (!strcmp(argv[i], "--help")) {
-            printf("Usage: MICROSTR.EXE [--quick] [--smc]\n");
-            printf("  --quick  Reduce iteration counts for a fast sanity run.\n");
-            printf("  --smc    Enable self-modifying code phase.\n");
-            return 0;
-        } else {
-            printf("MICROSTRESS_ERROR unknown_arg=%s\n", argv[i]);
-            return 2;
-        }
+__attribute__((noreturn)) void
+_start(void)
+{
+    const char *cmd = GetCommandLineA();
+    int         quick_mode = tiny_contains(cmd, "--quick");
+    int         enable_smc = tiny_contains(cmd, "--smc");
+    uint32_t    div = quick_mode ? 8U : 1U;
+    uint32_t    total = 0x13572468U;
+    uint32_t    chk;
+    uint32_t    err;
+    char        hx[9];
+
+    tiny_write_line("MICROSTRESS_START");
+
+    chk = run_phase("imm_store", IMM_STORE_ITERS_DEFAULT / div, phase_imm_store, &err);
+    if (err)
+        ExitProcess(3U);
+    total ^= rotl32(chk, 1U);
+
+    chk = run_phase("branch_helper", BRANCH_ITERS_DEFAULT / div, phase_branch_helper, &err);
+    if (err)
+        ExitProcess(4U);
+    total ^= rotl32(chk, 7U);
+
+    chk = run_phase("mmx_touch", MMX_ITERS_DEFAULT / div, phase_mmx_touch, &err);
+    if (err)
+        ExitProcess(5U);
+    total ^= rotl32(chk, 13U);
+
+    if (enable_smc) {
+        chk = run_phase("smc_touch", SMC_ITERS_DEFAULT / div, phase_smc_touch, &err);
+        if (err)
+            ExitProcess(6U);
+        total ^= rotl32(chk, 19U);
+    } else {
+        tiny_write_line("PHASE_SKIP smc_touch reason=disabled");
     }
 
-    printf("MICROSTRESS_START\n");
-    fflush(stdout);
-
-    {
-        unsigned long div = quick_mode ? 8UL : 1UL;
-        uint32_t chk = 0U;
-
-        if (run_phase("imm_store", &chk, phase_imm_store, IMM_STORE_ITERS_DEFAULT / div))
-            return 3;
-        total ^= rotl32(chk, 1U);
-
-        if (run_phase("branch_helper", &chk, phase_branch_helper, BRANCH_ITERS_DEFAULT / div))
-            return 4;
-        total ^= rotl32(chk, 7U);
-
-        if (run_phase("mmx_touch", &chk, phase_mmx_touch, MMX_ITERS_DEFAULT / div))
-            return 5;
-        total ^= rotl32(chk, 13U);
-
-        if (enable_smc) {
-            if (run_phase("smc_touch", &chk, phase_smc_touch, SMC_ITERS_DEFAULT / div))
-                return 6;
-            total ^= rotl32(chk, 19U);
-        } else {
-            printf("PHASE_SKIP smc_touch reason=disabled\n");
-            fflush(stdout);
-        }
-    }
-
-    printf("MICROSTRESS_DONE total=%08lx\n", (unsigned long) total);
-    fflush(stdout);
-    return 0;
+    tiny_write("MICROSTRESS_DONE total=");
+    hex8(total, hx);
+    tiny_write(hx);
+    tiny_write("\r\n");
+    ExitProcess(0U);
 }
