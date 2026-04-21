@@ -12,6 +12,7 @@ if ! command -v hdiutil >/dev/null 2>&1; then
     exit 1
 fi
 
+# Always rebuild EXE first so ISO content matches current source/flags.
 "$KIT_DIR/build-win98-microstress.sh"
 
 rm -rf "$STAGE_DIR"

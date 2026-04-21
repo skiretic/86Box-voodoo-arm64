@@ -16,6 +16,11 @@
 - `F-019` and `F-020` are resolved baseline items and are not first-wave implementation slices.
 - `A-022` remains optional measurement hygiene and stays out of wave 1.
 - Wave-1 execution order is fixed: `S-01` -> `S-02` -> `S-03` -> `A-013`.
+- Code-comment rule for this wave is strict:
+  - every non-trivial changed code block must include developer-facing comments at change time.
+  - comments must state both what the block does and why it was added/changed.
+  - do not defer comments because code "looks obvious"; ambiguity should be treated as a defect.
+  - comment cleanup/compaction is allowed later, after behavior is validated and stable.
 
 ## Execution Status (Current)
 - Current branch/head: `ndr-analysis` @ `ce8e485bd`

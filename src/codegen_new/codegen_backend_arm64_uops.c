@@ -1176,6 +1176,7 @@ codegen_MOV(codeblock_t *block, uop_t *uop)
         /* Same truncation rule for 8-bit destinations from 32-bit temps. */
         host_arm64_BFI(block, dest_reg, src_reg, 0, 8);
     } else if (REG_IS_B(dest_size) && REG_IS_W(src_size)) {
+        /* 16->8 form follows same low-byte-only semantics as x86 partial register writes. */
         host_arm64_BFI(block, dest_reg, src_reg, 0, 8);
     } else
         fatal("MOV %x %x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
@@ -3606,6 +3607,7 @@ codegen_direct_write_8_imm(codeblock_t *block, void *p, uint8_t imm_data)
 void
 codegen_direct_write_16_imm(codeblock_t *block, void *p, uint16_t imm_data)
 {
+    /* Mirrors 8/32-bit helpers so MOV_IMM-to-cpu_state stays a single backend write path. */
     host_arm64_mov_imm(block, REG_W16, imm_data);
 
     if (in_range12_h((uintptr_t) p - (uintptr_t) &cpu_state))
@@ -3616,6 +3618,7 @@ codegen_direct_write_16_imm(codeblock_t *block, void *p, uint16_t imm_data)
 void
 codegen_direct_write_32_imm(codeblock_t *block, void *p, uint32_t imm_data)
 {
+    /* 32-bit immediate store fast path used by S-02a hook coverage in generic emitters. */
     host_arm64_mov_imm(block, REG_W16, imm_data);
 
     if (in_range12_w((uintptr_t) p - (uintptr_t) &cpu_state))
