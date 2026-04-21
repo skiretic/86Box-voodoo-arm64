@@ -795,6 +795,8 @@ codegen_MMX_ENTER(codeblock_t *block, uop_t *uop)
     host_arm64_call(block, x86_int);
     host_arm64_B(block, codegen_exit_rout);
 
+    /* S-01 fix: patch against the active write cursor; block->data can point at stale
+       bytes here when block emission is still in-flight. */
     host_arm64_branch_set_offset(branch_ptr, &block_write_data[block_pos]);
 
     host_arm64_mov_imm(block, REG_TEMP, 0x01010101);
@@ -1168,8 +1170,10 @@ codegen_MOV(codeblock_t *block, uop_t *uop)
     } else if (REG_IS_Q(dest_size) && REG_IS_Q(src_size)) {
         host_arm64_FMOV_D_D(block, dest_reg, src_reg);
     } else if (REG_IS_W(dest_size) && REG_IS_L(src_size)) {
+        /* Preserve upper destination bits; only replace the architected low 16 bits. */
         host_arm64_BFI(block, dest_reg, src_reg, 0, 16);
     } else if (REG_IS_B(dest_size) && REG_IS_L(src_size)) {
+        /* Same truncation rule for 8-bit destinations from 32-bit temps. */
         host_arm64_BFI(block, dest_reg, src_reg, 0, 8);
     } else if (REG_IS_B(dest_size) && REG_IS_W(src_size)) {
         host_arm64_BFI(block, dest_reg, src_reg, 0, 8);
@@ -3591,6 +3595,7 @@ codegen_set_jump_dest(codeblock_t *block, void *p)
 void
 codegen_direct_write_8_imm(codeblock_t *block, void *p, uint8_t imm_data)
 {
+    /* Used by MOV_IMM-style uops to skip temp register materialization in the IR layer. */
     host_arm64_mov_imm(block, REG_W16, imm_data);
 
     if (in_range12_b((uintptr_t) p - (uintptr_t) &cpu_state))
@@ -3621,6 +3626,7 @@ codegen_direct_write_32_imm(codeblock_t *block, void *p, uint32_t imm_data)
 void
 codegen_direct_write_32_imm_stack(codeblock_t *block, int stack_offset, uint32_t imm_data)
 {
+    /* Stack form keeps parity with direct cpu_state writes and enforces the same range guard. */
     host_arm64_mov_imm(block, REG_W16, imm_data);
 
     if (in_range12_w(stack_offset))
