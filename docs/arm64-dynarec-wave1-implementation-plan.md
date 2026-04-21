@@ -23,22 +23,22 @@
   - comment cleanup/compaction is allowed later, after behavior is validated and stable.
 
 ## Execution Status (Current)
-- Current branch/head: `ndr-analysis` @ `ce8e485bd`
+- Current branch/head: `ndr-analysis` @ `1b2185e94`
 
 ### Slice Status Table (Authoritative)
 | Slice | Status | Notes |
 | --- | --- | --- |
 | `S-01` | Completed | `codegen_MMX_ENTER()` stale-buffer patch-site fix landed; WL-05 quick/normal/smc baselines validated. |
 | `S-02a` | Completed | `A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` landed. |
-| `S-02b` | Pending (next) | `A-011` bounded `host_arm64_mov_imm()` improvements not started. |
-| `S-02` overall | In progress | Considered complete only when `S-02a` + `S-02b` + S-02 validation gate are all green. |
-| `S-03` | Not started | Must wait until full `S-02` closure. |
+| `S-02b` | Completed | `A-011` landed: bounded `host_arm64_mov_imm()` now tries `MOVN` and logical-immediate `ORR` before `MOVZ/MOVK` fallback. |
+| `S-02` overall | Completed | `S-02a` + `S-02b` code landed and validation gate passed (WL-05 + workload checks). |
+| `S-03` | Pending (next) | Next slice after `S-02` closure. |
 | `A-013` | Not started | Must wait until `S-03` closure per locked order. |
 
 ### Order Lock (Do Not Skip)
 - Fixed order remains mandatory: `S-01` -> `S-02` -> `S-03` -> `A-013`.
-- Current executable next step is only: `S-02b`, then full `S-02` validation closeout.
-- No `S-03` or `A-013` implementation work may start before `S-02` is marked complete.
+- Current executable next step is only: `S-03a` (observability/state plumbing), then `S-03b` policy behavior change.
+- No `A-013` implementation work may start before `S-03` is marked complete.
 
 ## Recommended Execution Order and Scope Boundaries
 1. `S-01` (correctness guardrail; smallest write set; unblocker for safe backend work)
@@ -66,21 +66,21 @@ Original first patch (completed):
 - `S-01`: fixed `codegen_MMX_ENTER()` branch patching to use `block_write_data`.
 
 Recommended next patch:
-- `S-02b`: implement bounded `host_arm64_mov_imm()` improvements (`MOVN` + logical-immediate path), then run `S-02` validation closeout.
+- `S-03a`: add/confirm minimal state/observability support needed for churn-policy decision support (no behavior change yet).
 
 Recommended next files to edit:
-- `src/codegen_new/codegen_backend_arm64.h`
-- `src/codegen_new/codegen_backend_arm64_uops.c`
+- `src/cpu/386_dynarec.c`
+- `src/codegen_new/codegen_block.c`
 
 Exact next commands for the next implementation session:
 ```bash
 cd /Users/anthony/projects/code/86Box-voodoo-arm64
 git rev-parse --abbrev-ref HEAD
 git rev-parse --short HEAD
-rg -n "S-02|A-012|CODEGEN_BACKEND_HAS_MOV_IMM|codegen_direct_write_8_imm|codegen_direct_write_16_imm|codegen_direct_write_32_imm|codegen_direct_write_32_imm_stack" docs/arm64-dynarec-wave1-implementation-plan.md src/codegen_new/codegen_backend_arm64.h src/codegen_new/codegen_backend_arm64_uops.c src/codegen_new/codegen_reg.c src/codegen_new/codegen_ir_defs.h
+rg -n "S-03|S-03a|S-03b|BYTE_MASK|NO_IMMEDIATES|codegen_delete_random_block" docs/arm64-dynarec-wave1-implementation-plan.md docs/arm64-dynarec-investigation.md src/cpu/386_dynarec.c src/codegen_new/codegen_block.c
 sed -n '1,220p' docs/arm64-dynarec-wave1-implementation-plan.md
-sed -n '500,570p' src/codegen_new/codegen_reg.c
-sed -n '900,940p' src/codegen_new/codegen_ir_defs.h
+sed -n '820,980p' src/cpu/386_dynarec.c
+sed -n '420,520p' src/codegen_new/codegen_block.c
 ```
 
 ## Cross-Slice Validation Framework
@@ -254,6 +254,23 @@ Secondary profile policy (optional):
   - `MICROSTRESS_DONE total=b86f22a1`
   - `MICRO_SUMMARY status=OK mode=smc log=C:\PERF_LOG\wl05-micro.log`
 - Reporting contract: for routine runs, only these two lines are required from the VM console.
+
+### S-02 Validation Closeout (2026-04-21)
+- `WL-05` one-shot result (`MRUNALL.BAT`) matched locked baselines:
+  - quick total `45db7b65` / `status=OK`
+  - normal total `2520dd5e` / `status=OK`
+  - smc total `b86f22a1` / `status=OK`
+- `WL-01` 3DMark99 full benchmark:
+  - completed without crash/hang/visual corruption
+  - score snapshot: `2519 3DMarks`, `5163 CPU 3DMarks`
+- `WL-02` Quake III demo four:
+  - `1260 frames, 37.4 seconds: 33.7 fps`
+- Interpretation note for this host class:
+  - absolute benchmark numbers are secondary because VM may run below 100% emulation speed on Apple Silicon host load conditions.
+  - gate priority remains correctness/stability + gross-regression detection, not absolute FPS/score movement.
+- Cross-arch safety note:
+  - `S-02b` touched `src/codegen_new/codegen_backend_arm64_ops.c` under ARM64 build guard (`#if defined __aarch64__ || defined _M_ARM64`).
+  - x86-64 backend behavior remains unchanged by this slice.
 
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
@@ -626,7 +643,7 @@ Secondary profile policy (optional):
   - build/sign/JIT/smoke gates pass
 
 ## Next Execution Session Handoff
-- Start with `S-01` in `src/codegen_new/codegen_backend_arm64_uops.c`.
+- Start with `S-03a` state/observability plumbing in `src/cpu/386_dynarec.c` (and only supporting changes needed in `src/codegen_new/codegen_block.c`).
 - Keep changes scoped to one slice at a time and do not overlap slice commits.
 - Do not reopen static investigation unless a slice hits a hard blocker.
 - Do not run benchmarking without explicit approval; runtime plans in this doc remain plan-level guidance.
