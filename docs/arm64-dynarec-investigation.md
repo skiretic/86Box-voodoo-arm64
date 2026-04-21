@@ -1,19 +1,22 @@
 # ARM64 New Dynarec Investigation
 
 ## Resume Here
-- Current objective: analyze ARM64-specific new-dynarec modules for performance loss, incorrect behavior/instability, and avoidable fallback/churn; convert evidence into a prioritized implementation plan.
-- Exact next file/module: `src/codegen_new/codegen_backend_arm64_imm.c`
+- Current objective: convert the newly confirmed ARM64 emitter, helper-dispatch, and range-safety findings into an implementation-ready slice order, with the next investigation unit focused on how often the expensive control-flow patterns are actually emitted.
+- Exact next file/module: `src/codegen_new/codegen_ops_branch.c`
 - Next 3 concrete actions:
-  1. Inspect `codegen_backend_arm64_imm.c` for constant-materialization patterns that may worsen the missing ARM64 `MOV_IMM` fast path or inflate instruction count.
-  2. Check whether immediate-selection logic already offers reusable pieces for `A-008`, or whether new direct-store helpers would need separate machinery.
-  3. Update backlog, findings, and a fresh `State Snapshot` immediately after the immediate-materialization analysis completes.
-- Active blockers: no runtime evidence collected in this session by design; any execution validation remains plan-only.
+  1. Trace how often `uop_CMP_IMM_J*`, `uop_CMP_J*`, plain `uop_JMP`, and helper-abort sequences are emitted so `F-012` can be prioritized against `F-011` and `F-013`.
+  2. Draft a bounded `S-02` sub-order: implement direct imm-store hooks first, then fold in cheaper ARM64 constant materialization (`MOVN` / logical-immediate moves) before touching riskier branch-veneer work.
+  3. Write future validation plans for `A-012`, `A-013`, and `A-015`, explicitly recording intended logfile and metadata destinations before any runtime work is attempted.
+- Active blockers:
+  - `src/codegen_new/codegen_timing.c` does not exist at HEAD `362d73f1f`; timing follow-up must start from `src/codegen_new/codegen_block.c` and `src/codegen_new/codegen.h` instead.
+  - No runtime evidence collected in this session by design; helper-call frequency, block-distance histograms, and any validation remain plan-only.
 
 ## Scope
-- Session start: 2026-04-20 22:54:04 EDT
+- Campaign start: 2026-04-20 22:54:04 EDT
+- Current continuation checkpoint: 2026-04-20 23:28:50 EDT
 - Repository: `/Users/anthony/projects/code/86Box-voodoo-arm64`
 - Branch: `ndr-analysis`
-- HEAD: `123c135cf5ce703e0a406e88f6f49677370e7cd7`
+- HEAD: `362d73f1f77ba5a3669510b213285b992a9544f1`
 - Mission: investigate ARM64-specific issues in the new dynarec that may cause `performance loss`, `incorrect behavior/instability`, or `avoidable fallback/churn`, and end with a prioritized improvement plan backed by evidence.
 
 ## Goals
@@ -47,32 +50,44 @@
 | Raw instruction emitters | `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64_ops.h` | Encodes AArch64 scalar/vector ops, branches, loads/stores, and literal/branch helpers used by higher layers. | `E-006` |
 | Uop lowering / semantic bridge | `src/codegen_new/codegen_backend_arm64_uops.c` | Likely largest semantic lowering unit from IR/uops to ARM64; expected hotspot for correctness gaps, fallback, and flag mapping costs. | `E-007` |
 | Immediate materialization | `src/codegen_new/codegen_backend_arm64_imm.c` | Encodes immediate selection/materialization; candidate source of instruction bloat or suboptimal constant handling. | `E-008` |
+| Executable allocator / branch envelope | `src/codegen_new/codegen_allocator.c`, `src/codegen_new/codegen_allocator.h` | Proves generated ARM64 blocks and helper stubs live inside a single contiguous executable arena, which sharply constrains which relative branches and calls should always be reachable. | `E-013`, `E-035`, `E-036` |
+| Reg writeback / imm-store contract | `src/codegen_new/codegen_reg.c`, `src/codegen_new/codegen_ir_defs.h` | Defines the generic direct-immediate-store hooks and shows why the ARM64 backend currently cannot opt into the same dead-end `MOV_IMM` fast path as x86-64. | `E-021`, `E-043`, `E-044` |
 | Dynarec integration boundary | `src/cpu/386_dynarec.c`, `src/cpu/386_dynarec_ops.c` | Governs block lookup/validation/end conditions and can reveal avoidable recompile churn or cache invalidation behavior observable on ARM64 as backend symptoms. | `E-009` |
 
 ## Hypothesis Register
 | Hypothesis ID | Status | Statement | Initial basis | Planned tie-break / next step |
 | --- | --- | --- | --- | --- |
 | H-001 | parked | ARM64 helper stub generation may be forcing too many slow-path calls on misaligned or lookup-miss memory accesses, causing measurable performance loss beyond expected x86 semantics. | `codegen_backend_arm64.c` emits dedicated load/store stubs with explicit `readlookup2`/`writelookup2` probes and helper-call fallback branches. | `codegen_backend_x86-64.c` uses the same misalignment-triggered helper pattern, so this is not an ARM64-specific first-slice explanation without stronger evidence. Revisit only if later ARM64-only behavior shows materially higher fallback frequency. |
-| H-002 | open | ARM64 host register pool size and fixed register assignments may create excess spills/reloads or limit scheduling freedom in hot blocks. | Only 10 integer callee-saved registers and 8 FP registers are exposed as allocatable host pools, with `X29` pinned as `REG_CPUSTATE`. | Confirm how allocator-facing pools are consumed in backend code and whether common helpers further reserve temps. |
-| H-003 | open | ARM64 immediate materialization may inflate instruction count or churn literal construction in common paths, contributing to backend overhead. | Dedicated immediate file exists and exported `host_arm64_find_imm()` suggests special-case search/materialization logic. | Inspect `codegen_backend_arm64_imm.c` and call sites after backend scaffolding review. |
+| H-002 | parked | Raw ARM64 host register pool size may be a primary driver of backend slowdown. | Only 10 integer callee-saved registers and 8 FP registers are exposed as allocatable host pools, with `X29` pinned as `REG_CPUSTATE`. | Parked after the defs comparison: x86-64 exposes even fewer integer host regs, so any remaining ARM64 pressure is more likely second-order from helper/encoding gaps than from raw register count alone. Re-open only if future spill-aware telemetry contradicts this. |
+| H-003 | confirmed | ARM64 immediate materialization inflates instruction count in common paths. | Dedicated immediate file exists and exported `host_arm64_find_imm()` suggests special-case search/materialization logic. | Confirmed in `U-004` / `U-005`: the primary gap is not the logical-immediate table itself, but that `host_arm64_mov_imm()` never uses logical-immediate or `MOVN` forms and the backend still lacks direct imm-store hooks. Track via `A-012` and `A-011`. |
 | H-004 | open | Some user-visible ARM64 instability may originate at the block validation/recompile boundary rather than in instruction semantics, appearing as backend faults or random slowdowns. | `386_dynarec.c` contains extensive block validation, dirty-page, and block-end logic that can cause recompilation or fallback churn. | Inspect block lifecycle paths after first backend module analysis and separate frontend vs backend causes. |
 | H-005 | rejected | `codegen_allocator_clean_blocks()` in the ARM64 backend might be freeing or invalidating the shared helper block immediately after initialization, causing latent corruption. | ARM64 `codegen_backend_init()` calls `codegen_allocator_clean_blocks(block->head_mem_block)` while x86-64 init does not. | Rejected after allocator inspection: the function only performs `__clear_cache()` on ARM64 and does not free memory. |
 | H-006 | open | ARM64 FP-to-int conversions may pay avoidable overhead because rounding is implemented as out-of-line helper calls plus an indirect jump-table dispatch. | `build_fp_round_routine()` builds shared rounding helpers, and ARM64 uops call them for `MOV_INT_DOUBLE` / `MOV_INT_DOUBLE_64`. | Current call-site inventory narrows this to three conversion sites in `codegen_backend_arm64_uops.c`; keep open, but prioritize lower than the MMX branch-patch bug and the missing ARM64 `MOV_IMM` fast path. |
-| H-007 | open | ARM64 direct state/stack access helpers may become a latent instability source because they `fatal()` on immediate-range overflow instead of falling back to a generic address-materialization path. | `codegen_direct_read_*` / `codegen_direct_write_*` helpers encode fixed-range loads/stores from `REG_CPUSTATE` or `SP` and hard-fail when offsets exceed the encoding window. | Current call-site audit suggests existing uses stay within `cpu_state` fields and small stack slots; keep as a robustness item unless future layout growth reduces margin. |
+| H-007 | confirmed | ARM64 direct state/stack access helpers may become a latent instability source because they `fatal()` on immediate-range overflow instead of falling back to a generic address-materialization path. | `codegen_direct_read_*` / `codegen_direct_write_*` helpers encode fixed-range loads/stores from `REG_CPUSTATE` or `SP` and hard-fail when offsets exceed the encoding window. | Confirmed and widened in `U-005` / `U-006`: most helpers still hard-fail, while the F64 stack helpers currently skip validation entirely. Track through `A-009` and `A-015`. |
+| H-008 | confirmed | ARM64 helper calls and direct jumps are paying avoidable overhead because the backend always materializes absolute destinations even when JIT-local targets are within AArch64 branch range. | `host_arm64_call()` / `host_arm64_jump()` use `MOVX_IMM` plus `BLR/BR`. | Confirmed in `U-005` / `U-007`: the JIT allocator reserves a contiguous ~120MB arena and the local helper stubs live inside it, so JIT-local targets are always within `B/BL` range. Track through `A-013`. |
+| H-009 | open | ARM64 abort/control-flow checks may pay chronic overhead because the single global `codegen_exit_rout` and long-form patchable branch templates force extra branches once blocks drift beyond the 19-bit `B.cond` / `CBNZ` range. | `host_arm64_CBNZ()` and `host_arm64_Bxx_()` already synthesize long-form veneers. | Tie-break with future IR-frequency plus block-distance test planning: determine how many compiled blocks sit >1MB from `codegen_exit_rout`, and whether local exit veneers materially reduce dynamic branch count. Track through `A-014`. |
+| H-010 | confirmed | ARM64 backend interface drift in `codegen_backend_arm64.h` is masking missing emitter capabilities and raising implementation risk for the next slices. | Stale `STRB_IMM_W` declaration and unimplemented `LDR_LITERAL_*` prototypes in the public ARM64 header. | Confirmed as a maintenance / design-risk issue in `U-007`. Keep it as a low-priority cleanup via `A-016`; do not prioritize it ahead of user-visible performance/correctness slices. |
 
 ## Running Prioritized Backlog
 | Priority | Action ID | Status | Candidate improvement | Expected win | Risk | Validation plan | Rollback trigger |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0 | A-001 | completed | Complete evidence-backed analysis of `codegen_backend_arm64.c` before proposing implementation slices. | Established that ARM64-specific cache maintenance and FP-round helper structure deserve follow-up, while generic misalignment fallback is not yet ARM64-specific. | Medium: scaffolding findings still need confirmation from uop usage. | Static audit completed for this module. | Re-open only if later evidence contradicts the module summary. |
 | P0 | A-002 | completed | Analyze `codegen_backend_arm64_uops.c` hotspot paths for ARM64-specific helper traffic, correctness traps, and broad performance gaps. | Exposed one concrete correctness bug, one broad optimization gap, and one latent robustness concern; ruled memory-helper traffic as mostly backend-generic. | Medium: full semantic audit of every uop remains out of scope for this session. | Static hotspot audit completed with x86-64 comparisons. | Re-open if later workload evidence points at a different ARM64-only uop family. |
-| P1 | A-003 | in_progress | Analyze `codegen_backend_arm64_imm.c` for immediate encoding inefficiencies and constant-materialization churn. | Medium performance upside if common immediates are emitted suboptimally, especially alongside `F-006`. | Low-medium. | Static inspection of encoding strategy and call density in backend/uops code. | Drop if use sites show low frequency or already-optimal encoding. |
+| P1 | A-003 | completed | Analyze `codegen_backend_arm64_imm.c` for immediate encoding inefficiencies and constant-materialization churn. | Confirmed that the logical-immediate table already covers common masks, shifting attention to missing emitter fast paths rather than the table itself. | Low-medium. | Static inspection completed with call-site follow-through into `arm64_ops.c` and `arm64_uops.c`. | Re-open only if later profiling shows the table lookup itself is a measurable compile-time bottleneck. |
 | P0 | A-004 | completed | Analyze `src/cpu/386_dynarec.c` block validation / dirty-page flow for recompile churn that could magnify ARM64-only cache-flush cost. | Confirmed that dirty-list recompiles escalate blocks into shorter `BYTE_MASK` mode and then `NO_IMMEDIATES`, directly compounding ARM64 compile-time overhead. | Medium: any heuristic changes risk self-modifying-code regressions. | Static audit completed; future targeted churn test plan only. | Re-open if later evidence shows churn is dominated elsewhere. |
-| P2 | A-005 | pending | Analyze raw emitters in `codegen_backend_arm64_ops.c` / `.h` for branch range, literal load, or NEON helper patterns that create avoidable bloat. | Medium. | Medium. | Static inspection after higher-level semantic files. | Defer if higher-level fixes subsume emitter concerns. |
+| P1 | A-005 | completed | Analyze raw emitters in `codegen_backend_arm64_ops.c` / `.h` for branch range, literal load, and load/store helper patterns that create avoidable bloat or latent correctness risk. | Surfaced one broad helper-call gap, one broad control-flow-veneer gap, one silent stack-offset correctness risk, and one low-priority header drift issue. | Medium. | Static inspection completed with allocator and x86-64 comparisons. | Re-open if later evidence shows these emitter costs are not exercised by real IR. |
 | P1 | A-006 | pending | If uops confirm heavy use, design a bounded ARM64 optimization for FP-to-int rounding that avoids helper-call indirection where safe. | Medium: could reduce helper traffic in x87/MMX-heavy paths. | Medium-high: semantic drift risk around rounding, overflow, and tag handling. | Static semantic audit first; future targeted test plan only with explicit logfile/metadata requirements. | Roll back if manual cross-checks or future tests show rounding mismatches. |
 | P0 | A-007 | pending | Fix `codegen_MMX_ENTER()` branch patching to use `block_write_data` consistently and audit the ARM64 backend for any other stale-buffer patch sites. | High: bounded correctness fix for a split-block patching bug that can cause instability. | Low. | Static audit plus future targeted split-block test plan only. | Roll back if branch-patch audit proves `block_write_data` can never differ in that path. |
 | P1 | A-008 | pending | Add ARM64 support for the `CODEGEN_BACKEND_HAS_MOV_IMM` fast path by implementing direct immediate stores where safe. | Medium to high: reduces register pressure and instruction count for dead-end immediate writes. | Medium: needs careful handling of address-range limits and stack-vs-`cpu_state` destinations. | Static design now; future compile/runtime validation plan only. | Roll back if implementation increases code size or introduces range-related fragility without measurable benefit. |
 | P2 | A-009 | pending | Add a generic ARM64 fallback path for direct state/stack reads and writes that exceed immediate encoding windows instead of `fatal()`ing. | Low to medium: robustness improvement and future-proofing. | Low-medium. | Static call-site audit first; future targeted layout-stress test plan only. | Defer or roll back if current layout margins remain large and no realistic overflow path exists. |
 | P1 | A-010 | pending | Revisit dirty-list escalation (`BYTE_MASK` then `NO_IMMEDIATES`) and/or its trigger policy now that ARM64 recompiles pay cache flush and macOS JIT protection costs. | High on churn-heavy workloads: could reduce repeated short-block recompiles and immediate reload overhead. | Medium-high: heuristic changes can regress genuine self-modifying-code cases. | Static design now; future targeted SMC/churn validation plan only with logfile/metadata capture. | Roll back if invalidation frequency or correctness regressions rise in SMC-heavy workloads. |
+| P1 | A-011 | pending | Teach `host_arm64_mov_imm()` to exploit one-instruction logical-immediate moves (`ORR wzr,#imm`) and `MOVN` before falling back to `MOVZ` / `MOVK`. | Medium: cuts instruction count and temp pressure in constant-heavy blocks and helper setup. | Low. | Static opcode-diff audit now; future block-size comparison on constant-heavy traces with logfile/metadata capture. | Roll back if selection complexity outweighs code-size wins or exposes partial-register semantic drift. |
+| P1 | A-012 | pending | Implement ARM64 direct imm-store hooks (`codegen_direct_write_8_imm`, `_16_imm`, `_32_imm`, `_32_imm_stack`) and then enable `CODEGEN_BACKEND_HAS_MOV_IMM`. | Medium-high: broad dead-end immediate-store win across generic IR. | Medium. | Static design now; future compile/runtime validation plan should compare block size and helper-count deltas while recording logfile/metadata destinations. | Roll back if safe range handling requires a much larger addressing refactor than expected. |
+| P1 | A-013 | pending | Add JIT-local relative `BL` / `B` fast paths to `host_arm64_call()` / `host_arm64_jump()`, falling back to `MOVX_IMM + BLR/BR` only for external or out-of-range targets. | High on helper-heavy workloads: avoids repeated 64-bit target materialization for JIT-local helpers and block jumps. | Low-medium. | Static target-class audit now; future helper-heavy block-size / instruction-count comparison with logfile/metadata capture. | Roll back if any supposedly local target can escape the contiguous code arena or if dual-path dispatch complicates external helpers too much. |
+| P2 | A-014 | pending | Investigate local exit veneers or per-region exit/helper stubs so `CBNZ` and patchable conditionals stay within the 19-bit range more often. | Medium-high on far-from-block0, helper-heavy, or branch-heavy workloads. | Medium-high: control-flow plumbing is more invasive than the relative-call slice. | Future plan should gather block-distance histograms and branch-frequency evidence first, with explicit logfile/metadata destinations. | Roll back if most hot blocks stay within 1MB or if extra veneers increase I-cache pressure without measurable branch-count reduction. |
+| P0 | A-015 | pending | Add validation and fallback for `host_arm64_LDR_IMM_F64` / `STR_IMM_F64` stack users (`codegen_direct_{read,write}_{64,double}_stack`) so large stack offsets cannot silently misencode. | High correctness / robustness upside; performance-neutral. | Low. | Static stack-offset audit now; future synthetic large-stack test plan only, with logfile/metadata destinations recorded before execution. | Roll back if a full audit proves all stack offsets are permanently bounded well inside the 12-bit scaled window. |
+| P2 | A-016 | pending | Normalize `codegen_backend_arm64.h` to match the actual ARM64 ops surface (fix `STRB_IMM_W` drift, remove or implement `LDR_LITERAL_*`). | Low direct user-visible win, but it reduces implementation risk for the next emitter slices. | Low. | Static header-to-implementation diff now; future build-only validation plan if a cleanup patch is prepared later. | Roll back if the cleanup becomes entangled with higher-value emitter work and threatens schedule or focus. |
+| P2 | A-017 | pending | Add generic temp-register fallbacks for `ADDX_IMM` and similar immediate encoders that currently assume large offsets can never occur. | Low-medium robustness upside and future-proofing. | Low-medium. | Static call-site audit now; future targeted large-offset IR plan only, with logfile/metadata destinations predeclared. | Roll back if current callers remain provably within range and the fallback path adds complexity with no plausible trigger. |
 
 ## Findings Summary
 - F-001: The ARM64 new dynarec backend surface compiled for `ARCH STREQUAL "arm64"` is currently constrained to four translation units (`codegen_backend_arm64.c`, `_ops.c`, `_uops.c`, `_imm.c`), with additional ARM64 ABI/register definitions in headers and the runtime block-management boundary in `386_dynarec.c`. Confidence: high. Impact estimate: high for investigation prioritization because it bounds the code surface that can directly cause ARM64 backend-specific regressions. Evidence: `E-001`, `E-002`, `E-004`, `E-005`, `E-009`.
@@ -84,6 +99,11 @@
 - F-007: ARM64 direct state/stack access helpers rely on fixed immediate ranges and `fatal()` when offsets exceed those windows. Current call-site audit shows they are only used for `cpu_state` fields and small stack slots today, so this is a latent robustness issue rather than an active bug, but ARM64 lacks the generic fallback flexibility that x86-64 gets from absolute addressing. Confidence: medium. Impact estimate: low-medium, mainly as future-proofing against layout growth or new call sites. Evidence: `E-022`, `E-023`, `E-024`.
 - F-008: Dirty-list recompiles are an explicit churn amplifier. When a valid block is still in the dirty list, `exec386_dynarec_dyn()` first promotes it to `CODEBLOCK_BYTE_MASK`, then on the next dirty-list hit adds `CODEBLOCK_NO_IMMEDIATES`; in `BYTE_MASK` mode the maximum block size drops from `1000` guest bytes to roughly `40-103` bytes depending on alignment, and `NO_IMMEDIATES` pushes decode/translation down slower immediate-from-RAM paths. On ARM64 this compounds both cache flush cost (`F-002`) and the missing `MOV_IMM` fast path (`F-006`). Confidence: high. Impact estimate: high on churn-heavy workloads. Evidence: `E-025`, `E-026`, `E-027`, `E-028`.
 - F-009: On macOS AArch64, each block recompile also toggles `pthread_jit_write_protect_np(0/1)` around code generation. This is not a bug by itself, but it makes churn reduction even more valuable on the user’s current host class because ARM64 compile costs are not limited to cache flushing. Confidence: high for macOS-specific impact. Impact estimate: medium on Apple ARM64; none on non-Apple hosts. Evidence: `E-026`.
+- F-010: `host_arm64_find_imm()` already knows common logical-immediate masks such as `0x01010101`, but `host_arm64_mov_imm()` never consults that table and has no `MOVN` path; it only emits `MOVZ` / `MOVK`. This turns one-instruction constants into two-instruction sequences in common sites such as `codegen_MMX_ENTER()` and general `UOP_MOV_IMM`, while x86-64 still uses a single `MOV reg, imm32`. Severity: medium. Confidence: high. Expected user-visible impact: medium code-size growth and extra backend work in constant-heavy blocks, especially MMX/FPU/helper-setup paths. Likely reproduction conditions: blocks with repeated fixed masks (`0x01010101`, dense negative masks, status words) or many `UOP_MOV_IMM` values. Candidate implementation files: `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64_imm.c`, `src/codegen_new/codegen_backend_arm64_uops.c`. Rollback trigger: if smarter selection raises compile-time complexity or perturbs partial-register semantics without reducing block size. Evidence: `E-029`, `E-030`, `E-031`, `E-032`, `E-033`.
+- F-011: ARM64 JIT-local calls and direct jumps always materialize the destination into `X16` and use `BLR/BR`, whereas x86-64 first tries a relative `CALL/JMP` and falls back only when needed. The executable allocator reserves a contiguous ~120MB arena and the local helper stubs plus `codegen_exit_rout` all live inside that same arena, so JIT-local ARM64 targets are always within AArch64's 26-bit `B/BL` reach but the backend currently never exploits it. Severity: high. Confidence: high. Expected user-visible impact: high on helper-heavy workloads because every memory helper, FP-round helper, and JIT-local jump pays extra instructions. Likely reproduction conditions: blocks that frequently call `codegen_mem_*`, `codegen_fp_round*`, or chain to JIT-local jump targets. Candidate implementation files: `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64.c`, `src/codegen_new/codegen_allocator.h`, `src/codegen_new/codegen_allocator.c`. Rollback trigger: if any supposedly local target class can escape the contiguous arena in practice or if the fallback split becomes harder to reason about than the current conservative path. Evidence: `E-034`, `E-035`, `E-036`, `E-037`, `E-038`, `E-039`.
+- F-012: ARM64 abort/control-flow plumbing expands more often than x86-64 once blocks drift away from block0. `host_arm64_CBNZ()` already degrades to `CBZ skip; B dest` when the target is outside the 19-bit range, the global `codegen_exit_rout` is created in the helper block at backend init, and the arena spans ~120MB, so far-from-helper blocks will frequently exceed 1MB. Separately, every patchable `host_arm64_Bxx_()` condition is emitted as inverted `B.cond` plus unconditional `B`, while x86-64 patches a single long Jcc. Severity: medium-high. Confidence: medium-high. Expected user-visible impact: medium-high extra instructions and branch-predictor pressure in helper-abort and branch-heavy blocks. Likely reproduction conditions: longer-lived sessions that compile many blocks plus workloads with lots of mem-helper abort checks or compare/jump uops. Candidate implementation files: `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64.c`, potentially `src/codegen_new/codegen_block.c`. Rollback trigger: if distance histograms later show hot blocks usually remain within 1MB or if local veneers inflate I-cache use more than they reduce branches. Evidence: `E-037`, `E-040`, `E-041`, `E-042`.
+- F-013: The missing ARM64 `MOV_IMM` fast path is backed by a concrete interface gap: the IR layer declares generic direct imm-store hooks, `codegen_reg_write_imm()` depends on them, and x86-64 implements them, but the ARM64 backend currently only provides narrow `STORE_PTR_IMM{,_8}` uops that work for in-range `cpu_state` destinations. This keeps the broad dead-end immediate-store optimization disabled and leaves stack immediates without any backend hook at all. Severity: high. Confidence: high. Expected user-visible impact: medium-high extra register traffic and instruction count across generic IR, especially for short-lived constants that never need a host register. Likely reproduction conditions: address-generation and flag-update blocks with dead-end constants, plus churn paths that repeatedly re-materialize small immediates. Candidate implementation files: `src/codegen_new/codegen_backend_arm64_uops.c`, `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64.h`. Rollback trigger: if a first ARM64 implementation needs unsafe address assumptions or a much larger addressing refactor than expected. Evidence: `E-019`, `E-021`, `E-043`, `E-044`, `E-045`.
+- F-014: ARM64 floating-point stack direct-access helpers currently have a correctness gap sharper than the earlier `fatal()` range family. `host_arm64_LDR_IMM_F64()` / `STR_IMM_F64()` do not validate `OFFSET12_Q`, and `codegen_direct_{read,write}_{64,double}_stack()` forwards stack offsets straight into them, while `codegen_reg.c` can route stack-backed `REG_QWORD` and `REG_DOUBLE` traffic through those helpers. If stack offsets grow beyond the 12-bit scaled window, these paths can silently encode the wrong address instead of cleanly failing. Severity: high correctness / latent. Confidence: medium-high. Expected user-visible impact: low-frequency but potentially severe corruption or instability if future stack layout growth crosses the encoding limit. Likely reproduction conditions: larger temporary-frame layouts, new FP temporaries, or future backend refactors that expand stack usage. Candidate implementation files: `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64_uops.c`. Rollback trigger: if a full stack-offset audit proves all possible offsets permanently remain within the current 12-bit scaled window. Evidence: `E-046`, `E-047`, `E-048`.
 
 ## Progress Log
 | Completed analysis unit | Key finding ID(s) | Evidence link(s) | Estimated impact | Decision ID | Follow-up action ID(s) |
@@ -92,6 +112,10 @@
 | U-001 `codegen_backend_arm64.c` | `F-002`, `F-003`, `F-004` | `E-003`, `E-010`, `E-011`, `E-012`, `E-013`, `E-014`, `E-015` | Medium-high: identified one ARM64-specific compile-time cost, one ARM64-specific helper-cost candidate, and one deprioritized false lead | `D-002`, `D-003` | `A-002`, `A-004`, `A-006` |
 | U-002 `codegen_backend_arm64_uops.c` hotspot audit | `F-005`, `F-006`, `F-007` | `E-016`, `E-017`, `E-018`, `E-019`, `E-020`, `E-021`, `E-022`, `E-023`, `E-024` | High: surfaced a bounded P0 correctness defect plus a broad ARM64-only optimization gap | `D-004`, `D-005`, `D-006` | `A-004`, `A-007`, `A-008`, `A-009` |
 | U-003 `386_dynarec.c` recompile/churn audit | `F-008`, `F-009` | `E-025`, `E-026`, `E-027`, `E-028` | High: ties ARM64 compile-time taxes to specific churn/escalation mechanics | `D-007`, `D-008` | `A-003`, `A-010` |
+| U-004 `codegen_backend_arm64_imm.c` | `F-010` | `E-029`, `E-030`, `E-031`, `E-032`, `E-033` | Medium: confirmed that the table is not the main issue, but register-immediate selection still leaves one-instruction ARM64 constants unused | `D-009` | `A-011`, `A-012` |
+| U-005 `codegen_backend_arm64_ops.c` | `F-011`, `F-012`, `F-014` | `E-034`, `E-040`, `E-041`, `E-046` | High: surfaced one broad helper-dispatch gap, one branch-range/control-flow gap, and one latent correctness defect | `D-010`, `D-011`, `D-012` | `A-013`, `A-014`, `A-015`, `A-017` |
+| U-006 remaining `codegen_backend_arm64_uops.c` support-path audit | `F-011`, `F-012`, `F-013`, `F-014` | `E-039`, `E-045`, `E-047`, `E-048` | High: tied emitter-level gaps to actual hot helper-call, abort-check, imm-store, and stack-writeback sites | `D-011`, `D-012` | `A-012`, `A-013`, `A-014`, `A-015` |
+| U-007 supporting module audit (`codegen_allocator.c/h`, `codegen_reg.c`, `codegen_backend_arm64.h`) | `F-011`, `F-013` | `E-035`, `E-036`, `E-043`, `E-049`, `E-050`, `E-051` | High for implementation readiness: narrowed which new slices are low-risk/high-return versus control-flow-heavy follow-ons | `D-010`, `D-013` | `A-012`, `A-013`, `A-016` |
 
 ## Decision Ledger
 | Decision ID | Option chosen | Alternatives rejected | Rationale | Evidence | Reversal trigger |
@@ -104,6 +128,11 @@
 | D-006 | Keep immediate-range direct state access as a robustness backlog item, not a first implementation slice. | Prioritize range-fallback work ahead of MMX branch fix or `MOV_IMM` fast path. | Current call sites stay within `cpu_state` fields and small stack slots, so the risk is latent rather than active; it is worth future-proofing but not first. | `E-022`, `E-023`, `E-024` | Reverse if later audits find current call sites near the range limit or any observed failures tied to range overflow. |
 | D-007 | Treat dirty-list escalation/churn reduction as the third implementation slice candidate after the MMX-enter bug and ARM64 `MOV_IMM` fast path. | Defer churn work until after emitter/imm micro-optimizations. | `BYTE_MASK` + `NO_IMMEDIATES` escalation shortens blocks and forces slower immediate handling exactly where ARM64 recompiles already pay extra cache/JIT overhead. | `E-025`, `E-026`, `E-027`, `E-028` | Reverse if later workload evidence shows invalidation frequency is negligible outside synthetic SMC cases. |
 | D-008 | Treat macOS `pthread_jit_write_protect_np` toggling as further justification for reducing recompiles, not as a standalone optimization target. | Pursue platform-specific write-protect batching first. | The toggle is required platform behavior; the highest-leverage response is to reduce how often the backend enters the recompile path. | `E-026` | Reverse if later investigation reveals safe batching or a broader JIT permission window is already available to the project. |
+| D-009 | Treat the logical-immediate table as supporting machinery, not the primary optimization target; focus immediate work on `host_arm64_mov_imm()` and direct imm-store hooks instead. | Rewrite or special-case the table first. | `codegen_backend_arm64_imm.c` already knows common masks such as `0x01010101`; the remaining inefficiency is that the emitter path never consumes that information for plain constant materialization. | `E-029`, `E-030`, `E-031`, `E-032` | Reverse if future profiling shows compile-time binary-search cost dominates over emitted instruction count. |
+| D-010 | Add JIT-local relative `BL` / `B` fast paths to the backlog ahead of branch-veneer work, but still behind `S-01` and the broader `S-02` imm-store slice. | Ignore the call/jump gap for now; prioritize exit veneers first. | It is the newer low-risk/high-return ARM64-specific gap: the allocator guarantees range for local targets, helper call sites are abundant, and x86-64 already uses a relative-first strategy. | `E-034`, `E-035`, `E-036`, `E-037`, `E-038`, `E-039` | Reverse if target classification turns out to be more ambiguous than the current static audit indicates. |
+| D-011 | Keep the global-exit / conditional-veneer optimization as a second-wave performance slice rather than moving it ahead of direct imm-store work. | Promote veneer work ahead of `S-02`. | The likely win is real, but the control-flow plumbing is more invasive and needs IR-frequency plus distance evidence to rank it confidently against the simpler broad-based imm-store gap. | `E-040`, `E-041`, `E-042` | Reverse if future IR or distance evidence shows abort branches dominate hot paths more than dead-end immediates do. |
+| D-012 | Elevate the ARM64 F64 stack offset issue into its own correctness backlog item instead of leaving it buried under the general range-fallback work. | Leave it implicit inside `A-009`. | Unlike the other direct-access helpers, these paths currently omit validation entirely and can silently misencode rather than stopping loudly. | `E-046`, `E-047`, `E-048` | Reverse if a complete stack-offset audit proves the current window can never be exceeded. |
+| D-013 | Park `H-002` as a primary lead. | Continue treating raw host-register count as an active ARM64-only root cause. | The raw allocator-facing register count is not a compelling ARM64-only explanation after the defs comparison, so investigation effort should stay on helper, branch, and imm-store gaps instead. | `E-005`, `E-051` | Reverse if later spill-aware evidence shows ARM64 register pressure still dominates despite the wider raw pool. |
 
 ## Evidence Index
 | Evidence ID | Reference | Exact location | Related IDs | Why it matters |
@@ -128,7 +157,7 @@
 | E-018 | `src/codegen_new/codegen_backend_x86-64_uops.c` | lines 829-845 | `F-005`, `D-004` | Provides the x86-64 comparison where the analogous MMX-enter branch is patched against the current write buffer. |
 | E-019 | `src/codegen_new/codegen_ir.c` | lines 113-118 | `F-006`, `D-005` | Shows the direct `MOV_IMM`-to-memory optimization is guarded by `CODEGEN_BACKEND_HAS_MOV_IMM`. |
 | E-020 | `src/codegen_new/codegen_backend_x86-64.h` | line 14 | `F-006`, `D-005` | Demonstrates that x86-64 opts into the `MOV_IMM` fast path. |
-| E-021 | `src/codegen_new/codegen_reg.c` | lines 512-540 | `F-006` | Shows the backend-specific direct immediate-store helpers that become available when the fast-path flag is enabled. |
+| E-021 | `src/codegen_new/codegen_reg.c` | lines 512-540 | `F-006`, `F-013` | Shows the backend-specific direct immediate-store helpers that become available when the fast-path flag is enabled and the generic hook contract is satisfied. |
 | E-022 | `src/codegen_new/codegen_backend_arm64_uops.c` | lines 3373-3566 | `F-007`, `H-007`, `D-006` | Captures the fixed-range direct read/write helpers and their `fatal()` behavior when offsets exceed AArch64 immediate windows. |
 | E-023 | `src/codegen_new/codegen_reg.c` | lines 307-540 | `F-007`, `D-006` | Audits the current ARM64 direct-access call sites: `cpu_state` fields, FPU tag/MM/ST arrays, and small stack slots. |
 | E-024 | `src/cpu/cpu.h` | lines 332-417 | `F-007`, `D-006` | Shows the relevant `cpu_state` fields currently used by direct-access helpers live inside the core state struct, supporting the “latent, not active” classification. |
@@ -136,6 +165,29 @@
 | E-026 | `src/cpu/386_dynarec.c` | lines 539-552 and 639-642 | `F-008`, `F-009`, `D-007`, `D-008` | Shows the shortened `BYTE_MASK` block-size cap and the macOS AArch64 `pthread_jit_write_protect_np` toggles around recompilation. |
 | E-027 | `src/codegen_new/codegen_block.c` | lines 370-384 and 548-568 | `F-008` | Confirms dirty invalidation frees the compiled mem blocks and that recompilation allocates fresh executable memory again. |
 | E-028 | `src/codegen_new/codegen.c` | lines 217-240 | `F-008` | Representative decode path showing how `CODEBLOCK_NO_IMMEDIATES` replaces embedded immediates with memory loads, increasing translation work. |
+| E-029 | `src/codegen_new/codegen_backend_arm64_imm.c` | lines 1313-1329 | `F-010`, `H-003`, `D-009` | Shows that ARM64 logical immediates are resolved through a 1302-entry binary search table rather than on-the-fly synthesis. |
+| E-030 | `src/codegen_new/codegen_backend_arm64_imm.c` | lines 345-347 | `F-010`, `D-009` | Demonstrates that `0x01010101` is already encodable by the ARM64 logical-immediate table. |
+| E-031 | `src/codegen_new/codegen_backend_arm64_uops.c` | lines 800-805 | `F-010` | Shows a hot ARM64 MMX path materializing `0x01010101` through `host_arm64_mov_imm()` before multiple stores. |
+| E-032 | `src/codegen_new/codegen_backend_arm64_ops.c` | lines 1089-1115 and 1532-1539 | `F-010`, `H-003` | Confirms plain ARM64 immediate materialization only uses `MOVZ` / `MOVK`, with no `MOVN` or logical-immediate move path. |
+| E-033 | `src/codegen_new/codegen_backend_x86-64_ops.c` | lines 1057-1066 | `F-010` | Provides the x86-64 comparison where a 32-bit register immediate is handled by a single emitter helper/instruction. |
+| E-034 | `src/codegen_new/codegen_backend_arm64_ops.c` | lines 1518-1528 | `F-011`, `H-008`, `D-010` | Shows ARM64 call and jump helpers always materialize a full 64-bit destination into `X16` and dispatch via `BLR/BR`. |
+| E-035 | `src/codegen_new/codegen_allocator.h` | lines 4-21 | `F-011`, `F-012`, `H-008`, `H-009` | States that the executable allocator is bounded by ARMv8's +/-128MB branch range and allocates 131072 blocks of size `0x3c0` (~120MB total). |
+| E-036 | `src/codegen_new/codegen_allocator.c` | lines 90-103 and 185-187 | `F-011`, `F-012` | Confirms the allocator mmaps one contiguous executable arena and derives all code pointers as offsets into that arena. |
+| E-037 | `src/codegen_new/codegen_backend_arm64.c` | lines 298-315 | `F-011`, `F-012` | Shows helper stubs and `codegen_exit_rout` are emitted into the same JIT arena during backend initialization. |
+| E-038 | `src/codegen_new/codegen_backend_x86-64_ops.c` | lines 31-46 and 49-65 | `F-011` | Provides the x86-64 comparison where relative `CALL/JMP` is attempted first and absolute-register fallback is used only when necessary. |
+| E-039 | `src/codegen_new/codegen_backend_arm64_uops.c` | lines 197-223 and 905-1139 | `F-011` | Shows hot ARM64 helper-call sites that all funnel through `host_arm64_call()`, including instruction callbacks and memory helpers. |
+| E-040 | `src/codegen_new/codegen_backend_arm64_ops.c` | lines 608-621 | `F-012`, `H-009`, `D-011` | Shows `host_arm64_CBNZ()` emitting a direct `CBNZ` only when the target fits 19 bits and otherwise degrading to `CBZ skip; B dest`. |
+| E-041 | `src/codegen_new/codegen_backend_arm64_ops.c` | lines 469-585 | `F-012`, `H-009`, `D-011` | Shows every patchable ARM64 conditional branch template as inverted `B.cond` over an unconditional `B`. |
+| E-042 | `src/codegen_new/codegen_backend_x86-64_ops.c` | lines 339-345 and 376-462 | `F-012` | Provides the x86-64 comparison where direct and patchable conditional branches use single long Jcc encodings. |
+| E-043 | `src/codegen_new/codegen_ir_defs.h` | lines 915-918 | `F-013`, `A-012` | Declares the generic direct imm-store hooks the backend must provide to enable the broader `MOV_IMM` fast path. |
+| E-044 | `src/codegen_new/codegen_backend_x86-64_uops.c` | lines 3510-3527 | `F-013`, `A-012` | Shows x86-64 implementing all four direct imm-store hooks expected by `codegen_reg_write_imm()`. |
+| E-045 | `src/codegen_new/codegen_backend_arm64_uops.c` | lines 2724-2745 | `F-013` | Shows ARM64's current ad-hoc imm-store lowering is limited to `STORE_PTR_IMM{,_8}` and only covers in-range `cpu_state` destinations. |
+| E-046 | `src/codegen_new/codegen_backend_arm64_ops.c` | lines 987-990 and 1325-1328 | `F-014`, `A-015`, `D-012` | Shows the ARM64 floating-point immediate load/store emitters accept raw offsets without the range checks used by the integer and pointer variants. |
+| E-047 | `src/codegen_new/codegen_backend_arm64_uops.c` | lines 3550-3576 | `F-014`, `A-015`, `D-012` | Shows stack-based 64-bit / double helpers forwarding stack offsets straight into the unvalidated F64 load/store emitters. |
+| E-048 | `src/codegen_new/codegen_reg.c` | lines 324-352 and 438-467 | `F-014`, `A-015` | Shows stack-backed `REG_QWORD` / `REG_DOUBLE` loads and writebacks can reach the unvalidated ARM64 stack helpers. |
+| E-049 | `src/codegen_new/codegen_backend_arm64.h` | lines 19-25 | `H-010`, `A-016` | Captures stale or unimplemented public ARM64 helper declarations (`LDR_LITERAL_*`, `STRB_IMM_W`) that drift from the actual ops surface. |
+| E-050 | `src/codegen_new/codegen_backend_arm64_ops.h` | lines 214-215 | `H-010`, `A-016` | Shows the actual exported byte-store helper name is `host_arm64_STRB_IMM`, not `host_arm64_STRB_IMM_W`. |
+| E-051 | `src/codegen_new/codegen_backend_x86-64_defs.h` | lines 47-50 | `H-002`, `D-013` | Shows x86-64 exposes only 3 integer host regs and 7 FP regs, weakening raw register-count as an ARM64-only performance explanation. |
 
 ## Analysis Units
 
@@ -217,77 +269,286 @@
 - Confidence: high for the escalation mechanism; medium for workload impact until logs/counters are available.
 - Impact estimate: high, because this unit links ARM64-only compile-time taxes to specific recompile behavior and explains why some regressions may look disproportionately bad on Apple ARM64.
 
+### U-004 `codegen_backend_arm64_imm.c`
+- Timestamp: 2026-04-20 23:16:08 EDT
+- What this unit covers: the ARM64 logical-immediate table itself and how much of that machinery is actually consumed by the higher-level emitter paths.
+- What it does:
+  - Stores a precomputed 1302-entry table of valid AArch64 logical-immediate encodings.
+  - Exposes `host_arm64_find_imm()` so other emitter helpers can ask whether a 32-bit value is representable as a logical immediate.
+- ARM64-specific logic observed:
+  - The table already contains common backend masks such as `0x01010101`, so the immediate layer is more capable than the current register-immediate materialization path suggests.
+  - `host_arm64_find_imm()` is only a lookup routine; it does not by itself decide whether `MOVZ` / `MOVK`, logical-immediate `ORR`, or a future `MOVN` would be the cheapest move form.
+- Risk points:
+  - `R-004`: constant materialization overhead comes from how emitters consume the table, not from a lack of encodable masks (`F-010`).
+- Code examples:
+  - Problematic ARM64 support that already exists (`src/codegen_new/codegen_backend_arm64_imm.c:345-347`):
+    ```c
+    { 0xa00, 0x01000000},
+    { 0xe20, 0x01000100},
+    { 0xe30, 0x01010101},
+    ```
+    Why it matters: `0x01010101` is already encodable as a logical immediate, so later two-instruction materialization is avoidable.
+  - Problematic ARM64 consumer (`src/codegen_new/codegen_backend_arm64_ops.c:1532-1539`):
+    ```c
+    if (imm_is_imm16(imm_data))
+        host_arm64_MOVZ_IMM(block, reg, imm_data);
+    else {
+        host_arm64_MOVZ_IMM(block, reg, imm_data & 0xffff);
+        host_arm64_MOVK_IMM(block, reg, imm_data & 0xffff0000);
+    }
+    ```
+    Why it matters: plain register-immediate setup never tries the cheaper logical-immediate form it already knows how to encode.
+  - Hot ARM64 use site (`src/codegen_new/codegen_backend_arm64_uops.c:800-805`) with x86-64 contrast (`src/codegen_new/codegen_backend_x86-64_ops.c:1057-1066`):
+    ```c
+    host_arm64_mov_imm(block, REG_TEMP, 0x01010101);
+    host_arm64_STR_IMM_W(block, REG_TEMP, REG_CPUSTATE, ...tag[0]...);
+    host_arm64_STR_IMM_W(block, REG_TEMP, REG_CPUSTATE, ...tag[4]...);
+    ```
+    Why it matters: a common MMX-entry constant is still emitted through a heavier ARM64 path while x86-64 uses a single immediate move helper.
+- Candidate fixes (proposal only; no implementation here):
+  - `A-011`: add logical-immediate and `MOVN` selection to `host_arm64_mov_imm()`.
+  - `A-012`: keep the broader direct imm-store slice separate; the table already provides reusable encoding knowledge for that work.
+- New/updated hypotheses:
+  - `H-003` moved to `confirmed`.
+- Confidence: high.
+- Impact estimate: medium, because the immediate layer itself is not broken but it now clearly feeds a broad emitter inefficiency.
+
+### U-005 `codegen_backend_arm64_ops.c`
+- Timestamp: 2026-04-20 23:21:14 EDT
+- What this unit covers: raw ARM64 emitter helpers for branches, calls, immediate loads/stores, block chaining, and stack-access primitives.
+- What it does:
+  - Encodes scalar/vector arithmetic, compare, branch, call, and load/store instructions.
+  - Allocates chained executable mem blocks and patches in inter-block jumps when a block fragment overflows `BLOCK_MAX`.
+  - Provides the low-level helpers that every higher ARM64 uop-lowering path relies on.
+- ARM64-specific logic observed:
+  - `host_arm64_call()` and `host_arm64_jump()` always materialize absolute destinations into `X16` before `BLR` / `BR`.
+  - `host_arm64_CBNZ()` already contains a built-in long-range fallback sequence (`CBZ skip; B dest`) when the 19-bit range is exceeded.
+  - Patchable conditional branches (`host_arm64_Bxx_()`) are always emitted as inverted `B.cond` over an unconditional `B`.
+  - `host_arm64_LDR_IMM_F64()` / `host_arm64_STR_IMM_F64()` do not validate their scaled-immediate offset, unlike the integer and pointer forms in the same file.
+- Risk points:
+  - `R-005`: avoidable helper-call and JIT-local jump bloat from never using relative `B/BL` even when the allocator guarantees range (`F-011`).
+  - `R-006`: extra abort/control-flow branches once targets drift out of the 19-bit conditional range (`F-012`).
+  - `R-007`: silent stack-offset misencoding for F64 load/store helpers if frame offsets grow beyond the 12-bit scaled window (`F-014`).
+- Code examples:
+  - Problematic ARM64 call/jump site (`src/codegen_new/codegen_backend_arm64_ops.c:1518-1528`) with x86-64 contrast (`src/codegen_new/codegen_backend_x86-64_ops.c:31-46`):
+    ```c
+    host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
+    host_arm64_BLR(block, REG_X16);
+    ```
+    Why it matters: JIT-local targets inside the shared code arena still pay a full 64-bit materialization sequence instead of one relative branch.
+  - Problematic ARM64 conditional-range fallback (`src/codegen_new/codegen_backend_arm64_ops.c:608-621`):
+    ```c
+    if (offset_is_19bit(offset)) {
+        codegen_addlong(block, OPCODE_CBNZ | OFFSET19(offset) | Rt(reg));
+    } else {
+        codegen_addlong(block, OPCODE_CBZ | OFFSET19(8) | Rt(reg));
+        codegen_addlong(block, OPCODE_B | OFFSET26(offset));
+    }
+    ```
+    Why it matters: once `codegen_exit_rout` or another target sits more than 1MB away, every abort check grows into two branches.
+  - Problematic ARM64 patchable branch template (`src/codegen_new/codegen_backend_arm64_ops.c:549-554`) with x86-64 contrast (`src/codegen_new/codegen_backend_x86-64_ops.c:425-430`):
+    ```c
+    codegen_addlong(block, OPCODE_BCOND | COND_EQ | OFFSET19(8));
+    codegen_addlong(block, OPCODE_B);
+    ```
+    Why it matters: ARM64 patchable Jccs always start as a two-branch sequence, while x86-64 reserves a single long Jcc slot.
+  - Problematic ARM64 F64 load/store helpers (`src/codegen_new/codegen_backend_arm64_ops.c:987-990` and `1325-1328`):
+    ```c
+    codegen_addlong(block, OPCODE_LDR_IMM_F64 | OFFSET12_Q(offset) | Rn(base_reg) | Rt(dest_reg));
+    codegen_addlong(block, OPCODE_STR_IMM_F64 | OFFSET12_Q(offset) | Rn(base_reg) | Rt(src_reg));
+    ```
+    Why it matters: unlike `LDR_IMM_W`, `LDR_IMM_X`, `STR_IMM_W`, and `STR_IMM_Q`, these helpers never check whether `offset` actually fits.
+- Candidate fixes (proposal only; no implementation here):
+  - `A-013`: add JIT-local relative `BL` / `B` fast paths with conservative fallback for external targets.
+  - `A-014`: if frequency justifies it, add local exit veneers or per-region helper stubs to keep more branches in the 19-bit range.
+  - `A-015`: add validation and fallback for F64 stack helpers before layout growth turns this into silent corruption.
+  - `A-016`: clean up the public ARM64 header while the emitter surface is fresh in context.
+- New/updated hypotheses:
+  - `H-007` moved to `confirmed`.
+  - `H-008` moved to `confirmed`.
+  - `H-009` opened.
+  - `H-010` opened.
+- Confidence: high for `F-011`, medium-high for `F-012`, medium-high for `F-014`.
+- Impact estimate: high overall, because this unit exposed both broad low-risk performance work and a distinct latent correctness defect.
+
+### U-006 remaining `codegen_backend_arm64_uops.c` support-path audit
+- Timestamp: 2026-04-20 23:25:12 EDT
+- What this unit covers: the remaining ARM64 uop-lowering paths that actually exercise the newly identified emitter gaps, especially helper calls, imm stores, and stack-backed register traffic.
+- What it does:
+  - Drives most JIT helper calls (`CALL_FUNC`, `CALL_INSTRUCTION_FUNC`, mem load/store helpers, FP-round helpers).
+  - Emits the ARM64-specific ad-hoc imm-store uops (`STORE_PTR_IMM`, `STORE_PTR_IMM_8`).
+  - Implements stack and `cpu_state` direct-access helpers that the register allocator/writeback layer reaches indirectly.
+- ARM64-specific logic observed:
+  - Hot mem-helper and instruction-helper paths all funnel through `host_arm64_call()`, so the absolute-call cost from `F-011` is not isolated to a rare opcode family.
+  - The only ARM64 imm-store lowering sites found in the backend are the narrow `STORE_PTR_IMM{,_8}` uops, both limited to in-range `cpu_state` destinations.
+  - Stack-backed 64-bit / double reads and writes forward offsets directly into the unvalidated F64 load/store emitters, while 32-bit stack helpers still guard range explicitly.
+- Risk points:
+  - `R-008`: helper-heavy uops inherit the absolute-call and far-exit overheads from `F-011` / `F-012`.
+  - `R-009`: the missing generic imm-store hook set is not theoretical; current ARM64 lowering only covers a small subset of destinations (`F-013`).
+  - `R-010`: stack-backed FP/QWORD traffic can reach the unvalidated F64 stack helpers through allocator-driven load/writeback paths (`F-014`).
+- Code examples:
+  - Hot ARM64 helper-call site (`src/codegen_new/codegen_backend_arm64_uops.c:219-223`) with x86-64 contrast (`src/codegen_new/codegen_backend_x86-64_uops.c:220-229`):
+    ```c
+    host_arm64_mov_imm(block, REG_ARG0, uop->imm_data);
+    host_arm64_call(block, uop->p);
+    host_arm64_CBNZ(block, REG_X0, (uintptr_t) codegen_exit_rout);
+    ```
+    Why it matters: one callback path already combines all three ARM64-only costs discovered here: absolute call, possible long-range `CBNZ`, and a global exit stub.
+  - Narrow ARM64 imm-store substitute (`src/codegen_new/codegen_backend_arm64_uops.c:2724-2745`):
+    ```c
+    host_arm64_mov_imm(block, REG_W16, uop->imm_data);
+    if (in_range12_w((uintptr_t) uop->p - (uintptr_t) &cpu_state))
+        host_arm64_STR_IMM_W(block, REG_W16, REG_CPUSTATE, ...);
+    else
+        fatal("codegen_STORE_PTR_IMM - not in range\n");
+    ```
+    Why it matters: ARM64 currently has a special-case imm-store path, but it is much narrower than the generic hook set x86-64 exposes.
+  - Problematic ARM64 stack helpers (`src/codegen_new/codegen_backend_arm64_uops.c:3550-3576`):
+    ```c
+    void codegen_direct_read_64_stack(..., int stack_offset)
+    {
+        host_arm64_LDR_IMM_F64(block, host_reg, REG_XSP, stack_offset);
+    }
+    ```
+    Why it matters: the stack helper itself performs no validation, so the correctness risk from `F-014` is fully wired into normal allocator traffic.
+- Candidate fixes (proposal only; no implementation here):
+  - `A-012`: implement the generic imm-store hook family so ARM64 can participate in the same dead-end immediate optimization as x86-64.
+  - `A-013`: once relative `BL/B` exists, route the hot helper-call sites through it automatically for JIT-local targets.
+  - `A-015`: validate or fall back the F64 stack helper path before new stack users expand it further.
+- New/updated hypotheses:
+  - `H-009` remains open.
+  - `H-010` remains open.
+- Confidence: high for `F-013`, medium-high for `F-014`.
+- Impact estimate: high, because this audit ties the new emitter gaps directly to existing hot lowering paths.
+
+### U-007 supporting module audit (`codegen_allocator.c/h`, `codegen_reg.c`, `codegen_ir_defs.h`, `codegen_backend_arm64.h`)
+- Timestamp: 2026-04-20 23:28:50 EDT
+- What this unit covers: the supporting modules that determine whether the newly surfaced ARM64 gaps are real implementation opportunities or merely theoretical emitter curiosities.
+- What it does:
+  - `codegen_allocator.c/h` defines the executable arena geometry and therefore the true branch/call reach available to the backend.
+  - `codegen_reg.c` and `codegen_ir_defs.h` define the generic direct imm-store contract and the stack/direct-access paths used by allocator-driven register loads and writebacks.
+  - `codegen_backend_arm64.h` exposes the public ARM64 backend surface seen by generic code.
+- ARM64-specific logic observed:
+  - The executable allocator maps one contiguous arena of `MEM_BLOCK_NR * MEM_BLOCK_SIZE`, which is ~120MB and therefore wholly inside ARM64's +/-128MB unconditional branch reach.
+  - `codegen_reg_write_imm()` already expects four backend imm-store hooks; x86-64 satisfies that contract, but ARM64 still does not.
+  - `codegen_backend_arm64.h` has drifted from the actual ops surface: it advertises `host_arm64_STRB_IMM_W` and `host_arm64_LDR_LITERAL_*`, while the active low-level header exports `host_arm64_STRB_IMM` and no literal-load implementation exists at current HEAD.
+  - The suggested `src/codegen_new/codegen_timing.c` module is absent at HEAD `362d73f1f`; timing hooks currently surface through `codegen_block.c` and `codegen.h` instead.
+- Risk points:
+  - `R-011`: JIT-local range guarantees make the missing relative-call/jump fast path a concrete missed optimization, not just a speculative idea (`F-011`).
+  - `R-012`: the imm-store contract gap is broad enough to justify its own slice because it blocks a generic IR optimization end-to-end (`F-013`).
+  - `R-013`: header drift can raise implementation risk and hide missing helpers during follow-up work (`H-010`).
+- Code examples:
+  - Range guarantee (`src/codegen_new/codegen_allocator.h:13-21` and `src/codegen_new/codegen_allocator.c:92-95`):
+    ```c
+    #define MEM_BLOCK_NR 131072
+    #define MEM_BLOCK_SIZE 0x3c0
+    mem_block_alloc = plat_mmap(MEM_BLOCK_NR * MEM_BLOCK_SIZE, 1);
+    ```
+    Why it matters: the whole JIT arena is ~120MB, so JIT-local ARM64 targets are always inside unconditional `B/BL` reach.
+  - Generic imm-store contract (`src/codegen_new/codegen_ir_defs.h:915-918` and `src/codegen_new/codegen_reg.c:514-540`) with x86-64 contrast (`src/codegen_new/codegen_backend_x86-64_uops.c:3510-3527`):
+    ```c
+    void codegen_direct_write_8_imm(...);
+    void codegen_direct_write_16_imm(...);
+    void codegen_direct_write_32_imm(...);
+    void codegen_direct_write_32_imm_stack(...);
+    ```
+    Why it matters: the generic optimizer is already wired for backend-specific imm stores; ARM64 is missing the actual implementation layer.
+  - Header drift (`src/codegen_new/codegen_backend_arm64.h:19-25` versus `src/codegen_new/codegen_backend_arm64_ops.h:214-215`):
+    ```c
+    void host_arm64_LDR_LITERAL_W(...);
+    void host_arm64_LDR_LITERAL_X(...);
+    void host_arm64_STRB_IMM_W(...);
+    ```
+    Why it matters: the public ARM64 surface no longer matches the active emitter header, which increases follow-up implementation risk even if it is not yet a user-visible bug.
+- Candidate fixes (proposal only; no implementation here):
+  - `A-012`: use the already-existing generic imm-store contract rather than inventing a one-off ARM64-only fast path.
+  - `A-013`: rely on the allocator geometry to make a relative-call/jump fast path bounded and reversible.
+  - `A-016`: clean the public ARM64 header once the higher-value emitter slices are underway.
+- New/updated hypotheses:
+  - `H-002` moved to `parked`.
+  - `H-010` moved to `confirmed`.
+- Confidence: high.
+- Impact estimate: high for implementation readiness, because these supporting modules turn several candidate ideas into concrete bounded slices.
+
 ## Known Unknowns
-- Whether recent historical ARM64 regressions were accompanied by preserved logfiles and metadata on disk; none have been referenced yet in this session.
-- Which helper or fallback sites in `codegen_backend_arm64_uops.c` dominate real workloads.
-- Whether any ARM64 correctness issues stem from x86 flag reconstruction, address-size corner cases, FP rounding, or block invalidation/re-entry sequencing.
-- Whether immediate materialization overhead is frequent enough to compete with helper-call or spill costs.
-- How often ARM64 `codegen_fp_round` / `codegen_fp_round_quad` calls actually occur in representative workloads relative to total block execution.
-- How much user-visible slowdown is driven by compile/recompile churn that magnifies the mandatory ARM64 `__clear_cache()` cost.
+- Whether recent historical ARM64 regressions were accompanied by preserved logfiles and metadata on disk; no historical run was referenced in this session, so logfile/metadata status remains unknown.
+- Which IR producers (`codegen_ops_branch.c`, `codegen_ops_shift.c`, `codegen.c`) dominate the newly confirmed `host_arm64_call()`, `host_arm64_CBNZ()`, and patchable-branch patterns in real workloads.
+- Whether hot compiled blocks regularly end up more than 1MB from `codegen_exit_rout`, or whether block reuse keeps most hot paths close enough that `F-012` matters less than the static structure suggests.
+- Whether ARM64 helper-heavy workloads are bottlenecked more by absolute-call materialization (`F-011`), long abort branches (`F-012`), or compile/recompile churn (`F-008` / `F-009`).
+- Whether ARM64 `codegen_fp_round` / `codegen_fp_round_quad` calls occur often enough in representative workloads to compete with the newly found helper-dispatch and imm-store gaps.
+- Whether enabling ARM64 `MOV_IMM` fast-path support can safely ship in two bounded sub-steps (direct imm-store hooks first, smarter constant materialization second) without needing the broader range-fallback work up front.
+- Whether stack layouts can realistically grow enough to trigger `F-014` without deliberate stress, or whether that slice should remain correctness hygiene rather than a hot bug fix.
 - Whether any existing workload is known to emit `UOP_MMX_ENTER` near a mem-block boundary often enough to make `F-005` user-visible today.
-- Whether enabling ARM64 `MOV_IMM` fast-path support would require a generic out-of-range fallback first, or whether current destinations are already range-safe enough for an initial slice.
-- How often real workloads drive the dirty-list progression all the way to `NO_IMMEDIATES`, and whether that correlates with observed ARM64 slowdowns.
-- Whether Apple ARM64 workloads are bottlenecked more by cache flushes, JIT write-protect toggles, or the shorter `BYTE_MASK` block size after invalidations.
+- Suggested `src/codegen_new/codegen_timing.c` follow-up is blocked because that file does not exist at HEAD `362d73f1f`; remaining timing-oriented planning must anchor in `codegen_block.c` / `codegen.h`.
 
 ## Rejected Hypotheses
 - H-005 rejected at 2026-04-20 22:58:23 EDT: `codegen_allocator_clean_blocks()` is not freeing or invalidating helper memory. `src/codegen_new/codegen_allocator.c:190-200` shows an ARM64-only `__clear_cache()` loop over generated blocks, which makes the ARM64 init/epilogue call sites a cache-coherency requirement rather than a lifetime bug. Evidence: `E-012`, `E-013`.
 
 ## State Snapshot
-### Snapshot 2026-04-20 23:12:37 EDT
-- Current focus: session checkpoint complete; next recommended unit remains `A-003` / `src/codegen_new/codegen_backend_arm64_imm.c`
-- Completed units: `U-000`, `U-001`, `U-002`, `U-003`
-- Active findings: `F-001` through `F-009`
-- Active decisions: `D-001` through `D-008`
+### Snapshot 2026-04-20 23:28:50 EDT
+- Current focus: session end checkpoint complete; next recommended unit is `U-008` / `src/codegen_new/codegen_ops_branch.c`
+- Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`, `U-005`, `U-006`, `U-007`
+- Active findings: `F-001` through `F-014`
+- Active decisions: `D-001` through `D-013`
+- Active hypotheses:
+  - `H-001` parked
+  - `H-002` parked
+  - `H-003` confirmed
+  - `H-004` open
+  - `H-005` rejected
+  - `H-006` open
+  - `H-007` confirmed
+  - `H-008` confirmed
+  - `H-009` open
+  - `H-010` confirmed
+- Next commit-ready investigation move: inspect `codegen_ops_branch.c` first to map how often the newly confirmed ARM64 helper-call and long-branch patterns are produced before deciding whether `A-013` or `A-014` should follow `S-02`.
+
+### Snapshot 2026-04-20 23:25:12 EDT
+- Current focus: `U-007` / supporting module audit
+- Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`, `U-005`, `U-006`
+- Active findings: `F-001` through `F-014`
 - Active hypotheses:
   - `H-001` parked
   - `H-002` open
-  - `H-003` open
+  - `H-003` confirmed
+  - `H-004` open
+  - `H-005` rejected
+  - `H-006` open
+  - `H-007` confirmed
+  - `H-008` confirmed
+  - `H-009` open
+  - `H-010` open
+- Next commit-ready investigation move: fold allocator and reg-contract evidence back into the canonical backlog, then choose between `codegen_ops_branch.c` and `codegen_block.c` for the next frequency/telemetry-focused unit.
+
+### Snapshot 2026-04-20 23:21:14 EDT
+- Current focus: `U-006` / remaining `codegen_backend_arm64_uops.c` support-path audit
+- Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`, `U-005`
+- Active findings: `F-001` through `F-012`
+- Active hypotheses:
+  - `H-001` parked
+  - `H-002` open
+  - `H-003` confirmed
+  - `H-004` open
+  - `H-005` rejected
+  - `H-006` open
+  - `H-007` confirmed
+  - `H-008` confirmed
+  - `H-009` open
+- Next commit-ready investigation move: trace the helper-call and stack-writeback paths that actually reach the new emitter gaps, then update findings before switching into the supporting modules.
+
+### Snapshot 2026-04-20 23:16:08 EDT
+- Current focus: `U-005` / `src/codegen_new/codegen_backend_arm64_ops.c`
+- Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`
+- Active findings: `F-001` through `F-010`
+- Active hypotheses:
+  - `H-001` parked
+  - `H-002` open
+  - `H-003` confirmed
   - `H-004` open
   - `H-005` rejected
   - `H-006` open
   - `H-007` open
-- Next commit-ready investigation move: inspect `codegen_backend_arm64_imm.c` specifically for reusable immediate/store machinery that could lower the cost or implementation risk of `S-02`.
-
-### Snapshot 2026-04-20 23:09:58 EDT
-- Current focus: `A-003` / `src/codegen_new/codegen_backend_arm64_imm.c`
-- Completed units: `U-000`, `U-001`, `U-002`, `U-003`
-- Active findings: `F-001`, `F-002`, `F-003`, `F-004`, `F-005`, `F-006`, `F-007`, `F-008`, `F-009`
-- Active hypotheses:
-  - `H-001` parked
-  - `H-002` open
-  - `H-003` open
-  - `H-004` open
-  - `H-005` rejected
-  - `H-006` open
-  - `H-007` open
-- Next commit-ready investigation move: inspect `codegen_backend_arm64_imm.c` to see whether ARM64 already has reusable constant-materialization machinery for `A-008`, or whether the missing `MOV_IMM` fast path truly needs new helper plumbing.
-
-### Snapshot 2026-04-20 23:06:23 EDT
-- Current focus: `A-004` / `src/cpu/386_dynarec.c`
-- Completed units: `U-000`, `U-001`, `U-002`
-- Active findings: `F-001`, `F-002`, `F-003`, `F-004`, `F-005`, `F-006`, `F-007`
-- Active hypotheses:
-  - `H-001` parked
-  - `H-002` open
-  - `H-003` open
-  - `H-004` open
-  - `H-005` rejected
-  - `H-006` open
-  - `H-007` open
-- Next commit-ready investigation move: inspect `386_dynarec.c` block validation, dirty-page invalidation, and recompilation flow to determine whether ARM64’s mandatory cache-flush cost is likely being amplified by avoidable churn.
-
-### Snapshot 2026-04-20 22:58:23 EDT
-- Current focus: `A-002` / `src/codegen_new/codegen_backend_arm64_uops.c`
-- Completed units: `U-000`, `U-001`
-- Active findings: `F-001`, `F-002`, `F-003`, `F-004`
-- Active hypotheses:
-  - `H-001` parked
-  - `H-002` open
-  - `H-003` open
-  - `H-004` open
-  - `H-005` rejected
-  - `H-006` open
-- Next commit-ready investigation move: inspect `codegen_backend_arm64_uops.c` around `codegen_exit_rout` and `codegen_fp_round*` use sites first, then expand outward to high-frequency helper exits and flag/semantic paths before updating the backlog again.
+- Next commit-ready investigation move: inspect the raw emitter layer for missing relative-call/jump paths, long-range branch templates, and any load/store helpers that skip the range validation seen elsewhere.
 
 ### Snapshot 2026-04-20 22:54:04 EDT
 - Current focus: `A-001` / `src/codegen_new/codegen_backend_arm64.c`
@@ -305,7 +566,7 @@
 | Slice ID | Priority | Problem to address | Exact files to touch | Gate criteria | Rollback conditions |
 | --- | --- | --- | --- | --- | --- |
 | S-01 | P0 | Fix the ARM64 `codegen_MMX_ENTER()` stale-buffer branch patch so split-block emission cannot jump to the wrong fragment. | `src/codegen_new/codegen_backend_arm64_uops.c` | Confirm the branch patch uses `block_write_data` consistently; audit nearby ARM64 patch sites for the same pattern; define a targeted future test plan that forces `MMX_ENTER` near a mem-block boundary and records whether logfile and metadata are written to disk. | If a deeper audit proves `MMX_ENTER` can never span a mem-block boundary in practice, or if the fix reveals a different required patching abstraction. |
-| S-02 | P1 | Add ARM64 support for the missing `MOV_IMM` direct-to-memory fast path to reduce dead-end immediate-store overhead. | `src/codegen_new/codegen_backend_arm64.h`, `src/codegen_new/codegen_backend_arm64_uops.c`, `src/codegen_new/codegen_backend_arm64_ops.c` | Decide whether existing ARM64 immediate/store helpers are sufficient for byte/word/dword destinations; keep current range-safety assumptions explicit; define a future validation plan that compares code size / helper count before vs after and records logfile/metadata destinations. | If implementation needs a large generic addressing refactor first, or if range handling turns the slice into a higher-risk change than expected. |
+| S-02 | P1 | Add ARM64 support for the missing `MOV_IMM` direct-to-memory fast path, then immediately fold in cheaper constant materialization where the same slice already touches the emitter. | `src/codegen_new/codegen_backend_arm64.h`, `src/codegen_new/codegen_backend_arm64_uops.c`, `src/codegen_new/codegen_backend_arm64_ops.c`, optionally `src/codegen_new/codegen_backend_arm64_imm.c` if helper selection is shared | Land the four direct imm-store hooks first; keep current range-safety assumptions explicit; if the same patch series touches `host_arm64_mov_imm()`, prefer bounded additions (`MOVN`, logical-immediate move) over larger refactors; define a future validation plan that compares code size / helper count before vs after and records logfile/metadata destinations. | If implementation needs a large generic addressing refactor first, or if combining imm-store work with smarter materialization makes the slice materially riskier than expected. |
 | S-03 | P1 | Reduce churn from dirty-list escalation that currently drives shorter `BYTE_MASK` blocks, `NO_IMMEDIATES`, cache flushes, and macOS JIT toggles. | `src/cpu/386_dynarec.c`, `src/codegen_new/codegen_block.c`, optionally `src/codegen_new/codegen.h` if flag semantics change | Define the exact heuristic change first: delay escalation, add counters/thresholds, or constrain it to confirmed hot dirty blocks; pair it with a future SMC-focused test plan and explicit logfile/metadata capture. | If self-modifying-code workloads regress, invalidation frequency rises, or the heuristic increases correctness risk more than it reduces ARM64 recompile cost. |
 
 ### First Slice Recommended
@@ -315,26 +576,36 @@
   - The write set is tiny and bounded.
   - The rollback surface is low compared with the broader heuristic/performance slices.
 
+### Next Slice Recommended
+- Recommend `S-02` immediately after `S-01`.
+- Suggested internal sub-order:
+  - `A-012` direct imm-store hooks first.
+  - `A-011` smarter ARM64 constant materialization second if the emitter files are already open.
+  - `A-013` relative `BL/B` fast paths next as the strongest new low-risk/high-return non-top-3 slice.
+
 ### Sequencing Notes
-- `S-02` is the best broad performance follow-up once `S-01` is closed; it improves a generic inefficiency without needing to change dynarec policy.
-- `S-03` should come after `S-01` and ideally after an initial `S-02` design pass, because the churn slice is the most policy-heavy and benefits from having the lower-level ARM64 cost model already improved.
+- `S-02` remains the best broad performance follow-up once `S-01` is closed because it improves a generic inefficiency without needing to change dynarec policy.
+- `A-013` relative `BL/B` is now the best additional low-risk/high-return slice outside the retained top three, but it is narrower than `S-02` and therefore still ranks just after it.
+- `A-014` exit/conditional veneers now has clear evidence behind it, but it should stay behind `S-02` and `A-013` until IR-frequency evidence from `codegen_ops_branch.c` confirms how often the long-range forms are emitted.
+- `S-03` should still come after `S-01` and ideally after an initial `S-02` design pass, because the churn slice is the most policy-heavy and benefits from having the lower-level ARM64 cost model already improved.
 
 ## Session Delta
 - Added/changed in this session:
-  - Created the canonical investigation document.
-  - Recorded scope, constraints, goals, and non-goals for a docs-only ARM64 dynarec campaign.
-  - Built the initial ARM64 module map and seeded the evidence index, hypothesis register, backlog, progress log, decision ledger, resume state, and first state snapshot.
-  - Completed `U-001` for `src/codegen_new/codegen_backend_arm64.c`, adding findings for ARM64 cache-maintenance cost, FP-round helper structure, and a deprioritized misalignment fallback lead.
-  - Added allocator evidence showing `codegen_allocator_clean_blocks()` is a cache flush, not a free, and recorded the rejection of `H-005`.
-  - Completed `U-002` for `src/codegen_new/codegen_backend_arm64_uops.c`, adding a P0 correctness finding (`F-005`), a broad ARM64-only optimization gap (`F-006`), and a latent robustness finding (`F-007`).
-  - Completed `U-003` for `src/cpu/386_dynarec.c`, tying ARM64 compile-time taxes to dirty-list recompilation, shorter `BYTE_MASK` blocks, `NO_IMMEDIATES`, and macOS JIT write-protect toggling.
-  - Added the decision-ready top-3 implementation slice plan with files, gates, rollback conditions, and a recommended first slice.
+  - Updated the canonical doc to current HEAD `362d73f1f77ba5a3669510b213285b992a9544f1`.
+  - Completed `U-004` for `src/codegen_new/codegen_backend_arm64_imm.c`, confirming that the logical-immediate table is already capable enough and that the real gap is emitter use of it.
+  - Completed `U-005` for `src/codegen_new/codegen_backend_arm64_ops.c`, adding findings for missing relative `BL/B` fast paths, long-range abort/patchable branch expansion, and the unvalidated F64 stack load/store helpers.
+  - Completed `U-006` for the remaining ARM64 uops support paths, tying the new emitter findings to actual helper-call, imm-store, and stack-writeback sites.
+  - Completed `U-007` for `codegen_allocator.c/h`, `codegen_reg.c`, `codegen_ir_defs.h`, and `codegen_backend_arm64.h`, expanding the file map and proving which new ARM64 slices are bounded and implementation-ready.
+  - Added new findings `F-010` through `F-014`, decisions `D-009` through `D-013`, evidence `E-029` through `E-051`, and backlog items `A-011` through `A-017`.
+  - Refreshed `Resume Here`, `Progress Log`, `Decision Ledger`, `Evidence Index`, `Known Unknowns`, `State Snapshot`, and the decision-ready slice ordering to reflect the deeper module coverage.
 - Unresolved:
-  - `codegen_backend_arm64_imm.c` has not yet been inspected to determine how much reusable machinery exists for the proposed ARM64 `MOV_IMM` fast path.
-  - No runtime validation plan tied to specific suspected failure points has been drafted yet.
+  - No runtime validation plan has been executed; all validation remains plan-only, and no historical run logfile/metadata pair was referenced in this session.
+  - `H-004`, `H-006`, and `H-009` remain open because churn frequency, FP-round hotness, and far-branch prevalence still need future measurement plans.
+  - The suggested timing follow-up needs a new anchor because `src/codegen_new/codegen_timing.c` does not exist at HEAD `362d73f1f`.
 - Exact first commands/files for next session:
-  - `rg -n "host_arm64_find_imm|MOVX_IMM|MOVZ_IMM|MOVK_IMM|mov_imm|immediate|literal" src/codegen_new/codegen_backend_arm64_imm.c src/codegen_new/codegen_backend_arm64_uops.c src/codegen_new/codegen_backend_arm64_ops.c`
-  - `nl -ba src/codegen_new/codegen_backend_arm64_imm.c | sed -n '1,260p'`
-  - `nl -ba src/codegen_new/codegen_backend_arm64_imm.c | sed -n '260,520p'`
-  - File focus: `src/codegen_new/codegen_backend_arm64_imm.c`
-- Recommended immediate next investigation unit: `U-004 codegen_backend_arm64_imm.c`
+  - `nl -ba src/codegen_new/codegen_ops_branch.c | sed -n '1,260p'`
+  - `rg -n "uop_CMP_IMM_J|uop_CMP_J|uop_JMP|uop_CALL" src/codegen_new/codegen_ops_branch.c src/codegen_new/codegen_ops_shift.c src/codegen_new/codegen.c`
+  - `nl -ba src/codegen_new/codegen_block.c | sed -n '548,610p'`
+  - File focus: `src/codegen_new/codegen_ops_branch.c`
+- Recommended immediate next investigation unit: `U-008 codegen_ops_branch.c IR-frequency / branch-production audit`
+- Broader issue inventory sufficient for multi-slice implementation planning: yes. The document now supports several bounded follow-up slices beyond the original short list; remaining work is prioritization and validation design rather than discovery of first-order ARM64-only gaps.
