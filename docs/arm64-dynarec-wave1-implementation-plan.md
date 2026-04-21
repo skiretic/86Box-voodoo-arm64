@@ -287,6 +287,19 @@ Secondary profile policy (optional):
   - optional for wave-1 slice pass/fail by default.
   - may be promoted to required for a slice if a bug only reproduces in microstress phases.
 
+### WL-05 Test Intent Mapping (Explicit)
+- `MRUNQ` (`--quick`):
+  - fast regression gate; reduced iterations, same phase mix.
+- `MRUN` (normal):
+  - full-iteration stability gate for main execution path.
+- `MRUNS` (`--smc`):
+  - full-iteration plus SMC-touch phase for churn/SMC guardrail checks.
+- Phase-to-slice mapping:
+  - `mmx_touch` -> `S-01` targeted correctness confidence.
+  - `imm_store` -> `S-02` direct imm-store fast-path validation.
+  - `branch_helper` -> `A-013` control-flow/helper-dispatch sensitivity.
+  - `smc_touch` -> `S-03` self-modifying/churn-policy guardrail sensitivity.
+
 ## Slice Plan: S-01
 
 ### Problem Statement

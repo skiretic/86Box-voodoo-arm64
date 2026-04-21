@@ -8,6 +8,7 @@ Contents:
 - SCRIPTS\MRUN.BAT             short-name alias for MICRO_RUN.BAT
 - SCRIPTS\MRUNQ.BAT            short-name alias for MICRO_RUN_QUICK.BAT
 - SCRIPTS\MRUNS.BAT            short-name alias for MICRO_RUN_SMC.BAT
+- SCRIPTS\MRUNALL.BAT          one-command quick+normal+smc run and summary
 
 Recommended guest usage:
 1) Mount this ISO in Win98 CD-ROM (assume D:)
@@ -16,6 +17,7 @@ Recommended guest usage:
    D:\SCRIPTS\MICRO_RUN_QUICK.BAT D:
    D:\SCRIPTS\MICRO_RUN_SMC.BAT D:
    D:\SCRIPTS\MRUN.BAT D:
+   D:\SCRIPTS\MRUNALL.BAT D:
 
 Expected output markers:
 - MICRO_RUN_START
