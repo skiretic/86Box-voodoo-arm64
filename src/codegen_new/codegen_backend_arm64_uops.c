@@ -3587,4 +3587,45 @@ codegen_set_jump_dest(codeblock_t *block, void *p)
 {
     host_arm64_branch_set_offset(p, &block_write_data[block_pos]);
 }
+
+void
+codegen_direct_write_8_imm(codeblock_t *block, void *p, uint8_t imm_data)
+{
+    host_arm64_mov_imm(block, REG_W16, imm_data);
+
+    if (in_range12_b((uintptr_t) p - (uintptr_t) &cpu_state))
+        host_arm64_STRB_IMM(block, REG_W16, REG_CPUSTATE, (uintptr_t) p - (uintptr_t) &cpu_state);
+    else
+        fatal("codegen_direct_write_8_imm - not in range\n");
+}
+void
+codegen_direct_write_16_imm(codeblock_t *block, void *p, uint16_t imm_data)
+{
+    host_arm64_mov_imm(block, REG_W16, imm_data);
+
+    if (in_range12_h((uintptr_t) p - (uintptr_t) &cpu_state))
+        host_arm64_STRH_IMM(block, REG_W16, REG_CPUSTATE, (uintptr_t) p - (uintptr_t) &cpu_state);
+    else
+        fatal("codegen_direct_write_16_imm - not in range\n");
+}
+void
+codegen_direct_write_32_imm(codeblock_t *block, void *p, uint32_t imm_data)
+{
+    host_arm64_mov_imm(block, REG_W16, imm_data);
+
+    if (in_range12_w((uintptr_t) p - (uintptr_t) &cpu_state))
+        host_arm64_STR_IMM_W(block, REG_W16, REG_CPUSTATE, (uintptr_t) p - (uintptr_t) &cpu_state);
+    else
+        fatal("codegen_direct_write_32_imm - not in range\n");
+}
+void
+codegen_direct_write_32_imm_stack(codeblock_t *block, int stack_offset, uint32_t imm_data)
+{
+    host_arm64_mov_imm(block, REG_W16, imm_data);
+
+    if (in_range12_w(stack_offset))
+        host_arm64_STR_IMM_W(block, REG_W16, REG_XSP, stack_offset);
+    else
+        fatal("codegen_direct_write_32_imm_stack - not in range\n");
+}
 #endif

@@ -24,6 +24,33 @@ Phases:
 - `mmx_touch` (MMX touchpoint; supports `S-01` targeted checks)
 - `smc_touch` (optional self-modifying phase; supports `S-03` targeted checks)
 
+## What this tests (explicit)
+
+Run modes:
+- `quick`: same phase coverage, reduced iteration counts. Fast regression gate.
+- `normal`: same phase coverage, full iteration counts. Main stability gate.
+- `smc`: same as `normal` plus `smc_touch` enabled. Churn/SMC guardrail gate.
+
+Phase intent:
+- `imm_store`:
+  - stresses immediate write patterns and dependent reload paths.
+  - primary signal for `S-02` (`CODEGEN_BACKEND_HAS_MOV_IMM` + direct imm-store hooks).
+- `branch_helper`:
+  - stresses branch-heavy/control-flow-dense integer behavior.
+  - primary signal for `A-013` (call/jump dispatch shape changes).
+- `mmx_touch`:
+  - forces MMX instruction path activity and entry/exit handling.
+  - primary targeted signal for `S-01` (`codegen_MMX_ENTER` patch-site correctness).
+- `smc_touch`:
+  - mutates executable bytes and re-executes generated code.
+  - tests self-modifying-code-adjacent behavior under deterministic loop.
+  - primary guardrail signal for `S-03` churn-policy work.
+
+Detection model:
+- Exact expected output markers + deterministic final totals.
+- Pass means no crash/error and stable totals for locked VM profile.
+- Fail means runtime error/crash/missing marker or unexpected total drift.
+
 ## Build (macOS host with Homebrew MinGW)
 
 Use the helper script:
@@ -76,7 +103,10 @@ D:\SCRIPTS\MICRO_RUN.BAT D:
 D:\SCRIPTS\MICRO_RUN_QUICK.BAT D:
 D:\SCRIPTS\MICRO_RUN_SMC.BAT D:
 D:\SCRIPTS\MRUN.BAT D:
+D:\SCRIPTS\MRUNALL.BAT D:
 ```
+
+`MRUNALL.BAT` runs quick + normal + smc in one shot and prints compact summary block for screenshot capture.
 
 ## Validation notes
 
