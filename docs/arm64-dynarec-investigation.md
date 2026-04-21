@@ -1,22 +1,23 @@
 # ARM64 New Dynarec Investigation
 
 ## Resume Here
-- Current objective: continue widening the shared-helper inventory beyond branch/shift/arith so the next non-branch producer slice is ranked by evidence rather than intuition; the next focus is the remaining mid-density helper users.
-- Exact next file/module: `src/codegen_new/codegen_ops_misc.c`
+- Current objective: static ARM64 source audit complete; use this document as the planning handoff for implementation sequencing, validation design, and slice scoping.
+- Exact next file/module: none for source discovery; planning should start from `Decision-Ready Plan`, `Running Prioritized Backlog`, and `Findings Summary`.
 - Next 3 concrete actions:
-  1. Inspect `src/codegen_new/codegen_ops_misc.c` to determine whether its helper usage deserves a real slice or just a low-priority footnote behind the branch/shift/arith modules.
-  2. Compare `src/codegen_new/codegen_ops_misc.c`, `src/codegen_new/codegen_ops_stack.c`, and the already-sampled `src/codegen_new/codegen_ops_jump.c` so the remaining shared-helper ranking is evidence-backed.
-  3. Draft future validation plans for `A-013`, `A-019`, and `A-020`, explicitly recording intended logfile and metadata destinations before any runtime work is attempted.
+  1. Start the implementation-planning pass from `S-01`, `S-02`, `S-03`, and `A-013`, keeping `A-021` explicitly tail-ranked unless workload evidence later promotes it.
+  2. Draft future validation plans for `S-01`, `S-02`/`A-013`, and `S-03`, explicitly recording intended logfile and metadata destinations before any runtime work is attempted.
+  3. Decide whether `A-011` stays bundled inside `S-02` or is staged immediately after the direct imm-store hook work once the written plan is assembled.
 - Active blockers:
-  - `src/codegen_new/codegen_timing.c` does not exist at HEAD `96806d27d`; timing follow-up must start from `src/codegen_new/codegen_block.c` and `src/codegen_new/codegen.h` instead.
-  - No runtime evidence collected in this continuation by design; helper-call frequency, block-distance histograms, and any validation remain plan-only.
+  - No runtime evidence collected in this investigation by design; remaining open questions are measurement-only and must stay plan-only until explicitly approved.
+  - `src/codegen_new/codegen_timing.c` does not exist at HEAD `4687f433c`; any telemetry follow-up must start from `src/codegen_new/codegen_block.c` and `src/codegen_new/codegen.h` instead.
+  - No implementation plan has been written yet; this document is now the completed static-audit handoff artifact for that next phase.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
-- Current continuation checkpoint: 2026-04-21 16:39:15 EDT
+- Current continuation checkpoint: 2026-04-21 16:52:32 EDT
 - Repository: `/Users/anthony/projects/code/86Box-voodoo-arm64`
 - Branch: `ndr-analysis`
-- HEAD: `96806d27d0094918feddaae636a2dd83e5496ee5`
+- HEAD: `4687f433c3ccdd3dbbaebb92bcbc1c7fde0f0c57`
 - Note: current HEAD moved forward only through docs-only investigation commits; the analyzed source tree still matches the earlier code state referenced in prior units.
 - Mission: investigate ARM64-specific issues in the new dynarec that may cause `performance loss`, `incorrect behavior/instability`, or `avoidable fallback/churn`, and end with a prioritized improvement plan backed by evidence.
 
@@ -54,7 +55,7 @@
 | Executable allocator / branch envelope | `src/codegen_new/codegen_allocator.c`, `src/codegen_new/codegen_allocator.h` | Proves generated ARM64 blocks and helper stubs live inside a single contiguous executable arena, which sharply constrains which relative branches and calls should always be reachable. | `E-013`, `E-035`, `E-036` |
 | Reg writeback / imm-store contract | `src/codegen_new/codegen_reg.c`, `src/codegen_new/codegen_ir_defs.h` | Defines the generic direct-immediate-store hooks and shows why the ARM64 backend currently cannot opt into the same dead-end `MOV_IMM` fast path as x86-64. | `E-021`, `E-043`, `E-044` |
 | Dynarec integration boundary | `src/cpu/386_dynarec.c`, `src/cpu/386_dynarec_ops.c` | Governs block lookup/validation/end conditions and can reveal avoidable recompile churn or cache invalidation behavior observable on ARM64 as backend symptoms. | `E-009` |
-| Shared control-flow / flag-helper producers | `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_ops_jump.c`, `src/codegen_new/codegen_ops_helpers.c`, `src/codegen_new/codegen_ops_helpers.h`, `src/codegen_new/codegen_ops_shift.c`, `src/codegen_new/codegen_ops_arith.c`, `src/codegen_new/codegen.c` | Determines how often the shared frontend emits `codegen_exit_rout` jumps, helper-result calls, instruction callbacks, and flag-helper wrappers that map onto ARM64 branch/call weak spots. | `E-052`, `E-053`, `E-054`, `E-056`, `E-057`, `E-058`, `E-059`, `E-060`, `E-061` |
+| Shared control-flow / flag-helper producers | `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_ops_jump.c`, `src/codegen_new/codegen_ops_helpers.c`, `src/codegen_new/codegen_ops_helpers.h`, `src/codegen_new/codegen_ops_shift.c`, `src/codegen_new/codegen_ops_arith.c`, `src/codegen_new/codegen_ops_misc.c`, `src/codegen_new/codegen_ops_stack.c`, `src/codegen_new/codegen.c` | Determines how often the shared frontend emits `codegen_exit_rout` jumps, helper-result calls, instruction callbacks, far-control-transfer helpers, and flag-helper wrappers that map onto ARM64 branch/call weak spots. | `E-052`, `E-053`, `E-054`, `E-056`, `E-057`, `E-058`, `E-059`, `E-060`, `E-061`, `E-062`, `E-063`, `E-064`, `E-065` |
 
 ## Hypothesis Register
 | Hypothesis ID | Status | Statement | Initial basis | Planned tie-break / next step |
@@ -62,12 +63,12 @@
 | H-001 | parked | ARM64 helper stub generation may be forcing too many slow-path calls on misaligned or lookup-miss memory accesses, causing measurable performance loss beyond expected x86 semantics. | `codegen_backend_arm64.c` emits dedicated load/store stubs with explicit `readlookup2`/`writelookup2` probes and helper-call fallback branches. | `codegen_backend_x86-64.c` uses the same misalignment-triggered helper pattern, so this is not an ARM64-specific first-slice explanation without stronger evidence. Revisit only if later ARM64-only behavior shows materially higher fallback frequency. |
 | H-002 | parked | Raw ARM64 host register pool size may be a primary driver of backend slowdown. | Only 10 integer callee-saved registers and 8 FP registers are exposed as allocatable host pools, with `X29` pinned as `REG_CPUSTATE`. | Parked after the defs comparison: x86-64 exposes even fewer integer host regs, so any remaining ARM64 pressure is more likely second-order from helper/encoding gaps than from raw register count alone. Re-open only if future spill-aware telemetry contradicts this. |
 | H-003 | confirmed | ARM64 immediate materialization inflates instruction count in common paths. | Dedicated immediate file exists and exported `host_arm64_find_imm()` suggests special-case search/materialization logic. | Confirmed in `U-004` / `U-005`: the primary gap is not the logical-immediate table itself, but that `host_arm64_mov_imm()` never uses logical-immediate or `MOVN` forms and the backend still lacks direct imm-store hooks. Track via `A-012` and `A-011`. |
-| H-004 | open | Some user-visible ARM64 instability may originate at the block validation/recompile boundary rather than in instruction semantics, appearing as backend faults or random slowdowns. | `386_dynarec.c` contains extensive block validation, dirty-page, and block-end logic that can cause recompilation or fallback churn. | Inspect block lifecycle paths after first backend module analysis and separate frontend vs backend causes. |
+| H-004 | open | Some user-visible ARM64 instability may originate at the block validation/recompile boundary rather than in instruction semantics, appearing as backend faults or random slowdowns. | `386_dynarec.c` contains extensive block validation, dirty-page, and block-end logic that can cause recompilation or fallback churn. | Static source audit is complete; only runtime telemetry on dirty-list hit rate, `BYTE_MASK` reuse, and recompile frequency should move this further. |
 | H-005 | rejected | `codegen_allocator_clean_blocks()` in the ARM64 backend might be freeing or invalidating the shared helper block immediately after initialization, causing latent corruption. | ARM64 `codegen_backend_init()` calls `codegen_allocator_clean_blocks(block->head_mem_block)` while x86-64 init does not. | Rejected after allocator inspection: the function only performs `__clear_cache()` on ARM64 and does not free memory. |
-| H-006 | open | ARM64 FP-to-int conversions may pay avoidable overhead because rounding is implemented as out-of-line helper calls plus an indirect jump-table dispatch. | `build_fp_round_routine()` builds shared rounding helpers, and ARM64 uops call them for `MOV_INT_DOUBLE` / `MOV_INT_DOUBLE_64`. | Current call-site inventory narrows this to three conversion sites in `codegen_backend_arm64_uops.c`; keep open, but prioritize lower than the MMX branch-patch bug and the missing ARM64 `MOV_IMM` fast path. |
+| H-006 | open | ARM64 FP-to-int conversions may pay avoidable overhead because rounding is implemented as out-of-line helper calls plus an indirect jump-table dispatch. | `build_fp_round_routine()` builds shared rounding helpers, and ARM64 uops call them for `MOV_INT_DOUBLE` / `MOV_INT_DOUBLE_64`. | Static source audit is complete; keep open only for future FP-heavy workload traces or directed validation plans that record logfile/metadata destinations before execution. |
 | H-007 | confirmed | ARM64 direct state/stack access helpers may become a latent instability source because they `fatal()` on immediate-range overflow instead of falling back to a generic address-materialization path. | `codegen_direct_read_*` / `codegen_direct_write_*` helpers encode fixed-range loads/stores from `REG_CPUSTATE` or `SP` and hard-fail when offsets exceed the encoding window. | Confirmed and widened in `U-005` / `U-006`: most helpers still hard-fail, while the F64 stack helpers currently skip validation entirely. Track through `A-009` and `A-015`. |
 | H-008 | confirmed | ARM64 helper calls and direct jumps are paying avoidable overhead because the backend always materializes absolute destinations even when JIT-local targets are within AArch64 branch range. | `host_arm64_call()` / `host_arm64_jump()` use `MOVX_IMM` plus `BLR/BR`. | Confirmed in `U-005` / `U-007`: the JIT allocator reserves a contiguous ~120MB arena and the local helper stubs live inside it, so JIT-local targets are always within `B/BL` range. Track through `A-013`. |
-| H-009 | open | ARM64 abort/control-flow checks may pay chronic overhead because the single global `codegen_exit_rout` and long-form patchable branch templates force extra branches once blocks drift beyond the 19-bit `B.cond` / `CBNZ` range. | `host_arm64_CBNZ()` and `host_arm64_Bxx_()` already synthesize long-form veneers. | Tie-break with future IR-frequency plus block-distance test planning: determine how many compiled blocks sit >1MB from `codegen_exit_rout`, and whether local exit veneers materially reduce dynamic branch count. Track through `A-014`. |
+| H-009 | open | ARM64 abort/control-flow checks may pay chronic overhead because the single global `codegen_exit_rout` and long-form patchable branch templates force extra branches once blocks drift beyond the 19-bit `B.cond` / `CBNZ` range. | `host_arm64_CBNZ()` and `host_arm64_Bxx_()` already synthesize long-form veneers. | Static source audit is complete; only future block-distance histograms and exit-frequency traces can determine whether local exit veneers outrank other performance slices. Track through `A-014`. |
 | H-010 | confirmed | ARM64 backend interface drift in `codegen_backend_arm64.h` is masking missing emitter capabilities and raising implementation risk for the next slices. | Stale `STRB_IMM_W` declaration and unimplemented `LDR_LITERAL_*` prototypes in the public ARM64 header. | Confirmed as a maintenance / design-risk issue in `U-007`. Keep it as a low-priority cleanup via `A-016`; do not prioritize it ahead of user-visible performance/correctness slices. |
 | H-011 | confirmed | Shared IR control-flow producers amplify the ARM64 helper-call and branch-range gaps enough that branch-heavy frontend work should stay above niche backend cleanup ideas. | `codegen_ops_branch.c` emits dense `uop_CALL_FUNC_RESULT`, `uop_CMP_IMM_J*`, and `uop_JMP(codegen_exit_rout)` sequences, with additional exit guards in adjacent producer modules. | Confirmed in `U-008` / `U-009`. The remaining tie-break is no longer whether this exists, but how to rank `A-013`, `A-014`, `A-018`, and `A-019` once future workload traces exist. |
 
@@ -94,6 +95,7 @@
 | P2 | A-018 | pending | Root-cause the disabled `JE/JNE` unroll path and, if safe, restore a bounded direct path so common equality branches do not always funnel through `codegen_exit_rout`. | Medium-high on branch-heavy code, especially equality-test loops and recompiled blocks. | High: the existing comment already documents a wrong-turn correctness bug in shared frontend control flow. | Static root-cause audit first; future branch-heavy directed validation plan only, with logfile/metadata destinations recorded before execution. | Roll back if re-enabling requires invasive shared IR changes or shows any path-selection mismatches. |
 | P2 | A-019 | pending | Investigate reducing `uop_CALL_FUNC_RESULT` fallback density in `codegen_ops_branch.c` by reusing already-materialized flag state or tightening `FLAGS_UNKNOWN` rebuild paths before helper calls. | Medium on flag-heavy branch workloads; could cut ARM64 helper-call traffic beyond `A-013`. | High: shared flag semantics are subtle and mistakes risk silent control-flow bugs. | Static flag-provenance audit now; future branch-matrix validation plan only with logfile/metadata capture. | Roll back if the optimization duplicates logic already encoded in uops or risks semantic drift across corner cases. |
 | P2 | A-020 | pending | Investigate bounded fast paths for shared `flags_rebuild` / `get_cf()` users in `codegen_ops_shift.c` and `codegen_ops_arith.c` so helper calls can be skipped when flag provenance is already materialized. | Medium on rotate/carry-heavy integer code; broader if helper-call cost still dominates after `A-013`. | High: carry/overflow semantics are delicate across ADC/SBB/rotate families. | Static flag-provenance audit now; future arithmetic/shift matrix validation plan only with logfile/metadata capture. | Roll back if the fast path duplicates existing flag machinery or risks silent semantic drift. |
+| P2 | A-021 | pending | If post-`A-013` traces still show far-control-transfer or flag-serialization hotness, investigate bounded cleanup of `loadcs` / `loadcsjmp` and `flags_rebuild_c` / `flags_rebuild` tail helpers in `codegen_ops_misc.c`, `codegen_ops_jump.c`, and `codegen_ops_stack.c`. | Low-medium on niche kernel/OS/runtime code; mostly a tail optimization after cheaper ARM64 helper dispatch exists. | High: segment-transfer and flag-serialization semantics are delicate, and general workloads may never need it. | Future directed plan only: far `JMP/CALL/RET/IRET`, `PUSHF/PUSHFD`, `STC/CLC/CMC`, with logfile/metadata destinations declared before execution. | Roll back or defer if traces show those opcodes are rare or if `A-013` already removes most visible cost. |
 
 ## Findings Summary
 - F-001: The ARM64 new dynarec backend surface compiled for `ARCH STREQUAL "arm64"` is currently constrained to four translation units (`codegen_backend_arm64.c`, `_ops.c`, `_uops.c`, `_imm.c`), with additional ARM64 ABI/register definitions in headers and the runtime block-management boundary in `386_dynarec.c`. Confidence: high. Impact estimate: high for investigation prioritization because it bounds the code surface that can directly cause ARM64 backend-specific regressions. Evidence: `E-001`, `E-002`, `E-004`, `E-005`, `E-009`.
@@ -113,6 +115,7 @@
 - F-015: `codegen_ops_branch.c` is the dominant shared IR producer of ARM64-costly control-flow shapes. Static counts over this one file show `28` explicit `uop_JMP(ir, codegen_exit_rout)` sites, `38` `uop_CALL_FUNC_RESULT` fallbacks, and `50` `uop_CMP_IMM_J{Z,NZ}_DEST` sites, with heavier cases such as `JLE`/`JNLE` and `LOOPE` stacking multiple helper calls before the terminal exit. On ARM64, those shared IR shapes map directly onto the already-confirmed backend weak spots: absolute helper calls (`F-011`), two-branch patchable conditionals / long-range fallbacks (`F-012`), and a single global exit stub. Severity: high. Confidence: high. Expected user-visible impact: high on branch-heavy, flag-unknown, and loop-heavy guest code because the shared frontend amplifies ARM64 backend costs at scale. Likely reproduction conditions: integer-heavy code with many Jcc/LOOP instructions, blocks that frequently enter `FLAGS_UNKNOWN` fallback, and workloads that force repeated helper abort/exit checks. Candidate implementation files: `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64_uops.c`, `src/codegen_new/codegen_backend_arm64.c`. Rollback trigger: if future workload telemetry shows another producer dominates dynamic helper/exit traffic despite this strong static density. Evidence: `E-052`, `E-056`, `E-057`.
 - F-016: Shared unroll policy and churn flags systematically suppress the cheapest no-exit control-flow path exactly where ARM64 recompiles are already expensive. `codegen_can_unroll()` immediately returns false for `CODEBLOCK_BYTE_MASK`, forward/out-of-block targets, and other non-local cases; `codegen_can_unroll_full()` further caps unrolling at `1000` uops, `200` register references, and `10` iterations; and `ropJE_common()` / `ropJNE_common()` still carry a comment that JE/JNE unrolling is disabled because the code can “take the wrong turn.” Because dirty-list recompiles promote blocks into `BYTE_MASK`, this shared policy directly couples `F-008` churn escalation to more ARM64 `codegen_exit_rout` traffic. Severity: medium-high. Confidence: high. Expected user-visible impact: high on dirty/recompiled branch-heavy blocks and equality-test loops, where control flow repeatedly falls back to the global exit path instead of staying in-block. Likely reproduction conditions: recompiled tight loops, equality-heavy branch code, blocks with high uop density or version-reference count, and workloads that trigger `BYTE_MASK`. Candidate implementation files: `src/codegen_new/codegen_ops_branch.c`, `src/codegen_new/codegen_ops_helpers.c`, `src/codegen_new/codegen_ops_helpers.h`, `src/codegen_new/codegen_block.c`. Rollback trigger: if deeper audit proves the unroll suppression is semantically required for most hot paths or if restoring it reintroduces control-flow mismatches. Evidence: `E-053`, `E-054`, `E-055`, `E-058`.
 - F-017: Shared helper-call pressure remains broad even outside the branch module. `codegen_ops_shift.c` contains `28` `uop_CALL_FUNC(ir, flags_rebuild)` sites plus `3` direct zero-count exits to `codegen_exit_rout`, while `codegen_ops_arith.c` hides a `uop_CALL_FUNC_RESULT(..., CF_SET)` helper behind `get_cf()` and calls that wrapper `38` times across carry-dependent arithmetic. This does not outrank `F-015`, but it means `A-013` has immediate leverage across multiple integer-op families and that any later helper-elimination work should not stay branch-only. Severity: medium. Confidence: high. Expected user-visible impact: medium on rotate/carry-heavy code and moderate reinforcement of ARM64 helper-call overhead in general integer workloads. Likely reproduction conditions: ADC/SBB-heavy code, rotate-heavy loops, and churn paths that also activate `CODEBLOCK_NO_IMMEDIATES` shift scaffolding. Candidate implementation files: `src/codegen_new/codegen_ops_shift.c`, `src/codegen_new/codegen_ops_arith.c`, `src/codegen_new/codegen_backend_arm64_ops.c`, `src/codegen_new/codegen_backend_arm64_uops.c`. Rollback trigger: if future workload telemetry shows these families are rare in representative traces or if `A-013` already removes most of the user-visible cost. Evidence: `E-059`, `E-060`, `E-061`.
+- F-018: The remaining unexamined shared helper producers are tail-ranked rather than new first-order slices. Static ranking over `codegen_ops_misc.c`, `codegen_ops_jump.c`, and `codegen_ops_stack.c` finds only `6`, `6`, and `2` helper/exit sites respectively. `codegen_ops_misc.c` concentrates them in carry-preserving `INC/DEC` rebuilds, far `FF /5` jumps, and `CLC/CMC/STC`; `codegen_ops_jump.c` concentrates them in far control transfer (`JMP far`, `RETF`, `IRET`) while its near backward jumps already use the direct-return/unroll path; `codegen_ops_stack.c` only rebuilds flags for `PUSHF` / `PUSHFD`. Severity: low-medium. Confidence: high. Expected user-visible impact: low on general workloads, with niche relevance for privileged/far-control-transfer-heavy guests. Likely reproduction conditions: DOS extenders, kernels, monitors, or guests that frequently execute far returns/jumps or serialize flags with `PUSHF` / `PUSHFD` / `STC` / `CLC` / `CMC`. Candidate implementation files: none ahead of the existing backlog; if future traces justify it, revisit `src/codegen_new/codegen_ops_misc.c`, `src/codegen_new/codegen_ops_jump.c`, `src/codegen_new/codegen_ops_stack.c`, and `src/codegen_new/codegen_backend_arm64_ops.c`. Rollback trigger: if future telemetry shows far-control-transfer or flag-stack traffic materially hotter than this static tail ranking suggests. Evidence: `E-062`, `E-063`, `E-064`, `E-065`.
 
 ## Progress Log
 | Completed analysis unit | Key finding ID(s) | Evidence link(s) | Estimated impact | Decision ID | Follow-up action ID(s) |
@@ -128,6 +131,7 @@
 | U-008 `codegen_ops_branch.c` IR-frequency / branch-production audit | `F-015` | `E-052`, `E-053` | High: confirmed that the shared branch frontend is a first-order frequency amplifier for the ARM64 call/branch gaps | `D-014` | `A-013`, `A-014`, `A-018`, `A-019` |
 | U-009 control-flow policy/support audit (`codegen_ops_helpers.c/h`, `codegen_ops_jump.c`, `codegen_ops_shift.c`, `codegen.c`, `codegen_block.c`) | `F-015`, `F-016` | `E-054`, `E-055`, `E-056`, `E-057`, `E-058` | High for prioritization: linked dirty-block policy and shared unroll limits directly to the branch-heavy ARM64 cost multipliers | `D-015` | `A-010`, `A-013`, `A-014`, `A-018`, `A-019` |
 | U-010 secondary shared flag-helper producer audit (`codegen_ops_shift.c`, `codegen_ops_arith.c`) | `F-017` | `E-059`, `E-060`, `E-061` | Medium-high: proved that branch is not the only shared helper-call source, but that the next tier is still best addressed first by `A-013` rather than riskier semantic rewrites | `D-016` | `A-013`, `A-019`, `A-020` |
+| U-011 remaining tail-producer sweep (`codegen_ops_misc.c`, `codegen_ops_stack.c`, residual `codegen_ops_jump.c`) | `F-018` | `E-062`, `E-063`, `E-064`, `E-065` | Medium for prioritization: closes the static source sweep and prevents over-promoting low-density helper sites into standalone early slices | `D-017`, `D-018` | `A-013`, `A-021` |
 
 ## Decision Ledger
 | Decision ID | Option chosen | Alternatives rejected | Rationale | Evidence | Reversal trigger |
@@ -148,6 +152,8 @@
 | D-014 | Treat `codegen_ops_branch.c` as the dominant shared frequency amplifier for `F-011` / `F-012`, and keep `A-013` ahead of smaller helper-specific ideas. | Start the next shared-frontend pass with scattered producer modules first. | Among shared ops producers, the branch frontend is uniquely dense with helper-result fallbacks and explicit global-exit traffic, so it deserves to anchor control-flow prioritization. | `E-052`, `E-056`, `E-057` | Reverse if future whole-trace telemetry shows another producer dominates dynamic helper/exit traffic despite this static density. |
 | D-015 | Keep JE/JNE unroll restoration as a later, higher-risk shared-frontend slice behind relative local `BL/B` and the broader direct-imm-store work. | Promote `A-018` ahead of `A-013` or `A-012`. | The wrong-turn comment and `BYTE_MASK` / unroll gating make re-enabling equality-branch unroll riskier than the simpler ARM64-local call/jump fast path. | `E-053`, `E-054`, `E-055`, `E-058` | Reverse if future static or dynamic evidence shows equality-branch exits dominate enough to justify shared-frontend surgery sooner. |
 | D-016 | Keep shift/arithmetic helper-elimination work as a later shared-frontend slice behind `A-013`. | Promote `A-020` ahead of the ARM64-local relative-call/jump work. | The shift/arithmetic helper density is real, but `A-013` improves every existing helper family immediately with backend-local risk, while `A-020` would touch delicate carry/rotate semantics. | `E-059`, `E-060`, `E-061` | Reverse if future traces still show helper-call overhead dominating after `A-013` is addressed. |
+| D-017 | Treat `codegen_ops_misc.c`, `codegen_ops_jump.c`, and `codegen_ops_stack.c` as tail producers that mainly strengthen `A-013`, not as new dedicated first-wave slices. | Promote a new dedicated misc/jump/stack helper slice into the first planning wave. | The remaining modules have only `6`, `6`, and `2` helper/exit sites respectively, concentrated in far control transfer and flag serialization rather than dense branch/shift/arithmetic hot paths. | `E-062`, `E-063`, `E-064`, `E-065` | Reverse if future traces show far-control-transfer or flag-stack traffic materially hotter than the static ranking suggests. |
+| D-018 | Declare the static ARM64 new-dynarec source audit complete and move next to implementation planning instead of further source discovery. | Continue source-by-source static discovery before planning. | Every suggested ARM64 backend module plus the remaining shared helper producers has now been inspected, and the final tail sweep did not uncover a new slice that outranks the current backlog. | `E-052`, `E-059`, `E-062`, `E-063`, `E-064`, `E-065` | Reverse only if later code changes land substantial new ARM64 backend/frontend logic before planning begins. |
 
 ## Evidence Index
 | Evidence ID | Reference | Exact location | Related IDs | Why it matters |
@@ -213,6 +219,10 @@
 | E-059 | `src/codegen_new/codegen_ops_shift.c` | lines 19-430 and 572-822 | `F-017`, `A-020`, `D-016` | Static counts over this file found `28` `uop_CALL_FUNC(ir, flags_rebuild)` sites and `3` direct `uop_CMP_IMM_JZ(..., codegen_exit_rout)` guards, making shift/rotate the next shared helper-heavy producer after the branch module. |
 | E-060 | `src/codegen_new/codegen_ops_shift.c` | lines 495-506 | `F-017`, `A-010` | Shows `CODEBLOCK_NO_IMMEDIATES` turns immediate-count shifts into RAM loads plus compare/jump scaffolding, extending the churn cost model into another shared producer. |
 | E-061 | `src/codegen_new/codegen_ops_arith.c` | lines 18-22 and call sites at 29-2219 | `F-017`, `A-020`, `D-016` | Shows `get_cf()` is just `uop_CALL_FUNC_RESULT(..., CF_SET)` and is referenced `38` times across carry-dependent arithmetic, broadening helper-call pressure beyond branch/shift paths. |
+| E-062 | `src/codegen_new/codegen_ops_misc.c` | lines 257-280, 309-369, 411-471, and 578-597 | `F-018`, `D-017` | Shows the remaining helper sites in `misc` are limited to `flags_rebuild_c` for carry-preserving `INC/DEC`, far `FF /5` transfers via `loadcsjmp`, and `CLC/CMC/STC` flag rebuilds. |
+| E-063 | `src/codegen_new/codegen_ops_stack.c` | lines 382-422 | `F-018`, `D-017` | Shows `stack` is mostly direct load/store lowering; only `PUSHF` / `PUSHFD` call `flags_rebuild`. |
+| E-064 | `src/codegen_new/codegen_ops_jump.c` | lines 17-29, 57-81, and 195-289 | `F-018`, `D-017` | Shows near backward jumps already use the direct-return/unroll path, while the helper calls in `jump` are concentrated in far control transfers (`loadcsjmp`, `loadcs`). |
+| E-065 | repo query over remaining tail producer files | 2026-04-21 static count using `rg -c "uop_CALL_FUNC\\(|uop_CALL_FUNC_RESULT\\(|uop_JMP\\(ir, codegen_exit_rout\\)|uop_CMP_IMM_JZ\\(ir, .*codegen_exit_rout\\)|uop_CMP_IMM_JNZ\\(ir, .*codegen_exit_rout\\)"` over `codegen_ops_misc.c`, `codegen_ops_stack.c`, and `codegen_ops_jump.c` returned `misc:6`, `jump:6`, `stack:2` | `F-018`, `D-017`, `D-018` | Gives the numeric tail ranking needed to close the static sweep without inventing another first-order slice. |
 
 ## Analysis Units
 
@@ -657,9 +667,63 @@
 - Confidence: high.
 - Impact estimate: medium-high, because this unit proves the helper-call problem is broader than the branch module even though the branch module still dominates explicit exit traffic.
 
+### U-011 remaining tail-producer sweep (`codegen_ops_misc.c`, `codegen_ops_stack.c`, residual `codegen_ops_jump.c`)
+- Timestamp: 2026-04-21 16:52:32 EDT
+- What this unit covers: the final shared-helper source sweep needed to close the static audit, focusing on the remaining unranked tail modules and the already-sampled `jump` contrast path.
+- What it does:
+  - `codegen_ops_misc.c` lowers grouped integer/control opcodes (`F6/F7/FF`), segment-load forms, and flag-toggle instructions.
+  - `codegen_ops_stack.c` lowers push/pop, segment stack transfers, `PUSHA`/`POPA`, `LEAVE`, and flag-stack serialization.
+  - `codegen_ops_jump.c` lowers near/far `JMP`, `CALL`, `RET`, `RETF`, and related control transfers.
+- ARM64-specific logic observed:
+  - These modules are shared, but their helper sites still map onto confirmed ARM64-local costs because every `loadcs` / `loadcsjmp` / `flags_rebuild*` call inherits the absolute `host_arm64_call()` path from `F-011`.
+  - `codegen_ops_misc.c` contains only six relevant helper sites, concentrated in carry-preserving `INC/DEC` rebuilds, far `FF /5` jumps, and `CLC` / `CMC` / `STC`.
+  - `codegen_ops_jump.c` also contains only six helper sites, and they are all in far control-transfer paths; near backward jumps already use `codegen_can_unroll()` and return the destination directly.
+  - `codegen_ops_stack.c` is almost entirely direct memory traffic; only `PUSHF` and `PUSHFD` force a `flags_rebuild` helper call before serializing flags to the guest stack.
+- Risk points:
+  - `R-021`: even tail helper sites still benefit from `A-013`, so the relative `BL/B` slice has slightly wider reach than the earlier branch/shift/arith units alone suggested (`F-018`).
+  - `R-022`: any dedicated optimization inside these modules would be niche and semantically risky because it would touch far control transfer, segment loading, or flag serialization rather than broad integer hot paths (`F-018`).
+- Code examples:
+  - Tail helper in `misc` (`src/codegen_new/codegen_ops_misc.c:278-280` and `366-368`):
+    ```c
+    if (needs_rebuild) {
+        uop_CALL_FUNC(ir, flags_rebuild_c);
+    }
+    ...
+    uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+    uop_LOAD_FUNC_ARG_IMM(ir, 1, op_pc + 1);
+    uop_CALL_FUNC(ir, loadcsjmp);
+    ```
+    Why it matters: the remaining `misc` helpers are real, but they are tied to carry-preserving `INC/DEC` and far jumps rather than dense general-purpose hot paths.
+  - Tail helper in `stack` (`src/codegen_new/codegen_ops_stack.c:390-396` and `408-422`):
+    ```c
+    uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
+    uop_CALL_FUNC(ir, flags_rebuild);
+    ...
+    uop_MEM_STORE_REG(ir, IREG_SS_base, sp_reg, IREG_flags);
+    ```
+    Why it matters: the stack module does not create a broad new helper family; it mostly stays on direct loads/stores and only serializes flags through a helper in `PUSHF` / `PUSHFD`.
+  - Contrast in `jump` between the cheap path and the helper-heavy far path (`src/codegen_new/codegen_ops_jump.c:26-29` and `211-213`):
+    ```c
+    if (offset < 0)
+        codegen_can_unroll(block, ir, op_pc + 1, dest_addr);
+    return dest_addr;
+    ...
+    uop_LOAD_FUNC_ARG_REG(ir, 0, IREG_temp1_W);
+    uop_CALL_FUNC(ir, loadcs);
+    ```
+    Why it matters: `jump` already demonstrates the cheaper shared path for simple backward branches, while its helper calls are isolated to far control transfer instead of dominating normal near-branch traffic.
+- Candidate fixes (proposal only; no implementation here):
+  - Keep `A-013` as the relevant ARM64-local response because it improves every helper family still present in these tail modules without adding a dedicated niche slice.
+  - Do not promote `misc` / `jump` / `stack` into a standalone first-wave optimization area ahead of `S-01`, `S-02`, `S-03`, `A-014`, `A-018`, or `A-020`.
+  - `A-021`: only if post-`A-013` workload traces still show far control transfer or flag serialization as hot, investigate bounded cleanups for `loadcs` / `loadcsjmp` and `flags_rebuild_c` / `flags_rebuild`.
+- New/updated hypotheses:
+  - `H-004`, `H-006`, and `H-009` remain open, but this unit closes static source discovery for them; only runtime telemetry can move their ranking further.
+- Confidence: high.
+- Impact estimate: medium for planning readiness, because this unit closes the last remaining static source sweep and prevents overcommitting to low-density tail modules.
+
 ## Known Unknowns
+- Static source sweep is complete; remaining unknowns are runtime-only.
 - Whether recent historical ARM64 regressions were accompanied by preserved logfiles and metadata on disk; no historical run was referenced in this session, so logfile/metadata status remains unknown.
-- Whether `codegen_ops_misc.c`, `codegen_ops_stack.c`, and the remaining mid-density helper users matter enough to add more slices beyond the now-confirmed branch/shift/arith producer set.
 - Whether hot compiled blocks regularly end up more than 1MB from `codegen_exit_rout`, or whether block reuse keeps most hot paths close enough that `F-012` matters less than the static structure suggests.
 - Whether ARM64 helper-heavy workloads are bottlenecked more by absolute-call materialization (`F-011`), long abort branches (`F-012`), or compile/recompile churn (`F-008` / `F-009`).
 - Whether ARM64 `codegen_fp_round` / `codegen_fp_round_quad` calls occur often enough in representative workloads to compete with the newly found helper-dispatch and imm-store gaps.
@@ -668,12 +732,31 @@
 - Whether the JE/JNE “wrong turn” bug is frontend-generic, block-layout-sensitive, or meaningfully worse on ARM64 because of mem-block splits and higher exit costs.
 - Whether stack layouts can realistically grow enough to trigger `F-014` without deliberate stress, or whether that slice should remain correctness hygiene rather than a hot bug fix.
 - Whether any existing workload is known to emit `UOP_MMX_ENTER` near a mem-block boundary often enough to make `F-005` user-visible today.
-- Suggested `src/codegen_new/codegen_timing.c` follow-up is blocked because that file does not exist at HEAD `96806d27d`; remaining timing-oriented planning must anchor in `codegen_block.c` / `codegen.h`.
+- Whether far-control-transfer or flag-serialization-heavy workloads are common enough to justify `A-021` after `A-013`, or whether the tail-module helper sites should remain a purely ranked footnote.
 
 ## Rejected Hypotheses
 - H-005 rejected at 2026-04-20 22:58:23 EDT: `codegen_allocator_clean_blocks()` is not freeing or invalidating helper memory. `src/codegen_new/codegen_allocator.c:190-200` shows an ARM64-only `__clear_cache()` loop over generated blocks, which makes the ARM64 init/epilogue call sites a cache-coherency requirement rather than a lifetime bug. Evidence: `E-012`, `E-013`.
 
 ## State Snapshot
+### Snapshot 2026-04-21 16:52:32 EDT
+- Current focus: static ARM64 source audit complete; handoff ready for implementation planning
+- Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`, `U-005`, `U-006`, `U-007`, `U-008`, `U-009`, `U-010`, `U-011`
+- Active findings: `F-001` through `F-018`
+- Active decisions: `D-001` through `D-018`
+- Active hypotheses:
+  - `H-001` parked
+  - `H-002` parked
+  - `H-003` confirmed
+  - `H-004` open
+  - `H-005` rejected
+  - `H-006` open
+  - `H-007` confirmed
+  - `H-008` confirmed
+  - `H-009` open
+  - `H-010` confirmed
+  - `H-011` confirmed
+- Next commit-ready investigation move: none required for static discovery; start the written implementation plan from `S-01`, `S-02`, `S-03`, `A-013`, and the final tail ranking in `F-018`.
+
 ### Snapshot 2026-04-21 16:39:15 EDT
 - Current focus: session end checkpoint complete; next recommended unit is `U-011` / `src/codegen_new/codegen_ops_misc.c`
 - Completed units: `U-000`, `U-001`, `U-002`, `U-003`, `U-004`, `U-005`, `U-006`, `U-007`, `U-008`, `U-009`, `U-010`
@@ -854,27 +937,25 @@
 - `A-018` JE/JNE unroll restoration is now a real backlog item, but it should stay behind `A-013` and `A-014` because the current shared-frontend comment already documents a correctness risk.
 - `A-019` flag-helper reduction should remain a later shared-frontend slice: the branch producer density now justifies investigating it, but it is still riskier than the simpler ARM64-local call/jump improvements.
 - `A-020` shift/arithmetic flag-helper elimination should stay behind `A-013` as well; the new evidence broadens the helper-call problem, but the lowest-risk answer is still to cheapen helper dispatch before rewriting flag semantics.
+- `A-021` should stay behind `A-013` and the existing shared-frontend work; the final tail sweep showed `misc` / `jump` / `stack` helper sites are real but too sparse and niche to justify a dedicated early slice.
 - `S-03` should still come after `S-01` and ideally after an initial `S-02` design pass, because the churn slice is the most policy-heavy and benefits from having the lower-level ARM64 cost model already improved.
 
 ## Session Delta
 - Added/changed in this session:
-  - Advanced HEAD to `96806d27d0094918feddaae636a2dd83e5496ee5` through docs-only investigation continuation, preserving the previous checkpoint while keeping the source-under-analysis unchanged.
-  - Refreshed the file map to include the newly relevant shared control-flow / flag-helper producer modules (`codegen_ops_branch.c`, `codegen_ops_jump.c`, `codegen_ops_helpers.c/h`, `codegen_ops_shift.c`, `codegen_ops_arith.c`, `codegen.c`).
-  - Completed `U-008` for `src/codegen_new/codegen_ops_branch.c`, confirming that the shared branch frontend is a dominant frequency amplifier for ARM64 helper-call and branch-range costs.
-  - Completed `U-009` for `codegen_ops_helpers.c/h`, `codegen_ops_jump.c`, `codegen_ops_shift.c`, `codegen.c`, and `codegen_block.c`, proving that `BYTE_MASK`/unroll policy directly couples churn to more ARM64 exit-rout traffic.
-  - Completed `U-010` for `codegen_ops_shift.c` and `codegen_ops_arith.c`, establishing shift/rotate plus carry-dependent arithmetic as the next shared helper-heavy tier after the branch module.
-  - Added new finding `F-017`, decision `D-016`, evidence `E-059` through `E-061`, and backlog item `A-020`; `A-013` now has direct evidence behind branch, shift, arithmetic, and generic-instruction helper traffic rather than only one family.
-  - Refreshed `Resume Here`, `Progress Log`, `Decision Ledger`, `Evidence Index`, `Known Unknowns`, `State Snapshot`, and sequencing notes so the next continuation starts from the broader shared-helper inventory rather than only backend-local gaps.
+  - Advanced HEAD to `4687f433c3ccdd3dbbaebb92bcbc1c7fde0f0c57` through docs-only investigation continuation, preserving the earlier checkpoints while keeping the source-under-analysis unchanged.
+  - Refreshed the ARM64/shared-producer file map to include the final tail modules `src/codegen_new/codegen_ops_misc.c` and `src/codegen_new/codegen_ops_stack.c`.
+  - Completed `U-011` for `codegen_ops_misc.c`, `codegen_ops_stack.c`, and the residual `codegen_ops_jump.c` ranking pass, closing the remaining static source sweep.
+  - Added finding `F-018`, decisions `D-017` and `D-018`, evidence `E-062` through `E-065`, and backlog item `A-021`, proving that the remaining helper producers are real but tail-ranked and do not outrank the existing slices.
+  - Converted `Resume Here`, `Known Unknowns`, `State Snapshot`, and `Session Delta` from “next investigation unit” form into a planning-ready handoff that explicitly marks the static audit complete.
 - Unresolved:
-  - No runtime validation plan has been executed; all validation remains plan-only, and no historical run logfile/metadata pair was referenced in this continuation.
-  - `H-004`, `H-006`, and `H-009` remain open because dynamic churn frequency, FP-round hotness, and far-branch prevalence still need future measurement plans.
-  - The remaining shared-helper ranking is not finished; `codegen_ops_misc.c`, `codegen_ops_stack.c`, and the already-sampled `codegen_ops_jump.c` still need a final pass to confirm whether any deserve promotion above footnote status.
+  - No runtime validation plan has been executed; all validation remains plan-only, and no historical run logfile/metadata pair was referenced in this investigation.
+  - `H-004`, `H-006`, and `H-009` remain open because churn frequency, FP-round hotness, and far-branch prevalence are runtime-only questions at this point.
   - The JE/JNE “wrong turn” root cause is still unknown, so `A-018` remains deliberately behind lower-risk ARM64-local slices.
-  - The suggested timing follow-up still needs a new anchor because `src/codegen_new/codegen_timing.c` does not exist at HEAD `96806d27d`.
+  - Future telemetry work still needs a new anchor because `src/codegen_new/codegen_timing.c` does not exist at HEAD `4687f433c`.
 - Exact first commands/files for next session:
-  - `nl -ba src/codegen_new/codegen_ops_misc.c | sed -n '1,260p'`
-  - `rg -n "uop_CALL_FUNC\\(|uop_CALL_FUNC_RESULT\\(|codegen_exit_rout|get_cf\\(|flags_rebuild" src/codegen_new/codegen_ops_misc.c src/codegen_new/codegen_ops_stack.c src/codegen_new/codegen_ops_jump.c`
-  - `nl -ba src/codegen_new/codegen_ops_stack.c | sed -n '1,240p'`
-  - File focus: `src/codegen_new/codegen_ops_misc.c`
-- Recommended immediate next investigation unit: `U-011 codegen_ops_misc.c shared-helper density audit`
-- Broader issue inventory sufficient for multi-slice implementation planning: yes. The document now supports several bounded follow-up slices beyond the original short list; remaining work is prioritization and validation design rather than discovery of first-order ARM64-only gaps.
+  - `nl -ba docs/arm64-dynarec-investigation.md | sed -n '74,170p'`
+  - `nl -ba docs/arm64-dynarec-investigation.md | sed -n '911,961p'`
+  - `rg -n "S-01|S-02|S-03|A-013|A-021|F-018|D-017|D-018" docs/arm64-dynarec-investigation.md`
+  - File focus: `docs/arm64-dynarec-investigation.md`
+- Recommended immediate next investigation unit: none. Recommended immediate next phase: implementation planning from `S-01`, `S-02`, `S-03`, and `A-013`, with `F-018` retained as the tail-ranking guardrail.
+- Broader issue inventory sufficient for multi-slice implementation planning: yes. The static audit now appears complete and broad enough to support multi-slice implementation planning without another discovery pass.
