@@ -1,0 +1,4 @@
+@echo off
+set SRC_DRIVE=%1
+if "%SRC_DRIVE%"=="" set SRC_DRIVE=D:
+call %SRC_DRIVE%\SCRIPTS\MICRO_RUN.BAT %SRC_DRIVE%
