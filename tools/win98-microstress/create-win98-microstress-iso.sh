@@ -18,8 +18,16 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR/SCRIPTS"
 
 cp "$KIT_DIR/MICROSTR.EXE" "$STAGE_DIR/"
-cp "$SRC_DIR/README.TXT" "$STAGE_DIR/"
+cp "$SRC_DIR/README.TXT" "$STAGE_DIR/README.TXT"
 cp "$SRC_DIR/SCRIPTS/"*.BAT "$STAGE_DIR/SCRIPTS/"
+
+# Win98/DOS batch parsing is most reliable with CRLF endings.
+awk '{ sub(/\r$/, ""); printf "%s\r\n", $0 }' "$STAGE_DIR/README.TXT" > "$STAGE_DIR/README.TXT.crlf"
+mv "$STAGE_DIR/README.TXT.crlf" "$STAGE_DIR/README.TXT"
+for bat in "$STAGE_DIR"/SCRIPTS/*.BAT; do
+    awk '{ sub(/\r$/, ""); printf "%s\r\n", $0 }' "$bat" > "$bat.crlf"
+    mv "$bat.crlf" "$bat"
+done
 
 rm -f "$OUT_ISO"
 hdiutil makehybrid \

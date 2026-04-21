@@ -11,6 +11,8 @@ if ! command -v i686-w64-mingw32-gcc >/dev/null 2>&1; then
 fi
 
 i686-w64-mingw32-gcc -O2 -march=i586 -mmmx -s -Wall -Wextra \
-    -o "$OUT" "$SRC"
+    -fno-stack-protector -ffreestanding -nostdlib \
+    -Wl,-e,_start -Wl,--subsystem,console \
+    -o "$OUT" "$SRC" -lkernel32
 
 echo "Built: $OUT"
