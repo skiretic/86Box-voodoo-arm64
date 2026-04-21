@@ -80,3 +80,7 @@ research/solo1-drivers/ESS 1938S Driver.iso
 AGENTS.md
 docs/videocommo*
 docs/perf-artifact*
+scripts/win9*
+docs/reference/x86*
+appimage-x86_64-cross/output/86Box-latest-x86_64.AppImage.zsync
+
