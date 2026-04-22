@@ -543,6 +543,24 @@ Secondary profile policy (optional):
   - no CPU frequency bump now (explicitly hold at `266 MHz`).
   - next code step should be correctness-safe consolidation/cleanup before any higher-frequency experimentation.
 
+### A-013h Guarded Consolidation (Prelaunch) (2026-04-21)
+- Change summary:
+  - Harden `host_arm64_branch_set_offset()` so A-013h collapse/telemetry only applies to the exact `B.cond +8` then `B` template emitted by ARM64 branch helpers.
+  - Keep fallback patching behavior unchanged (`B` rel26 still emitted), but avoid treating unrelated neighboring instruction shapes as `bcond` template events.
+  - Added explicit comment-level guard intent in ARM64 backend code for safer future maintenance.
+- Validation criteria:
+  - build/sign passes on ARM64.
+  - no x86-64 behavior change (ARM64-only backend file touched).
+  - telemetry prelaunch prep succeeds with default low-noise policy.
+- Rollback triggers:
+  - any guest control-flow anomaly or branch mispatch symptoms after launch.
+  - `WL-05` hash drift.
+  - S-03 safety counter regression (`unexpected_noimm_without_bmask` nonzero).
+- Exact commands (stop before VM launch):
+  - `./scripts/build-and-sign.sh`
+  - `RUN_TAG=a013h-bcond-r2 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+  - do not launch in this step (operator requested sleep hold).
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`

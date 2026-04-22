@@ -266,6 +266,17 @@ offset_is_26bit(int offset)
     return 1;
 }
 
+/* Decode signed byte displacement from a B.cond immediate field. */
+static inline int
+bcond_offset_bytes(uint32_t opcode)
+{
+    int imm19 = (int) ((opcode >> 5) & 0x7ffff);
+
+    if (imm19 & (1 << 18))
+        imm19 |= ~0x7ffff;
+    return imm19 << 2;
+}
+
 static inline int
 imm_is_imm16(uint32_t imm_data)
 {
@@ -591,20 +602,26 @@ host_arm64_BVS_(codeblock_t *block)
 void
 host_arm64_branch_set_offset(uint32_t *opcode, void *dest)
 {
-    uint32_t *cond_opcode = opcode - 1;
-    int       offset26    = (int) ((uintptr_t) dest - (uintptr_t) opcode);
+    uint32_t *cond_opcode        = opcode - 1;
+    uint32_t  branch_insn        = *opcode;
+    uint32_t  cond_insn          = *cond_opcode;
+    int       offset26           = (int) ((uintptr_t) dest - (uintptr_t) opcode);
+    int       is_bcond_template  = 0;
 
     a013_ensure_telemetry_env();
 
     /* A-013h:
-       Most branch patch sites come from B.cond-skip + B templates. When final
-       target is imm19-reachable from the conditional instruction, collapse to a
-       single direct B.cond and turn trailing B into NOP. */
-    if (((*cond_opcode) & 0xff000010u) == OPCODE_BCOND) {
+       Most branch patch sites come from B.cond-skip + B templates emitted by
+       host_arm64_B??_ helpers. Only collapse/track when we see that exact
+       template shape to avoid touching unrelated neighboring instructions. */
+    if (((branch_insn & 0xfc000000u) == OPCODE_B) &&
+        ((cond_insn & 0xff000010u) == OPCODE_BCOND) &&
+        (bcond_offset_bytes(cond_insn) == 8)) {
         uint8_t *cond_src = (uint8_t *) cond_opcode;
 
+        is_bcond_template = 1;
         if (codegen_allocator_can_branch_imm19(cond_src, dest)) {
-            uint32_t inv_cond = (*cond_opcode) & 0xf;
+            uint32_t inv_cond = cond_insn & 0xf;
             uint32_t cond     = inv_cond ^ 1u;
             int      offset19 = (int) ((uintptr_t) dest - (uintptr_t) cond_opcode);
 
@@ -616,7 +633,8 @@ host_arm64_branch_set_offset(uint32_t *opcode, void *dest)
     }
 
     *opcode = OPCODE_B | OFFSET26(offset26);
-    a013_record_bcond_patch_path("rel26", (uint8_t *) cond_opcode, dest);
+    if (is_bcond_template)
+        a013_record_bcond_patch_path("rel26", (uint8_t *) cond_opcode, dest);
 }
 
 void
