@@ -217,6 +217,23 @@ codegen_allocator_contains_host_ptr(const void *p)
 }
 
 bool
+codegen_allocator_can_branch_imm14(const uint8_t *src_insn_addr, const void *dst)
+{
+    intptr_t offset;
+
+    if (!src_insn_addr || !dst)
+        return false;
+
+    /* A-013i range gate:
+       AArch64 TBZ/TBNZ uses signed imm14 scaled by 4 bytes, so legal offsets
+       are [-2^15, 2^15) and must be 4-byte aligned. */
+    offset = (intptr_t) ((const uint8_t *) dst - src_insn_addr);
+    if (offset & 3)
+        return false;
+    return (offset >= -(1 << 15)) && (offset < (1 << 15));
+}
+
+bool
 codegen_allocator_can_branch_imm26(const uint8_t *src_insn_addr, const void *dst)
 {
     intptr_t offset;

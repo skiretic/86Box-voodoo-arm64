@@ -79,6 +79,10 @@
     - BEQ/CBNZ absolute fallbacks remained zero.
     - operator reported telemetry-wrapper run felt a bit slower, but normal double-click launch felt good in real-world use.
     - decision: keep guard-hardening change; continue fixed `266666666` baseline.
+  - `A-013i` promoted next:
+    - extend guarded patch-path shaping to `TBZ/TBNZ + B` templates in ARM64 backend.
+    - add `imm14` allocator-range helper and additive telemetry counters `tbxz_rel14`, `tbxz_rel26`, `tbxz_total`.
+    - parser extended to parse/print/delta `tbxz_*` fields without changing low-noise defaults.
   - Tooling follow-through now included in this same checkpoint:
     - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.

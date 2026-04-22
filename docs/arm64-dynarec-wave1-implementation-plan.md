@@ -590,6 +590,33 @@ Secondary profile policy (optional):
   - treat wrapper-vs-normal-launch feel difference as expected run-path variance unless repeated objective regressions appear.
   - continue on active `266 MHz` baseline.
 
+### A-013i TBZ/TBNZ Patch-Path Sweep (2026-04-22)
+- Change summary:
+  - Extend guarded conditional patch shaping to `TBZ/TBNZ + B` template sites in `host_arm64_branch_set_offset()`.
+  - Add ARM64 allocator range helper for `imm14` reach checks (`codegen_allocator_can_branch_imm14()`).
+  - Template collapse behavior:
+    - if final target is imm14-reachable from the `TBZ/TBNZ` instruction, collapse to direct single-op `TBZ/TBNZ` and NOP the trailing `B`.
+    - otherwise keep trailing `B` rel26 fallback.
+  - Add additive telemetry counters:
+    - `tbxz_rel14`, `tbxz_rel26`, `tbxz_total`
+  - Parser updated to parse/print/delta new `tbxz_*` fields.
+- Validation criteria:
+  - ARM64 build/sign passes.
+  - low-noise telemetry defaults unchanged (`stats=1`, `telemetry=0`, `trace=0`).
+  - `WL-05` hash lock unchanged.
+  - `unexpected_noimm_without_bmask=0`.
+  - `tbxz_*` counters present and nonzero in workloads that hit those patch paths.
+- Rollback triggers:
+  - any branch correctness anomaly in FPU/MMX/tag-test heavy paths.
+  - `WL-05` hash mismatch.
+  - S-03 safety regression or unexpected absolute fallback growth in existing A-013 paths.
+- Exact commands:
+  - `./scripts/build-and-sign.sh`
+  - `RUN_TAG=a013i-tbxz-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013i-tbxz-r1`
+  - after guest workload:
+  - `./scripts/dynarec/analyze-s03a-log.sh "<a013i-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-22_16-30-52-Windows 98 Gaming PC-a013h-bcond-r2/86box.log"`
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
