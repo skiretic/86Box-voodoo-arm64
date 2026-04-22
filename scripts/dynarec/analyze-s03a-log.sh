@@ -4,9 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="${ROOT_DIR}/scripts/dynarec/.analyze-s03a-log.bin"
 SRC="${ROOT_DIR}/scripts/dynarec/analyze-s03a-log.c"
+S_ONLY=0
+
+if [ "${1:-}" = "--s-only" ]; then
+  # S-lane prep/readability mode: keep S03 sections and drop A013 sections.
+  S_ONLY=1
+  shift
+fi
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
-  echo "usage: $0 <current-log> [baseline-log]" >&2
+  echo "usage: $0 [--s-only] <current-log> [baseline-log]" >&2
   exit 2
 fi
 
@@ -44,7 +51,25 @@ fi
 
 cc -O2 -std=c11 -Wall -Wextra -Werror -o "${BIN}" "${SRC}"
 if [ -n "${BASE_LOG}" ]; then
-  "${BIN}" "${CUR_LOG}" "${BASE_LOG}"
+  if [ "${S_ONLY}" -eq 1 ]; then
+    "${BIN}" "${CUR_LOG}" "${BASE_LOG}" | awk '
+      /^S03_/ { print; in_s=1; next }
+      /^A013_/ { in_s=0; next }
+      /^  / && in_s { print; next }
+      { in_s=0 }
+    '
+  else
+    "${BIN}" "${CUR_LOG}" "${BASE_LOG}"
+  fi
 else
-  "${BIN}" "${CUR_LOG}"
+  if [ "${S_ONLY}" -eq 1 ]; then
+    "${BIN}" "${CUR_LOG}" | awk '
+      /^S03_/ { print; in_s=1; next }
+      /^A013_/ { in_s=0; next }
+      /^  / && in_s { print; next }
+      { in_s=0 }
+    '
+  else
+    "${BIN}" "${CUR_LOG}"
+  fi
 fi

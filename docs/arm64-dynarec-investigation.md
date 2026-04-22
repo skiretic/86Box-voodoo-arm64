@@ -1,16 +1,15 @@
 # ARM64 New Dynarec Investigation
 
 ## Resume Here
-- Current objective: static ARM64 source audit complete and delta-reviewed against current `HEAD`; use this document as the planning handoff for implementation sequencing, validation design, and slice scoping.
-- Exact next file/module: none for source discovery; planning should start from `Decision-Ready Plan`, `Running Prioritized Backlog`, `Findings Summary`, and the current-HEAD delta note in `U-012`.
+- Current objective: keep this file as the canonical static-audit record; active implementation sequencing now lives in [docs/arm64-dynarec-wave1-implementation-plan.md](./arm64-dynarec-wave1-implementation-plan.md).
+- Exact next file/module: for active coding, start from `S-03` follow-on churn tuning (`S-03c`) in `src/cpu/386_dynarec.c` (ARM64-guarded).
 - Next 3 concrete actions:
-  1. Start the implementation-planning pass from `S-01`, `S-02`, `S-03`, and `A-013`, explicitly treating `F-019` and `F-020` as already fixed at current `HEAD` and keeping `A-021` / `A-022` tail-ranked unless workload evidence later promotes them.
-  2. Draft future validation plans for `S-01`, `S-02`/`A-013`, and `S-03`, explicitly recording intended logfile and metadata destinations before any runtime work is attempted.
-  3. Decide whether `A-011` stays bundled inside `S-02` or is staged immediately after the direct imm-store hook work once the written plan is assembled, and whether `A-022` belongs in the main plan or only in benchmarking-prep notes.
+  1. Use `a013i-tbxz-r1` as current baseline and parse S-only churn telemetry with `./scripts/dynarec/analyze-s03a-log.sh --s-only ...`.
+  2. Implement one ARM64-guarded `S-03c` policy adjustment (no new A-template work) and keep x86-64 behavior untouched.
+  3. Re-run locked workload flow and gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + improved/no-worse `promote_no_immediates_per_dirty_hit`.
 - Active blockers:
-  - No runtime evidence collected in this investigation by design; remaining open questions are measurement-only and must stay plan-only until explicitly approved.
-  - `src/codegen_new/codegen_timing.c` does not exist at HEAD `2e725bf5d`; any telemetry follow-up must start from `src/codegen_new/codegen_block.c` and `src/codegen_new/codegen.h` instead.
-  - No implementation plan has been written yet; this document is now the completed static-audit and post-sync-delta handoff artifact for that next phase.
+- None for source discovery; blocker handling is now execution-time only (regression gates and workload comparability).
+- Keep telemetry low-noise by default; detailed A-path tracing remains opt-in (`86BOX_A013_TRACE=1`).
 
 ### Post-Investigation Status Update (2026-04-21)
 - Historical note: this file remains canonical static-audit record and reflects investigation snapshot state.

@@ -62,28 +62,38 @@ What explicitly waits until after wave 1:
 - `A-014`, `A-018`, `A-019`, `A-020`, `A-021`, `A-022`
 - Also defer non-wave slices from the audit backlog unless a wave slice hard-dep appears during implementation.
 
-Original first patch (completed):
-- `S-01`: fixed `codegen_MMX_ENTER()` branch patching to use `block_write_data`.
+## S-* Kickoff Pack (Prepared, No Launch)
+- Active coding lane: `S-03` follow-on churn tuning (`S-03c`) at fixed `266666666`.
+- `A-013` is frozen at `A-013i`; do not expand template surface unless correctness regression forces reopen.
 
-Recommended next patch:
-- `A-013a`: JIT-local target classification helper + `host_arm64_call()` relative-path usage where in range.
+S-03c target scope (ARM64-guarded):
+- `src/cpu/386_dynarec.c`
+- `src/codegen_new/codegen.h`
+- optional telemetry-only touch: `scripts/dynarec/analyze-s03a-log.c`
 
-Recommended next files to edit:
-- `src/codegen_new/codegen_allocator.c`
-- `src/codegen_new/codegen_allocator.h`
-- `src/codegen_new/codegen_backend_arm64_ops.c`
-- `src/codegen_new/codegen_backend_arm64_ops.h`
+S-03c change intent:
+- reduce unnecessary `CODEBLOCK_NO_IMMEDIATES` promotions while preserving safety behavior.
+- keep default low-noise logging policy (`86BOX_NEW_DYNAREC_STATS=1`, `86BOX_NEW_DYNAREC_TELEMETRY=0`, `86BOX_A013_TRACE=0`).
+- keep x86-64 behavior unchanged.
 
-Exact next commands for the next implementation session:
+S-03c pre-code baseline (exact commands, no VM launch):
 ```bash
 cd /Users/anthony/projects/code/86Box-voodoo-arm64
 git rev-parse --abbrev-ref HEAD
 git rev-parse --short HEAD
-rg -n "A-013|host_arm64_call|host_arm64_jump|codegen_exit_rout|allocator" docs/arm64-dynarec-wave1-implementation-plan.md docs/arm64-dynarec-investigation.md src/codegen_new/codegen_backend_arm64_ops.c src/codegen_new/codegen_allocator.c src/codegen_new/codegen_allocator.h
-sed -n '1,220p' docs/arm64-dynarec-wave1-implementation-plan.md
-sed -n '1,260p' src/codegen_new/codegen_backend_arm64_ops.c
-sed -n '1,260p' src/codegen_new/codegen_allocator.c
+./scripts/dynarec/analyze-s03a-log.sh --s-only "docs/perf-artifacts/arm64-dynarec/2026-04-22_16-55-55-Windows 98 Gaming PC-a013i-tbxz-r1/86box.log" "docs/perf-artifacts/arm64-dynarec/2026-04-21_19-44-43-Windows 98 Gaming PC-s03b/86box.log.gz"
 ```
+
+S-03c validation criteria (next run):
+- `WL-05` hashes unchanged.
+- `unexpected_noimm_without_bmask=0`.
+- `promote_no_immediates_per_dirty_hit` lower or equal versus `a013i-tbxz-r1`.
+- no crash/hang/regression in locked workload flow.
+
+S-03c rollback triggers:
+- any WL-05 hash mismatch.
+- any nonzero `unexpected_noimm_without_bmask`.
+- materially higher `promote_no_immediates` churn with no compensating stability/perf gain.
 
 ## Cross-Slice Validation Framework
 
