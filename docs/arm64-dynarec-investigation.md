@@ -56,10 +56,15 @@
     - VM frequency set to `266666666` (`k6_2 x4`) and remained stable.
     - guest markers improved further (`Q3 timedemo 35.6 fps`, `3DMark99 2507`, `CPU 5885`) with locked `WL-05` hashes.
     - operator-observed real-time behavior stayed materially better than upstream in the same heavy sections.
+  - Next implementation slice promoted:
+    - `A-013h` big conditional-branch sweep via shared `host_arm64_branch_set_offset()` patch path.
+    - scope: lift all `B.cond` template patch sites to direct imm19 conditional branches when reachable; keep relative `B` fallback.
+    - additive telemetry fields: `bcond_rel19`, `bcond_rel26`, `bcond_total`.
+    - fixed CPU baseline during this slice: `266666666`.
   - Tooling follow-through now included in this same checkpoint:
     - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
-  - Current next execution slice is wave-1 closeout + continued CPU headroom validation at fixed `266 MHz` until heavy scenes are near-consistently `100%`, then one-step frequency escalation.
+  - Current next execution slice is `A-013h` at fixed `266 MHz`, followed by continued CPU headroom validation only after `A-013h` stability is confirmed.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 
 ## Scope

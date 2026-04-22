@@ -495,6 +495,30 @@ Secondary profile policy (optional):
   - continue active dev baseline at `266 MHz`.
   - only increase CPU frequency after `266 MHz` shows consistent `100%` in targeted heavy scenes while keeping `WL-05` hashes and stability clean.
 
+### A-013h Big Conditional-Branch Sweep Plan (2026-04-22)
+- Change summary:
+  - Extend A-013 conditional shaping across the shared `B.cond` patch path (not just `BEQ` direct callsites).
+  - `host_arm64_branch_set_offset()` now upgrades `B.cond-skip + B` templates to direct single `B.cond` when final target is imm19-reachable; otherwise keeps relative `B` fallback.
+  - Add additive summary counters:
+    - `bcond_rel19`, `bcond_rel26`, `bcond_total`
+  - Keep existing low-noise policy (`stats=1`, `telemetry=0`, `A013_TRACE=0`), no trace flood.
+- Validation criteria:
+  - ARM64 build/sign + launch passes at fixed `266 MHz` baseline.
+  - `WL-05` hashes remain locked.
+  - `unexpected_noimm_without_bmask=0`.
+  - New `bcond_*` counters present and nonzero in branch-heavy runs, with healthy relative usage.
+- Rollback triggers:
+  - control-flow correctness anomaly in Jcc-heavy paths.
+  - any `WL-05` hash mismatch.
+  - any harmful S-03 safety regression.
+  - suspicious surge in fallback branch shape inconsistent with prior runs.
+- Exact commands:
+  - `./scripts/build-and-sign.sh`
+  - `RUN_TAG=a013h-bcond-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013h-bcond-r1`
+  - after guest workload:
+  - `./scripts/dynarec/analyze-s03a-log.sh "<a013h-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_22-53-19-Windows 98 Gaming PC-a013g-266-r1/86box.log"`
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
