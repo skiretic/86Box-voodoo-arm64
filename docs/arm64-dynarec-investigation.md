@@ -27,26 +27,29 @@
   - `A-013a+b` and extended `A-013c/d/e` telemetry work have now passed regression gates in downstream execution runs.
   - Latest locked-run checkpoint: `2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2` with stable WL-05 totals and `A013_PATH` relative-adoption ratio `0.899442`.
   - A-013 telemetry logging policy is now tightened for lower run overhead: summary cadence reduced to every `1,048,576` path events and detailed per-path trace is opt-in via `86BOX_A013_TRACE=1`.
-  - Active residual tightening slice (`A-013f`) deepens ARM64 conditional-branch shaping for `host_arm64_CBNZ()` with explicit local imm19/imm26/absolute fallback paths plus additive telemetry counters (`cbnz_rel19`, `cbnz_rel26`, `cbnz_abs_nonlocal`, `cbnz_abs_range`, `cbnz_total`).
-  - `A-013f` validation criteria:
+  - Active residual tightening slice (`A-013g`) expands ARM64 conditional-branch shaping:
+    - `host_arm64_BEQ()` now has imm19 direct, imm26 bridge, and absolute fallback tiers.
+    - `host_arm64_CBNZ()` relative eligibility widened from local-only to any imm-reachable target.
+    - additive telemetry counters include `beq_rel19`, `beq_rel26`, `beq_abs_nonlocal`, `beq_abs_range`, `beq_total`.
+  - `A-013g` validation criteria:
     - build/sign/JIT launch gates pass with default trace-off policy.
     - `WL-05` hashes unchanged if microstress workload is run.
     - no `S-03` safety counter regressions (`unexpected_noimm_without_bmask=0`).
-    - stronger branch-path visibility via new CBNZ counters without fallback correctness loss.
-  - `A-013f` rollback triggers:
+    - stronger branch-path visibility via BEQ/CBNZ counters without fallback correctness loss.
+  - `A-013g` rollback triggers:
     - any control-flow correctness issue/crash tied to conditional branch dispatch.
     - any `WL-05` hash mismatch.
     - any harmful `S-03` safety counter regression.
-  - `A-013f` exact execution commands:
+  - `A-013g` exact execution commands:
     - `./scripts/build-and-sign.sh`
-    - `RUN_TAG=a013f-cbnz-r3 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
-    - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r3`
-    - post-workload parse: `./scripts/dynarec/analyze-s03a-log.sh "<a013f-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log"`
-  - `A-013f` launch checkpoint:
-    - `run_tag=a013f-cbnz-r3`
-    - `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-21_21-48-59-Windows 98 Gaming PC-a013f-cbnz-r3/`
+    - `RUN_TAG=a013g-beq-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+    - `./scripts/dynarec/launch-vm-telemetry-run.sh a013g-beq-r1`
+    - post-workload parse: `./scripts/dynarec/analyze-s03a-log.sh "<a013g-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log.gz"`
+  - `A-013g` launch checkpoint:
+    - `run_tag=a013g-beq-r1`
+    - `run_dir=<filled after launch>`
     - guest workload input pending.
-  - Current next execution slice is `A-013f` gate + wave-1 closeout decision.
+  - Current next execution slice is `A-013g` gate + wave-1 closeout decision.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 
 ## Scope

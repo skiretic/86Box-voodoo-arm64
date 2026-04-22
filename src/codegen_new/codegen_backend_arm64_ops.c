@@ -324,6 +324,7 @@ static void a013_ensure_telemetry_env(void);
 static void a013_log_summary_if_needed(void);
 static void a013_log_path_event_if_needed(const char *op, const char *path, const uint8_t *branch_src, const void *dst_addr, uint64_t event_total);
 static void a013_record_cbnz_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
+static void a013_record_beq_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
 
 void
 host_arm64_ADD_IMM(codeblock_t *block, int dst_reg, int src_n_reg, uint32_t imm_data)
@@ -602,8 +603,38 @@ host_arm64_BR(codeblock_t *block, int addr_reg)
 void
 host_arm64_BEQ(codeblock_t *block, void *dest)
 {
-    uint32_t *opcode = host_arm64_BEQ_(block);
-    host_arm64_branch_set_offset(opcode, dest);
+    uint8_t *branch_src;
+    int      is_local;
+
+    /* A-013g:
+       Prefer direct B.EQ when imm19-reachable, then bridge via inverse
+       conditional + B(imm26), and preserve MOVX+BR fallback for far targets. */
+    a013_ensure_telemetry_env();
+    codegen_alloc(block, 24);
+    branch_src = &block_write_data[block_pos];
+    is_local   = codegen_allocator_contains_host_ptr(dest);
+
+    if (codegen_allocator_can_branch_imm19(branch_src, dest)) {
+        intptr_t offset = (intptr_t) ((uint8_t *) dest - branch_src);
+        codegen_addlong(block, OPCODE_BCOND | COND_EQ | OFFSET19(offset));
+        a013_record_beq_path("rel19", branch_src, dest);
+        return;
+    }
+
+    if (codegen_allocator_can_branch_imm26(branch_src + 4, dest)) {
+        intptr_t offset;
+
+        codegen_addlong(block, OPCODE_BCOND | COND_NE | OFFSET19(8));
+        offset = (intptr_t) ((uint8_t *) dest - &block_write_data[block_pos]);
+        codegen_addlong(block, OPCODE_B | OFFSET26(offset));
+        a013_record_beq_path("rel26", branch_src, dest);
+        return;
+    }
+
+    codegen_addlong(block, OPCODE_BCOND | COND_NE | OFFSET19(12));
+    host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dest);
+    host_arm64_BR(block, REG_X16);
+    a013_record_beq_path(is_local ? "abs_range" : "abs_nonlocal", branch_src, dest);
 }
 
 void
@@ -625,14 +656,14 @@ host_arm64_CBNZ(codeblock_t *block, int reg, uintptr_t dest)
     cbnz_src = &block_write_data[block_pos];
     is_local = codegen_allocator_contains_host_ptr(dst_ptr);
 
-    if (is_local && codegen_allocator_can_branch_imm19(cbnz_src, dst_ptr)) {
+    if (codegen_allocator_can_branch_imm19(cbnz_src, dst_ptr)) {
         offset = (intptr_t) ((uint8_t *) dst_ptr - cbnz_src);
         codegen_addlong(block, OPCODE_CBNZ | OFFSET19(offset) | Rt(reg));
         a013_record_cbnz_path("rel19", cbnz_src, dst_ptr);
         return;
     }
 
-    if (is_local && codegen_allocator_can_branch_imm26(cbnz_src + 4, dst_ptr)) {
+    if (codegen_allocator_can_branch_imm26(cbnz_src + 4, dst_ptr)) {
         codegen_addlong(block, OPCODE_CBZ | OFFSET19(8) | Rt(reg));
         offset = (intptr_t) ((uint8_t *) dst_ptr - &block_write_data[block_pos]);
         codegen_addlong(block, OPCODE_B | OFFSET26(offset));
@@ -1556,6 +1587,11 @@ static uint64_t a013_cbnz_rel26        = 0;
 static uint64_t a013_cbnz_abs_nonlocal = 0;
 static uint64_t a013_cbnz_abs_range    = 0;
 static uint64_t a013_cbnz_events       = 0;
+static uint64_t a013_beq_rel19         = 0;
+static uint64_t a013_beq_rel26         = 0;
+static uint64_t a013_beq_abs_nonlocal  = 0;
+static uint64_t a013_beq_abs_range     = 0;
+static uint64_t a013_beq_events        = 0;
 static uint64_t a013_path_events       = 0;
 
 static int
@@ -1592,7 +1628,9 @@ a013_log_summary_if_needed(void)
     pclog("A013_PATH_SUMMARY call_rel=%" PRIu64 " call_abs_nonlocal=%" PRIu64 " call_abs_range=%" PRIu64
           " jump_rel=%" PRIu64 " jump_abs_nonlocal=%" PRIu64 " jump_abs_range=%" PRIu64
           " cbnz_rel19=%" PRIu64 " cbnz_rel26=%" PRIu64 " cbnz_abs_nonlocal=%" PRIu64
-          " cbnz_abs_range=%" PRIu64 " cbnz_total=%" PRIu64 " total=%" PRIu64 "\n",
+          " cbnz_abs_range=%" PRIu64 " cbnz_total=%" PRIu64
+          " beq_rel19=%" PRIu64 " beq_rel26=%" PRIu64 " beq_abs_nonlocal=%" PRIu64
+          " beq_abs_range=%" PRIu64 " beq_total=%" PRIu64 " total=%" PRIu64 "\n",
           a013_call_rel,
           a013_call_abs_nonlocal,
           a013_call_abs_range,
@@ -1604,6 +1642,11 @@ a013_log_summary_if_needed(void)
           a013_cbnz_abs_nonlocal,
           a013_cbnz_abs_range,
           a013_cbnz_events,
+          a013_beq_rel19,
+          a013_beq_rel26,
+          a013_beq_abs_nonlocal,
+          a013_beq_abs_range,
+          a013_beq_events,
           a013_path_events);
 }
 
@@ -1634,6 +1677,24 @@ a013_record_cbnz_path(const char *path, const uint8_t *branch_src, const void *d
 
     a013_cbnz_events++;
     a013_log_path_event_if_needed("cbnz", path, branch_src, dst_addr, a013_cbnz_events);
+    a013_log_summary_if_needed();
+}
+
+static void
+a013_record_beq_path(const char *path, const uint8_t *branch_src, const void *dst_addr)
+{
+    if (!strcmp(path, "rel19"))
+        a013_beq_rel19++;
+    else if (!strcmp(path, "rel26"))
+        a013_beq_rel26++;
+    else if (!strcmp(path, "abs_range"))
+        a013_beq_abs_range++;
+    else
+        a013_beq_abs_nonlocal++;
+
+    a013_beq_events++;
+    a013_path_events++;
+    a013_log_path_event_if_needed("beq", path, branch_src, dst_addr, a013_beq_events);
     a013_log_summary_if_needed();
 }
 
