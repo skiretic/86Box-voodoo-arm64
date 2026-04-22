@@ -435,6 +435,42 @@ Secondary profile policy (optional):
   - after guest workload:
   - `./scripts/dynarec/analyze-s03a-log.sh "<a013g-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log.gz"`
 
+### A-013g Lock-In Checkpoint (2026-04-21)
+- Runs:
+  - `a013g-beq-r1`: `docs/perf-artifacts/arm64-dynarec/2026-04-21_22-20-39-Windows 98 Gaming PC-a013g-beq-r1/`
+  - `a013g-beq-r2`: `docs/perf-artifacts/arm64-dynarec/2026-04-21_22-33-57-Windows 98 Gaming PC-a013g-beq-r2/`
+- Guest workload markers:
+  - `WL-05` locked totals remained unchanged in both runs:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+  - Quake III demo four timedemo markers:
+    - `r1`: `1260 frames, 38.3 seconds: 32.9 fps`
+    - `r2`: `1260 frames, 38.0 seconds: 33.1 fps`
+  - 3DMark99 full score markers:
+    - `r1`: `2434 3DMarks`, `5152 CPU 3DMarks`
+    - `r2`: `2461 3DMarks`, `5146 CPU 3DMarks`
+- Host telemetry summary:
+  - `unexpected_noimm_without_bmask=0` in both runs.
+  - New BEQ-path counters active and healthy:
+    - `r2`: `beq_rel19=21721`, `beq_rel26=313839`, `beq_abs_nonlocal=0`, `beq_abs_range=0`, `beq_total=335560`.
+  - CBNZ-path counters remain fully relative (`cbnz_abs_nonlocal=0`, `cbnz_abs_range=0`).
+  - A-013 call/jump relative share improved vs `a013f-cbnz-r3`:
+    - `a013f-cbnz-r3`: `0.899981`
+    - `a013g-beq-r1`: `0.900601`
+    - `a013g-beq-r2`: `0.901420`
+  - Low-noise telemetry policy held (`86BOX_NEW_DYNAREC_STATS=1`, `86BOX_NEW_DYNAREC_TELEMETRY=0`, `86BOX_A013_TRACE=0`), with small host logs (~6-7MB for full run).
+- Operator observation captured:
+  - In 3DMark99 texture-heavy section, emulator speed floor improved from ~`60%` (upstream sanity run) to sustained `80%+` on this branch.
+  - In Q3 demo four non-timedemo playback, emulator maintained `100%` significantly more often.
+  - This branch therefore favors real-time emulation stability even when synthetic benchmark score deltas are mixed.
+- Tooling hardening completed during lock-in:
+  - telemetry launcher retry/fallback path hardened in `scripts/dynarec/launch-vm-telemetry-run.sh`.
+  - parser `A013 total` key-match bug fixed in `scripts/dynarec/analyze-s03a-log.c`.
+- Decision:
+  - lock in `A-013g` as current validated baseline on `ndr-analysis`.
+  - next experimentation should focus on guest CPU frequency headroom using this baseline, not reverting branch-shape work.
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
