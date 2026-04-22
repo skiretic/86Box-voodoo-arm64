@@ -5,8 +5,8 @@
 - Exact next file/module: for active coding, continue `S-03` follow-on tuning (`S-03d`) in `src/cpu/386_dynarec.c` (ARM64-guarded threshold refinement).
 - Next 3 concrete actions:
   1. Keep `S-03c` as locked baseline (`r1/r2`) and retain `a013i-tbxz-r1` as pre-`S-03c` comparison point.
-  2. Implement one ARM64-guarded `S-03d` threshold refinement (no new A-template work), keeping x86-64 untouched.
-  3. Re-run locked workload flow and gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03c`.
+  2. Run `S-03d` validation for threshold-refinement (`2 -> 3`) on ARM64-only churn policy.
+  3. Gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03c`.
 - Active blockers:
 - None for source discovery; blocker handling is now execution-time only (regression gates and workload comparability).
 - Keep telemetry low-noise by default; detailed A-path tracing remains opt-in (`86BOX_A013_TRACE=1`).
@@ -110,6 +110,10 @@
       - `S-03c r1`: `0.001379`
       - `S-03c r2`: `0.001507`
     - decision: lock `S-03c`, proceed to `S-03d` threshold refinement.
+  - `S-03d` implementation checkpoint:
+    - ARM64-only threshold refined: `DYNAREC_S03B_NO_IMM_THRESHOLD` raised from `2` to `3`.
+    - no x86-64 behavior change intended.
+    - pending next telemetry validation tag: `s03d-threshold3-r1`.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
