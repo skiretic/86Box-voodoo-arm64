@@ -45,11 +45,16 @@
     - `RUN_TAG=a013g-beq-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
     - `./scripts/dynarec/launch-vm-telemetry-run.sh a013g-beq-r1`
     - post-workload parse: `./scripts/dynarec/analyze-s03a-log.sh "<a013g-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log.gz"`
-  - `A-013g` launch checkpoint:
-    - `run_tag=a013g-beq-r1`
-    - `run_dir=<filled after launch>`
-    - guest workload input pending.
-  - Current next execution slice is `A-013g` gate + wave-1 closeout decision.
+  - `A-013g` lock-in checkpoint:
+    - `run_tag=a013g-beq-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-21_22-20-39-Windows 98 Gaming PC-a013g-beq-r1/`
+    - `run_tag=a013g-beq-r2` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-21_22-33-57-Windows 98 Gaming PC-a013g-beq-r2/`
+    - both runs retained locked `WL-05` totals and `unexpected_noimm_without_bmask=0`.
+    - `A013_PATH` shows active BEQ shaping with zero BEQ absolute fallbacks (`beq_abs_nonlocal=0`, `beq_abs_range=0`) and continued zero CBNZ absolute fallbacks.
+    - operator-observed host behavior improved in real-time stress sections (3DMark texture phase and Q3 demo-four normal playback), with more frequent sustained `100%` emulation speed.
+  - Tooling follow-through now included in this same checkpoint:
+    - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
+    - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
+  - Current next execution slice is wave-1 closeout + CPU frequency headroom validation on top of locked `A-013g`.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 
 ## Scope
