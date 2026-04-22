@@ -26,6 +26,7 @@ APP_PATH="$(dirname "$(dirname "$(dirname "${BIN}")")")"
 env \
   86BOX_NEW_DYNAREC_STATS=1 \
   86BOX_NEW_DYNAREC_TELEMETRY=1 \
+  86BOX_A013_TRACE="${86BOX_A013_TRACE:-0}" \
   open -n -a "${APP_PATH}" --args \
   "${VM_FLAG_1}" "${VM_PATH}" \
   "${VM_FLAG_2}" "${VM_NAME}" \
