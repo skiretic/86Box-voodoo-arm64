@@ -13,6 +13,7 @@ fi
 TMP_FILES=""
 cleanup() {
   if [ -n "${TMP_FILES}" ]; then
+    # shellcheck disable=SC2086
     rm -f ${TMP_FILES}
   fi
 }
@@ -24,7 +25,7 @@ prepare_log() {
 
   case "${src}" in
     *.gz)
-      tmp="$(mktemp /tmp/analyze-s03a-log.XXXXXX.log)"
+      tmp="$(mktemp -t analyze-s03a-log.XXXXXX)"
       gzip -dc -- "${src}" > "${tmp}"
       TMP_FILES="${TMP_FILES} ${tmp}"
       printf '%s\n' "${tmp}"

@@ -405,6 +405,36 @@ Secondary profile policy (optional):
   - host log target: `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-48-59-Windows 98 Gaming PC-a013f-cbnz-r3/86box.log`
   - guest workload input pending.
 
+### A-013g Conditional-Branch Expansion Gate Plan (2026-04-22)
+- Change summary:
+  - ARM64-only `host_arm64_BEQ()` now uses three-tier shaping:
+    - imm19 range: direct `B.EQ`.
+    - imm26 range: inverse-conditional skip + relative `B`.
+    - out-of-range: inverse-conditional skip + absolute `MOVX_IMM + BR`.
+  - `host_arm64_CBNZ()` relative eligibility is widened from local-only to any imm-reachable target (`imm19` then `imm26` bridge), preserving absolute fallback when needed.
+  - Added additive `A013_PATH_SUMMARY` counters:
+    - `beq_rel19`, `beq_rel26`, `beq_abs_nonlocal`, `beq_abs_range`, `beq_total`
+  - Updated parser `scripts/dynarec/analyze-s03a-log.c` to parse/report new BEQ counters while staying backward-compatible.
+- Validation criteria:
+  - ARM64 build/sign + launch pass with low-noise defaults (`86BOX_NEW_DYNAREC_STATS=1`, `86BOX_NEW_DYNAREC_TELEMETRY=0`, `86BOX_A013_TRACE=0`).
+  - No `S-03` regression markers (`unexpected_noimm_without_bmask=0`).
+  - `WL-05` hashes remain locked if microstress workload is run:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+  - `A013_PATH_SUMMARY` shows nonzero `beq_total` and high BEQ relative usage (`beq_rel19 + beq_rel26`) with no correctness signal from fallback.
+- Rollback triggers:
+  - any control-flow correctness anomaly after BEQ/CBNZ path widening.
+  - any `WL-05` hash mismatch.
+  - any harmful `S-03` safety drift tied to this slice.
+  - unexpected growth of `beq_abs_range` or `cbnz_abs_range` in representative workload runs.
+- Exact commands:
+  - `./scripts/build-and-sign.sh`
+  - `RUN_TAG=a013g-beq-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013g-beq-r1`
+  - after guest workload:
+  - `./scripts/dynarec/analyze-s03a-log.sh "<a013g-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log.gz"`
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
