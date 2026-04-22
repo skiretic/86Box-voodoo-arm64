@@ -180,6 +180,30 @@ rg -n "DYNAREC_S03B_NO_IMM_THRESHOLD|dirty_list_recompile_hits|retry_resets" src
 ./scripts/build-and-sign.sh
 ```
 
+### S-03d Threshold-Refinement Implementation (No-Launch Checkpoint) (2026-04-22)
+Change summary:
+- Implemented ARM64-only threshold refinement:
+  - `DYNAREC_S03B_NO_IMM_THRESHOLD: 2 -> 3` in `src/cpu/386_dynarec.c`.
+  - x86-64 path remains unchanged.
+- Intent:
+  - require one additional consecutive dirty-list retry before `NO_IMMEDIATES` promotion.
+  - pair with existing `S-03c` retry-decay so transient churn clears without premature escalation.
+
+Validation criteria (next run):
+- `WL-05` hashes unchanged.
+- `unexpected_noimm_without_bmask=0`.
+- `ratio_promote_no_immediates_per_dirty_hit` remains in `S-03c` lock band (no harmful regression).
+
+Rollback triggers:
+- any safety counter regression.
+- any WL-05 hash mismatch.
+- clear churn regression without compensating stability/perf gain.
+
+Exact command for next telemetry launch:
+```bash
+./scripts/dynarec/launch-vm-telemetry-run.sh s03d-threshold3-r1
+```
+
 ## Cross-Slice Validation Framework
 
 ### Build/Sign Gate (Required for every slice)

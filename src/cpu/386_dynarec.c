@@ -84,7 +84,9 @@ static uint64_t dynarec_s03a_recompile_rebuild_paths = 0;
 #if defined(__aarch64__) || defined(_M_ARM64)
 /*S-03b ARM64-only policy: require repeated BYTE_MASK dirty-list hits before
   NO_IMMEDIATES promotion to avoid premature slow-immediate escalation. */
-#    define DYNAREC_S03B_NO_IMM_THRESHOLD 2
+/*S-03d tuning: raise threshold to 3 consecutive dirty-list retries so transient
+  churn is more likely to recover via retry-decay before forcing NO_IMMEDIATES.*/
+#    define DYNAREC_S03B_NO_IMM_THRESHOLD 3
 #endif
 
 static int
