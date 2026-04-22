@@ -5,6 +5,13 @@
 - Branch baseline for this plan: `ndr-analysis`
 - Starting commit for execution: `05b05e97f` (move forward only; no history rewrite)
 - Canonical audit source of truth: [docs/arm64-dynarec-investigation.md](./arm64-dynarec-investigation.md)
+- Terminology lock:
+  - `WL-05` is the deterministic Win98 microstress correctness workload run via `MRUNALL.BAT` (quick/normal/smc).
+  - It executes `MICROSTR.EXE` paths that stress:
+    - immediate-heavy constant/writeback/readback behavior (catches immediate encoding and register-state bugs),
+    - branch/helper-dense control-flow behavior (catches branch patch/helper dispatch divergence),
+    - SMC/churn-touch behavior (catches dirty-list transition/recompile policy hazards).
+  - Each mode emits `MICROSTRESS_DONE total=<hash>`; locked hashes mean guest-visible instruction behavior is unchanged.
 - Audit anchors used by this plan:
   - [Decision-Ready Plan](./arm64-dynarec-investigation.md#decision-ready-plan)
   - [Running Prioritized Backlog](./arm64-dynarec-investigation.md#running-prioritized-backlog)
@@ -231,6 +238,34 @@ Exact command for next telemetry launch:
 ```bash
 ./scripts/dynarec/launch-vm-telemetry-run.sh s03e-burst-r1
 ```
+
+### S-03e Validation Checkpoint (R2) (2026-04-22)
+- Run:
+  - `s03e-burst-r2`: `docs/perf-artifacts/arm64-dynarec/2026-04-22_18-38-07-Windows 98 Gaming PC-s03e-burst-r2/`
+- Guest markers (latest run):
+  - Q3 timedemo: `1260 frames, 36.3 seconds: 34.7 fps`
+  - 3DMark99 full: `2545 3DMarks`, `6053 CPU 3DMarks`
+  - `WL-05` locked totals unchanged:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+- Host telemetry summary:
+  - safety marker stayed clean: `unexpected_noimm_without_bmask=0`
+  - churn shaping improved vs prior checkpoints:
+    - `S-03c r2`: `promote_no_immediates/dirty_list_hits = 0.001507`
+    - `S-03d r2`: `promote_no_immediates/dirty_list_hits = 0.001159`
+    - `S-03e r2`: `promote_no_immediates/dirty_list_hits = 0.001091`
+  - latest `S-03e r2` summary:
+    - `dirty_list_hits=19252`
+    - `promote_no_immediates=21`
+    - `retry_resets=6910`
+    - `burst_promotions=21`
+    - `burst_resets=0`
+- Decision:
+  - accept `S-03e` as current churn-policy baseline on ARM64.
+  - keep `266666666` runtime profile and continue with code-first follow-on before new telemetry expansion.
+- Next step (code-first):
+  - implement an ARM64-only follow-on that reduces repeated transitions for stale dirty-list hotspots while preserving current safety gates, then re-run the same locked workload set.
 
 ## Cross-Slice Validation Framework
 
@@ -606,7 +641,7 @@ Secondary profile policy (optional):
     - `a013f-cbnz-r3`: `0.899981`
     - `a013g-beq-r1`: `0.900601`
     - `a013g-beq-r2`: `0.901420`
-  - Low-noise telemetry policy held (`86BOX_NEW_DYNAREC_STATS=1`, `86BOX_NEW_DYNAREC_TELEMETRY=0`, `86BOX_A013_TRACE=0`), with small host logs (~6-7MB for full run).
+  - Low-noise telemetry policy held (`86BOX_NEW_DYNAREC_STATS=1`, `86BOX_NEW_DYNAREC_TELEMETRY=0`, `86BOX_A013_TRACE=0`) and provided clean correctness-verification summaries.
 - Operator observation captured:
   - In 3DMark99 texture-heavy section, emulator speed floor improved from ~`60%` (upstream sanity run) to sustained `80%+` on this branch.
   - In Q3 demo four non-timedemo playback, emulator maintained `100%` significantly more often.
@@ -635,7 +670,7 @@ Secondary profile policy (optional):
 - Host telemetry summary:
   - `unexpected_noimm_without_bmask=0`
   - BEQ/CBNZ fallback counters remain zero (`beq_abs_nonlocal=0`, `beq_abs_range=0`, `cbnz_abs_nonlocal=0`, `cbnz_abs_range=0`)
-  - low-noise logging policy held (single-digit MB log, no trace flood).
+  - low-noise logging policy held and preserved clear correctness-verification summaries.
 - Operator observation captured:
   - at 266 MHz, emulator maintained `100%` speed significantly more often than upstream in the same heavy sections, while expectedly below the easier 233 MHz load level.
 - Decision:

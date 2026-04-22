@@ -2,15 +2,21 @@
 
 ## Resume Here
 - Current objective: keep this file as the canonical static-audit record; active implementation sequencing now lives in [docs/arm64-dynarec-wave1-implementation-plan.md](./arm64-dynarec-wave1-implementation-plan.md).
-- Exact next file/module: for active coding, continue `S-03` follow-on tuning (`S-03d`) in `src/cpu/386_dynarec.c` (ARM64-guarded threshold refinement).
-- Exact next file/module: for active coding, continue `S-03` follow-on tuning (`S-03e`) in `src/cpu/386_dynarec.c` (ARM64-guarded adaptive burst refinement).
+- Exact next file/module: for active coding, continue `S-03` follow-on tuning in `src/cpu/386_dynarec.c` (ARM64-guarded post-`S-03e` code-first refinement).
 - Next 3 concrete actions:
-  1. Keep `S-03c` as locked baseline (`r1/r2`) and retain `a013i-tbxz-r1` as pre-`S-03c` comparison point.
-  2. Run `S-03e` validation for adaptive burst-aware promotion on ARM64-only churn policy.
-  3. Gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03d`.
+  1. Keep `S-03e r2` as locked churn baseline and retain `S-03d r2` + `S-03c r2` as comparison anchors.
+  2. Implement the next ARM64-only code-first churn refinement before opening new telemetry scope.
+  3. Gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03e r2`.
 - Active blockers:
 - None for source discovery; blocker handling is now execution-time only (regression gates and workload comparability).
 - Keep telemetry low-noise by default; detailed A-path tracing remains opt-in (`86BOX_A013_TRACE=1`).
+- `WL-05` terminology: deterministic Win98 microstress correctness gate.
+  - run path: `MRUNALL.BAT` (quick/normal/smc) executing `MICROSTR.EXE`.
+  - purpose: stress
+    - immediate-heavy constant/writeback/readback behavior (immediate encoding + register-state correctness),
+    - branch/helper-heavy control flow (branch patch and helper dispatch correctness),
+    - SMC/churn-touch behavior (dirty-list transition and recompile-policy correctness).
+  - pass condition: `MICROSTRESS_DONE total=<hash>` remains locked across all three modes.
 
 ### Post-Investigation Status Update (2026-04-21)
 - Historical note: this file remains canonical static-audit record and reflects investigation snapshot state.
@@ -119,7 +125,15 @@
     - ARM64-only adaptive burst policy added: stale retry sequences reset by epoch-gap rule before escalation.
     - new telemetry fields: `burst_resets`, `burst_promotions`.
     - no x86-64 behavior change intended.
-    - pending next telemetry validation tag: `s03e-burst-r1`.
+  - `S-03e` validation checkpoint:
+    - `run_tag=s03e-burst-r2` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_18-38-07-Windows 98 Gaming PC-s03e-burst-r2/`
+    - guest markers: `Q3 timedemo 34.7 fps`, `3DMark99 2545`, `CPU 6053`.
+    - `WL-05` hashes remained locked and `unexpected_noimm_without_bmask=0`.
+    - churn ratio improved through each lock step:
+      - `S-03c r2`: `0.001507`
+      - `S-03d r2`: `0.001159`
+      - `S-03e r2`: `0.001091`
+    - decision: accept `S-03e` as current ARM64 churn baseline and proceed with code-first follow-on.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
