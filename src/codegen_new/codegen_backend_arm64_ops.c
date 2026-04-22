@@ -1566,7 +1566,8 @@ a013_log_summary_if_needed(void)
 {
     if (!a013_telemetry_enabled)
         return;
-    if ((a013_path_events & 0x7ff) != 0)
+    /* Log every 262,144 path events to keep telemetry useful but compact. */
+    if ((a013_path_events & 0x3ffff) != 0)
         return;
 
     pclog("A013_PATH_SUMMARY call_rel=%" PRIu64 " call_abs_nonlocal=%" PRIu64 " call_abs_range=%" PRIu64

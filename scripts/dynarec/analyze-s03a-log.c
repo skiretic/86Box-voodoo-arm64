@@ -43,6 +43,17 @@ typedef struct {
     uint64_t after[RETRIES_BUCKETS];
 } retries_hist_t;
 
+typedef struct {
+    uint64_t call_rel;
+    uint64_t call_abs_nonlocal;
+    uint64_t call_abs_range;
+    uint64_t jump_rel;
+    uint64_t jump_abs_nonlocal;
+    uint64_t jump_abs_range;
+    uint64_t total;
+    int      saw;
+} a013_path_t;
+
 static int
 is_key_boundary(const char c)
 {
@@ -130,6 +141,31 @@ update_tag_from_line(const char *line, tags_t *tags)
 }
 
 static void
+update_a013_from_line(const char *line, a013_path_t *a)
+{
+    uint64_t v;
+
+    if (!strstr(line, "A013_PATH_SUMMARY"))
+        return;
+
+    if (extract_u64(line, "call_rel", &v))
+        a->call_rel = v;
+    if (extract_u64(line, "call_abs_nonlocal", &v))
+        a->call_abs_nonlocal = v;
+    if (extract_u64(line, "call_abs_range", &v))
+        a->call_abs_range = v;
+    if (extract_u64(line, "jump_rel", &v))
+        a->jump_rel = v;
+    if (extract_u64(line, "jump_abs_nonlocal", &v))
+        a->jump_abs_nonlocal = v;
+    if (extract_u64(line, "jump_abs_range", &v))
+        a->jump_abs_range = v;
+    if (extract_u64(line, "total", &v))
+        a->total = v;
+    a->saw = 1;
+}
+
+static void
 update_summary_from_line(const char *line, summary_t *s)
 {
     uint64_t v;
@@ -194,7 +230,7 @@ update_transition_from_line(const char *line, transitions_t *t, retries_hist_t *
 }
 
 static int
-parse_log(const char *path, summary_t *s, transitions_t *t, tags_t *tags, retries_hist_t *rh)
+parse_log(const char *path, summary_t *s, transitions_t *t, tags_t *tags, retries_hist_t *rh, a013_path_t *a013)
 {
     char  line[8192];
     FILE *f = fopen(path, "r");
@@ -208,11 +244,13 @@ parse_log(const char *path, summary_t *s, transitions_t *t, tags_t *tags, retrie
     memset(t, 0, sizeof(*t));
     memset(tags, 0, sizeof(*tags));
     memset(rh, 0, sizeof(*rh));
+    memset(a013, 0, sizeof(*a013));
 
     while (fgets(line, sizeof(line), f)) {
         update_summary_from_line(line, s);
         update_transition_from_line(line, t, rh);
         update_tag_from_line(line, tags);
+        update_a013_from_line(line, a013);
     }
 
     fclose(f);
@@ -288,6 +326,37 @@ print_hist(const char *label, const retries_hist_t *rh)
 }
 
 static void
+print_a013(const char *label, const a013_path_t *a)
+{
+    double rel_ratio   = 0.0;
+    double abs_ratio   = 0.0;
+    double range_ratio = 0.0;
+    uint64_t rel_total;
+    uint64_t abs_total;
+
+    rel_total = a->call_rel + a->jump_rel;
+    abs_total = a->call_abs_nonlocal + a->call_abs_range + a->jump_abs_nonlocal + a->jump_abs_range;
+    if (a->total) {
+        rel_ratio   = (double) rel_total / (double) a->total;
+        abs_ratio   = (double) abs_total / (double) a->total;
+        range_ratio = (double) (a->call_abs_range + a->jump_abs_range) / (double) a->total;
+    }
+
+    printf("A013_PATH %s\n", label);
+    printf("  seen=%s\n", a->saw ? "yes" : "no");
+    printf("  call_rel=%" PRIu64 "\n", a->call_rel);
+    printf("  call_abs_nonlocal=%" PRIu64 "\n", a->call_abs_nonlocal);
+    printf("  call_abs_range=%" PRIu64 "\n", a->call_abs_range);
+    printf("  jump_rel=%" PRIu64 "\n", a->jump_rel);
+    printf("  jump_abs_nonlocal=%" PRIu64 "\n", a->jump_abs_nonlocal);
+    printf("  jump_abs_range=%" PRIu64 "\n", a->jump_abs_range);
+    printf("  total=%" PRIu64 "\n", a->total);
+    printf("  ratio_relative_total=%.6f\n", rel_ratio);
+    printf("  ratio_absolute_total=%.6f\n", abs_ratio);
+    printf("  ratio_abs_range_total=%.6f\n", range_ratio);
+}
+
+static void
 print_delta(const summary_t *base, const summary_t *cur, const transitions_t *base_t, const transitions_t *cur_t)
 {
     double base_ratio = 0.0;
@@ -310,6 +379,30 @@ print_delta(const summary_t *base, const summary_t *cur, const transitions_t *ba
     printf("  ratio_promote_no_immediates_per_dirty_hit_delta=%.6f\n", cur_ratio - base_ratio);
 }
 
+static void
+print_a013_delta(const a013_path_t *base, const a013_path_t *cur)
+{
+    uint64_t base_rel, cur_rel;
+    double   base_rel_ratio = 0.0;
+    double   cur_rel_ratio  = 0.0;
+
+    base_rel = base->call_rel + base->jump_rel;
+    cur_rel  = cur->call_rel + cur->jump_rel;
+    if (base->total)
+        base_rel_ratio = (double) base_rel / (double) base->total;
+    if (cur->total)
+        cur_rel_ratio = (double) cur_rel / (double) cur->total;
+
+    printf("A013_DELTA baseline_to_current\n");
+    printf("  call_rel_delta=%" PRId64 "\n", (int64_t) cur->call_rel - (int64_t) base->call_rel);
+    printf("  jump_rel_delta=%" PRId64 "\n", (int64_t) cur->jump_rel - (int64_t) base->jump_rel);
+    printf("  call_abs_nonlocal_delta=%" PRId64 "\n", (int64_t) cur->call_abs_nonlocal - (int64_t) base->call_abs_nonlocal);
+    printf("  jump_abs_nonlocal_delta=%" PRId64 "\n", (int64_t) cur->jump_abs_nonlocal - (int64_t) base->jump_abs_nonlocal);
+    printf("  call_abs_range_delta=%" PRId64 "\n", (int64_t) cur->call_abs_range - (int64_t) base->call_abs_range);
+    printf("  jump_abs_range_delta=%" PRId64 "\n", (int64_t) cur->jump_abs_range - (int64_t) base->jump_abs_range);
+    printf("  ratio_relative_total_delta=%.6f\n", cur_rel_ratio - base_rel_ratio);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -317,26 +410,30 @@ main(int argc, char **argv)
     transitions_t cur_t, base_t;
     tags_t        cur_tags, base_tags;
     retries_hist_t cur_rh, base_rh;
+    a013_path_t   cur_a013, base_a013;
 
     if (argc < 2 || argc > 3) {
         fprintf(stderr, "usage: %s <current-log> [baseline-log]\n", argv[0]);
         return 2;
     }
 
-    if (!parse_log(argv[1], &cur_s, &cur_t, &cur_tags, &cur_rh))
+    if (!parse_log(argv[1], &cur_s, &cur_t, &cur_tags, &cur_rh, &cur_a013))
         return 1;
 
     print_report("current", &cur_s, &cur_t);
     print_tags("current", &cur_tags);
     print_hist("current", &cur_rh);
+    print_a013("current", &cur_a013);
 
     if (argc == 3) {
-        if (!parse_log(argv[2], &base_s, &base_t, &base_tags, &base_rh))
+        if (!parse_log(argv[2], &base_s, &base_t, &base_tags, &base_rh, &base_a013))
             return 1;
         print_report("baseline", &base_s, &base_t);
         print_tags("baseline", &base_tags);
         print_hist("baseline", &base_rh);
+        print_a013("baseline", &base_a013);
         print_delta(&base_s, &cur_s, &base_t, &cur_t);
+        print_a013_delta(&base_a013, &cur_a013);
     }
 
     return 0;
