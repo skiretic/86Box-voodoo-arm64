@@ -36,8 +36,6 @@ VM_NAME="$(printf '%s\n' "${CMD_LINES}" | sed -n '5p')"
 LOG_FLAG="$(printf '%s\n' "${CMD_LINES}" | sed -n '6p')"
 LOGFILE="$(printf '%s\n' "${CMD_LINES}" | sed -n '7p')"
 RUN_DIR="$(dirname "${LOGFILE}")"
-APP_PATH="$(dirname "$(dirname "$(dirname "${BIN}")")")"
-
 /usr/bin/pkill -f "${ROOT_DIR}/build/src/86Box.app/Contents/MacOS/86Box" >/dev/null 2>&1 || true
 /usr/bin/pkill -f '/Applications/86box/86Box.app/Contents/MacOS/86Box' >/dev/null 2>&1 || true
 
@@ -45,16 +43,20 @@ env \
   86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
   86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
   86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
-  open -n -a "${APP_PATH}" --args \
+  "${BIN}" \
   "${VM_FLAG_1}" "${VM_PATH}" \
   "${VM_FLAG_2}" "${VM_NAME}" \
   "${LOG_FLAG}" "${LOGFILE}" \
-  >/tmp/86box-launch-telemetry.log 2>&1
+  >/tmp/86box-launch-telemetry.log 2>&1 &
 
-PID=""
+PID="$!"
+
 for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+    break
+  fi
   PID="$(pgrep -f "${BIN}" | head -n1 || true)"
-  if [ -n "${PID}" ]; then
+  if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
     break
   fi
   sleep 1
