@@ -255,17 +255,6 @@
 
 #    define DUP_ELEMENT(element)      ((element) << 19)
 
-/*Returns true if offset fits into 19 bits*/
-static int
-offset_is_19bit(int offset)
-{
-    if (offset >= (1 << (18 + 2)))
-        return 0;
-    if (offset < -(1 << (18 + 2)))
-        return 0;
-    return 1;
-}
-
 /*Returns true if offset fits into 26 bits*/
 static int
 offset_is_26bit(int offset)
@@ -330,6 +319,11 @@ codegen_alloc(codeblock_t *block, int size)
     if (block_pos >= (BLOCK_MAX - size))
         codegen_allocate_new_block(block);
 }
+
+static void a013_ensure_telemetry_env(void);
+static void a013_log_summary_if_needed(void);
+static void a013_log_path_event_if_needed(const char *op, const char *path, const uint8_t *branch_src, const void *dst_addr, uint64_t event_total);
+static void a013_record_cbnz_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
 
 void
 host_arm64_ADD_IMM(codeblock_t *block, int dst_reg, int src_n_reg, uint32_t imm_data)
@@ -621,18 +615,35 @@ host_arm64_BIC_REG_V(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_r
 void
 host_arm64_CBNZ(codeblock_t *block, int reg, uintptr_t dest)
 {
-    int offset;
+    uint8_t *cbnz_src;
+    void    *dst_ptr = (void *) dest;
+    int      is_local;
+    intptr_t offset;
 
-    codegen_alloc(block, 4);
-    offset = dest - (uintptr_t) &block_write_data[block_pos];
-    if (offset_is_19bit(offset)) {
+    a013_ensure_telemetry_env();
+    codegen_alloc(block, 12);
+    cbnz_src = &block_write_data[block_pos];
+    is_local = codegen_allocator_contains_host_ptr(dst_ptr);
+
+    if (is_local && codegen_allocator_can_branch_imm19(cbnz_src, dst_ptr)) {
+        offset = (intptr_t) ((uint8_t *) dst_ptr - cbnz_src);
         codegen_addlong(block, OPCODE_CBNZ | OFFSET19(offset) | Rt(reg));
-    } else {
-        codegen_alloc(block, 12);
-        codegen_addlong(block, OPCODE_CBZ | OFFSET19(8) | Rt(reg));
-        offset = (uintptr_t) dest - (uintptr_t) &block_write_data[block_pos];
-        codegen_addlong(block, OPCODE_B | OFFSET26(offset));
+        a013_record_cbnz_path("rel19", cbnz_src, dst_ptr);
+        return;
     }
+
+    if (is_local && codegen_allocator_can_branch_imm26(cbnz_src + 4, dst_ptr)) {
+        codegen_addlong(block, OPCODE_CBZ | OFFSET19(8) | Rt(reg));
+        offset = (intptr_t) ((uint8_t *) dst_ptr - &block_write_data[block_pos]);
+        codegen_addlong(block, OPCODE_B | OFFSET26(offset));
+        a013_record_cbnz_path("rel26", cbnz_src, dst_ptr);
+        return;
+    }
+
+    codegen_addlong(block, OPCODE_CBZ | OFFSET19(12) | Rt(reg));
+    host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dest);
+    host_arm64_BR(block, REG_X16);
+    a013_record_cbnz_path(is_local ? "abs_range" : "abs_nonlocal", cbnz_src, dst_ptr);
 }
 
 void
@@ -1540,6 +1551,11 @@ static uint64_t a013_call_abs_range    = 0;
 static uint64_t a013_jump_rel          = 0;
 static uint64_t a013_jump_abs_nonlocal = 0;
 static uint64_t a013_jump_abs_range    = 0;
+static uint64_t a013_cbnz_rel19        = 0;
+static uint64_t a013_cbnz_rel26        = 0;
+static uint64_t a013_cbnz_abs_nonlocal = 0;
+static uint64_t a013_cbnz_abs_range    = 0;
+static uint64_t a013_cbnz_events       = 0;
 static uint64_t a013_path_events       = 0;
 
 static int
@@ -1574,18 +1590,25 @@ a013_log_summary_if_needed(void)
         return;
 
     pclog("A013_PATH_SUMMARY call_rel=%" PRIu64 " call_abs_nonlocal=%" PRIu64 " call_abs_range=%" PRIu64
-          " jump_rel=%" PRIu64 " jump_abs_nonlocal=%" PRIu64 " jump_abs_range=%" PRIu64 " total=%" PRIu64 "\n",
+          " jump_rel=%" PRIu64 " jump_abs_nonlocal=%" PRIu64 " jump_abs_range=%" PRIu64
+          " cbnz_rel19=%" PRIu64 " cbnz_rel26=%" PRIu64 " cbnz_abs_nonlocal=%" PRIu64
+          " cbnz_abs_range=%" PRIu64 " cbnz_total=%" PRIu64 " total=%" PRIu64 "\n",
           a013_call_rel,
           a013_call_abs_nonlocal,
           a013_call_abs_range,
           a013_jump_rel,
           a013_jump_abs_nonlocal,
           a013_jump_abs_range,
+          a013_cbnz_rel19,
+          a013_cbnz_rel26,
+          a013_cbnz_abs_nonlocal,
+          a013_cbnz_abs_range,
+          a013_cbnz_events,
           a013_path_events);
 }
 
 static void
-a013_log_path_event_if_needed(const char *op, const char *path, uint8_t *branch_src, const void *dst_addr)
+a013_log_path_event_if_needed(const char *op, const char *path, const uint8_t *branch_src, const void *dst_addr, uint64_t event_total)
 {
     if (!a013_trace_enabled)
         return;
@@ -1594,7 +1617,24 @@ a013_log_path_event_if_needed(const char *op, const char *path, uint8_t *branch_
           path,
           branch_src,
           dst_addr,
-          a013_path_events);
+          event_total);
+}
+
+static void
+a013_record_cbnz_path(const char *path, const uint8_t *branch_src, const void *dst_addr)
+{
+    if (!strcmp(path, "rel19"))
+        a013_cbnz_rel19++;
+    else if (!strcmp(path, "rel26"))
+        a013_cbnz_rel26++;
+    else if (!strcmp(path, "abs_range"))
+        a013_cbnz_abs_range++;
+    else
+        a013_cbnz_abs_nonlocal++;
+
+    a013_cbnz_events++;
+    a013_log_path_event_if_needed("cbnz", path, branch_src, dst_addr, a013_cbnz_events);
+    a013_log_summary_if_needed();
 }
 
 void
@@ -1614,7 +1654,7 @@ host_arm64_call(codeblock_t *block, void *dst_addr)
         intptr_t offset = (intptr_t) ((uint8_t *) dst_addr - branch_src);
         a013_call_rel++;
         a013_path_events++;
-        a013_log_path_event_if_needed("call", "rel", branch_src, dst_addr);
+        a013_log_path_event_if_needed("call", "rel", branch_src, dst_addr, a013_path_events);
         a013_log_summary_if_needed();
         codegen_addlong(block, OPCODE_BL | OFFSET26(offset));
         return;
@@ -1625,7 +1665,7 @@ host_arm64_call(codeblock_t *block, void *dst_addr)
     else
         a013_call_abs_nonlocal++;
     a013_path_events++;
-    a013_log_path_event_if_needed("call", is_local ? "abs_range" : "abs_nonlocal", branch_src, dst_addr);
+    a013_log_path_event_if_needed("call", is_local ? "abs_range" : "abs_nonlocal", branch_src, dst_addr, a013_path_events);
     a013_log_summary_if_needed();
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BLR(block, REG_X16);
@@ -1649,7 +1689,7 @@ host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
         intptr_t offset = (intptr_t) ((uint8_t *) dst_ptr - branch_src);
         a013_jump_rel++;
         a013_path_events++;
-        a013_log_path_event_if_needed("jump", "rel", branch_src, dst_ptr);
+        a013_log_path_event_if_needed("jump", "rel", branch_src, dst_ptr, a013_path_events);
         a013_log_summary_if_needed();
         codegen_addlong(block, OPCODE_B | OFFSET26(offset));
         return;
@@ -1660,7 +1700,7 @@ host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
     else
         a013_jump_abs_nonlocal++;
     a013_path_events++;
-    a013_log_path_event_if_needed("jump", is_local ? "abs_range" : "abs_nonlocal", branch_src, dst_ptr);
+    a013_log_path_event_if_needed("jump", is_local ? "abs_range" : "abs_nonlocal", branch_src, dst_ptr, a013_path_events);
     a013_log_summary_if_needed();
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BR(block, REG_X16);

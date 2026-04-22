@@ -3,6 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 RUN_TAG="${1:-s03a-telemetry}"
+A013_TRACE_VALUE="$(printenv 86BOX_A013_TRACE 2>/dev/null || true)"
+
+if [ -z "${A013_TRACE_VALUE}" ]; then
+  A013_TRACE_VALUE=0
+fi
 
 cd "${ROOT_DIR}"
 
@@ -26,7 +31,7 @@ APP_PATH="$(dirname "$(dirname "$(dirname "${BIN}")")")"
 env \
   86BOX_NEW_DYNAREC_STATS=1 \
   86BOX_NEW_DYNAREC_TELEMETRY=1 \
-  86BOX_A013_TRACE="${86BOX_A013_TRACE:-0}" \
+  86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
   open -n -a "${APP_PATH}" --args \
   "${VM_FLAG_1}" "${VM_PATH}" \
   "${VM_FLAG_2}" "${VM_NAME}" \
