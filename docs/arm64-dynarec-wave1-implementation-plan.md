@@ -471,6 +471,30 @@ Secondary profile policy (optional):
   - lock in `A-013g` as current validated baseline on `ndr-analysis`.
   - next experimentation should focus on guest CPU frequency headroom using this baseline, not reverting branch-shape work.
 
+### A-013g 266 MHz Headroom Checkpoint (2026-04-21)
+- Run:
+  - `a013g-266-r1`: `docs/perf-artifacts/arm64-dynarec/2026-04-21_22-53-19-Windows 98 Gaming PC-a013g-266-r1/`
+- VM config checkpoint:
+  - `cpu_family = k6_2`
+  - `cpu_multi = 4`
+  - `cpu_speed = 266666666`
+- Guest workload markers:
+  - Q3 demo four timedemo: `1260 frames, 35.4 seconds: 35.6 fps`
+  - 3DMark99 full: `2507 3DMarks`, `5885 CPU 3DMarks`
+  - `WL-05` hashes still locked:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+- Host telemetry summary:
+  - `unexpected_noimm_without_bmask=0`
+  - BEQ/CBNZ fallback counters remain zero (`beq_abs_nonlocal=0`, `beq_abs_range=0`, `cbnz_abs_nonlocal=0`, `cbnz_abs_range=0`)
+  - low-noise logging policy held (single-digit MB log, no trace flood).
+- Operator observation captured:
+  - at 266 MHz, emulator maintained `100%` speed significantly more often than upstream in the same heavy sections, while expectedly below the easier 233 MHz load level.
+- Decision:
+  - continue active dev baseline at `266 MHz`.
+  - only increase CPU frequency after `266 MHz` shows consistent `100%` in targeted heavy scenes while keeping `WL-05` hashes and stability clean.
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
@@ -480,13 +504,16 @@ Secondary profile policy (optional):
 6. `WL-05-win98-microstress` (targeted and optional unless slice requires it)
 
 ### Session controls (fixed)
-- Use canonical K6-2 VM profile for pass/fail; run MMX secondary only when requested by slice plan.
+- Use canonical K6-2 VM profile for pass/fail at active baseline `266 MHz` (`cpu_speed = 266666666`); run MMX secondary only when requested by slice plan.
 - Start each workload from the same VM state (cold boot or same pre-captured checkpoint policy; do not mix methods inside a slice run).
 - Keep renderer/path settings unchanged (`vid_renderer`, Voodoo options, dynarec on).
 - Keep host conditions stable:
   - no unrelated heavy host workloads
   - same power mode and display setup within a slice run set
 - Do not change guest drivers, in-guest graphics settings, or toolkit versions mid-slice.
+- CPU-frequency progression rule:
+  - keep `266 MHz` until heavy-scene checks are near-consistently `100%`.
+  - only then bump frequency one step and re-run `WL-05` + Q3 + 3DMark gates.
 
 ### Repetition and timing rules
 - Per workload/scenario:
