@@ -519,6 +519,30 @@ Secondary profile policy (optional):
   - after guest workload:
   - `./scripts/dynarec/analyze-s03a-log.sh "<a013h-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_22-53-19-Windows 98 Gaming PC-a013g-266-r1/86box.log"`
 
+### A-013h Result Checkpoint (2026-04-21)
+- Run:
+  - `a013h-bcond-r1`: `docs/perf-artifacts/arm64-dynarec/2026-04-21_23-11-46-Windows 98 Gaming PC-a013h-bcond-r1/`
+- Guest markers:
+  - Q3 timedemo: `1260 frames, 36.7 seconds: 34.4 fps`
+  - 3DMark99: `2484 3DMarks`, `5891 CPU 3DMarks`
+  - `WL-05` locked totals unchanged:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+- Host telemetry summary:
+  - `unexpected_noimm_without_bmask=0`
+  - new A-013h counters active:
+    - `bcond_rel19=772357`
+    - `bcond_rel26=549442`
+    - `bcond_total=1321799`
+  - BEQ/CBNZ absolute fallback counters remained zero in this run.
+- Operator observation:
+  - sustained `100%` emulation speed behavior remains materially improved versus upstream baseline in the same heavy sections.
+- Decision:
+  - lock in `A-013h` as current best branch-shaping state at `266 MHz`.
+  - no CPU frequency bump now (explicitly hold at `266 MHz`).
+  - next code step should be correctness-safe consolidation/cleanup before any higher-frequency experimentation.
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
