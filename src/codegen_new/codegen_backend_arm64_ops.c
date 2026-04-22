@@ -1533,6 +1533,7 @@ host_arm64_ZIP2_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_re
    periodic summaries with low overhead. */
 static int      a013_env_init          = 0;
 static int      a013_telemetry_enabled = 0;
+static int      a013_trace_enabled     = 0;
 static uint64_t a013_call_rel          = 0;
 static uint64_t a013_call_abs_nonlocal = 0;
 static uint64_t a013_call_abs_range    = 0;
@@ -1558,6 +1559,8 @@ a013_ensure_telemetry_env(void)
     if (a013_env_init)
         return;
     a013_telemetry_enabled = a013_env_on("86BOX_NEW_DYNAREC_STATS") || a013_env_on("86BOX_NEW_DYNAREC_TELEMETRY");
+    /* Detailed per-path tracing is opt-in because it can perturb guest speed. */
+    a013_trace_enabled     = a013_env_on("86BOX_A013_TRACE");
     a013_env_init          = 1;
 }
 
@@ -1566,8 +1569,8 @@ a013_log_summary_if_needed(void)
 {
     if (!a013_telemetry_enabled)
         return;
-    /* Log every 262,144 path events to keep telemetry useful but compact. */
-    if ((a013_path_events & 0x3ffff) != 0)
+    /* Log every 1,048,576 path events to lower default logging overhead. */
+    if ((a013_path_events & 0xfffff) != 0)
         return;
 
     pclog("A013_PATH_SUMMARY call_rel=%" PRIu64 " call_abs_nonlocal=%" PRIu64 " call_abs_range=%" PRIu64
@@ -1578,6 +1581,19 @@ a013_log_summary_if_needed(void)
           a013_jump_rel,
           a013_jump_abs_nonlocal,
           a013_jump_abs_range,
+          a013_path_events);
+}
+
+static void
+a013_log_path_event_if_needed(const char *op, const char *path, uint8_t *branch_src, const void *dst_addr)
+{
+    if (!a013_trace_enabled)
+        return;
+    pclog("A013_PATH_TRACE op=%s path=%s src=%p dst=%p total=%" PRIu64 "\n",
+          op,
+          path,
+          branch_src,
+          dst_addr,
           a013_path_events);
 }
 
@@ -1598,6 +1614,7 @@ host_arm64_call(codeblock_t *block, void *dst_addr)
         intptr_t offset = (intptr_t) ((uint8_t *) dst_addr - branch_src);
         a013_call_rel++;
         a013_path_events++;
+        a013_log_path_event_if_needed("call", "rel", branch_src, dst_addr);
         a013_log_summary_if_needed();
         codegen_addlong(block, OPCODE_BL | OFFSET26(offset));
         return;
@@ -1608,6 +1625,7 @@ host_arm64_call(codeblock_t *block, void *dst_addr)
     else
         a013_call_abs_nonlocal++;
     a013_path_events++;
+    a013_log_path_event_if_needed("call", is_local ? "abs_range" : "abs_nonlocal", branch_src, dst_addr);
     a013_log_summary_if_needed();
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BLR(block, REG_X16);
@@ -1631,6 +1649,7 @@ host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
         intptr_t offset = (intptr_t) ((uint8_t *) dst_ptr - branch_src);
         a013_jump_rel++;
         a013_path_events++;
+        a013_log_path_event_if_needed("jump", "rel", branch_src, dst_ptr);
         a013_log_summary_if_needed();
         codegen_addlong(block, OPCODE_B | OFFSET26(offset));
         return;
@@ -1641,6 +1660,7 @@ host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
     else
         a013_jump_abs_nonlocal++;
     a013_path_events++;
+    a013_log_path_event_if_needed("jump", is_local ? "abs_range" : "abs_nonlocal", branch_src, dst_ptr);
     a013_log_summary_if_needed();
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BR(block, REG_X16);

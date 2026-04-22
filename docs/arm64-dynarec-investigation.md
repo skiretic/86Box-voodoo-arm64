@@ -26,6 +26,7 @@
   - `S-03a` and `S-03b` are now implemented/validated in downstream execution work.
   - `A-013a+b` and extended `A-013c/d/e` telemetry work have now passed regression gates in downstream execution runs.
   - Latest locked-run checkpoint: `2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2` with stable WL-05 totals and `A013_PATH` relative-adoption ratio `0.899442`.
+  - A-013 telemetry logging policy is now tightened for lower run overhead: summary cadence reduced to every `1,048,576` path events and detailed per-path trace is opt-in via `86BOX_A013_TRACE=1`.
   - Current next execution slice is wave-1 closeout and optional residual `A-013` tightening only.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 

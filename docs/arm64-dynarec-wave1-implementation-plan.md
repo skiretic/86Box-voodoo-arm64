@@ -361,6 +361,9 @@ Secondary profile policy (optional):
 - Interpretation:
   - S-03 safety counters remain healthy after `A-013c/d/e`.
   - `A-013` achieved high relative-path adoption with zero range-fallback hits in this run.
+  - Logging policy updated to reduce measurement perturbation:
+    - default `A013_PATH_SUMMARY` cadence is now every `1,048,576` path events (previously `262,144`).
+    - detailed `A013_PATH_TRACE` is now explicit opt-in only via `86BOX_A013_TRACE=1`.
 - Decision:
   - `A-013c/d/e` passes current regression gate on locked workloads.
   - proceed to remaining `A-013` deepening only if we need extra branch-shape tightening; otherwise prepare wave-1 closeout.
@@ -751,6 +754,9 @@ Secondary profile policy (optional):
   - keep ARM64-only behavior guardrails for new `A-013` code paths.
   - run:
   - `./scripts/dynarec/launch-vm-telemetry-run.sh a013cde`
+  - default launch keeps detailed A-013 trace disabled (`86BOX_A013_TRACE=0`) to avoid avoidable logging overhead during perf-sensitive checks.
+  - for focused debug-only tracing, run:
+  - `86BOX_A013_TRACE=1 ./scripts/dynarec/launch-vm-telemetry-run.sh a013cde-trace`
   - after guest run, parse with:
   - `./scripts/dynarec/analyze-s03a-log.sh "<a013cde-log>" "<s03b-baseline-log>"`
   - and review `A013_PATH_SUMMARY` lines in host log for:
