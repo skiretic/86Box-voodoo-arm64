@@ -277,6 +277,17 @@ bcond_offset_bytes(uint32_t opcode)
     return imm19 << 2;
 }
 
+/* Decode signed byte displacement from a TBZ/TBNZ immediate field. */
+static inline int
+tbxz_offset_bytes(uint32_t opcode)
+{
+    int imm14 = (int) ((opcode >> 5) & 0x3fff);
+
+    if (imm14 & (1 << 13))
+        imm14 |= ~0x3fff;
+    return imm14 << 2;
+}
+
 static inline int
 imm_is_imm16(uint32_t imm_data)
 {
@@ -337,6 +348,7 @@ static void a013_log_path_event_if_needed(const char *op, const char *path, cons
 static void a013_record_cbnz_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
 static void a013_record_beq_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
 static void a013_record_bcond_patch_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
+static void a013_record_tbxz_patch_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
 
 void
 host_arm64_ADD_IMM(codeblock_t *block, int dst_reg, int src_n_reg, uint32_t imm_data)
@@ -607,6 +619,7 @@ host_arm64_branch_set_offset(uint32_t *opcode, void *dest)
     uint32_t  cond_insn          = *cond_opcode;
     int       offset26           = (int) ((uintptr_t) dest - (uintptr_t) opcode);
     int       is_bcond_template  = 0;
+    int       is_tbxz_template   = 0;
 
     a013_ensure_telemetry_env();
 
@@ -632,9 +645,31 @@ host_arm64_branch_set_offset(uint32_t *opcode, void *dest)
         }
     }
 
+    /* A-013i:
+       Apply the same guarded template collapse to TBZ/TBNZ skip+branch forms,
+       which are used by a subset of ARM64 uop patch paths (e.g., tag tests). */
+    if (((branch_insn & 0xfc000000u) == OPCODE_B) &&
+        ((cond_insn & 0x7e000000u) == OPCODE_TBZ) &&
+        (tbxz_offset_bytes(cond_insn) == 8)) {
+        uint8_t *cond_src = (uint8_t *) cond_opcode;
+
+        is_tbxz_template = 1;
+        if (codegen_allocator_can_branch_imm14(cond_src, dest)) {
+            uint32_t flipped  = cond_insn ^ (1u << 24);
+            int      offset14 = (int) ((uintptr_t) dest - (uintptr_t) cond_opcode);
+
+            *cond_opcode = (flipped & ~0x0007ffe0u) | OFFSET14(offset14);
+            *opcode      = OPCODE_NOP;
+            a013_record_tbxz_patch_path("rel14", cond_src, dest);
+            return;
+        }
+    }
+
     *opcode = OPCODE_B | OFFSET26(offset26);
     if (is_bcond_template)
         a013_record_bcond_patch_path("rel26", (uint8_t *) cond_opcode, dest);
+    if (is_tbxz_template)
+        a013_record_tbxz_patch_path("rel26", (uint8_t *) cond_opcode, dest);
 }
 
 void
@@ -1638,6 +1673,9 @@ static uint64_t a013_beq_events        = 0;
 static uint64_t a013_bcond_rel19       = 0;
 static uint64_t a013_bcond_rel26       = 0;
 static uint64_t a013_bcond_events      = 0;
+static uint64_t a013_tbxz_rel14        = 0;
+static uint64_t a013_tbxz_rel26        = 0;
+static uint64_t a013_tbxz_events       = 0;
 static uint64_t a013_path_events       = 0;
 
 static int
@@ -1678,6 +1716,7 @@ a013_log_summary_if_needed(void)
           " beq_rel19=%" PRIu64 " beq_rel26=%" PRIu64 " beq_abs_nonlocal=%" PRIu64
           " beq_abs_range=%" PRIu64 " beq_total=%" PRIu64
           " bcond_rel19=%" PRIu64 " bcond_rel26=%" PRIu64 " bcond_total=%" PRIu64
+          " tbxz_rel14=%" PRIu64 " tbxz_rel26=%" PRIu64 " tbxz_total=%" PRIu64
           " total=%" PRIu64 "\n",
           a013_call_rel,
           a013_call_abs_nonlocal,
@@ -1698,6 +1737,9 @@ a013_log_summary_if_needed(void)
           a013_bcond_rel19,
           a013_bcond_rel26,
           a013_bcond_events,
+          a013_tbxz_rel14,
+          a013_tbxz_rel26,
+          a013_tbxz_events,
           a013_path_events);
 }
 
@@ -1760,6 +1802,20 @@ a013_record_bcond_patch_path(const char *path, const uint8_t *branch_src, const 
     a013_bcond_events++;
     a013_path_events++;
     a013_log_path_event_if_needed("bcond", path, branch_src, dst_addr, a013_bcond_events);
+    a013_log_summary_if_needed();
+}
+
+static void
+a013_record_tbxz_patch_path(const char *path, const uint8_t *branch_src, const void *dst_addr)
+{
+    if (!strcmp(path, "rel14"))
+        a013_tbxz_rel14++;
+    else
+        a013_tbxz_rel26++;
+
+    a013_tbxz_events++;
+    a013_path_events++;
+    a013_log_path_event_if_needed("tbxz", path, branch_src, dst_addr, a013_tbxz_events);
     a013_log_summary_if_needed();
 }
 

@@ -38,11 +38,14 @@ void codegen_allocator_clean_blocks(struct mem_block_t *block);
 /* A-013 classification helpers:
    - codegen_allocator_contains_host_ptr(): tells whether a host pointer targets
      the JIT allocator arena (candidate for direct local branch).
+   - codegen_allocator_can_branch_imm14(): validates AArch64 TBZ/TBNZ immediate
+     branch range/alignment from a source instruction address to target.
    - codegen_allocator_can_branch_imm19(): validates AArch64 CBZ/CBNZ immediate
      branch range/alignment from a source instruction address to target.
    - codegen_allocator_can_branch_imm26(): validates AArch64 B/BL immediate
      branch range/alignment from a source instruction address to target. */
 bool codegen_allocator_contains_host_ptr(const void *p);
+bool codegen_allocator_can_branch_imm14(const uint8_t *src_insn_addr, const void *dst);
 bool codegen_allocator_can_branch_imm19(const uint8_t *src_insn_addr, const void *dst);
 bool codegen_allocator_can_branch_imm26(const uint8_t *src_insn_addr, const void *dst);
 

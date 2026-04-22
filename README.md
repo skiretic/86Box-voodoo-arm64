@@ -1,20 +1,23 @@
-86Box — Voodoo ARM64 JIT Fork
-=============================
+86Box — ARM64 Dynarec Analysis Branch
+=====================================
 
 ## ⚠️ AI Disclosure
 **This fork was developed with the assistance of AI.**
 
 ---
 
-This fork adds a **JIT compiler for the 3dfx Voodoo GPU pixel pipeline on ARM64 (AArch64)**. The upstream 86Box Voodoo emulation uses an x86-64 JIT that generates native machine code for the pixel pipeline at runtime. On ARM64 hosts (Apple Silicon, Raspberry Pi 5, Snapdragon), that JIT is unavailable and the emulator falls back to a C interpreter, which is significantly slower.
+This branch is focused on **ARM64 (AArch64) new-dynarec correctness and performance work** for 86Box on Apple Silicon. The current campaign centers on guarded improvements to relative branch/call shaping and low-overhead telemetry for validation, while preserving fallback correctness and x86-64 behavior.
 
-This fork ports the Voodoo JIT to ARM64, generating native AArch64 instructions for each pixel pipeline configuration — depth test, texture fetch, color/alpha combine, fog, alpha blend, dithering, and framebuffer write. The result is the same runtime code generation approach as x86-64, targeting ARMv8.0-A baseline (compatible with all 64-bit ARM devices).
+Active development in this branch includes:
+- ARM64-only A-013 branch-path shaping extensions (`BL/B`, `CBNZ`, `BEQ`, and guarded conditional patch templates)
+- low-noise dynarec telemetry policy for perf-sensitive runs (summary-on, trace opt-in)
+- repeatable Win98 workload validation gates (Q3 / 3DMark / WL-05 hash lock)
 
 ### What's included
 
-- **Full Voodoo pixel pipeline JIT** — all 6 phases ported from x86-64 to ARM64
-- **macOS Apple Silicon support** — W^X handling via `pthread_jit_write_protect_np`, JIT entitlements
-- **JIT debug/verify mode** — optional runtime toggle to compare JIT output against the C interpreter pixel-by-pixel
+- **ARM64 dynarec branch-work tooling** — scripts and analyzers for A-013/S-03 telemetry runs
+- **macOS Apple Silicon build/sign flow** — local signed app workflow used by validation runs
+- **Docs-first implementation tracking** — active checkpointing in `docs/arm64-dynarec-*.md`
 
 ### Upstream
 
