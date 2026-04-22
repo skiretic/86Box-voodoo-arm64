@@ -67,6 +67,10 @@
     - new counters confirmed active at scale: `bcond_rel19=772357`, `bcond_rel26=549442`, `bcond_total=1321799`.
     - operator-observed 100%-speed stability remained clearly stronger than upstream baseline.
     - decision: keep CPU at `266666666` for now; do not bump frequency yet.
+  - `A-013h` guarded consolidation pass (no-launch checkpoint):
+    - tightened ARM64 patch-site detection so `bcond` collapse/telemetry only triggers on the exact helper-emitted `B.cond +8` + trailing `B` template.
+    - fallback branch patch remains unchanged; safety intent is stricter matching, not broader rewriting.
+    - build/sign validated; telemetry prep command staged for next run tag `a013h-bcond-r2`.
   - Tooling follow-through now included in this same checkpoint:
     - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
