@@ -50,7 +50,13 @@ typedef struct {
     uint64_t jump_rel;
     uint64_t jump_abs_nonlocal;
     uint64_t jump_abs_range;
+    uint64_t cbnz_rel19;
+    uint64_t cbnz_rel26;
+    uint64_t cbnz_abs_nonlocal;
+    uint64_t cbnz_abs_range;
+    uint64_t cbnz_total;
     uint64_t total;
+    int      has_cbnz_fields;
     int      saw;
 } a013_path_t;
 
@@ -144,6 +150,7 @@ static void
 update_a013_from_line(const char *line, a013_path_t *a)
 {
     uint64_t v;
+    int      saw_cbnz = 0;
 
     if (!strstr(line, "A013_PATH_SUMMARY"))
         return;
@@ -160,8 +167,30 @@ update_a013_from_line(const char *line, a013_path_t *a)
         a->jump_abs_nonlocal = v;
     if (extract_u64(line, "jump_abs_range", &v))
         a->jump_abs_range = v;
+    if (extract_u64(line, "cbnz_rel19", &v)) {
+        a->cbnz_rel19 = v;
+        saw_cbnz      = 1;
+    }
+    if (extract_u64(line, "cbnz_rel26", &v)) {
+        a->cbnz_rel26 = v;
+        saw_cbnz      = 1;
+    }
+    if (extract_u64(line, "cbnz_abs_nonlocal", &v)) {
+        a->cbnz_abs_nonlocal = v;
+        saw_cbnz             = 1;
+    }
+    if (extract_u64(line, "cbnz_abs_range", &v)) {
+        a->cbnz_abs_range = v;
+        saw_cbnz          = 1;
+    }
+    if (extract_u64(line, "cbnz_total", &v)) {
+        a->cbnz_total = v;
+        saw_cbnz      = 1;
+    }
     if (extract_u64(line, "total", &v))
         a->total = v;
+    if (saw_cbnz)
+        a->has_cbnz_fields = 1;
     a->saw = 1;
 }
 
@@ -328,18 +357,28 @@ print_hist(const char *label, const retries_hist_t *rh)
 static void
 print_a013(const char *label, const a013_path_t *a)
 {
-    double rel_ratio   = 0.0;
-    double abs_ratio   = 0.0;
-    double range_ratio = 0.0;
+    double rel_ratio        = 0.0;
+    double abs_ratio        = 0.0;
+    double range_ratio      = 0.0;
+    double cbnz_rel_ratio   = 0.0;
+    double cbnz_abs_ratio   = 0.0;
+    double cbnz_range_ratio = 0.0;
     uint64_t rel_total;
     uint64_t abs_total;
+    uint64_t cbnz_rel_total;
 
     rel_total = a->call_rel + a->jump_rel;
     abs_total = a->call_abs_nonlocal + a->call_abs_range + a->jump_abs_nonlocal + a->jump_abs_range;
+    cbnz_rel_total = a->cbnz_rel19 + a->cbnz_rel26;
     if (a->total) {
         rel_ratio   = (double) rel_total / (double) a->total;
         abs_ratio   = (double) abs_total / (double) a->total;
         range_ratio = (double) (a->call_abs_range + a->jump_abs_range) / (double) a->total;
+    }
+    if (a->cbnz_total) {
+        cbnz_rel_ratio   = (double) cbnz_rel_total / (double) a->cbnz_total;
+        cbnz_abs_ratio   = (double) (a->cbnz_abs_nonlocal + a->cbnz_abs_range) / (double) a->cbnz_total;
+        cbnz_range_ratio = (double) a->cbnz_abs_range / (double) a->cbnz_total;
     }
 
     printf("A013_PATH %s\n", label);
@@ -351,9 +390,18 @@ print_a013(const char *label, const a013_path_t *a)
     printf("  jump_abs_nonlocal=%" PRIu64 "\n", a->jump_abs_nonlocal);
     printf("  jump_abs_range=%" PRIu64 "\n", a->jump_abs_range);
     printf("  total=%" PRIu64 "\n", a->total);
+    printf("  cbnz_fields_seen=%s\n", a->has_cbnz_fields ? "yes" : "no");
+    printf("  cbnz_rel19=%" PRIu64 "\n", a->cbnz_rel19);
+    printf("  cbnz_rel26=%" PRIu64 "\n", a->cbnz_rel26);
+    printf("  cbnz_abs_nonlocal=%" PRIu64 "\n", a->cbnz_abs_nonlocal);
+    printf("  cbnz_abs_range=%" PRIu64 "\n", a->cbnz_abs_range);
+    printf("  cbnz_total=%" PRIu64 "\n", a->cbnz_total);
     printf("  ratio_relative_total=%.6f\n", rel_ratio);
     printf("  ratio_absolute_total=%.6f\n", abs_ratio);
     printf("  ratio_abs_range_total=%.6f\n", range_ratio);
+    printf("  ratio_cbnz_relative_total=%.6f\n", cbnz_rel_ratio);
+    printf("  ratio_cbnz_absolute_total=%.6f\n", cbnz_abs_ratio);
+    printf("  ratio_cbnz_abs_range_total=%.6f\n", cbnz_range_ratio);
 }
 
 static void
@@ -383,8 +431,10 @@ static void
 print_a013_delta(const a013_path_t *base, const a013_path_t *cur)
 {
     uint64_t base_rel, cur_rel;
-    double   base_rel_ratio = 0.0;
-    double   cur_rel_ratio  = 0.0;
+    double   base_rel_ratio      = 0.0;
+    double   cur_rel_ratio       = 0.0;
+    double   base_cbnz_rel_ratio = 0.0;
+    double   cur_cbnz_rel_ratio  = 0.0;
 
     base_rel = base->call_rel + base->jump_rel;
     cur_rel  = cur->call_rel + cur->jump_rel;
@@ -392,6 +442,10 @@ print_a013_delta(const a013_path_t *base, const a013_path_t *cur)
         base_rel_ratio = (double) base_rel / (double) base->total;
     if (cur->total)
         cur_rel_ratio = (double) cur_rel / (double) cur->total;
+    if (base->cbnz_total)
+        base_cbnz_rel_ratio = (double) (base->cbnz_rel19 + base->cbnz_rel26) / (double) base->cbnz_total;
+    if (cur->cbnz_total)
+        cur_cbnz_rel_ratio = (double) (cur->cbnz_rel19 + cur->cbnz_rel26) / (double) cur->cbnz_total;
 
     printf("A013_DELTA baseline_to_current\n");
     printf("  call_rel_delta=%" PRId64 "\n", (int64_t) cur->call_rel - (int64_t) base->call_rel);
@@ -401,6 +455,13 @@ print_a013_delta(const a013_path_t *base, const a013_path_t *cur)
     printf("  call_abs_range_delta=%" PRId64 "\n", (int64_t) cur->call_abs_range - (int64_t) base->call_abs_range);
     printf("  jump_abs_range_delta=%" PRId64 "\n", (int64_t) cur->jump_abs_range - (int64_t) base->jump_abs_range);
     printf("  ratio_relative_total_delta=%.6f\n", cur_rel_ratio - base_rel_ratio);
+    if (cur->has_cbnz_fields || base->has_cbnz_fields) {
+        printf("  cbnz_rel19_delta=%" PRId64 "\n", (int64_t) cur->cbnz_rel19 - (int64_t) base->cbnz_rel19);
+        printf("  cbnz_rel26_delta=%" PRId64 "\n", (int64_t) cur->cbnz_rel26 - (int64_t) base->cbnz_rel26);
+        printf("  cbnz_abs_nonlocal_delta=%" PRId64 "\n", (int64_t) cur->cbnz_abs_nonlocal - (int64_t) base->cbnz_abs_nonlocal);
+        printf("  cbnz_abs_range_delta=%" PRId64 "\n", (int64_t) cur->cbnz_abs_range - (int64_t) base->cbnz_abs_range);
+        printf("  ratio_cbnz_relative_total_delta=%.6f\n", cur_cbnz_rel_ratio - base_cbnz_rel_ratio);
+    }
 }
 
 int

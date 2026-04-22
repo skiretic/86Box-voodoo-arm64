@@ -368,6 +368,43 @@ Secondary profile policy (optional):
   - `A-013c/d/e` passes current regression gate on locked workloads.
   - proceed to remaining `A-013` deepening only if we need extra branch-shape tightening; otherwise prepare wave-1 closeout.
 
+### A-013f Conditional-Branch Deepening Gate Plan (2026-04-22)
+- Change summary:
+  - ARM64-only `host_arm64_CBNZ()` now uses three-tier shaping:
+    - local + imm19 range: direct `CBNZ`.
+    - local + imm26 (but not imm19): `CBZ skip` + relative `B`.
+    - non-local or out-of-range: `CBZ skip` + absolute `MOVX_IMM + BR`.
+  - Added allocator helper `codegen_allocator_can_branch_imm19()` for bounded CBZ/CBNZ range checks.
+  - Added additive `A013_PATH_SUMMARY` counters for conditional-branch shaping:
+    - `cbnz_rel19`, `cbnz_rel26`, `cbnz_abs_nonlocal`, `cbnz_abs_range`, `cbnz_total`
+  - Updated parser `scripts/dynarec/analyze-s03a-log.c` to parse and report new counters while remaining backward-compatible with old logs.
+- Validation criteria:
+  - build/sign/JIT launch gates pass with default low-noise logging (`86BOX_A013_TRACE=0`).
+  - no `S-03` safety regression in parser output versus locked baseline:
+    - `unexpected_noimm_without_bmask=0`
+    - no harmful drift in dirty-list / promotion counters.
+  - `WL-05` hashes remain locked if workload run includes microstress:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+  - `A013_PATH_SUMMARY` shows nonzero `cbnz_total` and healthy relative usage (`cbnz_rel19 + cbnz_rel26`), with no correctness signal from fallback path.
+- Rollback triggers:
+  - any control-flow correctness anomaly, crash, or dispatch misroute after CBNZ-path change.
+  - any `WL-05` hash mismatch.
+  - any new `S-03` safety regression or unstable churn signature tied to this slice.
+  - if standard run shows suspicious conditional fallback pattern (for example large unexpected `cbnz_abs_range`), revert A-013f and re-check.
+- Exact commands:
+  - `./scripts/build-and-sign.sh`
+  - `RUN_TAG=a013f-cbnz-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r1`
+  - after guest workload:
+  - `./scripts/dynarec/analyze-s03a-log.sh "<a013f-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log"`
+- Launch status (2026-04-21):
+  - launch completed: `run_tag=a013f-cbnz-r1`
+  - active run dir: `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-45-06-Windows 98 Gaming PC-a013f-cbnz-r1/`
+  - host log target: `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-45-06-Windows 98 Gaming PC-a013f-cbnz-r1/86box.log`
+  - guest workload input pending.
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
@@ -749,18 +786,19 @@ Secondary profile policy (optional):
 
 ## Next Execution Session Handoff
 - Start with telemetry capture run:
-  - continue deep `A-013` (`c/d/e`) on top of validated `A-013a+b`.
-  - add path-selection telemetry for `A-013` (`relative` vs `fallback`) and explicit far-target reason tagging.
+  - continue deep `A-013` with `A-013f` conditional-branch shaping on top of validated `A-013c/d/e`.
+  - keep path-selection telemetry for `A-013` (`relative` vs `fallback`) and include new CBNZ counters.
   - keep ARM64-only behavior guardrails for new `A-013` code paths.
   - run:
-  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013cde`
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r1`
   - default launch keeps detailed A-013 trace disabled (`86BOX_A013_TRACE=0`) to avoid avoidable logging overhead during perf-sensitive checks.
   - for focused debug-only tracing, run:
-  - `86BOX_A013_TRACE=1 ./scripts/dynarec/launch-vm-telemetry-run.sh a013cde-trace`
+  - `86BOX_A013_TRACE=1 ./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r1-trace`
   - after guest run, parse with:
-  - `./scripts/dynarec/analyze-s03a-log.sh "<a013cde-log>" "<s03b-baseline-log>"`
+  - `./scripts/dynarec/analyze-s03a-log.sh "<a013f-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log"`
   - and review `A013_PATH_SUMMARY` lines in host log for:
   - `call_rel`, `jump_rel`, `call_abs_nonlocal`, `jump_abs_nonlocal`, `call_abs_range`, `jump_abs_range`
+  - `cbnz_rel19`, `cbnz_rel26`, `cbnz_abs_nonlocal`, `cbnz_abs_range`, `cbnz_total`
   - large-log retention rule:
   - after parser review is accepted, finalize with:
   - `./scripts/dynarec/finalize-s03-log.sh "<current-log>" "<optional-baseline-log>"`
