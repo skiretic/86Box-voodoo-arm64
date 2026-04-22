@@ -75,24 +75,27 @@ is_key_boundary(const char c)
 static int
 extract_u64(const char *line, const char *key, uint64_t *out)
 {
-    char   needle[96];
-    char  *end_ptr = NULL;
-    char  *match   = NULL;
-    size_t nlen;
+    char        needle[96];
+    char       *end_ptr = NULL;
+    const char *match   = NULL;
+    const char *search  = line;
+    size_t      nlen;
 
     snprintf(needle, sizeof(needle), "%s=", key);
     nlen  = strlen(needle);
-    match = strstr((char *) line, needle);
-    if (!match)
-        return 0;
-    if (match != line && !is_key_boundary(*(match - 1)))
-        return 0;
+    while ((match = strstr(search, needle)) != NULL) {
+        if (match == line || is_key_boundary(*(match - 1))) {
+            const char *value = match + nlen;
 
-    match += nlen;
-    *out = strtoull(match, &end_ptr, 10);
-    if (end_ptr == match)
-        return 0;
-    return 1;
+            *out = strtoull((char *) value, &end_ptr, 10);
+            if ((const char *) end_ptr == value)
+                return 0;
+            return 1;
+        }
+        search = match + 1;
+    }
+
+    return 0;
 }
 
 static void
