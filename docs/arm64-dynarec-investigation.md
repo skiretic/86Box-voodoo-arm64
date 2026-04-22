@@ -83,11 +83,21 @@
     - extend guarded patch-path shaping to `TBZ/TBNZ + B` templates in ARM64 backend.
     - add `imm14` allocator-range helper and additive telemetry counters `tbxz_rel14`, `tbxz_rel26`, `tbxz_total`.
     - parser extended to parse/print/delta `tbxz_*` fields without changing low-noise defaults.
+  - `A-013i` result checkpoint:
+    - `run_tag=a013i-tbxz-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_16-55-55-Windows 98 Gaming PC-a013i-tbxz-r1/`
+    - guest marker: `3DMark99 2421`, `CPU 5887`; `WL-05` hashes stayed locked.
+    - safety marker held (`unexpected_noimm_without_bmask=0`).
+    - new telemetry fields confirmed active: `tbxz_rel14=55`, `tbxz_rel26=0`, `tbxz_total=55`.
+    - existing A-013 paths remained stable; BEQ/CBNZ absolute fallback counters stayed zero.
+    - operator decision: skip extra manual double-click run and accept this checkpoint.
+  - `A-*` closeout decision:
+    - `A-013` lane is now treated as complete/frozen for this wave after `A-013i`.
+    - no further template expansion planned unless a correctness regression reopens the lane.
   - Tooling follow-through now included in this same checkpoint:
     - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
-  - Current next execution slice is post-`A-013h` consolidation at fixed `266 MHz`; headroom bumping stays deferred by operator choice.
-  - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
+  - Current next execution slice shifts back to `S-*` lane work: post-wave churn optimization at fixed `266 MHz`.
+  - Churn telemetry remains active for rollback guardrails and becomes the active implementation focus.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
