@@ -2,11 +2,11 @@
 
 ## Resume Here
 - Current objective: keep this file as the canonical static-audit record; active implementation sequencing now lives in [docs/arm64-dynarec-wave1-implementation-plan.md](./arm64-dynarec-wave1-implementation-plan.md).
-- Exact next file/module: for active coding, start from `S-03` follow-on churn tuning (`S-03c`) in `src/cpu/386_dynarec.c` (ARM64-guarded).
+- Exact next file/module: for active coding, continue `S-03` follow-on tuning (`S-03d`) in `src/cpu/386_dynarec.c` (ARM64-guarded threshold refinement).
 - Next 3 concrete actions:
-  1. Use `a013i-tbxz-r1` as current baseline and parse S-only churn telemetry with `./scripts/dynarec/analyze-s03a-log.sh --s-only ...`.
-  2. Implement one ARM64-guarded `S-03c` policy adjustment (no new A-template work) and keep x86-64 behavior untouched.
-  3. Re-run locked workload flow and gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + improved/no-worse `promote_no_immediates_per_dirty_hit`.
+  1. Keep `S-03c` as locked baseline (`r1/r2`) and retain `a013i-tbxz-r1` as pre-`S-03c` comparison point.
+  2. Implement one ARM64-guarded `S-03d` threshold refinement (no new A-template work), keeping x86-64 untouched.
+  3. Re-run locked workload flow and gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03c`.
 - Active blockers:
 - None for source discovery; blocker handling is now execution-time only (regression gates and workload comparability).
 - Keep telemetry low-noise by default; detailed A-path tracing remains opt-in (`86BOX_A013_TRACE=1`).
@@ -101,6 +101,15 @@
     - ARM64-only retry-state decay added so stale dirty-list retry debt is cleared after stable non-dirty-list execution.
     - new `DYNAREC_S03A_SUMMARY` field `retry_resets=` added for observability.
     - parser updated to print/delta `retry_resets` while keeping backward compatibility on old logs.
+  - `S-03c` validation lock-in:
+    - `r1`: `docs/perf-artifacts/arm64-dynarec/2026-04-22_17-36-19-Windows 98 Gaming PC-s03c-retry-decay-r1/`
+    - `r2`: `docs/perf-artifacts/arm64-dynarec/2026-04-22_17-51-22-Windows 98 Gaming PC-s03c-retry-decay-r2/`
+    - both runs kept safety marker `unexpected_noimm_without_bmask=0` and locked WL-05 hashes.
+    - promotion ratio remained far below pre-`S-03c` baseline:
+      - pre-`S-03c`: `0.009377`
+      - `S-03c r1`: `0.001379`
+      - `S-03c r2`: `0.001507`
+    - decision: lock `S-03c`, proceed to `S-03d` threshold refinement.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
