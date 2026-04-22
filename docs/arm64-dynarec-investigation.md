@@ -61,10 +61,16 @@
     - scope: lift all `B.cond` template patch sites to direct imm19 conditional branches when reachable; keep relative `B` fallback.
     - additive telemetry fields: `bcond_rel19`, `bcond_rel26`, `bcond_total`.
     - fixed CPU baseline during this slice: `266666666`.
+  - `A-013h` first result checkpoint:
+    - `run_tag=a013h-bcond-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-21_23-11-46-Windows 98 Gaming PC-a013h-bcond-r1/`
+    - `WL-05` remained locked; no S-03 safety regressions (`unexpected_noimm_without_bmask=0`).
+    - new counters confirmed active at scale: `bcond_rel19=772357`, `bcond_rel26=549442`, `bcond_total=1321799`.
+    - operator-observed 100%-speed stability remained clearly stronger than upstream baseline.
+    - decision: keep CPU at `266666666` for now; do not bump frequency yet.
   - Tooling follow-through now included in this same checkpoint:
     - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
-  - Current next execution slice is `A-013h` at fixed `266 MHz`, followed by continued CPU headroom validation only after `A-013h` stability is confirmed.
+  - Current next execution slice is post-`A-013h` consolidation at fixed `266 MHz`; headroom bumping stays deferred by operator choice.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 
 ## Scope
