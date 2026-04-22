@@ -22,7 +22,8 @@ cd "${ROOT_DIR}"
 # Always launch signed repo build.
 ./scripts/build-and-sign.sh >/tmp/86box-build-sign.log 2>&1
 
-CMD_LINES="$(RUN_TAG="${RUN_TAG}" \
+CMD_LINES="$(env \
+  RUN_TAG="${RUN_TAG}" \
   86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
   86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
   86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
