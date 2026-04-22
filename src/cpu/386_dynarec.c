@@ -74,6 +74,9 @@ static uint64_t dynarec_s03a_promote_no_immediates   = 0;
 #if defined(__aarch64__) || defined(_M_ARM64)
 /*S-03b ARM64-only telemetry: counts delayed NO_IMMEDIATES promotions. */
 static uint64_t dynarec_s03b_defer_no_immediates     = 0;
+/*S-03c ARM64-only telemetry: counts retry-state resets after stable execution.
+  This validates that stale retry debt is being cleared before future churn.*/
+static uint64_t dynarec_s03c_retry_resets            = 0;
 #endif
 static uint64_t dynarec_s03a_recompiled_execs        = 0;
 static uint64_t dynarec_s03a_recompile_rebuild_paths = 0;
@@ -115,7 +118,7 @@ dynarec_s03a_log_summary(const char *tag)
     pclog("DYNAREC_S03A_SUMMARY tag=%s exec_calls=%" PRIu64 " valid_hits=%" PRIu64 " dirty_conflicts=%" PRIu64
           " dirty_list_hits=%" PRIu64 " promote_byte_mask=%" PRIu64 " promote_no_immediates=%" PRIu64
 #if defined(__aarch64__) || defined(_M_ARM64)
-          " defer_no_immediates=%" PRIu64
+          " defer_no_immediates=%" PRIu64 " retry_resets=%" PRIu64
 #endif
           " recompiled_execs=%" PRIu64 " rebuild_paths=%" PRIu64 "\n",
           tag,
@@ -127,6 +130,7 @@ dynarec_s03a_log_summary(const char *tag)
           dynarec_s03a_promote_no_immediates,
 #if defined(__aarch64__) || defined(_M_ARM64)
           dynarec_s03b_defer_no_immediates,
+          dynarec_s03c_retry_resets,
 #endif
           dynarec_s03a_recompiled_execs,
           dynarec_s03a_recompile_rebuild_paths);
@@ -569,6 +573,17 @@ exec386_dynarec_dyn(void)
             }
         }
 #    ifdef USE_NEW_DYNAREC
+        /*S-03c ARM64-only: if a BYTE_MASK block executes stably outside the
+          dirty list, clear stale retry debt so a distant future dirty hit does
+          not trigger premature NO_IMMEDIATES promotion.*/
+#        if defined(__aarch64__) || defined(_M_ARM64)
+        if (valid_block && !(block->flags & CODEBLOCK_IN_DIRTY_LIST) && (block->flags & CODEBLOCK_BYTE_MASK)
+            && !(block->flags & CODEBLOCK_NO_IMMEDIATES) && block->dirty_list_recompile_hits) {
+            block->dirty_list_recompile_hits = 0;
+            dynarec_s03c_retry_resets++;
+        }
+#        endif
+
         if (valid_block && (block->flags & CODEBLOCK_IN_DIRTY_LIST)) {
             const uint16_t flags_before = block->flags;
             const int had_byte_mask     = !!(block->flags & CODEBLOCK_BYTE_MASK);
