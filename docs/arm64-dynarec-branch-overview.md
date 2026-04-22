@@ -1,96 +1,99 @@
 # ARM64 Dynarec Branch Overview
 
-This is a high-level snapshot of what this branch is doing, why it exists, what has landed, and what is next.
+This document explains, at a high level, what changed in this branch and how those changes have improved behavior on Apple Silicon hosts.
 
-Use this file for quick orientation.  
-Use the detailed files for deep dive:
+For deep technical detail, see:
 - `docs/arm64-dynarec-wave1-implementation-plan.md`
 - `docs/arm64-dynarec-investigation.md`
 
-## Branch Intent
+## Branch Goal
 
-`ndr-analysis` is focused on **ARM64 new-dynarec correctness/performance improvements** with strict guardrails:
-- ARM64-only behavior changes where intended.
-- Preserve x86-64 behavior.
-- Prefer low-noise telemetry by default.
-- Validate changes with repeatable Win98 workloads (Q3, 3DMark99, WL-05 microstress).
+Improve ARM64 dynarec performance and stability in real workloads while keeping correctness strict.
 
-## What Landed So Far
+Ground rules:
+- ARM64-targeted behavior changes only (x86-64 behavior preserved).
+- Keep fallback paths safe.
+- Keep telemetry low overhead by default.
+- Validate on repeatable Win98 workloads.
 
-### 1) A-lane (A-013) branch-path shaping
+## What Was Improved
 
-A-013 is now treated as **closed/frozen** for this wave (unless correctness regression reopens it).
+### 1) Faster branch/call path handling inside generated ARM64 code
 
-Major outcome:
-- Relative-path branch/call shaping was broadened and hardened across:
-  - `BL/B` local-path handling
-  - `CBNZ` / `BEQ` shape paths
-  - shared `B.cond` patch templates
-  - guarded `TBZ/TBNZ + B` patch templates
-- Safety and fallback behavior stayed intact.
-- Default logging was throttled to low-noise summary mode; detailed path trace is opt-in with `86BOX_A013_TRACE=1`.
+The branch/call path selection was expanded and hardened so more local control-flow stays on efficient relative paths, while still falling back safely when needed.
 
-### 2) S-lane churn policy follow-ons
+Why this matters:
+- less overhead in helper-heavy and branch-heavy code.
+- more consistent real-time emulation speed in stress sections.
+- no observed safety regression in fallback behavior.
 
-S-03 base work was already complete; this branch then added follow-on tuning:
+Status:
+- this area is now considered stable for the current wave and not the active tuning focus.
 
-- **S-03c** (landed, validated)
-  - ARM64-only retry-decay:
-    - stale dirty-list retry debt is reset during stable non-dirty-list execution.
-  - Added `retry_resets` telemetry field.
-  - Result: large drop in `promote_no_immediates_per_dirty_hit` versus older S-03 baseline.
+### 2) Lower recompilation churn from dirty-list escalation
 
-- **S-03d** (landed, validated)
-  - ARM64-only threshold tune:
-    - `DYNAREC_S03B_NO_IMM_THRESHOLD` raised `2 -> 3`.
-  - Result: further reduction in promotion ratio without safety regressions.
+The policy that decides when to force “no immediates” mode was tuned in steps to avoid escalating too early:
 
-- **S-03e** (landed, currently being validated)
-  - ARM64-only adaptive burst policy:
-    - promotion now depends on dense retry bursts, not stale spaced retries.
-    - per-block epoch state added for burst recency logic.
-  - New telemetry fields:
-    - `burst_resets`
-    - `burst_promotions`
+- reset stale retry debt after stable execution periods.
+- require stronger repeated evidence before escalation.
+- add burst-awareness so spaced-out retries do not accumulate as if they were one hot burst.
 
-## Validation Model (How We Judge Pass/Fail)
+Why this matters:
+- fewer unnecessary expensive recompiles/escalations.
+- better balance between responsiveness and safety.
+- smoother behavior under mixed workloads.
 
-Primary gates:
-- `WL-05` hash lock unchanged.
-- `unexpected_noimm_without_bmask=0`.
-- no crash/hang or control-flow correctness issues in workload runs.
+### 3) Logging/telemetry made practical for long runs
 
-Secondary checks:
-- Q3 timedemo output consistency.
-- 3DMark99 completion/score trend.
-- churn telemetry deltas (`promote_no_immediates_per_dirty_hit`, defers, retry/burst counters).
+Default logging was moved to low-noise summary output.  
+Detailed tracing remains available only when explicitly enabled.
 
-## Current Runtime Baseline
+Why this matters:
+- avoids multi-GB logs in normal perf/regression runs.
+- keeps runs comparable and easier to parse.
+- still allows deep debugging when needed.
 
-- VM profile held at `266666666` (K6-2 baseline used for current wave checks).
-- Low-noise telemetry defaults:
+## Observed Impact So Far
+
+Across repeated Q3 + 3DMark99 + WL-05 runs:
+- stability gates remain clean.
+- WL-05 hash outputs remained locked (no drift).
+- safety marker `unexpected_noimm_without_bmask` stayed `0`.
+- churn promotion ratio dropped significantly versus older baseline:
+  - from about `0.014` to roughly `0.0011 - 0.0015` range in recent runs.
+- user-observed real-time emulation speed consistency improved in heavy scenes.
+
+## Validation Method
+
+Each candidate change is accepted only if:
+- Q3 timedemo finishes normally.
+- 3DMark99 full run finishes normally.
+- WL-05 quick/normal/smc hashes remain unchanged.
+- safety counters remain clean.
+
+## Current Runtime Profile
+
+- VM frequency currently held at `266666666`.
+- default telemetry environment:
   - `86BOX_NEW_DYNAREC_STATS=1`
   - `86BOX_NEW_DYNAREC_TELEMETRY=0`
   - `86BOX_A013_TRACE=0`
 
-## Tooling Improvements in Branch
+## Tooling Upgrades in This Branch
 
-- Telemetry launcher hardened for macOS launch reliability (`open -a` retries + fallback path).
-- Parser updated multiple times for new counters and cleaner S-lane-only views:
-  - `./scripts/dynarec/analyze-s03a-log.sh --s-only <current> [baseline]`
+- more reliable VM launch flow on macOS (retry + fallback behavior).
+- parser support for newer churn counters.
+- focused parser mode for churn-only review:
+  - `./scripts/dynarec/analyze-s03a-log.sh --s-only <current-log> [baseline-log]`
 
-## Current Status (As Of Now)
+## Where We Are Now
 
-- A-013 lane: **frozen** (accepted).
-- S-03c: **accepted**.
-- S-03d: **accepted**.
-- S-03e: **implemented and launched for validation**.
+- branch-path optimization work: stable and held.
+- churn-policy refinement work: active and progressing.
+- latest large code swing (adaptive burst-aware escalation): implemented and in validation.
 
-## Near-Term Next Steps
+## Next Steps
 
-1. Finish S-03e validation run(s) and lock/rollback based on gates.
-2. If stable, document S-lane closeout checkpoint.
-3. Then decide whether to:
-   - continue S-lane refinement, or
-   - move to the next major wave area.
-
+1. Complete validation of the newest churn-policy swing.
+2. If gates stay clean, lock it in docs as accepted baseline.
+3. Continue with next high-leverage code improvement before expanding test matrix further.
