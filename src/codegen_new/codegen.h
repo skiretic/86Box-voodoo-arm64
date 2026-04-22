@@ -38,6 +38,11 @@ typedef struct codeblock_t {
     uint16_t flags;
     uint8_t  ins;
     uint8_t  TOP;
+#if defined(__aarch64__) || defined(_M_ARM64)
+    /*S-03b ARM64-only: per-block retry counter used to delay NO_IMMEDIATES
+      promotion until churn repeats, reducing premature slow-immediate mode.*/
+    uint8_t  dirty_list_recompile_hits;
+#endif
     int      valid;
 
     /*Pointers for codeblock tree, used to search for blocks when hash lookup

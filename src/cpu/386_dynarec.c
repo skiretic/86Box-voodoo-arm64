@@ -69,8 +69,18 @@ static uint64_t dynarec_s03a_dirty_mask_conflicts    = 0;
 static uint64_t dynarec_s03a_dirty_list_hits         = 0;
 static uint64_t dynarec_s03a_promote_byte_mask       = 0;
 static uint64_t dynarec_s03a_promote_no_immediates   = 0;
+#if defined(__aarch64__) || defined(_M_ARM64)
+/*S-03b ARM64-only telemetry: counts delayed NO_IMMEDIATES promotions. */
+static uint64_t dynarec_s03b_defer_no_immediates     = 0;
+#endif
 static uint64_t dynarec_s03a_recompiled_execs        = 0;
 static uint64_t dynarec_s03a_recompile_rebuild_paths = 0;
+
+#if defined(__aarch64__) || defined(_M_ARM64)
+/*S-03b ARM64-only policy: require repeated BYTE_MASK dirty-list hits before
+  NO_IMMEDIATES promotion to avoid premature slow-immediate escalation. */
+#    define DYNAREC_S03B_NO_IMM_THRESHOLD 2
+#endif
 
 static int
 dynarec_s03a_env_on(const char *name)
@@ -102,6 +112,9 @@ dynarec_s03a_log_summary(const char *tag)
 
     pclog("DYNAREC_S03A_SUMMARY tag=%s exec_calls=%" PRIu64 " valid_hits=%" PRIu64 " dirty_conflicts=%" PRIu64
           " dirty_list_hits=%" PRIu64 " promote_byte_mask=%" PRIu64 " promote_no_immediates=%" PRIu64
+#if defined(__aarch64__) || defined(_M_ARM64)
+          " defer_no_immediates=%" PRIu64
+#endif
           " recompiled_execs=%" PRIu64 " rebuild_paths=%" PRIu64 "\n",
           tag,
           dynarec_s03a_exec_calls,
@@ -110,6 +123,9 @@ dynarec_s03a_log_summary(const char *tag)
           dynarec_s03a_dirty_list_hits,
           dynarec_s03a_promote_byte_mask,
           dynarec_s03a_promote_no_immediates,
+#if defined(__aarch64__) || defined(_M_ARM64)
+          dynarec_s03b_defer_no_immediates,
+#endif
           dynarec_s03a_recompiled_execs,
           dynarec_s03a_recompile_rebuild_paths);
 }
@@ -555,25 +571,56 @@ exec386_dynarec_dyn(void)
             const uint16_t flags_before = block->flags;
             const int had_byte_mask     = !!(block->flags & CODEBLOCK_BYTE_MASK);
             const int had_no_immediates = !!(block->flags & CODEBLOCK_NO_IMMEDIATES);
+            const char   *action         = "NONE";
+#if defined(__aarch64__) || defined(_M_ARM64)
+            const uint8_t retries_before = block->dirty_list_recompile_hits;
+#else
+            const uint8_t retries_before = 0;
+#endif
+            uint8_t retries_after        = retries_before;
 
             dynarec_s03a_dirty_list_hits++;
             block->flags &= ~CODEBLOCK_WAS_RECOMPILED;
             if (had_byte_mask) {
-                if (!had_no_immediates)
+                if (!had_no_immediates) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+                    /*S-03b ARM64-only: wait for repeated dirty-list BYTE_MASK
+                      hits before NO_IMMEDIATES promotion.*/
+                    block->dirty_list_recompile_hits++;
+                    retries_after = block->dirty_list_recompile_hits;
+                    if (block->dirty_list_recompile_hits >= DYNAREC_S03B_NO_IMM_THRESHOLD) {
+                        dynarec_s03a_promote_no_immediates++;
+                        block->flags |= CODEBLOCK_NO_IMMEDIATES;
+                        action = "NO_IMMEDIATES";
+                    } else {
+                        dynarec_s03b_defer_no_immediates++;
+                        action = "DEFER_NO_IMMEDIATES";
+                    }
+#else
                     dynarec_s03a_promote_no_immediates++;
-                block->flags |= CODEBLOCK_NO_IMMEDIATES;
+                    block->flags |= CODEBLOCK_NO_IMMEDIATES;
+                    action = "NO_IMMEDIATES";
+#endif
+                }
             } else {
+#if defined(__aarch64__) || defined(_M_ARM64)
+                block->dirty_list_recompile_hits = 0;
+                retries_after                    = 0;
+#endif
                 dynarec_s03a_promote_byte_mask++;
                 block->flags |= CODEBLOCK_BYTE_MASK;
+                action = "BYTE_MASK";
             }
 
             if (dynarec_s03a_telemetry_enabled) {
-                pclog("DYNAREC_S03A_TRANSITION phys=%08x pc=%08x dirty=1 action=%s flags_before=%04x flags_after=%04x\n",
+                pclog("DYNAREC_S03A_TRANSITION phys=%08x pc=%08x dirty=1 action=%s flags_before=%04x flags_after=%04x retries_before=%u retries_after=%u\n",
                       block->phys,
                       block->pc,
-                      had_byte_mask ? "NO_IMMEDIATES" : "BYTE_MASK",
+                      action,
                       (unsigned) flags_before,
-                      (unsigned) block->flags);
+                      (unsigned) block->flags,
+                      (unsigned) retries_before,
+                      (unsigned) retries_after);
             }
             dynarec_s03a_log_summary("transition");
         }
