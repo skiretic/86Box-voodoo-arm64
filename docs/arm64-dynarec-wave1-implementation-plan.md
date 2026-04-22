@@ -334,6 +334,37 @@ Secondary profile policy (optional):
   - no regression blocker observed for `A-013a+b`.
   - proceed to deeper `A-013c/d/e`.
 
+### A-013c/d/e Telemetry Gate (2026-04-21)
+- Regression run artifact root:
+  - `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/`
+- Guest workload gate:
+  - `MRUNALL` remained stable:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+  - Quake III timedemo: `1260 frames, 37.0 seconds: 34.0 fps`
+  - 3DMark99: `2644 3DMarks`, `5152 CPU 3DMarks`
+- Host telemetry/parsing (manual + parser agreed):
+  - `dirty_list_hits=21899`
+  - `promote_byte_mask=8274`
+  - `promote_no_immediates=193`
+  - `defer_no_immediates=309`
+  - `unexpected_noimm_without_bmask=0`
+  - `A013_PATH total=4980736`
+  - `A013_PATH call_rel=3693134`
+  - `A013_PATH jump_rel=786750`
+  - `A013_PATH call_abs_nonlocal=500852`
+  - `A013_PATH jump_abs_nonlocal=0`
+  - `A013_PATH call_abs_range=0`
+  - `A013_PATH jump_abs_range=0`
+  - `A013_PATH ratio_relative_total=0.899442`
+- Interpretation:
+  - S-03 safety counters remain healthy after `A-013c/d/e`.
+  - `A-013` achieved high relative-path adoption with zero range-fallback hits in this run.
+- Decision:
+  - `A-013c/d/e` passes current regression gate on locked workloads.
+  - proceed to remaining `A-013` deepening only if we need extra branch-shape tightening; otherwise prepare wave-1 closeout.
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`
