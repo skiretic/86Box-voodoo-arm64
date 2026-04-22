@@ -24,7 +24,9 @@
     - 3DMark99 full completed stable (no crash/hang/visual corruption), score captured for trend only.
     - Quake III demo four captured (`1260 frames, 37.4 seconds: 33.7 fps`).
   - `S-03a` and `S-03b` are now implemented/validated in downstream execution work.
-  - Current next execution slice is `A-013` per locked order.
+  - `A-013a+b` and extended `A-013c/d/e` telemetry work have now passed regression gates in downstream execution runs.
+  - Latest locked-run checkpoint: `2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2` with stable WL-05 totals and `A013_PATH` relative-adoption ratio `0.899442`.
+  - Current next execution slice is wave-1 closeout and optional residual `A-013` tightening only.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 
 ## Scope
