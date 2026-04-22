@@ -23,7 +23,7 @@
   - comment cleanup/compaction is allowed later, after behavior is validated and stable.
 
 ## Execution Status (Current)
-- Current branch/head: `ndr-analysis` @ `1b2185e94` (`S-03a` telemetry implementation in progress)
+- Current branch/head: `ndr-analysis` @ `working-tree` (`S-03b` implemented, validation completed; pending commit)
 
 ### Slice Status Table (Authoritative)
 | Slice | Status | Notes |
@@ -32,12 +32,12 @@
 | `S-02a` | Completed | `A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` landed. |
 | `S-02b` | Completed | `A-011` landed: bounded `host_arm64_mov_imm()` now tries `MOVN` and logical-immediate `ORR` before `MOVZ/MOVK` fallback. |
 | `S-02` overall | Completed | `S-02a` + `S-02b` code landed and validation gate passed (WL-05 + workload checks). |
-| `S-03` | In progress (`S-03a`) | Telemetry/counter plumbing underway; no policy behavior change in this phase. |
+| `S-03` | Completed | `S-03a` telemetry + `S-03b` ARM64-only delayed `NO_IMMEDIATES` policy implemented and validated. |
 | `A-013` | Not started | Must wait until `S-03` closure per locked order. |
 
 ### Order Lock (Do Not Skip)
 - Fixed order remains mandatory: `S-01` -> `S-02` -> `S-03` -> `A-013`.
-- Current executable next step is only: `S-03a` (observability/state plumbing), then `S-03b` policy behavior change.
+- Current executable next step is only: `A-013` (JIT-local call/jump path classification and relative branch emission).
 - No `A-013` implementation work may start before `S-03` is marked complete.
 
 ## Recommended Execution Order and Scope Boundaries
@@ -66,21 +66,23 @@ Original first patch (completed):
 - `S-01`: fixed `codegen_MMX_ENTER()` branch patching to use `block_write_data`.
 
 Recommended next patch:
-- `S-03a`: finalize state/observability support and host-log telemetry capture plumbing (no behavior change yet).
+- `A-013a`: JIT-local target classification helper + `host_arm64_call()` relative-path usage where in range.
 
 Recommended next files to edit:
-- `src/cpu/386_dynarec.c`
-- `src/codegen_new/codegen_block.c`
+- `src/codegen_new/codegen_allocator.c`
+- `src/codegen_new/codegen_allocator.h`
+- `src/codegen_new/codegen_backend_arm64_ops.c`
+- `src/codegen_new/codegen_backend_arm64_ops.h`
 
 Exact next commands for the next implementation session:
 ```bash
 cd /Users/anthony/projects/code/86Box-voodoo-arm64
 git rev-parse --abbrev-ref HEAD
 git rev-parse --short HEAD
-rg -n "S-03|S-03a|S-03b|BYTE_MASK|NO_IMMEDIATES|codegen_delete_random_block" docs/arm64-dynarec-wave1-implementation-plan.md docs/arm64-dynarec-investigation.md src/cpu/386_dynarec.c src/codegen_new/codegen_block.c
+rg -n "A-013|host_arm64_call|host_arm64_jump|codegen_exit_rout|allocator" docs/arm64-dynarec-wave1-implementation-plan.md docs/arm64-dynarec-investigation.md src/codegen_new/codegen_backend_arm64_ops.c src/codegen_new/codegen_allocator.c src/codegen_new/codegen_allocator.h
 sed -n '1,220p' docs/arm64-dynarec-wave1-implementation-plan.md
-sed -n '820,980p' src/cpu/386_dynarec.c
-sed -n '420,520p' src/codegen_new/codegen_block.c
+sed -n '1,260p' src/codegen_new/codegen_backend_arm64_ops.c
+sed -n '1,260p' src/codegen_new/codegen_allocator.c
 ```
 
 ## Cross-Slice Validation Framework
@@ -271,6 +273,42 @@ Secondary profile policy (optional):
 - Cross-arch safety note:
   - `S-02b` touched `src/codegen_new/codegen_backend_arm64_ops.c` under ARM64 build guard (`#if defined __aarch64__ || defined _M_ARM64`).
   - x86-64 backend behavior remains unchanged by this slice.
+
+### S-03 Validation Closeout (2026-04-21)
+- `S-03a` telemetry and launcher plumbing landed at commit `b9d3c2f48`.
+- `S-03b` code status:
+  - implemented in working tree (pending commit), guarded so policy/state changes are ARM64-only.
+  - touched files:
+    - `src/cpu/386_dynarec.c`
+    - `src/codegen_new/codegen.h`
+    - `src/codegen_new/codegen_block.c`
+  - non-ARM64 keeps baseline promotion behavior.
+- Host log used for validated run:
+  - `docs/perf-artifacts/arm64-dynarec/2026-04-21_19-44-43-Windows 98 Gaming PC-s03b/86box.log`
+- Parser/manual agreement (key churn metrics):
+  - `dirty_list_hits=19381`
+  - `promote_byte_mask=8795`
+  - `promote_no_immediates=272`
+  - `defer_no_immediates=415`
+  - transition actions:
+    - `BYTE_MASK=8795`
+    - `NO_IMMEDIATES=272`
+    - `DEFER_NO_IMMEDIATES=415`
+- Delta versus `S-03a` baseline log:
+  - `promote_no_immediates_delta=-18`
+  - `defer_no_immediates_delta=+415`
+  - `ratio_promote_no_immediates_per_dirty_hit_delta=-0.000536`
+  - `rebuild_paths_delta=-56291`
+- Correctness/stability gates from guest runs:
+  - `WL-05 MRUNALL` all modes unchanged and `status=OK`:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+  - Quake III timedemo: `1260 frames, 36.3 seconds: 34.7 fps`
+  - 3DMark99 full: `2686 3DMarks`, `5155 CPU 3DMarks`
+- Decision:
+  - `S-03` gate passes for wave-1 progression.
+  - next slice is `A-013`.
 
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
@@ -547,6 +585,12 @@ Secondary profile policy (optional):
   - include guardrails: if mismatch, abort test and treat as rollback signal.
 - Performance-check plan:
   - host-log churn observation (`recompile count`, `BYTE_MASK`/`NO_IMMEDIATES` transition frequency) using `DYNAREC_S03A_TRANSITION` and `DYNAREC_S03A_SUMMARY`.
+  - parser-required fields for decision:
+  - `ratio_promote_no_immediates_per_dirty_hit`
+  - `transitions_action_no_immediates`
+  - `transitions_action_defer_no_immediates`
+  - `S03_TAGS` (`transition` vs `periodic` mix sanity)
+  - `S03_RETRIES_HIST` (`before`/`after`) for escalation-threshold behavior evidence
 - Rollback criteria:
   - any self-modifying-code correctness anomaly, churn increase, or instability tied to policy change.
 
@@ -644,10 +688,11 @@ Secondary profile policy (optional):
 
 ## Next Execution Session Handoff
 - Start with telemetry capture run:
-  - `./scripts/dynarec/launch-vm-telemetry-run.sh s03a`
-  - capture printed `run_dir` and `logfile`
-  - run guest workloads, then review host log for `DYNAREC_S03A_*` lines
-- `S-03b` policy work must not start until `S-03a` telemetry review is complete.
+  - `A-013` implementation kickoff (no further `S-03` work unless regression appears):
+  - inspect target classification scope in:
+  - `src/codegen_new/codegen_allocator.c`
+  - `src/codegen_new/codegen_backend_arm64_ops.c`
+  - keep ARM64-only behavior guardrails for new `A-013` code paths.
 - Keep changes scoped to one slice at a time and do not overlap slice commits.
 - Do not reopen static investigation unless a slice hits a hard blocker.
 - Do not run benchmarking without explicit approval; runtime plans in this doc remain plan-level guidance.

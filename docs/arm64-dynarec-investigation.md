@@ -23,8 +23,9 @@
     - `WL-05` quick/normal/smc all `status=OK` with locked totals.
     - 3DMark99 full completed stable (no crash/hang/visual corruption), score captured for trend only.
     - Quake III demo four captured (`1260 frames, 37.4 seconds: 33.7 fps`).
-  - Current next execution slice is `S-03a` (state/observability plumbing) per locked order.
-  - `S-03a` implementation intent: add host-side churn telemetry counters/log lines (`DYNAREC_S03A_*`) first, then evaluate policy changes in `S-03b`.
+  - `S-03a` and `S-03b` are now implemented/validated in downstream execution work.
+  - Current next execution slice is `A-013` per locked order.
+  - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
