@@ -561,6 +561,35 @@ Secondary profile policy (optional):
   - `RUN_TAG=a013h-bcond-r2 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
   - do not launch in this step (operator requested sleep hold).
 
+### A-013h Guarded Consolidation Result (2026-04-22)
+- Run:
+  - `a013h-bcond-r2`: `docs/perf-artifacts/arm64-dynarec/2026-04-22_16-30-52-Windows 98 Gaming PC-a013h-bcond-r2/`
+- Guest markers:
+  - 3DMark99: `2450 3DMarks`, `5893 CPU 3DMarks`
+  - `WL-05` locked totals unchanged:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+- Host telemetry summary:
+  - `unexpected_noimm_without_bmask=0`
+  - A-013 counters remained healthy at scale:
+    - `call_rel=3478667`, `call_abs_nonlocal=453496`
+    - `cbnz_rel19=237895`, `cbnz_rel26=3488609`, `cbnz_abs_nonlocal=0`, `cbnz_abs_range=0`
+    - `beq_rel19=20147`, `beq_rel26=297379`, `beq_abs_nonlocal=0`, `beq_abs_range=0`
+    - `bcond_rel19=766867`, `bcond_rel26=552784`, `bcond_total=1319651`
+  - log volume remained low-noise (`86box.log` ~`7.2M`).
+- Delta vs `a013h-bcond-r1`:
+  - no safety regression (`unexpected_noimm_without_bmask` stayed `0`).
+  - `bcond_total` near-flat (`1321799 -> 1319651`), with small rel19/rel26 redistribution only.
+  - no BEQ/CBNZ absolute fallback regression (all absolute fallback counters stayed `0`).
+- Operator real-world observation:
+  - telemetry-wrapper run felt slightly slower than expected.
+  - subsequent normal double-click launch (no telemetry wrapper flow) felt good in real-world play.
+- Decision:
+  - keep `a79adfceb` guard-hardening in place.
+  - treat wrapper-vs-normal-launch feel difference as expected run-path variance unless repeated objective regressions appear.
+  - continue on active `266 MHz` baseline.
+
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
 2. `WL-01-3dmark99-full`

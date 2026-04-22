@@ -71,6 +71,14 @@
     - tightened ARM64 patch-site detection so `bcond` collapse/telemetry only triggers on the exact helper-emitted `B.cond +8` + trailing `B` template.
     - fallback branch patch remains unchanged; safety intent is stricter matching, not broader rewriting.
     - build/sign validated; telemetry prep command staged for next run tag `a013h-bcond-r2`.
+  - `A-013h` guarded consolidation run result:
+    - `run_tag=a013h-bcond-r2` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_16-30-52-Windows 98 Gaming PC-a013h-bcond-r2/`
+    - guest marker: `3DMark99 2450`, `CPU 5893`; `WL-05` hashes stayed locked.
+    - safety marker held (`unexpected_noimm_without_bmask=0`).
+    - `bcond_total` stayed effectively flat vs `r1` (`1321799 -> 1319651`) with only small rel19/rel26 redistribution.
+    - BEQ/CBNZ absolute fallbacks remained zero.
+    - operator reported telemetry-wrapper run felt a bit slower, but normal double-click launch felt good in real-world use.
+    - decision: keep guard-hardening change; continue fixed `266666666` baseline.
   - Tooling follow-through now included in this same checkpoint:
     - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
