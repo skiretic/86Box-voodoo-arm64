@@ -40,15 +40,46 @@ APP_PATH="$(dirname "$(dirname "$(dirname "${BIN}")")")"
 /usr/bin/pkill -f "${ROOT_DIR}/build/src/86Box.app/Contents/MacOS/86Box" >/dev/null 2>&1 || true
 /usr/bin/pkill -f '/Applications/86box/86Box.app/Contents/MacOS/86Box' >/dev/null 2>&1 || true
 
-env \
-  86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
-  86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
-  86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
-  open -n -a "${APP_PATH}" --args \
-  "${VM_FLAG_1}" "${VM_PATH}" \
-  "${VM_FLAG_2}" "${VM_NAME}" \
-  "${LOG_FLAG}" "${LOGFILE}" \
-  >/tmp/86box-launch-telemetry.log 2>&1
+LAUNCH_LOG="/tmp/86box-launch-telemetry.log"
+: > "${LAUNCH_LOG}"
+
+launch_with_open() {
+  local app_target="$1"
+
+  env \
+    86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
+    86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
+    86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
+    open -n -a "${app_target}" --args \
+    "${VM_FLAG_1}" "${VM_PATH}" \
+    "${VM_FLAG_2}" "${VM_NAME}" \
+    "${LOG_FLAG}" "${LOGFILE}" \
+    >>"${LAUNCH_LOG}" 2>&1
+}
+
+launch_with_bin() {
+  env \
+    86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
+    86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
+    86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
+    "${BIN}" \
+    "${VM_FLAG_1}" "${VM_PATH}" \
+    "${VM_FLAG_2}" "${VM_NAME}" \
+    "${LOG_FLAG}" "${LOGFILE}" \
+    >>"${LAUNCH_LOG}" 2>&1 &
+}
+
+# Preferred path: LaunchServices-backed app open.
+if ! launch_with_open "${APP_PATH}"; then
+  sleep 1
+  # Retry once for intermittent LaunchServices flakiness after rebuild/sign.
+  if ! launch_with_open "${APP_PATH}"; then
+    # Fallback to app-name resolution, then direct binary launch as last resort.
+    if ! launch_with_open "86Box"; then
+      launch_with_bin
+    fi
+  fi
+fi
 
 PID=""
 
@@ -66,7 +97,7 @@ if [ -z "${PID}" ]; then
   echo "run_dir=${RUN_DIR}"
   echo "logfile=${LOGFILE}"
   echo "build_log=/tmp/86box-build-sign.log"
-  echo "launch_log=/tmp/86box-launch-telemetry.log"
+  echo "launch_log=${LAUNCH_LOG}"
   echo "error=process_not_found"
   exit 1
 fi
