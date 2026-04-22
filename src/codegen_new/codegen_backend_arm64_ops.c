@@ -325,6 +325,7 @@ static void a013_log_summary_if_needed(void);
 static void a013_log_path_event_if_needed(const char *op, const char *path, const uint8_t *branch_src, const void *dst_addr, uint64_t event_total);
 static void a013_record_cbnz_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
 static void a013_record_beq_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
+static void a013_record_bcond_patch_path(const char *path, const uint8_t *branch_src, const void *dst_addr);
 
 void
 host_arm64_ADD_IMM(codeblock_t *block, int dst_reg, int src_n_reg, uint32_t imm_data)
@@ -590,8 +591,32 @@ host_arm64_BVS_(codeblock_t *block)
 void
 host_arm64_branch_set_offset(uint32_t *opcode, void *dest)
 {
-    int offset = (uintptr_t) dest - (uintptr_t) opcode;
-    *opcode |= OFFSET26(offset);
+    uint32_t *cond_opcode = opcode - 1;
+    int       offset26    = (int) ((uintptr_t) dest - (uintptr_t) opcode);
+
+    a013_ensure_telemetry_env();
+
+    /* A-013h:
+       Most branch patch sites come from B.cond-skip + B templates. When final
+       target is imm19-reachable from the conditional instruction, collapse to a
+       single direct B.cond and turn trailing B into NOP. */
+    if (((*cond_opcode) & 0xff000010u) == OPCODE_BCOND) {
+        uint8_t *cond_src = (uint8_t *) cond_opcode;
+
+        if (codegen_allocator_can_branch_imm19(cond_src, dest)) {
+            uint32_t inv_cond = (*cond_opcode) & 0xf;
+            uint32_t cond     = inv_cond ^ 1u;
+            int      offset19 = (int) ((uintptr_t) dest - (uintptr_t) cond_opcode);
+
+            *cond_opcode = OPCODE_BCOND | (cond & 0xfu) | OFFSET19(offset19);
+            *opcode      = OPCODE_NOP;
+            a013_record_bcond_patch_path("rel19", cond_src, dest);
+            return;
+        }
+    }
+
+    *opcode = OPCODE_B | OFFSET26(offset26);
+    a013_record_bcond_patch_path("rel26", (uint8_t *) cond_opcode, dest);
 }
 
 void
@@ -1592,6 +1617,9 @@ static uint64_t a013_beq_rel26         = 0;
 static uint64_t a013_beq_abs_nonlocal  = 0;
 static uint64_t a013_beq_abs_range     = 0;
 static uint64_t a013_beq_events        = 0;
+static uint64_t a013_bcond_rel19       = 0;
+static uint64_t a013_bcond_rel26       = 0;
+static uint64_t a013_bcond_events      = 0;
 static uint64_t a013_path_events       = 0;
 
 static int
@@ -1630,7 +1658,9 @@ a013_log_summary_if_needed(void)
           " cbnz_rel19=%" PRIu64 " cbnz_rel26=%" PRIu64 " cbnz_abs_nonlocal=%" PRIu64
           " cbnz_abs_range=%" PRIu64 " cbnz_total=%" PRIu64
           " beq_rel19=%" PRIu64 " beq_rel26=%" PRIu64 " beq_abs_nonlocal=%" PRIu64
-          " beq_abs_range=%" PRIu64 " beq_total=%" PRIu64 " total=%" PRIu64 "\n",
+          " beq_abs_range=%" PRIu64 " beq_total=%" PRIu64
+          " bcond_rel19=%" PRIu64 " bcond_rel26=%" PRIu64 " bcond_total=%" PRIu64
+          " total=%" PRIu64 "\n",
           a013_call_rel,
           a013_call_abs_nonlocal,
           a013_call_abs_range,
@@ -1647,6 +1677,9 @@ a013_log_summary_if_needed(void)
           a013_beq_abs_nonlocal,
           a013_beq_abs_range,
           a013_beq_events,
+          a013_bcond_rel19,
+          a013_bcond_rel26,
+          a013_bcond_events,
           a013_path_events);
 }
 
@@ -1695,6 +1728,20 @@ a013_record_beq_path(const char *path, const uint8_t *branch_src, const void *ds
     a013_beq_events++;
     a013_path_events++;
     a013_log_path_event_if_needed("beq", path, branch_src, dst_addr, a013_beq_events);
+    a013_log_summary_if_needed();
+}
+
+static void
+a013_record_bcond_patch_path(const char *path, const uint8_t *branch_src, const void *dst_addr)
+{
+    if (!strcmp(path, "rel19"))
+        a013_bcond_rel19++;
+    else
+        a013_bcond_rel26++;
+
+    a013_bcond_events++;
+    a013_path_events++;
+    a013_log_path_event_if_needed("bcond", path, branch_src, dst_addr, a013_bcond_events);
     a013_log_summary_if_needed();
 }
 

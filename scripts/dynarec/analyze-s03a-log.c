@@ -60,9 +60,13 @@ typedef struct {
     uint64_t beq_abs_nonlocal;
     uint64_t beq_abs_range;
     uint64_t beq_total;
+    uint64_t bcond_rel19;
+    uint64_t bcond_rel26;
+    uint64_t bcond_total;
     uint64_t total;
     int      has_cbnz_fields;
     int      has_beq_fields;
+    int      has_bcond_fields;
     int      saw;
 } a013_path_t;
 
@@ -161,6 +165,7 @@ update_a013_from_line(const char *line, a013_path_t *a)
     uint64_t v;
     int      saw_cbnz = 0;
     int      saw_beq  = 0;
+    int      saw_bcond = 0;
 
     if (!strstr(line, "A013_PATH_SUMMARY"))
         return;
@@ -217,12 +222,26 @@ update_a013_from_line(const char *line, a013_path_t *a)
         a->beq_total = v;
         saw_beq      = 1;
     }
+    if (extract_u64(line, "bcond_rel19", &v)) {
+        a->bcond_rel19 = v;
+        saw_bcond      = 1;
+    }
+    if (extract_u64(line, "bcond_rel26", &v)) {
+        a->bcond_rel26 = v;
+        saw_bcond      = 1;
+    }
+    if (extract_u64(line, "bcond_total", &v)) {
+        a->bcond_total = v;
+        saw_bcond      = 1;
+    }
     if (extract_u64(line, "total", &v))
         a->total = v;
     if (saw_cbnz)
         a->has_cbnz_fields = 1;
     if (saw_beq)
         a->has_beq_fields = 1;
+    if (saw_bcond)
+        a->has_bcond_fields = 1;
     a->saw = 1;
 }
 
@@ -398,15 +417,19 @@ print_a013(const char *label, const a013_path_t *a)
     double beq_rel_ratio    = 0.0;
     double beq_abs_ratio    = 0.0;
     double beq_range_ratio  = 0.0;
+    double bcond_rel_ratio  = 0.0;
+    double bcond_abs_ratio  = 0.0;
     uint64_t rel_total;
     uint64_t abs_total;
     uint64_t cbnz_rel_total;
     uint64_t beq_rel_total;
+    uint64_t bcond_rel_total;
 
     rel_total = a->call_rel + a->jump_rel;
     abs_total = a->call_abs_nonlocal + a->call_abs_range + a->jump_abs_nonlocal + a->jump_abs_range;
     cbnz_rel_total = a->cbnz_rel19 + a->cbnz_rel26;
     beq_rel_total  = a->beq_rel19 + a->beq_rel26;
+    bcond_rel_total = a->bcond_rel19 + a->bcond_rel26;
     if (a->total) {
         rel_ratio   = (double) rel_total / (double) a->total;
         abs_ratio   = (double) abs_total / (double) a->total;
@@ -421,6 +444,10 @@ print_a013(const char *label, const a013_path_t *a)
         beq_rel_ratio   = (double) beq_rel_total / (double) a->beq_total;
         beq_abs_ratio   = (double) (a->beq_abs_nonlocal + a->beq_abs_range) / (double) a->beq_total;
         beq_range_ratio = (double) a->beq_abs_range / (double) a->beq_total;
+    }
+    if (a->bcond_total) {
+        bcond_rel_ratio = (double) bcond_rel_total / (double) a->bcond_total;
+        bcond_abs_ratio = 1.0 - bcond_rel_ratio;
     }
 
     printf("A013_PATH %s\n", label);
@@ -444,6 +471,10 @@ print_a013(const char *label, const a013_path_t *a)
     printf("  beq_abs_nonlocal=%" PRIu64 "\n", a->beq_abs_nonlocal);
     printf("  beq_abs_range=%" PRIu64 "\n", a->beq_abs_range);
     printf("  beq_total=%" PRIu64 "\n", a->beq_total);
+    printf("  bcond_fields_seen=%s\n", a->has_bcond_fields ? "yes" : "no");
+    printf("  bcond_rel19=%" PRIu64 "\n", a->bcond_rel19);
+    printf("  bcond_rel26=%" PRIu64 "\n", a->bcond_rel26);
+    printf("  bcond_total=%" PRIu64 "\n", a->bcond_total);
     printf("  ratio_relative_total=%.6f\n", rel_ratio);
     printf("  ratio_absolute_total=%.6f\n", abs_ratio);
     printf("  ratio_abs_range_total=%.6f\n", range_ratio);
@@ -453,6 +484,8 @@ print_a013(const char *label, const a013_path_t *a)
     printf("  ratio_beq_relative_total=%.6f\n", beq_rel_ratio);
     printf("  ratio_beq_absolute_total=%.6f\n", beq_abs_ratio);
     printf("  ratio_beq_abs_range_total=%.6f\n", beq_range_ratio);
+    printf("  ratio_bcond_relative_total=%.6f\n", bcond_rel_ratio);
+    printf("  ratio_bcond_absolute_total=%.6f\n", bcond_abs_ratio);
 }
 
 static void
@@ -488,6 +521,8 @@ print_a013_delta(const a013_path_t *base, const a013_path_t *cur)
     double   cur_cbnz_rel_ratio  = 0.0;
     double   base_beq_rel_ratio  = 0.0;
     double   cur_beq_rel_ratio   = 0.0;
+    double   base_bcond_rel_ratio = 0.0;
+    double   cur_bcond_rel_ratio  = 0.0;
 
     base_rel = base->call_rel + base->jump_rel;
     cur_rel  = cur->call_rel + cur->jump_rel;
@@ -503,6 +538,10 @@ print_a013_delta(const a013_path_t *base, const a013_path_t *cur)
         base_beq_rel_ratio = (double) (base->beq_rel19 + base->beq_rel26) / (double) base->beq_total;
     if (cur->beq_total)
         cur_beq_rel_ratio = (double) (cur->beq_rel19 + cur->beq_rel26) / (double) cur->beq_total;
+    if (base->bcond_total)
+        base_bcond_rel_ratio = (double) (base->bcond_rel19 + base->bcond_rel26) / (double) base->bcond_total;
+    if (cur->bcond_total)
+        cur_bcond_rel_ratio = (double) (cur->bcond_rel19 + cur->bcond_rel26) / (double) cur->bcond_total;
 
     printf("A013_DELTA baseline_to_current\n");
     printf("  call_rel_delta=%" PRId64 "\n", (int64_t) cur->call_rel - (int64_t) base->call_rel);
@@ -525,6 +564,11 @@ print_a013_delta(const a013_path_t *base, const a013_path_t *cur)
         printf("  beq_abs_nonlocal_delta=%" PRId64 "\n", (int64_t) cur->beq_abs_nonlocal - (int64_t) base->beq_abs_nonlocal);
         printf("  beq_abs_range_delta=%" PRId64 "\n", (int64_t) cur->beq_abs_range - (int64_t) base->beq_abs_range);
         printf("  ratio_beq_relative_total_delta=%.6f\n", cur_beq_rel_ratio - base_beq_rel_ratio);
+    }
+    if (cur->has_bcond_fields || base->has_bcond_fields) {
+        printf("  bcond_rel19_delta=%" PRId64 "\n", (int64_t) cur->bcond_rel19 - (int64_t) base->bcond_rel19);
+        printf("  bcond_rel26_delta=%" PRId64 "\n", (int64_t) cur->bcond_rel26 - (int64_t) base->bcond_rel26);
+        printf("  ratio_bcond_relative_total_delta=%.6f\n", cur_bcond_rel_ratio - base_bcond_rel_ratio);
     }
 }
 
