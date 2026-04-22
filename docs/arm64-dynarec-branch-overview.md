@@ -53,6 +53,25 @@ Why this matters:
 - keeps runs comparable and easier to parse.
 - still allows deep debugging when needed.
 
+## Key Commits By Improvement
+
+### Branch/call-path optimization improvements
+- `69ea86118` — switched to compact default telemetry policy (summary-first) for path stats.
+- `a89166718` — expanded conditional branch shaping (`BEQ`, broader nonlocal-relative branch eligibility).
+- `07e0914e0` — broadened conditional patch-path shaping through shared branch patch path.
+- `a79adfceb` — hardened branch-template guard matching to avoid accidental rewrites.
+- `c3776d99c` — added guarded `TBZ/TBNZ` patch-path shaping and related counters.
+
+### Recompile churn policy improvements
+- `318688e58` — retry-debt decay during stable execution (`retry_resets` telemetry added).
+- `5a167d5c7` — raised escalation threshold from `2` to `3`.
+- `79580357a` — added adaptive burst-aware escalation (`burst_resets`, `burst_promotions`).
+
+### Tooling and telemetry usability improvements
+- `5036321f4` — hardened telemetry launcher with retries/fallback behavior.
+- `2012d0f5a` — added parser `--s-only` mode for churn-focused output.
+- `4b57a2f59` — fixed parser handling of A-path totals for reliable comparisons.
+
 ## Observed Impact So Far
 
 Across repeated Q3 + 3DMark99 + WL-05 runs:
