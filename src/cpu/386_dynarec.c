@@ -62,6 +62,8 @@ int cpu_end_block_after_ins = 0;
 static int dynarec_s03a_env_init          = 0;
 static int dynarec_s03a_stats_enabled     = 0;
 static int dynarec_s03a_telemetry_enabled = 0;
+/* Low-noise default: periodic summaries at 2^20 exec calls. */
+#define DYNAREC_S03A_PERIODIC_MASK ((1u << 20) - 1u)
 
 static uint64_t dynarec_s03a_exec_calls              = 0;
 static uint64_t dynarec_s03a_valid_block_hits        = 0;
@@ -875,7 +877,7 @@ exec386_dynarec_dyn(void)
 #    endif
 
     /* Keep log volume bounded while still providing progress snapshots for long runs. */
-    if ((dynarec_s03a_exec_calls & 0x3ffu) == 0)
+    if ((dynarec_s03a_exec_calls & DYNAREC_S03A_PERIODIC_MASK) == 0)
         dynarec_s03a_log_summary("periodic");
 }
 
