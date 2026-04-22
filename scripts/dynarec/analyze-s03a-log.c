@@ -14,9 +14,11 @@ typedef struct {
     uint64_t promote_byte_mask;
     uint64_t promote_no_immediates;
     uint64_t defer_no_immediates;
+    uint64_t retry_resets;
     uint64_t recompiled_execs;
     uint64_t rebuild_paths;
     int      has_defer_field;
+    int      has_retry_resets_field;
     int      saw_summary;
 } summary_t;
 
@@ -288,6 +290,10 @@ update_summary_from_line(const char *line, summary_t *s)
         s->defer_no_immediates = v;
         s->has_defer_field     = 1;
     }
+    if (extract_u64(line, "retry_resets", &v)) {
+        s->retry_resets          = v;
+        s->has_retry_resets_field = 1;
+    }
     if (extract_u64(line, "recompiled_execs", &v))
         s->recompiled_execs = v;
     if (extract_u64(line, "rebuild_paths", &v))
@@ -378,6 +384,8 @@ print_report(const char *label, const summary_t *s, const transitions_t *t)
     printf("  promote_no_immediates=%" PRIu64 "\n", s->promote_no_immediates);
     if (s->has_defer_field)
         printf("  defer_no_immediates=%" PRIu64 "\n", s->defer_no_immediates);
+    if (s->has_retry_resets_field)
+        printf("  retry_resets=%" PRIu64 "\n", s->retry_resets);
     printf("  recompiled_execs=%" PRIu64 "\n", s->recompiled_execs);
     printf("  rebuild_paths=%" PRIu64 "\n", s->rebuild_paths);
     printf("  transitions_total=%" PRIu64 "\n", t->total);
@@ -538,6 +546,8 @@ print_delta(const summary_t *base, const summary_t *cur, const transitions_t *ba
     printf("  promote_no_immediates_delta=%" PRId64 "\n", (int64_t) cur->promote_no_immediates - (int64_t) base->promote_no_immediates);
     if (cur->has_defer_field || base->has_defer_field)
         printf("  defer_no_immediates_delta=%" PRId64 "\n", (int64_t) cur->defer_no_immediates - (int64_t) base->defer_no_immediates);
+    if (cur->has_retry_resets_field || base->has_retry_resets_field)
+        printf("  retry_resets_delta=%" PRId64 "\n", (int64_t) cur->retry_resets - (int64_t) base->retry_resets);
     printf("  rebuild_paths_delta=%" PRId64 "\n", (int64_t) cur->rebuild_paths - (int64_t) base->rebuild_paths);
     printf("  transitions_total_delta=%" PRId64 "\n", (int64_t) cur_t->total - (int64_t) base_t->total);
     printf("  transitions_no_immediates_delta=%" PRId64 "\n", (int64_t) cur_t->action_no_immediates - (int64_t) base_t->action_no_immediates);

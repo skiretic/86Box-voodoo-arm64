@@ -95,6 +95,35 @@ S-03c rollback triggers:
 - any nonzero `unexpected_noimm_without_bmask`.
 - materially higher `promote_no_immediates` churn with no compensating stability/perf gain.
 
+### S-03c Retry-Decay Implementation (No-Launch Prep) (2026-04-22)
+Change summary:
+- Added ARM64-only retry-state decay in `exec386_dynarec_dyn()`:
+  - when a `BYTE_MASK` block is executing stably outside the dirty list and not yet in `NO_IMMEDIATES`, clear stale `dirty_list_recompile_hits`.
+  - intent: prevent distant, non-consecutive dirty events from inheriting old retry debt and prematurely promoting `NO_IMMEDIATES`.
+- Added ARM64-only summary counter:
+  - `retry_resets=<N>` in `DYNAREC_S03A_SUMMARY`.
+- Updated parser to read/print/delta the new field:
+  - `retry_resets`
+  - `retry_resets_delta`
+
+Validation criteria:
+- Build/sign passes.
+- `--s-only` parser output includes `retry_resets` on new logs.
+- Existing gates still hold: `WL-05` unchanged, `unexpected_noimm_without_bmask=0`.
+
+Rollback triggers:
+- Any correctness issue linked to block recompilation policy.
+- Unexpected rise in `promote_no_immediates_per_dirty_hit` with no measurable stability/perf benefit.
+- Any safety marker regression (`unexpected_noimm_without_bmask` nonzero).
+
+Exact commands (prep + verify, no VM launch):
+```bash
+cd /Users/anthony/projects/code/86Box-voodoo-arm64
+git status --short --branch
+./scripts/build-and-sign.sh
+./scripts/dynarec/analyze-s03a-log.sh --s-only "docs/perf-artifacts/arm64-dynarec/2026-04-22_16-55-55-Windows 98 Gaming PC-a013i-tbxz-r1/86box.log" "docs/perf-artifacts/arm64-dynarec/2026-04-21_19-44-43-Windows 98 Gaming PC-s03b/86box.log.gz"
+```
+
 ## Cross-Slice Validation Framework
 
 ### Build/Sign Gate (Required for every slice)

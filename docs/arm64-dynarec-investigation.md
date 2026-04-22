@@ -97,6 +97,10 @@
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
   - Current next execution slice shifts back to `S-*` lane work: post-wave churn optimization at fixed `266 MHz`.
   - Churn telemetry remains active for rollback guardrails and becomes the active implementation focus.
+  - `S-03c` kickoff (no-launch prep) is now in progress:
+    - ARM64-only retry-state decay added so stale dirty-list retry debt is cleared after stable non-dirty-list execution.
+    - new `DYNAREC_S03A_SUMMARY` field `retry_resets=` added for observability.
+    - parser updated to print/delta `retry_resets` while keeping backward compatibility on old logs.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
