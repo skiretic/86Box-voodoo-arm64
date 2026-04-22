@@ -23,7 +23,7 @@
   - comment cleanup/compaction is allowed later, after behavior is validated and stable.
 
 ## Execution Status (Current)
-- Current branch/head: `ndr-analysis` @ `working-tree` (`A-013` closeout accepted through `A-013i`; preparing post-`A-*` lane)
+- Current branch/head: `ndr-analysis` @ `working-tree` (`A-013` frozen at `A-013i`; `S-03c` retry-decay validated in `r1/r2`)
 
 ### Slice Status Table (Authoritative)
 | Slice | Status | Notes |
@@ -32,7 +32,7 @@
 | `S-02a` | Completed | `A-012` direct imm-store hooks + `CODEGEN_BACKEND_HAS_MOV_IMM` landed. |
 | `S-02b` | Completed | `A-011` landed: bounded `host_arm64_mov_imm()` now tries `MOVN` and logical-immediate `ORR` before `MOVZ/MOVK` fallback. |
 | `S-02` overall | Completed | `S-02a` + `S-02b` code landed and validation gate passed (WL-05 + workload checks). |
-| `S-03` | Completed | `S-03a` telemetry + `S-03b` ARM64-only delayed `NO_IMMEDIATES` policy implemented and validated. |
+| `S-03` | Completed + follow-on tuned | `S-03a` telemetry + `S-03b` delayed `NO_IMMEDIATES` + `S-03c` ARM64-only retry-decay validated (`r1/r2`) with safety gates intact. |
 | `A-013` | Completed (frozen at `A-013i`) | Relative branch/call shaping stack completed through `BL/B`, `CBNZ`, `BEQ`, shared `B.cond` patch path, and guarded `TBZ/TBNZ` patch path; gates passed with locked WL-05 hashes and safety markers. |
 
 ### Order Lock (Do Not Skip)
@@ -122,6 +122,62 @@ cd /Users/anthony/projects/code/86Box-voodoo-arm64
 git status --short --branch
 ./scripts/build-and-sign.sh
 ./scripts/dynarec/analyze-s03a-log.sh --s-only "docs/perf-artifacts/arm64-dynarec/2026-04-22_16-55-55-Windows 98 Gaming PC-a013i-tbxz-r1/86box.log" "docs/perf-artifacts/arm64-dynarec/2026-04-21_19-44-43-Windows 98 Gaming PC-s03b/86box.log.gz"
+```
+
+### S-03c Result Checkpoint (R1/R2) (2026-04-22)
+- Runs:
+  - `s03c-retry-decay-r1`: `docs/perf-artifacts/arm64-dynarec/2026-04-22_17-36-19-Windows 98 Gaming PC-s03c-retry-decay-r1/`
+  - `s03c-retry-decay-r2`: `docs/perf-artifacts/arm64-dynarec/2026-04-22_17-51-22-Windows 98 Gaming PC-s03c-retry-decay-r2/`
+- Guest markers:
+  - `r1` Q3 timedemo: `1260 frames, 36.5 seconds: 34.5 fps`
+  - `r2` Q3 timedemo: `1260 frames, 36.5 seconds: 34.5 fps`
+  - `r2` 3DMark99: `2460 3DMarks`, `5873 CPU 3DMarks`
+  - `WL-05` locked totals unchanged in both runs:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+- Host telemetry summary:
+  - safety marker held in both runs: `unexpected_noimm_without_bmask=0`
+  - new `S-03c` counter active:
+    - `r1 retry_resets=7106`
+    - `r2 retry_resets=7242`
+  - churn signal vs `a013i-tbxz-r1` baseline:
+    - `ratio_promote_no_immediates_per_dirty_hit`:
+      - baseline `0.009377`
+      - `r1 0.001379`
+      - `r2 0.001507`
+  - `r2` repeatability vs `r1`:
+    - ratio delta `+0.000128` (small; still far below baseline)
+    - no new safety regressions.
+- Decision:
+  - lock `S-03c` as stable at current `266666666` profile.
+  - keep ARM64-only retry-decay change.
+  - proceed to next S-lane tuning slice (`S-03d`) without reopening `A-*`.
+
+### S-03d Next Slice Prep (No-Launch) (2026-04-22)
+Change intent:
+- tune delayed `NO_IMMEDIATES` escalation threshold for ARM64-only churn behavior:
+  - raise `DYNAREC_S03B_NO_IMM_THRESHOLD` from `2` to `3`.
+  - keep all x86-64 behavior unchanged.
+  - keep low-noise telemetry defaults.
+
+Validation criteria:
+- `WL-05` hashes unchanged.
+- `unexpected_noimm_without_bmask=0`.
+- `ratio_promote_no_immediates_per_dirty_hit` not materially higher than `S-03c r1/r2` lock range.
+- no crash/hang regression in Q3/3DMark flow.
+
+Rollback triggers:
+- any safety marker regression.
+- any WL-05 hash mismatch.
+- clear churn regression (for example promotion ratio spike with no observable stability gain).
+
+Exact no-launch prep commands:
+```bash
+cd /Users/anthony/projects/code/86Box-voodoo-arm64
+git status --short --branch
+rg -n "DYNAREC_S03B_NO_IMM_THRESHOLD|dirty_list_recompile_hits|retry_resets" src/cpu/386_dynarec.c src/codegen_new/codegen.h scripts/dynarec/analyze-s03a-log.c
+./scripts/build-and-sign.sh
 ```
 
 ## Cross-Slice Validation Framework
