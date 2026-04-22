@@ -77,6 +77,12 @@ static uint64_t dynarec_s03b_defer_no_immediates     = 0;
 /*S-03c ARM64-only telemetry: counts retry-state resets after stable execution.
   This validates that stale retry debt is being cleared before future churn.*/
 static uint64_t dynarec_s03c_retry_resets            = 0;
+/*S-03e ARM64-only telemetry: burst-aware escalation observability. */
+static uint64_t dynarec_s03e_burst_resets            = 0;
+static uint64_t dynarec_s03e_burst_promotions        = 0;
+/*S-03e ARM64-only epoch: monotonically advances on dirty-list transitions so
+  per-block retry state can distinguish dense bursts from stale retries. */
+static uint32_t dynarec_s03e_dirty_epoch             = 0;
 #endif
 static uint64_t dynarec_s03a_recompiled_execs        = 0;
 static uint64_t dynarec_s03a_recompile_rebuild_paths = 0;
@@ -87,6 +93,9 @@ static uint64_t dynarec_s03a_recompile_rebuild_paths = 0;
 /*S-03d tuning: raise threshold to 3 consecutive dirty-list retries so transient
   churn is more likely to recover via retry-decay before forcing NO_IMMEDIATES.*/
 #    define DYNAREC_S03B_NO_IMM_THRESHOLD 3
+/*S-03e tuning: retry bursts must stay temporally dense; large gaps reset burst
+  accumulation instead of carrying stale debt into later promotions.*/
+#    define DYNAREC_S03E_BURST_GAP_MAX 64
 #endif
 
 static int
@@ -120,7 +129,8 @@ dynarec_s03a_log_summary(const char *tag)
     pclog("DYNAREC_S03A_SUMMARY tag=%s exec_calls=%" PRIu64 " valid_hits=%" PRIu64 " dirty_conflicts=%" PRIu64
           " dirty_list_hits=%" PRIu64 " promote_byte_mask=%" PRIu64 " promote_no_immediates=%" PRIu64
 #if defined(__aarch64__) || defined(_M_ARM64)
-          " defer_no_immediates=%" PRIu64 " retry_resets=%" PRIu64
+          " defer_no_immediates=%" PRIu64 " retry_resets=%" PRIu64 " burst_resets=%" PRIu64
+          " burst_promotions=%" PRIu64
 #endif
           " recompiled_execs=%" PRIu64 " rebuild_paths=%" PRIu64 "\n",
           tag,
@@ -133,6 +143,8 @@ dynarec_s03a_log_summary(const char *tag)
 #if defined(__aarch64__) || defined(_M_ARM64)
           dynarec_s03b_defer_no_immediates,
           dynarec_s03c_retry_resets,
+          dynarec_s03e_burst_resets,
+          dynarec_s03e_burst_promotions,
 #endif
           dynarec_s03a_recompiled_execs,
           dynarec_s03a_recompile_rebuild_paths);
@@ -582,6 +594,7 @@ exec386_dynarec_dyn(void)
         if (valid_block && !(block->flags & CODEBLOCK_IN_DIRTY_LIST) && (block->flags & CODEBLOCK_BYTE_MASK)
             && !(block->flags & CODEBLOCK_NO_IMMEDIATES) && block->dirty_list_recompile_hits) {
             block->dirty_list_recompile_hits = 0;
+            block->dirty_list_last_epoch     = 0;
             dynarec_s03c_retry_resets++;
         }
 #        endif
@@ -593,6 +606,7 @@ exec386_dynarec_dyn(void)
             const char   *action         = "NONE";
 #if defined(__aarch64__) || defined(_M_ARM64)
             const uint8_t retries_before = block->dirty_list_recompile_hits;
+            const uint16_t last_epoch_before = block->dirty_list_last_epoch;
 #else
             const uint8_t retries_before = 0;
 #endif
@@ -605,11 +619,28 @@ exec386_dynarec_dyn(void)
 #if defined(__aarch64__) || defined(_M_ARM64)
                     /*S-03b ARM64-only: wait for repeated dirty-list BYTE_MASK
                       hits before NO_IMMEDIATES promotion.*/
+                    /*S-03e ARM64-only: require retries to occur in a dense
+                      burst window; stale widely-spaced retries are reset.*/
+                    dynarec_s03e_dirty_epoch++;
+                    {
+                        const uint16_t cur_epoch = (uint16_t) dynarec_s03e_dirty_epoch;
+
+                        if (last_epoch_before != 0) {
+                            const uint16_t epoch_gap = (uint16_t) (cur_epoch - last_epoch_before);
+                            if (epoch_gap > DYNAREC_S03E_BURST_GAP_MAX) {
+                                block->dirty_list_recompile_hits = 0;
+                                dynarec_s03e_burst_resets++;
+                            }
+                        }
+                        block->dirty_list_last_epoch = cur_epoch;
+                    }
                     block->dirty_list_recompile_hits++;
                     retries_after = block->dirty_list_recompile_hits;
                     if (block->dirty_list_recompile_hits >= DYNAREC_S03B_NO_IMM_THRESHOLD) {
                         dynarec_s03a_promote_no_immediates++;
                         block->flags |= CODEBLOCK_NO_IMMEDIATES;
+                        block->dirty_list_last_epoch = 0;
+                        dynarec_s03e_burst_promotions++;
                         action = "NO_IMMEDIATES";
                     } else {
                         dynarec_s03b_defer_no_immediates++;
@@ -624,6 +655,7 @@ exec386_dynarec_dyn(void)
             } else {
 #if defined(__aarch64__) || defined(_M_ARM64)
                 block->dirty_list_recompile_hits = 0;
+                block->dirty_list_last_epoch     = 0;
                 retries_after                    = 0;
 #endif
                 dynarec_s03a_promote_byte_mask++;

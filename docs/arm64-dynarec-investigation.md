@@ -3,10 +3,11 @@
 ## Resume Here
 - Current objective: keep this file as the canonical static-audit record; active implementation sequencing now lives in [docs/arm64-dynarec-wave1-implementation-plan.md](./arm64-dynarec-wave1-implementation-plan.md).
 - Exact next file/module: for active coding, continue `S-03` follow-on tuning (`S-03d`) in `src/cpu/386_dynarec.c` (ARM64-guarded threshold refinement).
+- Exact next file/module: for active coding, continue `S-03` follow-on tuning (`S-03e`) in `src/cpu/386_dynarec.c` (ARM64-guarded adaptive burst refinement).
 - Next 3 concrete actions:
   1. Keep `S-03c` as locked baseline (`r1/r2`) and retain `a013i-tbxz-r1` as pre-`S-03c` comparison point.
-  2. Run `S-03d` validation for threshold-refinement (`2 -> 3`) on ARM64-only churn policy.
-  3. Gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03c`.
+  2. Run `S-03e` validation for adaptive burst-aware promotion on ARM64-only churn policy.
+  3. Gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03d`.
 - Active blockers:
 - None for source discovery; blocker handling is now execution-time only (regression gates and workload comparability).
 - Keep telemetry low-noise by default; detailed A-path tracing remains opt-in (`86BOX_A013_TRACE=1`).
@@ -114,6 +115,11 @@
     - ARM64-only threshold refined: `DYNAREC_S03B_NO_IMM_THRESHOLD` raised from `2` to `3`.
     - no x86-64 behavior change intended.
     - pending next telemetry validation tag: `s03d-threshold3-r1`.
+  - `S-03e` implementation checkpoint:
+    - ARM64-only adaptive burst policy added: stale retry sequences reset by epoch-gap rule before escalation.
+    - new telemetry fields: `burst_resets`, `burst_promotions`.
+    - no x86-64 behavior change intended.
+    - pending next telemetry validation tag: `s03e-burst-r1`.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT

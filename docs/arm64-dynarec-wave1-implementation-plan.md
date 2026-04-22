@@ -204,6 +204,34 @@ Exact command for next telemetry launch:
 ./scripts/dynarec/launch-vm-telemetry-run.sh s03d-threshold3-r1
 ```
 
+### S-03e Adaptive Burst Escalation (Implementation) (2026-04-22)
+Change summary:
+- Added ARM64-only burst-aware escalation shaping in `exec386_dynarec_dyn()`:
+  - promotions now require retries to remain temporally dense, not just cumulative count.
+  - stale retry debt resets when dirty-list epoch gap exceeds `DYNAREC_S03E_BURST_GAP_MAX`.
+- Added ARM64-only per-block epoch state:
+  - `dirty_list_last_epoch` in `codeblock_t` (initialized in `codegen_block_init()`).
+- Added telemetry fields in `DYNAREC_S03A_SUMMARY`:
+  - `burst_resets`
+  - `burst_promotions`
+- Parser extended to parse/print/delta both new fields.
+
+Validation criteria:
+- `WL-05` hashes unchanged.
+- `unexpected_noimm_without_bmask=0`.
+- `ratio_promote_no_immediates_per_dirty_hit` no harmful regression versus `S-03d`.
+- burst telemetry fields are active (non-empty in parser output).
+
+Rollback triggers:
+- any safety marker regression.
+- any WL-05 hash mismatch.
+- materially worse churn ratio without compensating stability/perf gain.
+
+Exact command for next telemetry launch:
+```bash
+./scripts/dynarec/launch-vm-telemetry-run.sh s03e-burst-r1
+```
+
 ## Cross-Slice Validation Framework
 
 ### Build/Sign Gate (Required for every slice)
