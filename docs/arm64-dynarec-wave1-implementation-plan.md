@@ -395,14 +395,14 @@ Secondary profile policy (optional):
   - if standard run shows suspicious conditional fallback pattern (for example large unexpected `cbnz_abs_range`), revert A-013f and re-check.
 - Exact commands:
   - `./scripts/build-and-sign.sh`
-  - `RUN_TAG=a013f-cbnz-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
-  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r1`
+  - `RUN_TAG=a013f-cbnz-r3 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r3`
   - after guest workload:
   - `./scripts/dynarec/analyze-s03a-log.sh "<a013f-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log"`
 - Launch status (2026-04-21):
-  - launch completed: `run_tag=a013f-cbnz-r1`
-  - active run dir: `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-45-06-Windows 98 Gaming PC-a013f-cbnz-r1/`
-  - host log target: `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-45-06-Windows 98 Gaming PC-a013f-cbnz-r1/86box.log`
+  - launch completed: `run_tag=a013f-cbnz-r3`
+  - active run dir: `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-48-59-Windows 98 Gaming PC-a013f-cbnz-r3/`
+  - host log target: `docs/perf-artifacts/arm64-dynarec/2026-04-21_21-48-59-Windows 98 Gaming PC-a013f-cbnz-r3/86box.log`
   - guest workload input pending.
 
 ### Run order (fixed)
@@ -790,10 +790,10 @@ Secondary profile policy (optional):
   - keep path-selection telemetry for `A-013` (`relative` vs `fallback`) and include new CBNZ counters.
   - keep ARM64-only behavior guardrails for new `A-013` code paths.
   - run:
-  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r1`
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r3`
   - default launch keeps detailed A-013 trace disabled (`86BOX_A013_TRACE=0`) to avoid avoidable logging overhead during perf-sensitive checks.
   - for focused debug-only tracing, run:
-  - `86BOX_A013_TRACE=1 ./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r1-trace`
+  - `86BOX_A013_TRACE=1 ./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r3-trace`
   - after guest run, parse with:
   - `./scripts/dynarec/analyze-s03a-log.sh "<a013f-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log"`
   - and review `A013_PATH_SUMMARY` lines in host log for:

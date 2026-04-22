@@ -39,12 +39,12 @@
     - any harmful `S-03` safety counter regression.
   - `A-013f` exact execution commands:
     - `./scripts/build-and-sign.sh`
-    - `RUN_TAG=a013f-cbnz-r1 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
-    - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r1`
+    - `RUN_TAG=a013f-cbnz-r3 ./scripts/dynarec/prepare-vm-telemetry-run.sh`
+    - `./scripts/dynarec/launch-vm-telemetry-run.sh a013f-cbnz-r3`
     - post-workload parse: `./scripts/dynarec/analyze-s03a-log.sh "<a013f-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-21_21-09-06-Windows 98 Gaming PC-a013cde-r2/86box.log"`
   - `A-013f` launch checkpoint:
-    - `run_tag=a013f-cbnz-r1`
-    - `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-21_21-45-06-Windows 98 Gaming PC-a013f-cbnz-r1/`
+    - `run_tag=a013f-cbnz-r3`
+    - `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-21_21-48-59-Windows 98 Gaming PC-a013f-cbnz-r3/`
     - guest workload input pending.
   - Current next execution slice is `A-013f` gate + wave-1 closeout decision.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
