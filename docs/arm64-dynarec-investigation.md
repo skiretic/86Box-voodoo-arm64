@@ -51,10 +51,15 @@
     - both runs retained locked `WL-05` totals and `unexpected_noimm_without_bmask=0`.
     - `A013_PATH` shows active BEQ shaping with zero BEQ absolute fallbacks (`beq_abs_nonlocal=0`, `beq_abs_range=0`) and continued zero CBNZ absolute fallbacks.
     - operator-observed host behavior improved in real-time stress sections (3DMark texture phase and Q3 demo-four normal playback), with more frequent sustained `100%` emulation speed.
+  - `A-013g` 266 MHz checkpoint:
+    - `run_tag=a013g-266-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-21_22-53-19-Windows 98 Gaming PC-a013g-266-r1/`
+    - VM frequency set to `266666666` (`k6_2 x4`) and remained stable.
+    - guest markers improved further (`Q3 timedemo 35.6 fps`, `3DMark99 2507`, `CPU 5885`) with locked `WL-05` hashes.
+    - operator-observed real-time behavior stayed materially better than upstream in the same heavy sections.
   - Tooling follow-through now included in this same checkpoint:
     - launcher hardened with retry/fallback launch paths (`open -a` retries plus direct-binary fallback).
     - parser fixed to read `A013_PATH total=` correctly when `cbnz_total=`/`beq_total=` fields are present.
-  - Current next execution slice is wave-1 closeout + CPU frequency headroom validation on top of locked `A-013g`.
+  - Current next execution slice is wave-1 closeout + continued CPU headroom validation at fixed `266 MHz` until heavy scenes are near-consistently `100%`, then one-step frequency escalation.
   - Churn telemetry remains active for rollback guardrails, but `S-03` is no longer the active implementation step.
 
 ## Scope
