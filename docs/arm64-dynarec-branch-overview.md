@@ -43,13 +43,13 @@ Why this matters:
 - better balance between responsiveness and safety.
 - smoother behavior under mixed workloads.
 
-### 3) Logging/telemetry made practical for long runs
+### 3) Logging/telemetry focused on correctness verification
 
 Default logging was moved to low-noise summary output.  
 Detailed tracing remains available only when explicitly enabled.
 
 Why this matters:
-- avoids multi-GB logs in normal perf/regression runs.
+- keeps correctness and safety checks visible on every run.
 - keeps runs comparable and easier to parse.
 - still allows deep debugging when needed.
 
@@ -81,6 +81,30 @@ Across repeated Q3 + 3DMark99 + WL-05 runs:
 - churn promotion ratio dropped significantly versus older baseline:
   - from about `0.014` to roughly `0.0011 - 0.0015` range in recent runs.
 - user-observed real-time emulation speed consistency improved in heavy scenes.
+- latest validated run markers:
+  - Q3 demo four timedemo: `1260 frames, 36.3 seconds: 34.7 fps`
+  - 3DMark99: `2545 3DMarks`, `6053 CPU 3DMarks`
+
+## What WL-05 Means
+
+`WL-05` is the deterministic Win98 microstress correctness workload.
+
+In practice:
+- inside the guest, `MRUNALL.BAT` runs three variants (quick/normal/smc) of `MICROSTR.EXE`.
+- those runs exercise core dynarec-sensitive behavior:
+  - immediate-heavy arithmetic/register updates:
+    - repeated constant materialization + writes + dependent reads (32-bit and subregister touch paths), which catches immediate encoding/writeback mistakes and stale register-state issues.
+  - branch/helper-heavy control-flow paths:
+    - dense conditional branch loops and helper-invoked paths, which catches wrong branch patching, wrong helper dispatch/return behavior, and control-flow divergence under dynarec.
+  - self-modifying/churn-touch behavior (smc mode):
+    - intentional write-then-execute/recompile pressure patterns, which catches dirty-list transition bugs, over-aggressive `NO_IMMEDIATES` escalation behavior, and stale block reuse hazards.
+- each variant emits `MICROSTRESS_DONE total=<hash>`.
+- if a hash changes, guest-visible instruction behavior changed; run is treated as correctness regression until explained.
+
+Current locked `WL-05` totals:
+- quick: `45db7b65`
+- normal: `2520dd5e`
+- smc: `b86f22a1`
 
 ## Validation Method
 
@@ -111,8 +135,10 @@ Each candidate change is accepted only if:
 - churn-policy refinement work: active and progressing.
 - latest large code swing (adaptive burst-aware escalation): implemented and in validation.
 
-## Next Steps
+## Later-Phase Goals (Not Hit Yet)
 
-1. Complete validation of the newest churn-policy swing.
-2. If gates stay clean, lock it in docs as accepted baseline.
-3. Continue with next high-leverage code improvement before expanding test matrix further.
+- Sustain `100%` emulation speed more consistently at higher guest CPU settings (beyond the current `266666666` working profile) without correctness loss.
+- Expand branch/control-flow efficiency beyond the current wave’s completed scope only where real workloads show meaningful host-side gain.
+- Reduce recompilation churn further in stubborn hotspot patterns while keeping current safety behavior (`unexpected_noimm_without_bmask=0`).
+- Keep x86-64 behavior unchanged while ARM64 path continues to improve.
+- Finish wave closeout with stable repeatability across the locked workload set (Q3, 3DMark99, WL-05) before moving to broader post-wave refactors.
