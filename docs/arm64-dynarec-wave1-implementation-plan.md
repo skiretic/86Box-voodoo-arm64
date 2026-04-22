@@ -722,6 +722,8 @@ Secondary profile policy (optional):
   - `./scripts/dynarec/launch-vm-telemetry-run.sh a013cde`
   - after guest run, parse with:
   - `./scripts/dynarec/analyze-s03a-log.sh "<a013cde-log>" "<s03b-baseline-log>"`
+  - and review `A013_PATH_SUMMARY` lines in host log for:
+  - `call_rel`, `jump_rel`, `call_abs_nonlocal`, `jump_abs_nonlocal`, `call_abs_range`, `jump_abs_range`
   - large-log retention rule:
   - after parser review is accepted, finalize with:
   - `./scripts/dynarec/finalize-s03-log.sh "<current-log>" "<optional-baseline-log>"`

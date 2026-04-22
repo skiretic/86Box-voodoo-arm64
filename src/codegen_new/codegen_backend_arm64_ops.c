@@ -2,6 +2,8 @@
 
 #    include <inttypes.h>
 #    include <stdint.h>
+#    include <stdlib.h>
+#    include <string.h>
 #    include <86box/86box.h>
 #    include "cpu.h"
 #    include <86box/mem.h>
@@ -1526,23 +1528,86 @@ host_arm64_ZIP2_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_re
     codegen_addlong(block, OPCODE_ZIP2_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
 }
 
+/* A-013e telemetry:
+   Tracks relative-vs-fallback path usage for call/jump lowering and logs
+   periodic summaries with low overhead. */
+static int      a013_env_init          = 0;
+static int      a013_telemetry_enabled = 0;
+static uint64_t a013_call_rel          = 0;
+static uint64_t a013_call_abs_nonlocal = 0;
+static uint64_t a013_call_abs_range    = 0;
+static uint64_t a013_jump_rel          = 0;
+static uint64_t a013_jump_abs_nonlocal = 0;
+static uint64_t a013_jump_abs_range    = 0;
+static uint64_t a013_path_events       = 0;
+
+static int
+a013_env_on(const char *name)
+{
+    const char *v = getenv(name);
+    if (!v || !*v)
+        return 0;
+    if (!strcmp(v, "0") || !strcmp(v, "false") || !strcmp(v, "FALSE") || !strcmp(v, "off") || !strcmp(v, "OFF"))
+        return 0;
+    return 1;
+}
+
+static void
+a013_ensure_telemetry_env(void)
+{
+    if (a013_env_init)
+        return;
+    a013_telemetry_enabled = a013_env_on("86BOX_NEW_DYNAREC_STATS") || a013_env_on("86BOX_NEW_DYNAREC_TELEMETRY");
+    a013_env_init          = 1;
+}
+
+static void
+a013_log_summary_if_needed(void)
+{
+    if (!a013_telemetry_enabled)
+        return;
+    if ((a013_path_events & 0x7ff) != 0)
+        return;
+
+    pclog("A013_PATH_SUMMARY call_rel=%" PRIu64 " call_abs_nonlocal=%" PRIu64 " call_abs_range=%" PRIu64
+          " jump_rel=%" PRIu64 " jump_abs_nonlocal=%" PRIu64 " jump_abs_range=%" PRIu64 " total=%" PRIu64 "\n",
+          a013_call_rel,
+          a013_call_abs_nonlocal,
+          a013_call_abs_range,
+          a013_jump_rel,
+          a013_jump_abs_nonlocal,
+          a013_jump_abs_range,
+          a013_path_events);
+}
+
 void
 host_arm64_call(codeblock_t *block, void *dst_addr)
 {
     uint8_t *branch_src;
+    int      is_local;
 
     /* A-013 core behavior:
        Prefer direct BL for local in-range JIT targets; otherwise preserve
        existing absolute MOVX+BLR fallback for correctness. */
+    a013_ensure_telemetry_env();
     codegen_alloc(block, 4);
     branch_src = &block_write_data[block_pos];
-    if (codegen_allocator_contains_host_ptr(dst_addr) &&
-        codegen_allocator_can_branch_imm26(branch_src, dst_addr)) {
+    is_local   = codegen_allocator_contains_host_ptr(dst_addr);
+    if (is_local && codegen_allocator_can_branch_imm26(branch_src, dst_addr)) {
         intptr_t offset = (intptr_t) ((uint8_t *) dst_addr - branch_src);
+        a013_call_rel++;
+        a013_path_events++;
+        a013_log_summary_if_needed();
         codegen_addlong(block, OPCODE_BL | OFFSET26(offset));
         return;
     }
 
+    if (is_local)
+        a013_call_abs_range++;
+    else
+        a013_call_abs_nonlocal++;
+    a013_path_events++;
+    a013_log_summary_if_needed();
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BLR(block, REG_X16);
 }
@@ -1552,19 +1617,30 @@ host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
 {
     uint8_t *branch_src;
     void    *dst_ptr = (void *) dst_addr;
+    int      is_local;
 
     /* A-013 core behavior:
        Prefer direct B for local in-range JIT targets; otherwise preserve
        existing absolute MOVX+BR fallback for correctness. */
+    a013_ensure_telemetry_env();
     codegen_alloc(block, 4);
     branch_src = &block_write_data[block_pos];
-    if (codegen_allocator_contains_host_ptr(dst_ptr) &&
-        codegen_allocator_can_branch_imm26(branch_src, dst_ptr)) {
+    is_local   = codegen_allocator_contains_host_ptr(dst_ptr);
+    if (is_local && codegen_allocator_can_branch_imm26(branch_src, dst_ptr)) {
         intptr_t offset = (intptr_t) ((uint8_t *) dst_ptr - branch_src);
+        a013_jump_rel++;
+        a013_path_events++;
+        a013_log_summary_if_needed();
         codegen_addlong(block, OPCODE_B | OFFSET26(offset));
         return;
     }
 
+    if (is_local)
+        a013_jump_abs_range++;
+    else
+        a013_jump_abs_nonlocal++;
+    a013_path_events++;
+    a013_log_summary_if_needed();
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BR(block, REG_X16);
 }
