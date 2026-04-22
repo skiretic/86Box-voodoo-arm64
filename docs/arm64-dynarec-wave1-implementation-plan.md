@@ -23,7 +23,7 @@
   - comment cleanup/compaction is allowed later, after behavior is validated and stable.
 
 ## Execution Status (Current)
-- Current branch/head: `ndr-analysis` @ `working-tree` (`S-03b` implemented, validation completed; pending commit)
+- Current branch/head: `ndr-analysis` @ `working-tree` (`A-013` closeout accepted through `A-013i`; preparing post-`A-*` lane)
 
 ### Slice Status Table (Authoritative)
 | Slice | Status | Notes |
@@ -33,12 +33,12 @@
 | `S-02b` | Completed | `A-011` landed: bounded `host_arm64_mov_imm()` now tries `MOVN` and logical-immediate `ORR` before `MOVZ/MOVK` fallback. |
 | `S-02` overall | Completed | `S-02a` + `S-02b` code landed and validation gate passed (WL-05 + workload checks). |
 | `S-03` | Completed | `S-03a` telemetry + `S-03b` ARM64-only delayed `NO_IMMEDIATES` policy implemented and validated. |
-| `A-013` | In progress (`A-013a+b`) | Local target classification + direct `BL/B` fast paths implemented and regression-gated; deeper `A-013c/d/e` pending. |
+| `A-013` | Completed (frozen at `A-013i`) | Relative branch/call shaping stack completed through `BL/B`, `CBNZ`, `BEQ`, shared `B.cond` patch path, and guarded `TBZ/TBNZ` patch path; gates passed with locked WL-05 hashes and safety markers. |
 
 ### Order Lock (Do Not Skip)
 - Fixed order remains mandatory: `S-01` -> `S-02` -> `S-03` -> `A-013`.
-- Current executable next step is only: `A-013` (JIT-local call/jump path classification and relative branch emission).
-- No `A-013` implementation work may start before `S-03` is marked complete.
+- `A-013` implementation lane is now closed/frozen for this wave unless a correctness regression reopens it.
+- Current executable next step after `A-*` closeout is post-wave churn optimization work (`S-03`-adjacent follow-on), not new template expansion.
 
 ## Recommended Execution Order and Scope Boundaries
 1. `S-01` (correctness guardrail; smallest write set; unblocker for safe backend work)
@@ -616,6 +616,33 @@ Secondary profile policy (optional):
   - `./scripts/dynarec/launch-vm-telemetry-run.sh a013i-tbxz-r1`
   - after guest workload:
   - `./scripts/dynarec/analyze-s03a-log.sh "<a013i-log>" "docs/perf-artifacts/arm64-dynarec/2026-04-22_16-30-52-Windows 98 Gaming PC-a013h-bcond-r2/86box.log"`
+
+### A-013i Result Checkpoint (2026-04-22)
+- Run:
+  - `a013i-tbxz-r1`: `docs/perf-artifacts/arm64-dynarec/2026-04-22_16-55-55-Windows 98 Gaming PC-a013i-tbxz-r1/`
+- Guest markers:
+  - 3DMark99: `2421 3DMarks`, `5887 CPU 3DMarks`
+  - `WL-05` locked totals unchanged:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+- Host telemetry summary:
+  - `unexpected_noimm_without_bmask=0`
+  - new A-013i counters active:
+    - `tbxz_rel14=55`
+    - `tbxz_rel26=0`
+    - `tbxz_total=55`
+  - existing A-013 path mix remained stable:
+    - `bcond_total=1320472` (near-flat vs `a013h-bcond-r2`)
+    - BEQ/CBNZ absolute fallback counters stayed zero.
+  - low-noise log policy held (`86box.log` ~`7.5M`).
+- Operator decision:
+  - skip extra double-click manual feel run for this slice.
+  - accept `a013i-tbxz-r1` as valid checkpoint from telemetry + workload gates.
+- Decision:
+  - lock in A-013i as current branch-shaping state.
+  - continue at fixed `266 MHz`.
+  - next step is optimization-focused A-013j (raise `tbxz` coverage volume and/or reduce branch-path churn) rather than telemetry plumbing changes.
 
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
