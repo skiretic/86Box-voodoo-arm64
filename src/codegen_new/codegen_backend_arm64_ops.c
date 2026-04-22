@@ -46,6 +46,7 @@
 #    define OPCODE_ADDX_IMM           (0x91 << OPCODE_SHIFT)
 #    define OPCODE_ADR                (0x10 << OPCODE_SHIFT)
 #    define OPCODE_B                  (0x14 << OPCODE_SHIFT)
+#    define OPCODE_BL                 (0x94 << OPCODE_SHIFT)
 #    define OPCODE_BCOND              (0x54 << OPCODE_SHIFT)
 #    define OPCODE_CBNZ               (0xb5 << OPCODE_SHIFT)
 #    define OPCODE_CBZ                (0xb4 << OPCODE_SHIFT)
@@ -1528,6 +1529,20 @@ host_arm64_ZIP2_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_re
 void
 host_arm64_call(codeblock_t *block, void *dst_addr)
 {
+    uint8_t *branch_src;
+
+    /* A-013 core behavior:
+       Prefer direct BL for local in-range JIT targets; otherwise preserve
+       existing absolute MOVX+BLR fallback for correctness. */
+    codegen_alloc(block, 4);
+    branch_src = &block_write_data[block_pos];
+    if (codegen_allocator_contains_host_ptr(dst_addr) &&
+        codegen_allocator_can_branch_imm26(branch_src, dst_addr)) {
+        intptr_t offset = (intptr_t) ((uint8_t *) dst_addr - branch_src);
+        codegen_addlong(block, OPCODE_BL | OFFSET26(offset));
+        return;
+    }
+
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BLR(block, REG_X16);
 }
@@ -1535,6 +1550,21 @@ host_arm64_call(codeblock_t *block, void *dst_addr)
 void
 host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
 {
+    uint8_t *branch_src;
+    void    *dst_ptr = (void *) dst_addr;
+
+    /* A-013 core behavior:
+       Prefer direct B for local in-range JIT targets; otherwise preserve
+       existing absolute MOVX+BR fallback for correctness. */
+    codegen_alloc(block, 4);
+    branch_src = &block_write_data[block_pos];
+    if (codegen_allocator_contains_host_ptr(dst_ptr) &&
+        codegen_allocator_can_branch_imm26(branch_src, dst_ptr)) {
+        intptr_t offset = (intptr_t) ((uint8_t *) dst_ptr - branch_src);
+        codegen_addlong(block, OPCODE_B | OFFSET26(offset));
+        return;
+    }
+
     host_arm64_MOVX_IMM(block, REG_X16, (uint64_t) dst_addr);
     host_arm64_BR(block, REG_X16);
 }

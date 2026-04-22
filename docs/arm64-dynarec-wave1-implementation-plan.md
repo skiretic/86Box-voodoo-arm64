@@ -33,7 +33,7 @@
 | `S-02b` | Completed | `A-011` landed: bounded `host_arm64_mov_imm()` now tries `MOVN` and logical-immediate `ORR` before `MOVZ/MOVK` fallback. |
 | `S-02` overall | Completed | `S-02a` + `S-02b` code landed and validation gate passed (WL-05 + workload checks). |
 | `S-03` | Completed | `S-03a` telemetry + `S-03b` ARM64-only delayed `NO_IMMEDIATES` policy implemented and validated. |
-| `A-013` | Not started | Must wait until `S-03` closure per locked order. |
+| `A-013` | In progress (`A-013a+b`) | Local target classification + direct `BL/B` fast paths implemented and regression-gated; deeper `A-013c/d/e` pending. |
 
 ### Order Lock (Do Not Skip)
 - Fixed order remains mandatory: `S-01` -> `S-02` -> `S-03` -> `A-013`.
@@ -309,6 +309,30 @@ Secondary profile policy (optional):
 - Decision:
   - `S-03` gate passes for wave-1 progression.
   - next slice is `A-013`.
+
+### A-013a+b Regression Gate (2026-04-21)
+- Code implemented (working tree):
+  - `codegen_allocator_contains_host_ptr()` and `codegen_allocator_can_branch_imm26()` in allocator module.
+  - `host_arm64_call()` uses direct `BL` for local+in-range targets, else fallback `MOVX+BLR`.
+  - `host_arm64_jump()` uses direct `B` for local+in-range targets, else fallback `MOVX+BR`.
+- Regression run artifact root:
+  - `docs/perf-artifacts/arm64-dynarec/2026-04-21_20-37-30-Windows 98 Gaming PC-a013ab-regress-rerun4/`
+- Guest workload gate:
+  - `MRUNALL` remained stable:
+    - quick `45db7b65`
+    - normal `2520dd5e`
+    - smc `b86f22a1`
+  - Quake III timedemo: `1260 frames, 37.1 seconds: 34.0 fps`
+  - 3DMark99: `2598 3DMarks`, `5150 CPU 3DMarks`
+- Host telemetry/parsing (manual + parser agreed):
+  - `dirty_list_hits=24276`
+  - `promote_byte_mask=9881`
+  - `promote_no_immediates=356`
+  - `defer_no_immediates=550`
+  - `unexpected_noimm_without_bmask=0`
+- Decision:
+  - no regression blocker observed for `A-013a+b`.
+  - proceed to deeper `A-013c/d/e`.
 
 ### Run order (fixed)
 1. `WL-00-smoke-boot`
@@ -623,16 +647,18 @@ Secondary profile policy (optional):
 - Reliable local-target classification helper available (allocator arena containment/range check).
 
 ### Implementation Outline
-1. Add a bounded target-classification helper for JIT arena membership/range.
-2. Update `host_arm64_call()`:
-  - if target is JIT-local and in branch range -> emit direct `BL`
+1. `A-013a` (core): add bounded target-classification helper for JIT arena membership/range.
+2. `A-013b` (core): update `host_arm64_call()` and `host_arm64_jump()`:
+  - if target is JIT-local and in branch range -> emit direct `BL` / `B`
   - else preserve existing absolute fallback
-3. Update `host_arm64_jump()` similarly with `B`/fallback `BR`.
-4. Keep fallback path untouched for correctness.
+3. `A-013c` (extended): add safe conditional-branch tightening for proven-local in-range branch destinations where callsite shape allows.
+4. `A-013d` (extended): strengthen far-target guardrails (explicit range checks + optional veneer/thunk strategy if needed), while preserving absolute fallback path.
+5. `A-013e` (extended observability): add low-overhead telemetry counters for branch-path selection ratios (`relative` vs `absolute`) for post-run review.
 
 ### Recommended Commit Boundaries
-- Commit 1 (`A-013a`): target-classification helper + `host_arm64_call()` dual-path.
-- Commit 2 (`A-013b`): `host_arm64_jump()` dual-path + cleanup/tests/docs.
+- Commit 1 (`A-013a+b`): target-classification helper + `host_arm64_call()` / `host_arm64_jump()` dual-path core behavior.
+- Commit 2 (`A-013c`): conditional-branch tightening (if safe proof obtained in static review).
+- Commit 3 (`A-013d+e`): far-target hardening + path telemetry + docs.
 
 ### Risk Level
 - Low-medium.
@@ -662,7 +688,8 @@ Secondary profile policy (optional):
   - classify representative call targets (JIT helper stubs, `codegen_exit_rout`, external C helpers) and validate path selection.
   - fallback correctness checks: force/observe non-local target path still emitting absolute sequence.
 - Performance-check plan:
-  - plan-only: compare emitted sequence shape for local helper call/jump sites before/after.
+  - compare emitted sequence shape for local helper call/jump sites before/after.
+  - for extended phase, include relative-path adoption ratio from telemetry (`A-013e`).
 - Rollback criteria:
   - any control-flow correctness issue or ambiguous target-classification behavior.
 
@@ -688,11 +715,19 @@ Secondary profile policy (optional):
 
 ## Next Execution Session Handoff
 - Start with telemetry capture run:
-  - `A-013` implementation kickoff (no further `S-03` work unless regression appears):
-  - inspect target classification scope in:
-  - `src/codegen_new/codegen_allocator.c`
-  - `src/codegen_new/codegen_backend_arm64_ops.c`
+  - continue deep `A-013` (`c/d/e`) on top of validated `A-013a+b`.
+  - add path-selection telemetry for `A-013` (`relative` vs `fallback`) and explicit far-target reason tagging.
   - keep ARM64-only behavior guardrails for new `A-013` code paths.
+  - run:
+  - `./scripts/dynarec/launch-vm-telemetry-run.sh a013cde`
+  - after guest run, parse with:
+  - `./scripts/dynarec/analyze-s03a-log.sh "<a013cde-log>" "<s03b-baseline-log>"`
+  - large-log retention rule:
+  - after parser review is accepted, finalize with:
+  - `./scripts/dynarec/finalize-s03-log.sh "<current-log>" "<optional-baseline-log>"`
+  - for cleanup mode (safe delete after validation):
+  - `./scripts/dynarec/finalize-s03-log.sh --delete-raw "<current-log>" "<optional-baseline-log>"`
+  - safety guarantee: raw log deletion is blocked unless required summary fields are present.
 - Keep changes scoped to one slice at a time and do not overlap slice commits.
 - Do not reopen static investigation unless a slice hits a hard blocker.
 - Do not run benchmarking without explicit approval; runtime plans in this doc remain plan-level guidance.
