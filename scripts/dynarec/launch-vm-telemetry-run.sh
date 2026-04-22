@@ -4,9 +4,17 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 RUN_TAG="${1:-s03a-telemetry}"
 A013_TRACE_VALUE="$(printenv 86BOX_A013_TRACE 2>/dev/null || true)"
+S03_STATS_VALUE="$(printenv 86BOX_NEW_DYNAREC_STATS 2>/dev/null || true)"
+S03_TELEMETRY_VALUE="$(printenv 86BOX_NEW_DYNAREC_TELEMETRY 2>/dev/null || true)"
 
 if [ -z "${A013_TRACE_VALUE}" ]; then
   A013_TRACE_VALUE=0
+fi
+if [ -z "${S03_STATS_VALUE}" ]; then
+  S03_STATS_VALUE=1
+fi
+if [ -z "${S03_TELEMETRY_VALUE}" ]; then
+  S03_TELEMETRY_VALUE=0
 fi
 
 cd "${ROOT_DIR}"
@@ -14,7 +22,11 @@ cd "${ROOT_DIR}"
 # Always launch signed repo build.
 ./scripts/build-and-sign.sh >/tmp/86box-build-sign.log 2>&1
 
-CMD_LINES="$(RUN_TAG="${RUN_TAG}" ./scripts/dynarec/prepare-vm-telemetry-run.sh)"
+CMD_LINES="$(RUN_TAG="${RUN_TAG}" \
+  86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
+  86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
+  86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
+  ./scripts/dynarec/prepare-vm-telemetry-run.sh)"
 BIN="$(printf '%s\n' "${CMD_LINES}" | sed -n '1p')"
 VM_FLAG_1="$(printf '%s\n' "${CMD_LINES}" | sed -n '2p')"
 VM_PATH="$(printf '%s\n' "${CMD_LINES}" | sed -n '3p')"
@@ -29,8 +41,8 @@ APP_PATH="$(dirname "$(dirname "$(dirname "${BIN}")")")"
 /usr/bin/pkill -f '/Applications/86box/86Box.app/Contents/MacOS/86Box' >/dev/null 2>&1 || true
 
 env \
-  86BOX_NEW_DYNAREC_STATS=1 \
-  86BOX_NEW_DYNAREC_TELEMETRY=1 \
+  86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
+  86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
   86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
   open -n -a "${APP_PATH}" --args \
   "${VM_FLAG_1}" "${VM_PATH}" \
@@ -63,3 +75,6 @@ echo "run_tag=${RUN_TAG}"
 echo "run_dir=${RUN_DIR}"
 echo "logfile=${LOGFILE}"
 echo "pid=${PID}"
+echo "env_86BOX_NEW_DYNAREC_STATS_EFFECTIVE=${S03_STATS_VALUE}"
+echo "env_86BOX_NEW_DYNAREC_TELEMETRY_EFFECTIVE=${S03_TELEMETRY_VALUE}"
+echo "env_86BOX_A013_TRACE_EFFECTIVE=${A013_TRACE_VALUE}"
