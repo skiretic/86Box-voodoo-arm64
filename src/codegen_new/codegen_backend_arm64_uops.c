@@ -1887,16 +1887,9 @@ codegen_PFACC(codeblock_t *block, uop_t *uop)
     int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
 
     if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        /* sum_b first to avoid src_b/dest alias clobber when ModRM uses same reg. */
-        host_arm64_DUP_V2S(block, REG_V_TEMP, src_reg_b, 1);
-        host_arm64_FADD_V2S(block, REG_V_TEMP, REG_V_TEMP, src_reg_b);
-
-        /* sum_a = src_a0 + src_a1 (lane 0). */
-        host_arm64_DUP_V2S(block, dest_reg, src_reg_a, 1);
-        host_arm64_FADD_V2S(block, dest_reg, dest_reg, src_reg_a);
-
-        /* Compose [sum_a, sum_b] from lane0 of both temps. */
-        host_arm64_ZIP1_V2S(block, dest_reg, dest_reg, REG_V_TEMP);
+        /* PFACC semantics map directly to pairwise add across src_a/src_b vectors:
+           dst[0] = src_a[0] + src_a[1], dst[1] = src_b[0] + src_b[1]. */
+        host_arm64_FADDP_V2S(block, dest_reg, src_reg_a, src_reg_b);
     } else
         fatal("PFACC %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
 
