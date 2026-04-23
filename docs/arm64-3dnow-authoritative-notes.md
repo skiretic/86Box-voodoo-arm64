@@ -84,4 +84,10 @@ Therefore:
 2. Keep unsupported opcodes as `NULL` to preserve interpreter fallback until lowered.
 3. Use `tools/win98-3dnowcov` + host `COV3DNOW_SUMMARY` telemetry as the primary acceptance gate for each newly enabled opcode.
 4. Only promote a new opcode mapping after deterministic `3DNOWCOV` pass and stable hash behavior.
-
+5. Avoid churn by using exact-op-first bring-up:
+   - implement real dynarec lowering first, not helper-call substitution.
+   - verify handwritten ARM64 opcode constants with `clang`/`otool` disassembly.
+   - when exact ISA ops exist, prefer them over approximate sequences.
+6. For performance-feel checks, keep coverage telemetry opt-in:
+   - default runs: `86BOX_3DNOW_COV_STATS=0`
+   - dispatch-proof runs: `86BOX_3DNOW_COV_STATS=1` and parse `DYNAREC_3DNOW_SUMMARY`.

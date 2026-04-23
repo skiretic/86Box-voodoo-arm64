@@ -33,6 +33,19 @@ Validation run (`3dnowcov-r2`) confirms stable baseline and usable harness:
 5. Move forward-only; no history rewrite.
 6. Each phase must be independently revertible.
 
+## Proven Low-Churn Method (Keep Using This)
+
+Use this exact implementation order for each new opcode slice:
+1. Add real ARM64 dynarec path first (no helper-call substitution).
+2. Keep unsupported opcodes as `NULL` fallback until their real lowering exists.
+3. Mirror x86 semantics exactly from interpreter path before coding.
+4. Verify ARM64 instruction encodings with assembler/disassembly (`clang` + `otool`) before relying on handwritten constants.
+5. Prefer exact architecture ops over synthesized approximations when available.
+6. Validate with `3DNOWCOV` guest hash/markers first; only then broaden to general workload feel checks.
+7. Keep telemetry low-noise by default; enable `86BOX_3DNOW_COV_STATS=1` only when dispatch split evidence is needed.
+
+This method was used to stabilize `ae` (`PFACC`) and to land `b7` (`PMULHRW`) / `bf` (`PAVGUSB`) with clean validation.
+
 ## Bring-Up Phases
 
 ### Phase 0: Harness Lock (Done)
