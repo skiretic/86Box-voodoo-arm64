@@ -329,12 +329,16 @@
 #define UOP_PFRSQRT (UOP_TYPE_PARAMS_REGS | 0xc5)
 /*UOP_PFACC - (packed float) dest_reg[0] = dest_reg[0] + dest_reg[1], dest_reg[1] = src_reg_b[0] + src_reg_b[1]*/
 #define UOP_PFACC (UOP_TYPE_PARAMS_REGS | 0xc6)
+/*UOP_PFNACC - (packed float) dest_reg[0] = src_reg_a[0] - src_reg_a[1], dest_reg[1] = src_reg_b[0] - src_reg_b[1]*/
+#define UOP_PFNACC (UOP_TYPE_PARAMS_REGS | 0xcb)
+/*UOP_PFPNACC - (packed float) dest_reg[0] = src_reg_a[0] - src_reg_a[1], dest_reg[1] = src_reg_b[0] + src_reg_b[1]*/
+#define UOP_PFPNACC (UOP_TYPE_PARAMS_REGS | 0xcc)
 /*UOP_PMULHRW - (packed word) dest_reg = ((src_reg_a * src_reg_b) + 0x8000) >> 16*/
 #define UOP_PMULHRW (UOP_TYPE_PARAMS_REGS | 0xc7)
 /*UOP_PAVGUSB - (packed byte) dest_reg = (src_reg_a + src_reg_b + 1) >> 1*/
 #define UOP_PAVGUSB (UOP_TYPE_PARAMS_REGS | 0xc8)
 
-#define UOP_MAX     0xcb
+#define UOP_MAX     0xcd
 
 #define UOP_INVALID 0xff
 
@@ -848,6 +852,8 @@ extern int codegen_fp_enter(void);
 #define uop_PFRCP(ir, dst_reg, src_reg)                                  uop_gen_reg_dst_src1(UOP_PFRCP, ir, dst_reg, src_reg)
 #define uop_PFRSQRT(ir, dst_reg, src_reg)                                uop_gen_reg_dst_src1(UOP_PFRSQRT, ir, dst_reg, src_reg)
 #define uop_PFACC(ir, dst_reg, src_reg_a, src_reg_b)                     uop_gen_reg_dst_src2(UOP_PFACC, ir, dst_reg, src_reg_a, src_reg_b)
+#define uop_PFNACC(ir, dst_reg, src_reg_a, src_reg_b)                    uop_gen_reg_dst_src2(UOP_PFNACC, ir, dst_reg, src_reg_a, src_reg_b)
+#define uop_PFPNACC(ir, dst_reg, src_reg_a, src_reg_b)                   uop_gen_reg_dst_src2(UOP_PFPNACC, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PMULHRW(ir, dst_reg, src_reg_a, src_reg_b)                   uop_gen_reg_dst_src2(UOP_PMULHRW, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PAVGUSB(ir, dst_reg, src_reg_a, src_reg_b)                   uop_gen_reg_dst_src2(UOP_PAVGUSB, ir, dst_reg, src_reg_a, src_reg_b)
 #define uop_PFSUB(ir, dst_reg, src_reg_a, src_reg_b)                     uop_gen_reg_dst_src2(UOP_PFSUB, ir, dst_reg, src_reg_a, src_reg_b)
