@@ -1,4 +1,6 @@
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 #include <86box/86box.h>
 #include "cpu.h"
 #include <86box/mem.h>
@@ -20,6 +22,102 @@
 #include "codegen_ops_helpers.h"
 
 #define MAX_INSTRUCTION_COUNT 50
+#define DYNAREC_3DNOW_PERIODIC_MASK ((1u << 20) - 1u)
+
+/* Opt-in 3DNow dynarec bring-up coverage counters.
+   Disabled by default; enabled only with 86BOX_3DNOW_COV_STATS=1. */
+static int      dynarec_3dnow_cov_env_init          = 0;
+static int      dynarec_3dnow_cov_stats_enabled     = 0;
+static uint64_t dynarec_3dnow_recompiled_dispatches = 0;
+static uint64_t dynarec_3dnow_fallback_dispatches   = 0;
+
+static int
+dynarec_3dnow_cov_env_on(const char *name)
+{
+    const char *v = getenv(name);
+    if (!v || !*v)
+        return 0;
+    if ((v[0] == '0' && !v[1]) || !strcmp(v, "false") || !strcmp(v, "FALSE") || !strcmp(v, "off") || !strcmp(v, "OFF"))
+        return 0;
+    return 1;
+}
+
+static void
+dynarec_3dnow_cov_log_summary(const char *tag)
+{
+    uint64_t total_dispatches;
+
+    if (!dynarec_3dnow_cov_stats_enabled)
+        return;
+
+    total_dispatches = dynarec_3dnow_recompiled_dispatches + dynarec_3dnow_fallback_dispatches;
+    pclog("DYNAREC_3DNOW_SUMMARY tag=%s total=%llu recompiled=%llu fallback=%llu\n",
+          tag,
+          (unsigned long long) total_dispatches,
+          (unsigned long long) dynarec_3dnow_recompiled_dispatches,
+          (unsigned long long) dynarec_3dnow_fallback_dispatches);
+}
+
+static void
+dynarec_3dnow_cov_log_summary_final(void)
+{
+    if (!dynarec_3dnow_cov_stats_enabled)
+        return;
+    if (!dynarec_3dnow_recompiled_dispatches && !dynarec_3dnow_fallback_dispatches)
+        return;
+
+    dynarec_3dnow_cov_log_summary("final");
+}
+
+static void
+dynarec_3dnow_cov_init_env(void)
+{
+    if (dynarec_3dnow_cov_env_init)
+        return;
+
+    dynarec_3dnow_cov_stats_enabled = dynarec_3dnow_cov_env_on("86BOX_3DNOW_COV_STATS");
+    dynarec_3dnow_cov_env_init      = 1;
+
+    if (dynarec_3dnow_cov_stats_enabled)
+        atexit(dynarec_3dnow_cov_log_summary_final);
+}
+
+static void
+dynarec_3dnow_cov_maybe_log_periodic(void)
+{
+    uint64_t total_dispatches;
+
+    if (!dynarec_3dnow_cov_stats_enabled)
+        return;
+
+    total_dispatches = dynarec_3dnow_recompiled_dispatches + dynarec_3dnow_fallback_dispatches;
+    if (!total_dispatches || ((total_dispatches & DYNAREC_3DNOW_PERIODIC_MASK) != 0))
+        return;
+
+    dynarec_3dnow_cov_log_summary("periodic");
+}
+
+static void
+dynarec_3dnow_cov_count_recompiled_dispatch(void)
+{
+    dynarec_3dnow_cov_init_env();
+    if (!dynarec_3dnow_cov_stats_enabled)
+        return;
+
+    dynarec_3dnow_recompiled_dispatches++;
+    dynarec_3dnow_cov_maybe_log_periodic();
+}
+
+static void
+dynarec_3dnow_cov_count_fallback_dispatch(void)
+{
+    dynarec_3dnow_cov_init_env();
+    if (!dynarec_3dnow_cov_stats_enabled)
+        return;
+
+    dynarec_3dnow_fallback_dispatches++;
+    dynarec_3dnow_cov_maybe_log_periodic();
+}
 
 static struct {
     uint32_t pc;
@@ -399,6 +497,7 @@ codegen_generate_call(uint8_t opcode, OpFn op, uint32_t fetchdat, uint32_t new_p
     int          in_lock            = 0;
     uint32_t     next_pc            = 0;
     uint16_t     op87               = 0x0000;
+    int          saw_3dnow_dispatch = 0;
 #ifdef DEBUG_EXTRA
     uint8_t last_prefix = 0;
 #endif
@@ -658,6 +757,8 @@ generate_call:
         }
 
         opcode_3dnow = fastreadb(cs + opcode_pc);
+        dynarec_3dnow_cov_init_env();
+        saw_3dnow_dispatch = 1;
         if (!fpu_softfloat && recomp_opcodes_3DNOW[opcode_3dnow]) {
             next_pc = opcode_pc + 1;
 
@@ -683,6 +784,8 @@ generate_call:
     if (recomp_op_table && recomp_op_table[(opcode | op_32) & recomp_opcode_mask]) {
         uint32_t new_pc = recomp_op_table[(opcode | op_32) & recomp_opcode_mask](block, ir, opcode, fetchdat, op_32, op_pc);
         if (new_pc) {
+            if (saw_3dnow_dispatch)
+                dynarec_3dnow_cov_count_recompiled_dispatch();
             if (new_pc != -1)
                 uop_MOV_IMM(ir, IREG_pc, new_pc);
 
@@ -734,6 +837,8 @@ codegen_skip:
 #ifdef DEBUG_EXTRA
     uop_LOG_INSTR(ir, opcode | (last_prefix << 8));
 #endif
+    if (saw_3dnow_dispatch)
+        dynarec_3dnow_cov_count_fallback_dispatch();
     codegen_accumulate_flush(ir);
     if (op_table == x86_dynarec_opcodes_3DNOW)
         uop_MOV_IMM(ir, IREG_pc, next_pc);
