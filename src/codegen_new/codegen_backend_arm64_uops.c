@@ -1887,12 +1887,13 @@ codegen_PFACC(codeblock_t *block, uop_t *uop)
     int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
 
     if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
-        /* sum_a = src_a0 + src_a1 (lane 0), sum_b = src_b0 + src_b1 (lane 0). */
-        host_arm64_DUP_V2S(block, dest_reg, src_reg_a, 1);
-        host_arm64_FADD_V2S(block, dest_reg, dest_reg, src_reg_a);
-
+        /* sum_b first to avoid src_b/dest alias clobber when ModRM uses same reg. */
         host_arm64_DUP_V2S(block, REG_V_TEMP, src_reg_b, 1);
         host_arm64_FADD_V2S(block, REG_V_TEMP, REG_V_TEMP, src_reg_b);
+
+        /* sum_a = src_a0 + src_a1 (lane 0). */
+        host_arm64_DUP_V2S(block, dest_reg, src_reg_a, 1);
+        host_arm64_FADD_V2S(block, dest_reg, dest_reg, src_reg_a);
 
         /* dst lane1 = sum_b, preserving dst lane0 = sum_a. */
         host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 1, 0);
