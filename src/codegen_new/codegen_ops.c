@@ -191,7 +191,9 @@ RecompOpFn recomp_opcodes_3DNOW[256] = {
 // clang-format off
 #if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64
     /* Phase 1 ARM64 bring-up: enable only opcodes with existing rop+lowerer support. */
+    [0x0c] = ropPI2FW,
     [0x0d] = ropPI2FD,
+    [0x1c] = ropPF2IW,
     [0x1d] = ropPF2ID,
     [0x90] = ropPFCMPGE,
     [0x94] = ropPFMIN,

@@ -1740,6 +1740,28 @@ codegen_PF2ID(codeblock_t *block, uop_t *uop)
     return 0;
 }
 static int
+codegen_PF2IW(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        host_arm64_FCVTZS_V2S(block, REG_V_TEMP, src_reg_b);
+        host_arm64_XTN_V4H_4S(block, REG_V_TEMP, REG_V_TEMP);
+        host_arm64_FMOV_W_S(block, REG_TEMP, REG_V_TEMP);
+        host_arm64_FMOV_D_D(block, dest_reg, src_reg_a);
+        host_arm64_FMOV_S_W(block, REG_V_TEMP, REG_TEMP);
+        host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 0, 0);
+    } else
+        fatal("PF2IW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
 codegen_PFADD(codeblock_t *block, uop_t *uop)
 {
     int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
@@ -1943,6 +1965,28 @@ codegen_PI2FD(codeblock_t *block, uop_t *uop)
         host_arm64_SCVTF_V2S(block, dest_reg, src_reg_a);
     } else
         fatal("PI2FD %02x\n", uop->dest_reg_a_real);
+
+    return 0;
+}
+static int
+codegen_PI2FW(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
+        host_arm64_FMOV_W_S(block, REG_TEMP, src_reg_a);
+        host_arm64_MOV_REG_ASR(block, REG_TEMP2, REG_TEMP, 16);
+        host_arm64_MOV_REG_ROR(block, REG_TEMP, REG_TEMP, 16);
+        host_arm64_MOV_REG_ASR(block, REG_TEMP, REG_TEMP, 16);
+        host_arm64_FMOV_S_W(block, dest_reg, REG_TEMP);
+        host_arm64_FMOV_S_W(block, REG_V_TEMP, REG_TEMP2);
+        host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 1, 0);
+        host_arm64_SCVTF_V2S(block, dest_reg, dest_reg);
+    } else
+        fatal("PI2FW %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
 
     return 0;
 }
@@ -3317,6 +3361,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PF2ID &
         UOP_MASK]
     = codegen_PF2ID,
+    [UOP_PF2IW &
+        UOP_MASK]
+    = codegen_PF2IW,
     [UOP_PFADD &
         UOP_MASK]
     = codegen_PFADD,
@@ -3353,6 +3400,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PI2FD &
         UOP_MASK]
     = codegen_PI2FD,
+    [UOP_PI2FW &
+        UOP_MASK]
+    = codegen_PI2FW,
 
     [UOP_PMADDWD &
         UOP_MASK]
