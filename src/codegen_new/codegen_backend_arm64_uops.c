@@ -1895,8 +1895,8 @@ codegen_PFACC(codeblock_t *block, uop_t *uop)
         host_arm64_DUP_V2S(block, dest_reg, src_reg_a, 1);
         host_arm64_FADD_V2S(block, dest_reg, dest_reg, src_reg_a);
 
-        /* dst lane1 = sum_b, preserving dst lane0 = sum_a. */
-        host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 1, 0);
+        /* Compose [sum_a, sum_b] from lane0 of both temps. */
+        host_arm64_ZIP1_V2S(block, dest_reg, dest_reg, REG_V_TEMP);
     } else
         fatal("PFACC %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
 
