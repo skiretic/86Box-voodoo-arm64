@@ -6,6 +6,7 @@ RUN_TAG="${1:-s03a-telemetry}"
 A013_TRACE_VALUE="$(printenv 86BOX_A013_TRACE 2>/dev/null || true)"
 S03_STATS_VALUE="$(printenv 86BOX_NEW_DYNAREC_STATS 2>/dev/null || true)"
 S03_TELEMETRY_VALUE="$(printenv 86BOX_NEW_DYNAREC_TELEMETRY 2>/dev/null || true)"
+COV3DNOW_STATS_VALUE="$(printenv 86BOX_3DNOW_COV_STATS 2>/dev/null || true)"
 
 if [ -z "${A013_TRACE_VALUE}" ]; then
   A013_TRACE_VALUE=0
@@ -15,6 +16,9 @@ if [ -z "${S03_STATS_VALUE}" ]; then
 fi
 if [ -z "${S03_TELEMETRY_VALUE}" ]; then
   S03_TELEMETRY_VALUE=0
+fi
+if [ -z "${COV3DNOW_STATS_VALUE}" ]; then
+  COV3DNOW_STATS_VALUE=0
 fi
 
 cd "${ROOT_DIR}"
@@ -27,6 +31,7 @@ CMD_LINES="$(env \
   86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
   86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
   86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
+  86BOX_3DNOW_COV_STATS="${COV3DNOW_STATS_VALUE}" \
   ./scripts/dynarec/prepare-vm-telemetry-run.sh)"
 BIN="$(printf '%s\n' "${CMD_LINES}" | sed -n '1p')"
 VM_FLAG_1="$(printf '%s\n' "${CMD_LINES}" | sed -n '2p')"
@@ -50,6 +55,7 @@ launch_with_open() {
     86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
     86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
     86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
+    86BOX_3DNOW_COV_STATS="${COV3DNOW_STATS_VALUE}" \
     open -n -a "${app_target}" --args \
     "${VM_FLAG_1}" "${VM_PATH}" \
     "${VM_FLAG_2}" "${VM_NAME}" \
@@ -62,6 +68,7 @@ launch_with_bin() {
     86BOX_NEW_DYNAREC_STATS="${S03_STATS_VALUE}" \
     86BOX_NEW_DYNAREC_TELEMETRY="${S03_TELEMETRY_VALUE}" \
     86BOX_A013_TRACE="${A013_TRACE_VALUE}" \
+    86BOX_3DNOW_COV_STATS="${COV3DNOW_STATS_VALUE}" \
     "${BIN}" \
     "${VM_FLAG_1}" "${VM_PATH}" \
     "${VM_FLAG_2}" "${VM_NAME}" \
@@ -91,6 +98,21 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   sleep 1
 done
 
+# Guard against short-lived launch failures: if process appears then exits
+# immediately, retry once via LaunchServices before reporting failure.
+if [ -n "${PID}" ] && ! (sleep 2; kill -0 "${PID}" 2>/dev/null); then
+  PID=""
+  if launch_with_open "${APP_PATH}"; then
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      PID="$(pgrep -f "${BIN}" | head -n1 || true)"
+      if [ -n "${PID}" ] && kill -0 "${PID}" 2>/dev/null; then
+        break
+      fi
+      sleep 1
+    done
+  fi
+fi
+
 if [ -z "${PID}" ]; then
   echo "launch_failed=1"
   echo "run_tag=${RUN_TAG}"
@@ -110,3 +132,4 @@ echo "pid=${PID}"
 echo "env_86BOX_NEW_DYNAREC_STATS_EFFECTIVE=${S03_STATS_VALUE}"
 echo "env_86BOX_NEW_DYNAREC_TELEMETRY_EFFECTIVE=${S03_TELEMETRY_VALUE}"
 echo "env_86BOX_A013_TRACE_EFFECTIVE=${A013_TRACE_VALUE}"
+echo "env_86BOX_3DNOW_COV_STATS_EFFECTIVE=${COV3DNOW_STATS_VALUE}"
