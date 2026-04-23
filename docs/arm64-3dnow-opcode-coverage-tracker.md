@@ -46,6 +46,15 @@ Legend:
 | `8e` | `PFPNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `bb` | `PSWAPD` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 
+### Base 3DNow Companion Opcodes (`0F xx`, not `0F 0F ... imm8`)
+
+These are part of practical base 3DNow-era coverage but are not represented in the imm8 table above.
+
+| Opcode | Mnemonic | Guest Validation | ARM64 Dynarec |
+| --- | --- | --- | --- |
+| `0F 0D /r` | `PREFETCH/PREFETCHW` | Harness loop executes (`LOOP 2`); explicit marker update pending validation rerun | Enabled on ARM64 (`ropPREFETCH`), fallback on x86-64 |
+| `0F 0E` | `FEMMS` | Harness loop executes (`LOOP 2`); explicit marker update pending validation rerun | Enabled on ARM64 (`ropFEMMS` + helper), fallback on x86-64 |
+
 ## ARM64 Dynarec Bring-Up Target Table
 
 Use this table to track progress as ARM64 mapping is enabled opcode-by-opcode.
@@ -104,3 +113,4 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-23 | `3dnowcov-r13` PFACC dynarec real fix | `pass=19 fail=0 skip=5`, `DONE` | Re-enabled `ae` with ARM64 pairwise-add lowering via `FADDP.V2S` | Host telemetry returned to dynarec-forward split (`DYNAREC_3DNOW_SUMMARY ... recompiled=34 fallback=4`) with no `PFACC FAIL`. |
 | 2026-04-23 | Phase 2 partial bring-up: `PMULHRW` + `PAVGUSB` dynarec path | Code landed, ready to validate | Added ARM64 dynarec coverage for opcodes `b7` and `bf` | Real codegen only (no helper fallback): `PMULHRW` lowered with `SMULL + SRSHR + XTN`, `PAVGUSB` lowered with `URHADD`; ARM64 `recomp_opcodes_3DNOW` now maps both. |
 | 2026-04-23 | `3dnowcov-r16` validation for `b7`/`bf` slice | `pass=19 fail=0 skip=5`, `DONE` | `b7` and `bf` moved to validated | Final ARM64 PMULHRW fix corrected `SRSHR` encoding and kept non-saturating narrow; host telemetry: `DYNAREC_3DNOW_SUMMARY tag=final total=38 recompiled=38 fallback=0`. |
+| 2026-04-23 | ARM64 non-Ext companion slice: `0F0D`/`0F0E` (`PREFETCH`/`FEMMS`) + Win98 explicit misc marker | Code landed, ready to validate | Added ARM64 real dynarec entries for `recomp_opcodes_0f{,_no_mmx}` slots `0x0d`/`0x0e`; x86-64 unchanged (`NULL`) | `ropPREFETCH` uses real EA decode path and keeps ModRM-reg illegal fallback; `ropFEMMS` uses exact semantics helper (`MMX` feature + `#NM` checks + `x87_emms`) and exits cleanly on exceptions. |
