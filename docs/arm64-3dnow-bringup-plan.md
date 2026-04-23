@@ -32,6 +32,10 @@ Validation run (`3dnowcov-r2`) confirms stable baseline and usable harness:
    - `86BOX_3DNOW_COV_STATS=1` to enable.
 5. Move forward-only; no history rewrite.
 6. Each phase must be independently revertible.
+7. Clean-code enforcement for this bring-up:
+   - any newly written code that fails validation must be fixed or removed before handoff.
+   - do not leave partial/experimental dead paths from the current slice in tree.
+   - do not silently modify unrelated pre-existing code; call out and justify such edits before making them.
 
 ## Proven Low-Churn Method (Keep Using This)
 
