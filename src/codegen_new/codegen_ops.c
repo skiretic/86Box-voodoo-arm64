@@ -213,6 +213,7 @@ RecompOpFn recomp_opcodes_3DNOW[256] = {
     [0xb4] = ropPFMUL,
     [0xb6] = ropPFRCPIT,
     [0xb7] = ropPMULHRW,
+    [0xbb] = ropPSWAPD,
     [0xbf] = ropPAVGUSB,
 #else
 /*      00              01              02              03              04              05              06              07              08              09              0a              0b              0c              0d              0e              0f*/

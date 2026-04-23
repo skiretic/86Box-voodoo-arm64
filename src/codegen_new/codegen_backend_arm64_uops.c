@@ -1972,6 +1972,26 @@ codegen_PFPNACC(codeblock_t *block, uop_t *uop)
     return 0;
 }
 static int
+codegen_PSWAPD(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
+        /* Alias-safe swap using source snapshot:
+           dst[0] = src[1], dst[1] = src[0]. */
+        host_arm64_FMOV_D_D(block, REG_V_TEMP, src_reg_a);
+        host_arm64_DUP_V2S(block, dest_reg, REG_V_TEMP, 1);
+        host_arm64_DUP_V2S(block, REG_V_TEMP, REG_V_TEMP, 0);
+        host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 1, 0);
+    } else
+        fatal("PSWAPD %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
+
+    return 0;
+}
+static int
 codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
 {
     int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
@@ -3451,6 +3471,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PFPNACC &
         UOP_MASK]
     = codegen_PFPNACC,
+    [UOP_PSWAPD &
+        UOP_MASK]
+    = codegen_PSWAPD,
     [UOP_PFRSQRT &
         UOP_MASK]
     = codegen_PFRSQRT,
