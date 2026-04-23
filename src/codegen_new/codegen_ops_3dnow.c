@@ -50,6 +50,8 @@ ropParith(PFMAX)
 ropParith(PFMIN)
 ropParith(PFMUL)
 ropParith(PFSUB)
+ropParith(PMULHRW)
+ropParith(PAVGUSB)
     // clang-format on
 
 uint32_t ropPF2ID(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)

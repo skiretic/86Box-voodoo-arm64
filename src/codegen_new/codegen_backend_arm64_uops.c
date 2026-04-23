@@ -1984,6 +1984,42 @@ codegen_PMULHW(codeblock_t *block, uop_t *uop)
     return 0;
 }
 static int
+codegen_PMULHRW(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        host_arm64_SMULL_V4S_4H(block, REG_V_TEMP, src_reg_a, src_reg_b);
+        host_arm64_SRSHR_V4S(block, REG_V_TEMP, REG_V_TEMP, 16);
+        host_arm64_XTN_V4H_4S(block, dest_reg, REG_V_TEMP);
+    } else
+        fatal("PMULHRW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
+codegen_PAVGUSB(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        host_arm64_URHADD_V8B(block, dest_reg, src_reg_a, src_reg_b);
+    } else
+        fatal("PAVGUSB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
 codegen_PMULLW(codeblock_t *block, uop_t *uop)
 {
     int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
@@ -3324,6 +3360,12 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PMULHW &
         UOP_MASK]
     = codegen_PMULHW,
+    [UOP_PMULHRW &
+        UOP_MASK]
+    = codegen_PMULHRW,
+    [UOP_PAVGUSB &
+        UOP_MASK]
+    = codegen_PAVGUSB,
     [UOP_PMULLW &
         UOP_MASK]
     = codegen_PMULLW,

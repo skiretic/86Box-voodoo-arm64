@@ -38,8 +38,8 @@ Legend:
 | `b0` | `PFCMPEQ` | 3DNow base | PASS | Enabled (pending validation) |
 | `b4` | `PFMUL` | 3DNow base | PASS | Enabled (pending validation) |
 | `b6` | `PFRCPIT2` | 3DNow base | PASS | Enabled (pending validation) |
-| `b7` | `PMULHRW` | 3DNow base | PASS | Not enabled yet |
-| `bf` | `PAVGUSB` | 3DNow base | PASS | Not enabled yet |
+| `b7` | `PMULHRW` | 3DNow base | PASS | Enabled (validated) |
+| `bf` | `PAVGUSB` | 3DNow base | PASS | Enabled (validated) |
 | `0c` | `PI2FW` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `1c` | `PF2IW` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `8a` | `PFNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
@@ -75,8 +75,8 @@ Status values:
 | `b4` | `PFMUL` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
 | `b6` | `PFRCPIT2` | Phase 1 | Enabled | Curated ARM64 table entry added via `ropPFRCPIT`; validate in next run. |
 | `ae` | `PFACC` | Phase 2 | Validated | ARM64 lowering switched to `FADDP.V2S` pairwise path and matched harness baseline. |
-| `b7` | `PMULHRW` | Phase 2 | Planned | Needs explicit mapping/coverage confirmation. |
-| `bf` | `PAVGUSB` | Phase 2 | Planned | Needs explicit mapping/coverage confirmation. |
+| `b7` | `PMULHRW` | Phase 2 | Validated | ARM64 lowering uses `SMULL + SRSHR + XTN` and matches harness baseline. |
+| `bf` | `PAVGUSB` | Phase 2 | Validated | ARM64 lowering uses `URHADD.V8B` and matches harness baseline. |
 | `0c` | `PI2FW` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `1c` | `PF2IW` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `8a` | `PFNACC` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
@@ -102,3 +102,5 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-23 | `3dnowcov-r10/r11` PFACC triage conclusion + ARM64 safety gate | Code landed, ready to validate | Temporarily disabled ARM64 dynarec dispatch for `ae` (`PFACC`) to force known-good instruction-function fallback | Repeated runs stayed `pass=18 fail=1` with stable `PFACC` fail hash while dynarec active (`recompiled=34 fallback=4`); gated `ae` to `NULL` on ARM64 table (`fallback`) pending bit-exact lowerer fix. |
 | 2026-04-23 | `3dnowcov-r12` safety-gated confirmation | `pass=19 fail=0 skip=5`, `DONE` | Confirmed harness stability with PFACC forced fallback | Host telemetry showed fallback-heavy split (`recompiled=32 fallback=6`) as expected for temporary safety gate. |
 | 2026-04-23 | `3dnowcov-r13` PFACC dynarec real fix | `pass=19 fail=0 skip=5`, `DONE` | Re-enabled `ae` with ARM64 pairwise-add lowering via `FADDP.V2S` | Host telemetry returned to dynarec-forward split (`DYNAREC_3DNOW_SUMMARY ... recompiled=34 fallback=4`) with no `PFACC FAIL`. |
+| 2026-04-23 | Phase 2 partial bring-up: `PMULHRW` + `PAVGUSB` dynarec path | Code landed, ready to validate | Added ARM64 dynarec coverage for opcodes `b7` and `bf` | Real codegen only (no helper fallback): `PMULHRW` lowered with `SMULL + SRSHR + XTN`, `PAVGUSB` lowered with `URHADD`; ARM64 `recomp_opcodes_3DNOW` now maps both. |
+| 2026-04-23 | `3dnowcov-r16` validation for `b7`/`bf` slice | `pass=19 fail=0 skip=5`, `DONE` | `b7` and `bf` moved to validated | Final ARM64 PMULHRW fix corrected `SRSHR` encoding and kept non-saturating narrow; host telemetry: `DYNAREC_3DNOW_SUMMARY tag=final total=38 recompiled=38 fallback=0`. |
