@@ -44,7 +44,7 @@ Legend:
 | `1c` | `PF2IW` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `8a` | `PFNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `8e` | `PFPNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
-| `bb` | `PSWAPD` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
+| `bb` | `PSWAPD` | 3DNowExt | SKIP_NO_3DNOWEXT | Enabled (3DNowExt profile only, pending validation) |
 
 ## ARM64 Dynarec Bring-Up Target Table
 
@@ -81,7 +81,7 @@ Status values:
 | `1c` | `PF2IW` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `8a` | `PFNACC` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `8e` | `PFPNACC` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
-| `bb` | `PSWAPD` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
+| `bb` | `PSWAPD` | Phase 3 (3DNowExt) | Enabled | Real dynarec `ropPSWAPD` path added; gated at runtime on `CPU_FEATURE_3DNOWE` to preserve non-3DNowExt behavior. |
 
 ## Progress Update Log
 
@@ -104,3 +104,4 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-23 | `3dnowcov-r13` PFACC dynarec real fix | `pass=19 fail=0 skip=5`, `DONE` | Re-enabled `ae` with ARM64 pairwise-add lowering via `FADDP.V2S` | Host telemetry returned to dynarec-forward split (`DYNAREC_3DNOW_SUMMARY ... recompiled=34 fallback=4`) with no `PFACC FAIL`. |
 | 2026-04-23 | Phase 2 partial bring-up: `PMULHRW` + `PAVGUSB` dynarec path | Code landed, ready to validate | Added ARM64 dynarec coverage for opcodes `b7` and `bf` | Real codegen only (no helper fallback): `PMULHRW` lowered with `SMULL + SRSHR + XTN`, `PAVGUSB` lowered with `URHADD`; ARM64 `recomp_opcodes_3DNOW` now maps both. |
 | 2026-04-23 | `3dnowcov-r16` validation for `b7`/`bf` slice | `pass=19 fail=0 skip=5`, `DONE` | `b7` and `bf` moved to validated | Final ARM64 PMULHRW fix corrected `SRSHR` encoding and kept non-saturating narrow; host telemetry: `DYNAREC_3DNOW_SUMMARY tag=final total=38 recompiled=38 fallback=0`. |
+| 2026-04-23 | Phase 3 partial bring-up: `PSWAPD` dynarec path (`bb`) | Code landed, ready to validate | Added ARM64 dynarec coverage for opcode `bb` under 3DNowExt profile | Real codegen path in `ropPSWAPD` uses `PSRLQ + PSLLQ + OR` (no helper-call substitution) and runtime-gates on `CPU_FEATURE_3DNOWE` to keep non-3DNowExt behavior unchanged. |
