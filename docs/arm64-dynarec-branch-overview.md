@@ -37,6 +37,8 @@ The policy that decides when to force “no immediates” mode was tuned in step
 - reset stale retry debt after stable execution periods.
 - require stronger repeated evidence before escalation.
 - add burst-awareness so spaced-out retries do not accumulate as if they were one hot burst.
+- retire stale `NO_IMMEDIATES` state after sustained stable execution, so old hotspots can return to faster immediate-friendly mode.
+- add post-retirement re-promotion hysteresis so stale hotspots do not immediately bounce back into `NO_IMMEDIATES`.
 
 Why this matters:
 - fewer unnecessary expensive recompiles/escalations.
@@ -84,6 +86,35 @@ Across repeated Q3 + 3DMark99 + WL-05 runs:
 - latest validated run markers:
   - Q3 demo four timedemo: `1260 frames, 36.3 seconds: 34.7 fps`
   - 3DMark99: `2545 3DMarks`, `6053 CPU 3DMarks`
+- latest `S-03f` trial markers (not yet promoted to baseline):
+  - Q3 demo four timedemo: `1260 frames, 36.6 seconds: 34.4 fps`
+  - 3DMark99: `2492 3DMarks`, `5894 CPU 3DMarks`
+  - `WL-05` and safety marker stayed clean, but churn ratio regressed versus lock (`0.001404` vs `0.001091`), so tuning remains active.
+- latest recheck (`S-03f r3`) confirmed mixed-but-promising behavior:
+  - Q3 returned to lock-level marker (`1260 frames, 36.4 seconds: 34.7 fps`).
+  - 3DMark99 remained below lock score (`2478`, CPU `5882`).
+  - churn ratio improved versus `r2` (`0.001276` vs `0.001404`) but is still above lock (`0.001091`).
+  - operator observed major improvement in 3DMark99 16 MB / 32 MB texture tests (roughly `90-97%` host-speed range versus older runs often near `~60%`), indicating real gain in a known host-stress hotspot.
+- latest `S-03g` file-copy check (`PERF_RUN.BAT`) improved churn pressure further:
+  - `promote_no_immediates/dirty_list_hits = 0.001153` (better than `S-03f` file-copy `0.001335`), with safety marker still clean.
+- full mixed-workload recheck for `S-03g` did not hold that gain:
+  - Q3 and WL-05 remained stable, 3DMark improved vs some `S-03f` runs.
+  - churn ratio rose to `0.001375`, worse than both lock (`0.001091`) and `S-03f r3` (`0.001276`).
+  - result: `S-03g` remains a non-baseline experiment.
+- current follow-on (`S-03h`) switches to split-state guard logic:
+  - separate stability-retirement streak from dirty retry state.
+  - keep post-retirement re-promotion guard short and targeted to early dirty retries.
+  - goal: retain disk-heavy gain without full-workload churn regression.
+- latest outcome:
+  - `S-03h` did not hold on full workload (`ratio 0.001494`) even though correctness stayed clean.
+  - branch reverted to `S-03e`-baseline churn behavior for stability.
+  - restore-check run landed near lock again (`0.001158` vs lock `0.001091`) with WL-05 unchanged and user-observed texture-stress responsiveness improved versus failed experimental variants.
+- post-reboot logging recheck (`S-03e` baseline) showed expected variance without correctness drift:
+  - `r1`: `0.001096` (`8 / 7299`, near lock).
+  - `r2`: `0.001242` (`23 / 18520`, above lock).
+  - safety marker remained `0` and WL-05 stayed locked in both runs.
+- file-copy gate status:
+  - dedicated `PERF_RUN.BAT` run completed with full marker sequence and no `PERF_ERROR` observed in guest console.
 
 ## What WL-05 Means
 
@@ -113,6 +144,13 @@ Each candidate change is accepted only if:
 - 3DMark99 full run finishes normally.
 - WL-05 quick/normal/smc hashes remain unchanged.
 - safety counters remain clean.
+- perf ISO file-copy workload (`PERF_RUN.BAT`) completes with the full marker sequence:
+  - `PERF_RUN_START`
+  - `PERF_PREP_START` / `PERF_PREP_END`
+  - `PERF_LOOP_START 1` / `PERF_LOOP_END 1`
+  - `PERF_LOOP_START 2` / `PERF_LOOP_END 2`
+  - `PERF_DONE`
+  - and no `PERF_ERROR`.
 
 ## Current Runtime Profile
 
@@ -133,7 +171,9 @@ Each candidate change is accepted only if:
 
 - branch-path optimization work: stable and held.
 - churn-policy refinement work: active and progressing.
-- latest large code swing (adaptive burst-aware escalation): implemented and in validation.
+- latest large code swings (`S-03f/g/h`) were tested and rejected for baseline promotion after full-workload churn regressions; branch is operating on restored `S-03e` baseline.
+- dedicated file-copy/disk-heavy validation is now part of active gate flow (`PERF_RUN.BAT` from perf ISO).
+- validated caveat for interpretation of K6-2 workload behavior: ARM64 builds currently gate 3DNow dynarec decode-table entries off, so 3DNow execution still routes through instruction-function dispatch path rather than active ARM64 3DNow dynarec decode flow.
 
 ## Later-Phase Goals (Not Hit Yet)
 

@@ -5,8 +5,8 @@
 - Exact next file/module: for active coding, continue `S-03` follow-on tuning in `src/cpu/386_dynarec.c` (ARM64-guarded post-`S-03e` code-first refinement).
 - Next 3 concrete actions:
   1. Keep `S-03e r2` as locked churn baseline and retain `S-03d r2` + `S-03c r2` as comparison anchors.
-  2. Implement the next ARM64-only code-first churn refinement before opening new telemetry scope.
-  3. Gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03e r2`.
+  2. Validate `S-03f` adaptive `NO_IMMEDIATES` retirement under the locked workload set.
+  3. Gate on `WL-05` hash lock + `unexpected_noimm_without_bmask=0` + no harmful churn-ratio regression versus `S-03e r2` (`<= 0.001091`).
 - Active blockers:
 - None for source discovery; blocker handling is now execution-time only (regression gates and workload comparability).
 - Keep telemetry low-noise by default; detailed A-path tracing remains opt-in (`86BOX_A013_TRACE=1`).
@@ -134,6 +134,115 @@
       - `S-03d r2`: `0.001159`
       - `S-03e r2`: `0.001091`
     - decision: accept `S-03e` as current ARM64 churn baseline and proceed with code-first follow-on.
+  - `S-03f` implementation checkpoint:
+    - ARM64-only adaptive retirement added for `BYTE_MASK + NO_IMMEDIATES` blocks after sustained stable execution.
+    - policy intent: avoid long-lived stale `NO_IMMEDIATES` pinning while preserving burst-aware promotion safety for true hot churn.
+    - no x86-64 behavior change intended.
+    - telemetry defaults remain low-noise (`86BOX_NEW_DYNAREC_STATS=1`, `86BOX_NEW_DYNAREC_TELEMETRY=0`, `86BOX_A013_TRACE=0`).
+    - validation set now explicitly includes file-copy workload from perf ISO script (`D:\\SCRIPTS\\PERF_RUN.BAT D:`) with required markers:
+      - `PERF_RUN_START`
+      - `PERF_PREP_START` / `PERF_PREP_END`
+      - `PERF_LOOP_START 1` / `PERF_LOOP_END 1`
+      - `PERF_LOOP_START 2` / `PERF_LOOP_END 2`
+      - `PERF_DONE`
+      - and no `PERF_ERROR`
+  - `S-03f` validation checkpoint (current):
+    - `run_tag=s03f-noimm-retire-r2` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_19-15-14-Windows 98 Gaming PC-s03f-noimm-retire-r2/`
+    - guest markers: `Q3 timedemo 34.4 fps`, `3DMark99 2492`, `CPU 5894`.
+    - `WL-05` stayed locked and safety marker stayed clean (`unexpected_noimm_without_bmask=0`).
+    - churn ratio regressed versus lock:
+      - lock (`S-03e r2`): `0.001091`
+      - `S-03f r2`: `0.001404`
+    - decision: keep `S-03f` in tuning state (not promoted to baseline yet).
+  - dedicated disk-heavy follow-on run launched:
+    - `run_tag=s03f-filecopy-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_19-24-23-Windows 98 Gaming PC-s03f-filecopy-r1/`
+    - target guest command remains `D:\\SCRIPTS\\PERF_RUN.BAT D:` with marker lock and `PERF_ERROR` absence requirement.
+  - `S-03f` file-copy validation checkpoint:
+    - guest console markers completed in order:
+      - `PERF_RUN_START`
+      - `PERF_PREP_START` / `PERF_PREP_END`
+      - `PERF_LOOP_START 1` / `PERF_LOOP_END 1`
+      - `PERF_LOOP_START 2` / `PERF_LOOP_END 2`
+      - `PERF_DONE`
+      - no `PERF_ERROR` observed
+    - host safety remained clean: `unexpected_noimm_without_bmask=0`.
+    - next step: rerun full `WL-05 + Q3 + 3DMark99` comparability workload (`s03f-noimm-retire-r3`).
+    - optimization signal: file-copy churn ratio remained above lock target (`0.001335` vs `0.001091`), suggesting residual ARM64 dirty-list escalation overhead in disk-heavy paths.
+    - follow-on optimization focus: tighten ARM64-only `NO_IMMEDIATES` retirement/hysteresis policy for stale disk hotspots while preserving correctness gates.
+  - `S-03f` validation checkpoint (`r3`):
+    - `run_tag=s03f-noimm-retire-r3` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_19-36-29-Windows 98 Gaming PC-s03f-noimm-retire-r3/`
+    - guest markers: `Q3 timedemo 34.7 fps`, `3DMark99 2478`, `CPU 5882`.
+    - `WL-05` stayed locked; safety marker stayed clean (`unexpected_noimm_without_bmask=0`).
+    - churn ratio improved versus `r2` but remains above lock:
+      - `S-03f r2`: `0.001404`
+      - `S-03f r3`: `0.001276`
+      - lock (`S-03e r2`): `0.001091`
+    - operator-observed hotspot signal: 3DMark99 16 MB / 32 MB texture tests were much closer to full speed (`~90-97%`) than older historical behavior (often around `~60%`).
+    - decision: keep `S-03f` unpromoted; tune for churn-ratio recovery while protecting newly observed texture-stress responsiveness.
+  - `S-03g` implementation checkpoint:
+    - ARM64-only re-promotion hysteresis added to reduce post-retirement `NO_IMMEDIATES` flip-flop churn.
+    - new ARM64 block state: `no_immediates_repromote_cooldown`.
+    - on `S-03f` retirement, cooldown is set; while active, re-promotion threshold is raised above base `S-03d` threshold.
+    - no x86-64 behavior change intended.
+    - no parser updates required (no new telemetry fields).
+    - next run tag staged: `s03g-hysteresis-r1`.
+    - telemetry prep completed without launch; staged logfile path:
+      - `docs/perf-artifacts/arm64-dynarec/2026-04-22_19-51-17-Windows 98 Gaming PC-s03g-hysteresis-r1/86box.log`
+  - `S-03g` file-copy validation checkpoint (`r1`):
+    - `run_tag=s03g-filecopy-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_19-54-21-Windows 98 Gaming PC-s03g-filecopy-r1/`
+    - guest marker lock completed (`PERF_RUN_START` .. `PERF_DONE`) with no `PERF_ERROR` observed.
+    - host safety remained clean: `unexpected_noimm_without_bmask=0`.
+    - churn ratio improved versus prior file-copy checkpoint:
+      - `S-03f filecopy r1`: `0.001335`
+      - `S-03g filecopy r1`: `0.001153`
+    - still slightly above lock target `0.001091`; proceed to full comparability run.
+  - `S-03g` full-workload validation checkpoint (`r1`):
+    - `run_tag=s03g-hysteresis-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_20-05-36-Windows 98 Gaming PC-s03g-hysteresis-r1/`
+    - guest markers: `Q3 timedemo 34.6 fps`, `3DMark99 2517`, `CPU 5880`.
+    - `WL-05` stayed locked and safety marker stayed clean (`unexpected_noimm_without_bmask=0`).
+    - churn ratio regressed on full workload:
+      - lock (`S-03e r2`): `0.001091`
+      - `S-03f r3`: `0.001276`
+      - `S-03g r1`: `0.001375`
+    - decision: do not promote `S-03g` hysteresis policy as baseline.
+  - `S-03h` implementation checkpoint:
+    - replaced `S-03g` with split-state ARM64-only guard policy.
+    - dirty retry (`dirty_list_recompile_hits`) and stability retirement streak (`no_immediates_stable_streak`) are now separate state variables.
+    - post-retirement guard is short-lived and counted on dirty retries (`no_immediates_repromote_guard_hits`) rather than broad execution cooldown.
+    - intent: preserve file-copy benefit while reducing mixed-workload over-penalization.
+    - no x86-64 behavior change intended; no parser updates required.
+    - next run tag staged: `s03h-split-guard-r1`.
+  - `S-03h` file-copy validation checkpoint (`r1`):
+    - `run_tag=s03h-filecopy-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_20-26-52-Windows 98 Gaming PC-s03h-filecopy-r1/`
+    - operator confirmed expected file-copy completion with no anomaly.
+    - host safety remained clean: `unexpected_noimm_without_bmask=0`.
+    - churn ratio: `0.001150` (slightly better than `S-03g` file-copy `0.001153`, still above lock `0.001091`).
+    - next step: separate full `WL-05 + Q3 + 3DMark99` run (`s03h-full-r1`).
+  - `S-03h` full validation outcome:
+    - full-workload ratio regressed to `0.001494`; correctness remained clean but policy was not acceptable.
+  - restore action:
+    - churn-policy code returned to `S-03e` baseline behavior.
+    - restore validation run: `run_tag=s03e-restore-check-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_20-50-00-Windows 98 Gaming PC-s03e-restore-check-r1/`
+    - host ratio recovered near lock:
+      - lock (`S-03e r2`): `0.001091`
+      - restore check (`r1`): `0.001158`
+    - safety marker stayed clean (`unexpected_noimm_without_bmask=0`), WL-05 remained locked.
+    - operator observed texture-stress responsiveness recovery (16 MB / 32 MB tests back to high-80s/low-90s range).
+  - post-reboot logging recheck:
+    - `run_tag=s03e-postreboot-r1` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_21-13-17-Windows 98 Gaming PC-s03e-postreboot-r1/`
+      - `unexpected_noimm_without_bmask=0`
+      - `promote_no_immediates/dirty_list_hits = 0.001096` (`8 / 7299`, near lock).
+    - `run_tag=s03e-postreboot-r2` -> `run_dir=docs/perf-artifacts/arm64-dynarec/2026-04-22_21-15-15-Windows 98 Gaming PC-s03e-postreboot-r2/`
+      - `unexpected_noimm_without_bmask=0`
+      - `promote_no_immediates/dirty_list_hits = 0.001242` (`23 / 18520`, above lock).
+    - interpretation: measurable run-to-run variance remains under logging, but correctness gates stayed clean and behavior remained materially better than rejected `S-03g/S-03h` policy swings.
+  - code-validated 3DNow caveat (ARM64):
+    - `src/codegen_new/codegen_ops.c` sets `recomp_opcodes_3DNOW` to `0` on ARM/ARM64 builds.
+    - `src/codegen_new/codegen.c` takes the 3DNow recomp path only when `recomp_opcodes_3DNOW[opcode_3dnow]` is non-null; otherwise instruction dispatch proceeds through `uop_CALL_INSTRUCTION_FUNC`.
+    - `src/codegen_new/codegen_backend_arm64_uops.c` contains ARM64 PF*/PI2FD/PF2ID lowerers, but current ARM64 decode-table gating keeps them effectively inactive in normal 3DNow decode flow.
+  - current status:
+    - `S-03e` behavior is active baseline again.
+    - optional non-logging double-click sanity run remains useful for user-feel checks, but telemetry logging remains required for objective gate comparisons.
 
 ## Scope
 - Campaign start: 2026-04-20 22:54:04 EDT
