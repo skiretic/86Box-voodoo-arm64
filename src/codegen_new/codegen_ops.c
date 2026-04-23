@@ -182,7 +182,23 @@ RecompOpFn recomp_opcodes_0f_no_mmx[512] = {
 RecompOpFn recomp_opcodes_3DNOW[256] = {
 // clang-format off
 #if defined __ARM_EABI__ || defined _ARM_ || defined _M_ARM || defined __aarch64__ || defined _M_ARM64
-0
+    /* Phase 1 ARM64 bring-up: enable only opcodes with existing rop+lowerer support. */
+    [0x0d] = ropPI2FD,
+    [0x1d] = ropPF2ID,
+    [0x90] = ropPFCMPGE,
+    [0x94] = ropPFMIN,
+    [0x96] = ropPFRCP,
+    [0x97] = ropPFRSQRT,
+    [0x9a] = ropPFSUB,
+    [0x9e] = ropPFADD,
+    [0xa0] = ropPFCMPGT,
+    [0xa4] = ropPFMAX,
+    [0xa6] = ropPFRCPIT,
+    [0xa7] = ropPFRSQIT1,
+    [0xaa] = ropPFSUBR,
+    [0xb0] = ropPFCMPEQ,
+    [0xb4] = ropPFMUL,
+    [0xb6] = ropPFRCPIT,
 #else
 /*      00              01              02              03              04              05              06              07              08              09              0a              0b              0c              0d              0e              0f*/
 /*00*/  NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           NULL,           ropPI2FD,       NULL,           NULL,
