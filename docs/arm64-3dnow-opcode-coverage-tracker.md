@@ -52,8 +52,8 @@ These are part of practical base 3DNow-era coverage but are not represented in t
 
 | Opcode | Mnemonic | Guest Validation | ARM64 Dynarec |
 | --- | --- | --- | --- |
-| `0F 0D /r` | `PREFETCH/PREFETCHW` | Harness loop executes (`LOOP 2`); explicit marker update pending validation rerun | Enabled on ARM64 (`ropPREFETCH`), fallback on x86-64 |
-| `0F 0E` | `FEMMS` | Harness loop executes (`LOOP 2`); explicit marker update pending validation rerun | Enabled on ARM64 (`ropFEMMS` + helper), fallback on x86-64 |
+| `0F 0D /r` | `PREFETCH/PREFETCHW` | PASS (`3DNOWCOV_MISC prefetch=P`) | Enabled/validated on ARM64 (`ropPREFETCH`), fallback on x86-64 |
+| `0F 0E` | `FEMMS` | PASS (`3DNOWCOV_MISC femms=P`) | Enabled/validated on ARM64 (`ropFEMMS` + helper), fallback on x86-64 |
 
 ## ARM64 Dynarec Bring-Up Target Table
 
@@ -114,3 +114,5 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-23 | Phase 2 partial bring-up: `PMULHRW` + `PAVGUSB` dynarec path | Code landed, ready to validate | Added ARM64 dynarec coverage for opcodes `b7` and `bf` | Real codegen only (no helper fallback): `PMULHRW` lowered with `SMULL + SRSHR + XTN`, `PAVGUSB` lowered with `URHADD`; ARM64 `recomp_opcodes_3DNOW` now maps both. |
 | 2026-04-23 | `3dnowcov-r16` validation for `b7`/`bf` slice | `pass=19 fail=0 skip=5`, `DONE` | `b7` and `bf` moved to validated | Final ARM64 PMULHRW fix corrected `SRSHR` encoding and kept non-saturating narrow; host telemetry: `DYNAREC_3DNOW_SUMMARY tag=final total=38 recompiled=38 fallback=0`. |
 | 2026-04-23 | ARM64 non-Ext companion slice: `0F0D`/`0F0E` (`PREFETCH`/`FEMMS`) + Win98 explicit misc marker | Code landed, ready to validate | Added ARM64 real dynarec entries for `recomp_opcodes_0f{,_no_mmx}` slots `0x0d`/`0x0e`; x86-64 unchanged (`NULL`) | `ropPREFETCH` uses real EA decode path and keeps ModRM-reg illegal fallback; `ropFEMMS` uses exact semantics helper (`MMX` feature + `#NM` checks + `x87_emms`) and exits cleanly on exceptions. |
+| 2026-04-23 | `s03b-base3dnow-k6_2` validation rerun (post companion slice) | `pass=19 fail=0 skip=5`, `DONE` | Companion non-imm8 checks validated (`3DNOWCOV_MISC prefetch=P femms=P`) | Guest hash remained baseline (`83e69a2e`); host telemetry showed full base opcode dynarec hit rate (`DYNAREC_3DNOW_SUMMARY tag=final total=38 recompiled=38 fallback=0`). |
+| 2026-04-23 | 3DNowExt harness parity fix for `PF2IW` reference model | Code landed, ready to validate | Corrected `OPK_CONV_PF2IW` expected-value behavior to match interpreter semantics | `opPF2IW` writes only `sw[0..1]`; tool now preserves `sw[2..3]` instead of forcing zero, removing false-fail risk on 3DNowExt profile runs. |
