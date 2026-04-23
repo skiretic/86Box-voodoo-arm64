@@ -857,6 +857,12 @@ host_arm64_DUP_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int element)
 }
 
 void
+host_arm64_INS_S(codeblock_t *block, int dst_reg, int src_reg, int dst_index, int src_index)
+{
+    codegen_addlong(block, OPCODE_INS_S | Rd(dst_reg) | Rn(src_reg) | ((dst_index & 3) << 19) | ((src_index & 3) << 14));
+}
+
+void
 host_arm64_INS_D(codeblock_t *block, int dst_reg, int src_reg, int dst_index, int src_index)
 {
     codegen_addlong(block, OPCODE_INS_D | Rd(dst_reg) | Rn(src_reg) | ((dst_index & 1) << 20) | ((src_index & 1) << 14));
