@@ -129,6 +129,7 @@
 #    define OPCODE_FABS_D             (0x1e60c000)
 #    define OPCODE_FADD_D             (0x1e602800)
 #    define OPCODE_FADD_V2S           (0x0e20d400)
+#    define OPCODE_FADDP_V2S          (0x2e20d400)
 #    define OPCODE_FCMEQ_V2S          (0x0e20e400)
 #    define OPCODE_FCMGE_V2S          (0x2e20e400)
 #    define OPCODE_FCMGT_V2S          (0x2ea0e400)
@@ -899,6 +900,11 @@ void
 host_arm64_FADD_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
 {
     codegen_addlong(block, OPCODE_FADD_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
+}
+void
+host_arm64_FADDP_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
+{
+    codegen_addlong(block, OPCODE_FADDP_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
 }
 void
 host_arm64_FCMEQ_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)

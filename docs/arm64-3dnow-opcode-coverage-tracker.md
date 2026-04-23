@@ -34,7 +34,7 @@ Legend:
 | `a6` | `PFRCPIT1` | 3DNow base | PASS | Enabled (pending validation) |
 | `a7` | `PFRSQIT1` | 3DNow base | PASS | Enabled (pending validation) |
 | `aa` | `PFSUBR` | 3DNow base | PASS | Enabled (pending validation) |
-| `ae` | `PFACC` | 3DNow base | PASS | Fallback (ARM64 dynarec gated) |
+| `ae` | `PFACC` | 3DNow base | PASS | Enabled (validated) |
 | `b0` | `PFCMPEQ` | 3DNow base | PASS | Enabled (pending validation) |
 | `b4` | `PFMUL` | 3DNow base | PASS | Enabled (pending validation) |
 | `b6` | `PFRCPIT2` | 3DNow base | PASS | Enabled (pending validation) |
@@ -74,7 +74,7 @@ Status values:
 | `b0` | `PFCMPEQ` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
 | `b4` | `PFMUL` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
 | `b6` | `PFRCPIT2` | Phase 1 | Enabled | Curated ARM64 table entry added via `ropPFRCPIT`; validate in next run. |
-| `ae` | `PFACC` | Phase 2 | Blocked | ARM64 dynarec mapping temporarily disabled (`NULL`) after repeat mismatch; instruction-function fallback remains correct. |
+| `ae` | `PFACC` | Phase 2 | Validated | ARM64 lowering switched to `FADDP.V2S` pairwise path and matched harness baseline. |
 | `b7` | `PMULHRW` | Phase 2 | Planned | Needs explicit mapping/coverage confirmation. |
 | `bf` | `PAVGUSB` | Phase 2 | Planned | Needs explicit mapping/coverage confirmation. |
 | `0c` | `PI2FW` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
@@ -100,3 +100,5 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-23 | `3dnowcov-r8` regression triage (`PFACC` still fail) + alias-safe PFACC fix | Code landed, ready to validate | PFACC lowering now computes `sum_b` before mutating destination to preserve source when `src==dst` | Host telemetry showed `recompiled=34 fallback=4`, confirming active dynarec path; patched `codegen_backend_arm64_uops.c` ordering for ModRM alias safety. |
 | 2026-04-23 | `3dnowcov-r9` regression triage (`PFACC` still fail) + ZIP lane compose fix | Code landed, ready to validate | PFACC now assembles `[sum_a,sum_b]` via `ZIP1_V2S` from lane0 sums, removing insert-op dependency | Observed persistent `3DNOW_OP PFACC FAIL` with `recompiled=34 fallback=4`; replaced ARM64 lane-pack in `codegen_backend_arm64_uops.c` and removed unused `INS_S` emitter path. |
 | 2026-04-23 | `3dnowcov-r10/r11` PFACC triage conclusion + ARM64 safety gate | Code landed, ready to validate | Temporarily disabled ARM64 dynarec dispatch for `ae` (`PFACC`) to force known-good instruction-function fallback | Repeated runs stayed `pass=18 fail=1` with stable `PFACC` fail hash while dynarec active (`recompiled=34 fallback=4`); gated `ae` to `NULL` on ARM64 table (`fallback`) pending bit-exact lowerer fix. |
+| 2026-04-23 | `3dnowcov-r12` safety-gated confirmation | `pass=19 fail=0 skip=5`, `DONE` | Confirmed harness stability with PFACC forced fallback | Host telemetry showed fallback-heavy split (`recompiled=32 fallback=6`) as expected for temporary safety gate. |
+| 2026-04-23 | `3dnowcov-r13` PFACC dynarec real fix | `pass=19 fail=0 skip=5`, `DONE` | Re-enabled `ae` with ARM64 pairwise-add lowering via `FADDP.V2S` | Host telemetry returned to dynarec-forward split (`DYNAREC_3DNOW_SUMMARY ... recompiled=34 fallback=4`) with no `PFACC FAIL`. |
