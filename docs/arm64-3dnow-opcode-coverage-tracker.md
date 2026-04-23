@@ -86,8 +86,8 @@ Status values:
 | `ae` | `PFACC` | Phase 2 | Validated | ARM64 lowering switched to `FADDP.V2S` pairwise path and matched harness baseline. |
 | `b7` | `PMULHRW` | Phase 2 | Validated | ARM64 lowering uses `SMULL + SRSHR + XTN` and matches harness baseline. |
 | `bf` | `PAVGUSB` | Phase 2 | Validated | ARM64 lowering uses `URHADD.V8B` and matches harness baseline. |
-| `0c` | `PI2FW` | Phase 3 (3DNowExt) | Enabled | Local ARM64 dynarec WIP enabled; `s03d` mismatch traced to `INS_S` lane-index encoding, fixed for next validation. |
-| `1c` | `PF2IW` | Phase 3 (3DNowExt) | Enabled | Local ARM64 dynarec WIP enabled; no fail observed in `s03d` run after harness parity fix. |
+| `0c` | `PI2FW` | Phase 3 (3DNowExt) | Validated | ARM64 dynarec lowering validated in `s03e-ext-pi2fw-fix` after `INS_S` lane-index fix. |
+| `1c` | `PF2IW` | Phase 3 (3DNowExt) | Validated | ARM64 dynarec lowering validated in `s03e-ext-pi2fw-fix`; preserves interpreter high-word behavior. |
 | `8a` | `PFNACC` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `8e` | `PFPNACC` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `bb` | `PSWAPD` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
@@ -119,3 +119,4 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-23 | `s03c-3dnowext-harnessfix` rerun on K6-2+ | `pass=24 fail=0 skip=0`, `DONE` | Confirmed harness parity fix removed `PF2IW` false fail | Guest total hash `28aeb9ef`; host telemetry still showed partial dynarec coverage (`DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=38 fallback=10`) before Ext opcode table enablement. |
 | 2026-04-23 | `s03d-ext-pi2fw-pf2iw` first Ext dynarec slice (`0c`,`1c`) | `pass=23 fail=1 skip=0`, `ERROR` | `0c (PI2FW)` now active but mismatching; `1c (PF2IW)` no longer failing | Guest marker: `3DNOW_OP PI2FW FAIL hash=0a173abf`, counts `pass=23 fail=1 skip=0`, total hash `d6e898bb`, misc `prefetch=P femms=P hash=c305a947`; host telemetry: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=42 fallback=6`. |
 | 2026-04-23 | PI2FW ARM64 dynarec lane-insert fix for next Ext run | Code landed, ready to validate | Keeps `0c`/`1c` enabled; no new opcode enablement yet | Corrected `host_arm64_INS_S` S-lane index encoding used by `UOP_PI2FW` lane packing. Next manual `COV3D_RUN.BAT` checkpoint should use a fresh build plus rebuilt `3DNOWCOV` ISO and expect `pass=24 fail=0 skip=0`. |
+| 2026-04-23 | `s03e-ext-pi2fw-fix` validation rerun | `pass=24 fail=0 skip=0`, `DONE` | `0c (PI2FW)` and `1c (PF2IW)` moved to validated ARM64 dynarec coverage | Guest total hash returned to Ext baseline `28aeb9ef`; per-op hashes included `0c=a9fc1282`, `1c=cb4e2647`. Host telemetry still shows remaining Ext fallback work: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=42 fallback=6`, so `8a`/`8e`/`bb` are validated by guest fallback but not dynarec-complete. |
