@@ -244,7 +244,10 @@ static u64v_t ref_eval(op_kind_t k, u64v_t dst, u64v_t src)
     case OPK_CONV_PI2FD:  r.f[0] = (float) src.s32[0]; r.f[1] = (float) src.s32[1]; break;
     case OPK_CONV_PF2ID:  r.s32[0] = (int32_t) src.f[0]; r.s32[1] = (int32_t) src.f[1]; break;
     case OPK_CONV_PI2FW:  r.f[0] = (float) src.s16[0]; r.f[1] = (float) src.s16[1]; break;
-    case OPK_CONV_PF2IW:  r.s16[0] = (int16_t) ((int32_t) src.f[0]); r.s16[1] = (int16_t) ((int32_t) src.f[1]); r.s16[2] = r.s16[3] = 0; break;
+    case OPK_CONV_PF2IW:
+        r.s16[0] = (int16_t) ((int32_t) src.f[0]);
+        r.s16[1] = (int16_t) ((int32_t) src.f[1]);
+        break;
     case OPK_INT_PMULHRW:
         r.s16[0] = (int16_t) ((((int32_t) dst.s16[0] * (int32_t) src.s16[0]) + 0x8000) >> 16);
         r.s16[1] = (int16_t) ((((int32_t) dst.s16[1] * (int32_t) src.s16[1]) + 0x8000) >> 16);
