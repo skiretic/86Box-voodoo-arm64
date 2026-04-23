@@ -338,11 +338,14 @@ __attribute__((noreturn)) void _start(void)
 {
     uint32_t eax, ebx, ecx, edx;
     uint32_t maxext = 0, pass = 0, fail = 0, skip = 0, total_hash = 0x3d90c0deU;
+    uint32_t misc_hash;
     uint32_t i, iters;
     int has_cpuid, has_3dnow = 0, has_3dnowext = 0;
     const char *cmd = GetCommandLineA();
     char nbuf[16], hbuf[9];
     u64v_t a = {0}, b = {0};
+    uint8_t prefetch_buf[1024];
+    char prefetch_status = 'F', femms_status = 'F';
     int verbose = tiny_contains(cmd, "--verbose");
     uint32_t op_hashes[OP_COUNT];
     uint8_t op_status[OP_COUNT];
@@ -401,13 +404,24 @@ __attribute__((noreturn)) void _start(void)
     tiny_writeln("3DNOWCOV_LOOP_START 2");
     for (i = 0; i < iters; i++) {
         uint32_t off = (i * 64U) & 1023U;
-        uint8_t *base = (uint8_t *) (uintptr_t) &a;
+        uint8_t *base = prefetch_buf;
         do_prefetch(base + off);
         do_prefetch(base + ((off + 32U) & 1023U));
         total_hash ^= rotl32((uint32_t) off + i, i & 31U);
     }
+    prefetch_status = 'P';
     do_femms();
+    femms_status = 'P';
     tiny_writeln("3DNOWCOV_LOOP_END 2");
+
+    misc_hash = lcg32(total_hash ^ 0x6d697363U ^ ((uint32_t) prefetch_status << 8) ^ (uint32_t) femms_status);
+    tiny_write("3DNOWCOV_MISC prefetch=");
+    tiny_write((prefetch_status == 'P') ? "P" : "F");
+    tiny_write(" femms=");
+    tiny_write((femms_status == 'P') ? "P" : "F");
+    tiny_write(" hash=");
+    hex8(misc_hash, hbuf); tiny_write(hbuf);
+    tiny_write("\r\n");
 
     tiny_write("3DNOWCOV_COUNTS pass=");
     u32dec(pass, nbuf); tiny_write(nbuf);

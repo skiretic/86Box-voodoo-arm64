@@ -117,6 +117,9 @@ Work:
   - `PMULHRW`
   - `PAVGUSB`
 - then map opcodes `ae`, `b7`, `bf` into ARM64 recomp table.
+- complete companion non-imm8 3DNow-era opcodes in `0F` map:
+  - `0F 0D /r` (`PREFETCH/PREFETCHW`)
+  - `0F 0E` (`FEMMS`)
 
 Gate:
 - `3DNOWCOV` remains `pass=19 fail=0 skip=5`.
