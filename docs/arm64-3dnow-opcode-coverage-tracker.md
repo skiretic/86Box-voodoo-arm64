@@ -41,7 +41,7 @@ Legend:
 | `b7` | `PMULHRW` | 3DNow base | PASS | Enabled (validated) |
 | `bf` | `PAVGUSB` | 3DNow base | PASS | Enabled (validated) |
 | `0c` | `PI2FW` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
-| `1c` | `PF2IW` | 3DNowExt | SKIP_NO_3DNOWEXT | Enabled (3DNowExt profile only, pending validation) |
+| `1c` | `PF2IW` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `8a` | `PFNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `8e` | `PFPNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
 | `bb` | `PSWAPD` | 3DNowExt | SKIP_NO_3DNOWEXT | Enabled (3DNowExt profile only, pending validation) |
@@ -78,7 +78,7 @@ Status values:
 | `b7` | `PMULHRW` | Phase 2 | Validated | ARM64 lowering uses `SMULL + SRSHR + XTN` and matches harness baseline. |
 | `bf` | `PAVGUSB` | Phase 2 | Validated | ARM64 lowering uses `URHADD.V8B` and matches harness baseline. |
 | `0c` | `PI2FW` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
-| `1c` | `PF2IW` | Phase 3 (3DNowExt) | Enabled | Real dynarec `ropPF2IW` path added; runtime-gated on `CPU_FEATURE_3DNOWE` and preserves destination upper words per interpreter semantics. |
+| `1c` | `PF2IW` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `8a` | `PFNACC` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `8e` | `PFPNACC` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
 | `bb` | `PSWAPD` | Phase 3 (3DNowExt) | Enabled | Real dynarec `ropPSWAPD` path added; gated at runtime on `CPU_FEATURE_3DNOWE` to preserve non-3DNowExt behavior. |
@@ -105,5 +105,3 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-23 | Phase 2 partial bring-up: `PMULHRW` + `PAVGUSB` dynarec path | Code landed, ready to validate | Added ARM64 dynarec coverage for opcodes `b7` and `bf` | Real codegen only (no helper fallback): `PMULHRW` lowered with `SMULL + SRSHR + XTN`, `PAVGUSB` lowered with `URHADD`; ARM64 `recomp_opcodes_3DNOW` now maps both. |
 | 2026-04-23 | `3dnowcov-r16` validation for `b7`/`bf` slice | `pass=19 fail=0 skip=5`, `DONE` | `b7` and `bf` moved to validated | Final ARM64 PMULHRW fix corrected `SRSHR` encoding and kept non-saturating narrow; host telemetry: `DYNAREC_3DNOW_SUMMARY tag=final total=38 recompiled=38 fallback=0`. |
 | 2026-04-23 | Phase 3 partial bring-up: `PSWAPD` dynarec path (`bb`) | Code landed, ready to validate | Added ARM64 dynarec coverage for opcode `bb` under 3DNowExt profile | Real codegen path in `ropPSWAPD` uses `PSRLQ + PSLLQ + OR` (no helper-call substitution) and runtime-gates on `CPU_FEATURE_3DNOWE` to keep non-3DNowExt behavior unchanged. |
-| 2026-04-23 | `3dnowcov-r18-pswapd-ext` first 3DNowExt-profile validation run | `pass=23 fail=1 skip=0`, `ERROR` | Revealed failure on `1c PF2IW`; `bb` observed passing in guest row (`bbP`) | Host telemetry showed active split (`DYNAREC_3DNOW_SUMMARY ... total=48 recompiled=40 fallback=8`) on `k6_2p`; next slice targets real ARM64 `PF2IW` lowering. |
-| 2026-04-23 | Phase 3 partial bring-up: `PF2IW` dynarec path (`1c`) | Code landed, ready to validate | Added ARM64 dynarec coverage for opcode `1c` under 3DNowExt profile | Real codegen path uses `PF2ID` conversion plus integer bit-lane compose to match interpreter `sw[0..1]` writes while preserving destination upper words; no helper-call substitution. |
