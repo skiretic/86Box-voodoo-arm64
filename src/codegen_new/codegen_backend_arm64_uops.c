@@ -1877,6 +1877,26 @@ codegen_PFRCP(codeblock_t *block, uop_t *uop)
     return 0;
 }
 static int
+codegen_PFACC(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        /* Build [src_a0, src_a1, src_b0, src_b1], then pairwise add. */
+        host_arm64_INS_D(block, REG_V_TEMP, src_reg_a, 0, 0);
+        host_arm64_INS_D(block, REG_V_TEMP, src_reg_b, 1, 0);
+        host_arm64_ADDP_V4S(block, dest_reg, REG_V_TEMP, REG_V_TEMP);
+    } else
+        fatal("PFACC %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
 codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
 {
     int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
@@ -3286,6 +3306,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PFRCP &
         UOP_MASK]
     = codegen_PFRCP,
+    [UOP_PFACC &
+        UOP_MASK]
+    = codegen_PFACC,
     [UOP_PFRSQRT &
         UOP_MASK]
     = codegen_PFRSQRT,
