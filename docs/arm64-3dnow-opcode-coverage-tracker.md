@@ -34,7 +34,7 @@ Legend:
 | `a6` | `PFRCPIT1` | 3DNow base | PASS | Enabled (pending validation) |
 | `a7` | `PFRSQIT1` | 3DNow base | PASS | Enabled (pending validation) |
 | `aa` | `PFSUBR` | 3DNow base | PASS | Enabled (pending validation) |
-| `ae` | `PFACC` | 3DNow base | PASS | Not enabled yet |
+| `ae` | `PFACC` | 3DNow base | PASS | Enabled (pending validation) |
 | `b0` | `PFCMPEQ` | 3DNow base | PASS | Enabled (pending validation) |
 | `b4` | `PFMUL` | 3DNow base | PASS | Enabled (pending validation) |
 | `b6` | `PFRCPIT2` | 3DNow base | PASS | Enabled (pending validation) |
@@ -74,7 +74,7 @@ Status values:
 | `b0` | `PFCMPEQ` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
 | `b4` | `PFMUL` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
 | `b6` | `PFRCPIT2` | Phase 1 | Enabled | Curated ARM64 table entry added via `ropPFRCPIT`; validate in next run. |
-| `ae` | `PFACC` | Phase 2 | Planned | Needs explicit mapping/coverage confirmation. |
+| `ae` | `PFACC` | Phase 2 | Enabled | New `ropPFACC` + ARM64 `UOP_PFACC` lowerer landed; validate in next run. |
 | `b7` | `PMULHRW` | Phase 2 | Planned | Needs explicit mapping/coverage confirmation. |
 | `bf` | `PAVGUSB` | Phase 2 | Planned | Needs explicit mapping/coverage confirmation. |
 | `0c` | `PI2FW` | Phase 3 (3DNowExt) | Planned | Gate on CPUID 3DNowExt profile. |
@@ -95,3 +95,4 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 | 2026-04-22 | Phase 1 ARM64 curated `recomp_opcodes_3DNOW` + dynarec/fallback counters | Code landed, ready to validate | Enabled 16 Phase 1 opcodes (`0d,1d,90,94,96,97,9a,9e,a0,a4,a6,a7,aa,b0,b4,b6`) | Added opt-in `DYNAREC_3DNOW_SUMMARY` periodic/final counters via `86BOX_3DNOW_COV_STATS=1`; VM run pending. |
 | 2026-04-22 | `3dnowcov-r4/r5` regression triage (`PFRSQRT` fail) + ARM64 lowerer fix | Code landed, ready to validate | `97` path corrected in ARM64 `UOP_PFRSQRT` lowering (`1.0 / sqrt(src)` source-preserving sequence) | Observed guest `pass=18 fail=1` with `3DNOW_OP PFRSQRT FAIL`; fixed `codegen_backend_arm64_uops.c` clobber of sqrt temp. |
 | 2026-04-22 | `3dnowcov-r6` post-fix validation | `pass=19 fail=0 skip=5`, `DONE` | Phase 1 curated ARM64 path validated against harness baseline hash `83e69a2e` | Host telemetry confirmed mixed dispatch with recompile preference: `DYNAREC_3DNOW_SUMMARY tag=final total=38 recompiled=32 fallback=6`. |
+| 2026-04-22 | Phase 2 partial bring-up: `PFACC` dynarec path | Code landed, ready to validate | Added ARM64 dynarec coverage for opcode `ae` | Kept `b7`/`bf` fallback; real path uses new `UOP_PFACC` lowering (no helper-call substitution). |

@@ -196,6 +196,7 @@ RecompOpFn recomp_opcodes_3DNOW[256] = {
     [0xa6] = ropPFRCPIT,
     [0xa7] = ropPFRSQIT1,
     [0xaa] = ropPFSUBR,
+    [0xae] = ropPFACC,
     [0xb0] = ropPFCMPEQ,
     [0xb4] = ropPFMUL,
     [0xb6] = ropPFRCPIT,
