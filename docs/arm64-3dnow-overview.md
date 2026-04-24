@@ -4,6 +4,20 @@
 
 This is the quick onboarding page for ARM64 3DNow/3DNowExt dynarec status in this repo.
 
+## Branch Purpose (Current Working Branch)
+
+Branch: `3dnow-arm64-ndr`
+
+Purpose of this branch is isolation, not final release shape:
+- keep only ARM64 3DNow/3DNowExt bring-up work needed for validation
+- exclude unrelated pre-3DNow NDR optimization lanes that existed before `ndr-3dnow-lab` split from `ndr-analysis`
+- keep telemetry/bring-up scripts temporarily while validation completes
+
+Planned follow-up after confidence lock:
+1. remove temporary telemetry/bring-up-only logging hooks/scripts
+2. keep only functional 3DNow/3DNowExt implementation and required minimal docs
+3. prepare a fresh clean-port branch (`arm64-3dnow-ndr-release`) for upstreaming workflow
+
 Current state:
 - 3DNow base + 3DNowExt coverage in `3DNOWCOV` is validated.
 - Latest Ext validation profile result: `pass=24 fail=0 skip=0`, hash `28aeb9ef`.
@@ -49,4 +63,3 @@ Interpretation:
 - ARM64-only behavior changes for this bring-up.
 - Keep x86-64 behavior unchanged.
 - Prefer real dynarec lowering first (no helper substitution for new opcode paths).
-

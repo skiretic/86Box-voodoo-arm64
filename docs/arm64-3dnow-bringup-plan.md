@@ -4,6 +4,11 @@
 
 This plan defined the controlled bring-up path for enabling 3DNow recompilation on ARM64 in the new dynarec, with strict rollback boundaries and deterministic validation.
 
+Branch-context note (current):
+- Active branch `3dnow-arm64-ndr` is an isolation branch to separate 3DNow bring-up from unrelated earlier NDR optimization work.
+- Telemetry/bring-up scripts are intentionally retained short-term for validation evidence.
+- Post-validation cleanup and minimal-file re-port are planned in a dedicated release-prep branch (`arm64-3dnow-ndr-release`).
+
 Current final state (2026-04-23):
 - ARM64 `recomp_opcodes_3DNOW` mapping is enabled for all opcodes covered by `3DNOWCOV`, including 3DNowExt opcodes.
 - 3DNow/3DNowExt coverage profile validates at `pass=24 fail=0 skip=0` with stable total hash `28aeb9ef`.
