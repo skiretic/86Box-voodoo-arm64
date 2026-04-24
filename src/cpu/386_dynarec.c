@@ -251,6 +251,22 @@ codegen_mmx_enter(void)
 }
 
 int
+codegen_femms(void)
+{
+    if (!cpu_has_feature(CPU_FEATURE_MMX)) {
+        x86illegal();
+        return 1;
+    }
+    if (cr0 & 0xc) {
+        x86_int(7);
+        return 1;
+    }
+
+    x87_emms();
+    return 0;
+}
+
+int
 codegen_fp_enter(void)
 {
     FP_ENTER();

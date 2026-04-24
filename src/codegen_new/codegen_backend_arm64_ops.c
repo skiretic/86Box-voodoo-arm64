@@ -126,6 +126,7 @@
 #    define OPCODE_FABS_D             (0x1e60c000)
 #    define OPCODE_FADD_D             (0x1e602800)
 #    define OPCODE_FADD_V2S           (0x0e20d400)
+#    define OPCODE_FADDP_V2S          (0x2e20d400)
 #    define OPCODE_FCMEQ_V2S          (0x0e20e400)
 #    define OPCODE_FCMGE_V2S          (0x2e20e400)
 #    define OPCODE_FCMGT_V2S          (0x2ea0e400)
@@ -186,12 +187,15 @@
 #    define OPCODE_SQXTN_V8B_8H       (0x0e214800)
 #    define OPCODE_SQXTUN_V8B_8H      (0x2e212800)
 #    define OPCODE_SQXTN_V4H_4S       (0x0e614800)
+#    define OPCODE_XTN_V8B_8H         (0x0e212800)
+#    define OPCODE_XTN_V4H_4S         (0x0e612800)
 #    define OPCODE_SHL_VD             (0x0f005400)
 #    define OPCODE_SHL_VQ             (0x4f005400)
 #    define OPCODE_SHRN               (0x0f008400)
 #    define OPCODE_SMULL_V4S_4H       (0x0e60c000)
 #    define OPCODE_SSHR_VD            (0x0f000400)
 #    define OPCODE_SSHR_VQ            (0x4f000400)
+#    define OPCODE_SRSHR_VQ           (0x4f302400)
 #    define OPCODE_STR_REG            (0xb8206800)
 #    define OPCODE_STRB_REG           (0x38206800)
 #    define OPCODE_STRH_REG           (0x78206800)
@@ -207,6 +211,7 @@
 #    define OPCODE_UQSUB_V4H          (0x2e602c00)
 #    define OPCODE_UQXTN_V8B_8H       (0x2e214800)
 #    define OPCODE_UQXTN_V4H_4S       (0x2e614800)
+#    define OPCODE_URHADD_V8B         (0x2e201400)
 #    define OPCODE_USHR_VD            (0x2f000400)
 #    define OPCODE_USHR_VQ            (0x6f000400)
 #    define OPCODE_ZIP1_V8B           (0x0e003800)
@@ -729,6 +734,12 @@ host_arm64_INS_D(codeblock_t *block, int dst_reg, int src_reg, int dst_index, in
 }
 
 void
+host_arm64_INS_S(codeblock_t *block, int dst_reg, int src_reg, int dst_index, int src_index)
+{
+    codegen_addlong(block, OPCODE_INS_S | Rd(dst_reg) | Rn(src_reg) | ((dst_index & 3) << 19) | ((src_index & 3) << 13));
+}
+
+void
 host_arm64_EOR_IMM(codeblock_t *block, int dst_reg, int src_n_reg, uint32_t imm_data)
 {
     uint32_t imm_encoding = host_arm64_find_imm(imm_data);
@@ -766,6 +777,11 @@ void
 host_arm64_FADD_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
 {
     codegen_addlong(block, OPCODE_FADD_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
+}
+void
+host_arm64_FADDP_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
+{
+    codegen_addlong(block, OPCODE_FADDP_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
 }
 void
 host_arm64_FCMEQ_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
@@ -1249,6 +1265,16 @@ host_arm64_SQXTN_V4H_4S(codeblock_t *block, int dst_reg, int src_reg)
 {
     codegen_addlong(block, OPCODE_SQXTN_V4H_4S | Rd(dst_reg) | Rn(src_reg));
 }
+void
+host_arm64_XTN_V8B_8H(codeblock_t *block, int dst_reg, int src_reg)
+{
+    codegen_addlong(block, OPCODE_XTN_V8B_8H | Rd(dst_reg) | Rn(src_reg));
+}
+void
+host_arm64_XTN_V4H_4S(codeblock_t *block, int dst_reg, int src_reg)
+{
+    codegen_addlong(block, OPCODE_XTN_V4H_4S | Rd(dst_reg) | Rn(src_reg));
+}
 
 void
 host_arm64_SHL_V4H(codeblock_t *block, int dst_reg, int src_n_reg, int shift)
@@ -1286,6 +1312,13 @@ host_arm64_SSHR_V2D(codeblock_t *block, int dst_reg, int src_n_reg, int shift)
     if (shift > 64)
         fatal("host_arm_SSHR_V2D : shift > 64\n");
     codegen_addlong(block, OPCODE_SSHR_VQ | Rd(dst_reg) | Rn(src_n_reg) | SHIFT_IMM_V2D(64 - shift));
+}
+void
+host_arm64_SRSHR_V4S(codeblock_t *block, int dst_reg, int src_n_reg, int shift)
+{
+    if (shift > 32)
+        fatal("host_arm_SRSHR_V4S : shift > 32\n");
+    codegen_addlong(block, OPCODE_SRSHR_VQ | Rd(dst_reg) | Rn(src_n_reg) | SHIFT_IMM_V2S(32 - shift));
 }
 
 void
@@ -1454,6 +1487,11 @@ void
 host_arm64_UQXTN_V4H_4S(codeblock_t *block, int dst_reg, int src_reg)
 {
     codegen_addlong(block, OPCODE_UQXTN_V4H_4S | Rd(dst_reg) | Rn(src_reg));
+}
+void
+host_arm64_URHADD_V8B(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_reg)
+{
+    codegen_addlong(block, OPCODE_URHADD_V8B | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
 }
 
 void

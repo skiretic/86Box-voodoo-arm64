@@ -1,8 +1,63 @@
 #include <math.h>
 
+/* Optional opcode histogram for guest 3DNow coverage runs.
+   Kept disabled by default to preserve normal low-noise behavior. */
+static int      cov3dnow_env_init          = 0;
+static int      cov3dnow_stats_enabled     = 0;
+static uint64_t cov3dnow_total             = 0;
+static uint64_t cov3dnow_prefetch_total    = 0;
+static uint64_t cov3dnow_femms_total       = 0;
+static uint64_t cov3dnow_opcode_hits[256]  = {0};
+#define COV3DNOW_PERIODIC_MASK ((1u << 20) - 1u)
+
+static int
+cov3dnow_env_on(const char *name)
+{
+    const char *v = getenv(name);
+    if (!v || !*v)
+        return 0;
+    if ((v[0] == '0' && !v[1]) || !strcmp(v, "false") || !strcmp(v, "FALSE") || !strcmp(v, "off") || !strcmp(v, "OFF"))
+        return 0;
+    return 1;
+}
+
+static void
+cov3dnow_init_env(void)
+{
+    if (cov3dnow_env_init)
+        return;
+    cov3dnow_stats_enabled = cov3dnow_env_on("86BOX_3DNOW_COV_STATS");
+    cov3dnow_env_init      = 1;
+}
+
+static void
+cov3dnow_maybe_log_summary(const char *tag)
+{
+    int i;
+
+    if (!cov3dnow_stats_enabled)
+        return;
+    if ((cov3dnow_total & COV3DNOW_PERIODIC_MASK) != 0)
+        return;
+
+    pclog("COV3DNOW_SUMMARY tag=%s total=%llu prefetch=%llu femms=%llu",
+          tag, (unsigned long long) cov3dnow_total, (unsigned long long) cov3dnow_prefetch_total,
+          (unsigned long long) cov3dnow_femms_total);
+    for (i = 0; i < 256; i++) {
+        if (cov3dnow_opcode_hits[i])
+            pclog(" op%02x=%llu", i, (unsigned long long) cov3dnow_opcode_hits[i]);
+    }
+    pclog("\n");
+}
+
 static int
 opPREFETCH_a16(uint32_t fetchdat)
 {
+    cov3dnow_init_env();
+    cov3dnow_prefetch_total++;
+    cov3dnow_total++;
+    cov3dnow_maybe_log_summary("prefetch16");
+
     fetch_ea_16(fetchdat);
     ILLEGAL_ON(cpu_mod == 3);
 
@@ -12,6 +67,11 @@ opPREFETCH_a16(uint32_t fetchdat)
 static int
 opPREFETCH_a32(uint32_t fetchdat)
 {
+    cov3dnow_init_env();
+    cov3dnow_prefetch_total++;
+    cov3dnow_total++;
+    cov3dnow_maybe_log_summary("prefetch32");
+
     fetch_ea_32(fetchdat);
     ILLEGAL_ON(cpu_mod == 3);
 
@@ -22,6 +82,11 @@ opPREFETCH_a32(uint32_t fetchdat)
 static int
 opFEMMS(UNUSED(uint32_t fetchdat))
 {
+    cov3dnow_init_env();
+    cov3dnow_femms_total++;
+    cov3dnow_total++;
+    cov3dnow_maybe_log_summary("femms");
+
     ILLEGAL_ON(!cpu_has_feature(CPU_FEATURE_MMX));
     if (cr0 & 0xc) {
         x86_int(7);
@@ -515,6 +580,10 @@ op3DNOW_a16(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     cpu_state.pc++;
+    cov3dnow_init_env();
+    cov3dnow_opcode_hits[opcode]++;
+    cov3dnow_total++;
+    cov3dnow_maybe_log_summary("3dnow16");
 
     return x86_opcodes_3DNOW[opcode](0);
 }
@@ -530,6 +599,10 @@ op3DNOW_a32(uint32_t fetchdat)
     if (cpu_state.abrt)
         return 1;
     cpu_state.pc++;
+    cov3dnow_init_env();
+    cov3dnow_opcode_hits[opcode]++;
+    cov3dnow_total++;
+    cov3dnow_maybe_log_summary("3dnow32");
 
     return x86_opcodes_3DNOW[opcode](0);
 }

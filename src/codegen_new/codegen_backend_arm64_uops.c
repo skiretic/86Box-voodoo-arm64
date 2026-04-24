@@ -1735,6 +1735,28 @@ codegen_PF2ID(codeblock_t *block, uop_t *uop)
     return 0;
 }
 static int
+codegen_PF2IW(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        host_arm64_FCVTZS_V2S(block, REG_V_TEMP, src_reg_b);
+        host_arm64_XTN_V4H_4S(block, REG_V_TEMP, REG_V_TEMP);
+        host_arm64_FMOV_W_S(block, REG_TEMP, REG_V_TEMP);
+        host_arm64_FMOV_D_D(block, dest_reg, src_reg_a);
+        host_arm64_FMOV_S_W(block, REG_V_TEMP, REG_TEMP);
+        host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 0, 0);
+    } else
+        fatal("PF2IW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
 codegen_PFADD(codeblock_t *block, uop_t *uop)
 {
     int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
@@ -1872,6 +1894,99 @@ codegen_PFRCP(codeblock_t *block, uop_t *uop)
     return 0;
 }
 static int
+codegen_PFACC(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        /* PFACC semantics map directly to pairwise add across src_a/src_b vectors:
+           dst[0] = src_a[0] + src_a[1], dst[1] = src_b[0] + src_b[1]. */
+        host_arm64_FADDP_V2S(block, dest_reg, src_reg_a, src_reg_b);
+    } else
+        fatal("PFACC %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
+codegen_PFNACC(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        /* Pairwise semantics:
+           dst[0] = src_a[0] - src_a[1], dst[1] = src_b[0] - src_b[1]. */
+        host_arm64_DUP_V2S(block, REG_V_TEMP, src_reg_a, 0);
+        host_arm64_DUP_V2S(block, dest_reg, src_reg_a, 1);
+        host_arm64_FSUB_V2S(block, REG_V_TEMP, REG_V_TEMP, dest_reg);
+
+        host_arm64_DUP_V2S(block, dest_reg, src_reg_b, 0);
+        host_arm64_DUP_V2S(block, src_reg_a, src_reg_b, 1);
+        host_arm64_FSUB_V2S(block, dest_reg, dest_reg, src_reg_a);
+
+        host_arm64_ZIP1_V2S(block, dest_reg, REG_V_TEMP, dest_reg);
+    } else
+        fatal("PFNACC %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
+codegen_PFPNACC(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        /* Pairwise semantics:
+           dst[0] = src_a[0] - src_a[1], dst[1] = src_b[0] + src_b[1]. */
+        host_arm64_DUP_V2S(block, REG_V_TEMP, src_reg_a, 0);
+        host_arm64_DUP_V2S(block, dest_reg, src_reg_a, 1);
+        host_arm64_FSUB_V2S(block, REG_V_TEMP, REG_V_TEMP, dest_reg);
+
+        host_arm64_DUP_V2S(block, dest_reg, src_reg_b, 0);
+        host_arm64_DUP_V2S(block, src_reg_a, src_reg_b, 1);
+        host_arm64_FADD_V2S(block, dest_reg, dest_reg, src_reg_a);
+
+        host_arm64_ZIP1_V2S(block, dest_reg, REG_V_TEMP, dest_reg);
+    } else
+        fatal("PFPNACC %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
+codegen_PSWAPD(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
+        /* Alias-safe swap using source snapshot:
+           dst[0] = src[1], dst[1] = src[0]. */
+        host_arm64_FMOV_D_D(block, REG_V_TEMP, src_reg_a);
+        host_arm64_DUP_V2S(block, dest_reg, REG_V_TEMP, 1);
+        host_arm64_DUP_V2S(block, REG_V_TEMP, REG_V_TEMP, 0);
+        host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 1, 0);
+    } else
+        fatal("PSWAPD %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
+
+    return 0;
+}
+static int
 codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
 {
     int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
@@ -1882,7 +1997,7 @@ codegen_PFRSQRT(codeblock_t *block, uop_t *uop)
     if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
         /*TODO: This could be improved (use VRSQRTE/VRSQRTS)*/
         host_arm64_FSQRT_S(block, REG_V_TEMP, src_reg_a);
-        host_arm64_FMOV_S_ONE(block, REG_V_TEMP);
+        host_arm64_FMOV_S_ONE(block, dest_reg);
         host_arm64_FDIV_S(block, dest_reg, dest_reg, REG_V_TEMP);
         host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);
     } else
@@ -1922,6 +2037,28 @@ codegen_PI2FD(codeblock_t *block, uop_t *uop)
 
     return 0;
 }
+static int
+codegen_PI2FW(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
+        host_arm64_FMOV_W_S(block, REG_TEMP, src_reg_a);
+        host_arm64_MOV_REG_ASR(block, REG_TEMP2, REG_TEMP, 16);
+        host_arm64_MOV_REG_ROR(block, REG_TEMP, REG_TEMP, 16);
+        host_arm64_MOV_REG_ASR(block, REG_TEMP, REG_TEMP, 16);
+        host_arm64_FMOV_S_W(block, dest_reg, REG_TEMP);
+        host_arm64_FMOV_S_W(block, REG_V_TEMP, REG_TEMP2);
+        host_arm64_INS_S(block, dest_reg, REG_V_TEMP, 1, 0);
+        host_arm64_SCVTF_V2S(block, dest_reg, dest_reg);
+    } else
+        fatal("PI2FW %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real);
+
+    return 0;
+}
 
 static int
 codegen_PMADDWD(codeblock_t *block, uop_t *uop)
@@ -1956,6 +2093,42 @@ codegen_PMULHW(codeblock_t *block, uop_t *uop)
         host_arm64_SHRN_V4H_4S(block, dest_reg, dest_reg, 16);
     } else
         fatal("PMULHW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
+codegen_PMULHRW(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        host_arm64_SMULL_V4S_4H(block, REG_V_TEMP, src_reg_a, src_reg_b);
+        host_arm64_SRSHR_V4S(block, REG_V_TEMP, REG_V_TEMP, 16);
+        host_arm64_XTN_V4H_4S(block, dest_reg, REG_V_TEMP);
+    } else
+        fatal("PMULHRW %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
+
+    return 0;
+}
+static int
+codegen_PAVGUSB(codeblock_t *block, uop_t *uop)
+{
+    int dest_reg   = HOST_REG_GET(uop->dest_reg_a_real);
+    int src_reg_a  = HOST_REG_GET(uop->src_reg_a_real);
+    int src_reg_b  = HOST_REG_GET(uop->src_reg_b_real);
+    int dest_size  = IREG_GET_SIZE(uop->dest_reg_a_real);
+    int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
+    int src_size_b = IREG_GET_SIZE(uop->src_reg_b_real);
+
+    if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a) && REG_IS_Q(src_size_b)) {
+        host_arm64_URHADD_V8B(block, dest_reg, src_reg_a, src_reg_b);
+    } else
+        fatal("PAVGUSB %02x %02x %02x\n", uop->dest_reg_a_real, uop->src_reg_a_real, uop->src_reg_b_real);
 
     return 0;
 }
@@ -3257,6 +3430,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PF2ID &
         UOP_MASK]
     = codegen_PF2ID,
+    [UOP_PF2IW &
+        UOP_MASK]
+    = codegen_PF2IW,
     [UOP_PFADD &
         UOP_MASK]
     = codegen_PFADD,
@@ -3281,6 +3457,18 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PFRCP &
         UOP_MASK]
     = codegen_PFRCP,
+    [UOP_PFACC &
+        UOP_MASK]
+    = codegen_PFACC,
+    [UOP_PFNACC &
+        UOP_MASK]
+    = codegen_PFNACC,
+    [UOP_PFPNACC &
+        UOP_MASK]
+    = codegen_PFPNACC,
+    [UOP_PSWAPD &
+        UOP_MASK]
+    = codegen_PSWAPD,
     [UOP_PFRSQRT &
         UOP_MASK]
     = codegen_PFRSQRT,
@@ -3290,6 +3478,9 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PI2FD &
         UOP_MASK]
     = codegen_PI2FD,
+    [UOP_PI2FW &
+        UOP_MASK]
+    = codegen_PI2FW,
 
     [UOP_PMADDWD &
         UOP_MASK]
@@ -3297,6 +3488,12 @@ const uOpFn uop_handlers[UOP_MAX] = {
     [UOP_PMULHW &
         UOP_MASK]
     = codegen_PMULHW,
+    [UOP_PMULHRW &
+        UOP_MASK]
+    = codegen_PMULHRW,
+    [UOP_PAVGUSB &
+        UOP_MASK]
+    = codegen_PAVGUSB,
     [UOP_PMULLW &
         UOP_MASK]
     = codegen_PMULLW,
