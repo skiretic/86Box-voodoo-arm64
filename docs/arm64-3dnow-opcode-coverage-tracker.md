@@ -5,6 +5,7 @@
 - `Guest Validation` reflects `3DNOWCOV` behavior (current baseline is interpreter/dispatch path).
 - `ARM64 Dynarec` reflects whether opcode is actively mapped in `recomp_opcodes_3DNOW` on ARM64.
 - This tracker is the live checklist for bring-up sequencing.
+- New dev start point: `docs/arm64-3dnow-overview.md`.
 
 ## Current Coverage Snapshot (Baseline)
 
