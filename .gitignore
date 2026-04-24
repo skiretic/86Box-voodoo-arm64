@@ -67,3 +67,16 @@ CMakeLists.txt.user
 
 # Jetbrains CLion
 .idea
+docs/perf*
+
+docs/rage128*
+
+docs/video*
+docs/refere*
+scripts/win98/*
+tools/win98-microstr*
+tools/win98-3dno*
+scripts/dynarec/.analyze-s03a-log.bin
+research/solo*
+appimage-x86_64-cross/output/86Box-latest-x86_64.AppImage.zsync
+V4_4500_AGP_SD_1.18.rom
