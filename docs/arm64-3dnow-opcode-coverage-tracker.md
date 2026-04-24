@@ -18,6 +18,7 @@ Legend:
 - `PASS` = validated on current emulated profile
 - `SKIP_NO_3DNOWEXT` = expected skip on non-3DNowExt profile
 - `Pending` = not yet validated in current profile
+- Top table baseline was captured on a guest CPU profile equivalent to AMD K6-2 (3DNow base, no 3DNowExt bit), so Ext opcodes show `SKIP_NO_3DNOWEXT` there by design.
 
 | imm8 | Mnemonic | Class | Guest Validation | ARM64 Dynarec |
 | --- | --- | --- | --- | --- |
