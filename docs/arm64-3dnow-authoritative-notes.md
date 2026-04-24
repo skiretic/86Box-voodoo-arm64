@@ -7,6 +7,12 @@ This file captures the minimum authoritative 3DNow facts needed for ARM64 dynare
 Primary goal:
 - keep implementation aligned to architectural opcode semantics (real dynarec lowering), not ad-hoc helper-only behavior.
 
+Current project status (2026-04-23):
+- ARM64 dynarec lowering is now enabled and validated for all 3DNow/3DNowExt opcodes covered by `tools/win98-3dnowcov`.
+- Final validation + soak telemetry show no fallback:
+  - `s03g-ext-pswapd`: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=48 fallback=0`
+  - `s03h-game-3dnow-soak-01`: `DYNAREC_3DNOW_SUMMARY tag=final total=4427 recompiled=4427 fallback=0`
+
 ## Authoritative Sources in This Repo
 
 - AMD Architecture Programmer's Manual snapshot:
@@ -82,7 +88,7 @@ Therefore:
 1. Keep ARM64 changes table-driven:
    - enable `recomp_opcodes_3DNOW` entries opcode-by-opcode (`imm8`) with explicit guards.
 2. Keep unsupported opcodes as `NULL` to preserve interpreter fallback until lowered.
-3. Use `tools/win98-3dnowcov` + host `COV3DNOW_SUMMARY` telemetry as the primary acceptance gate for each newly enabled opcode.
+3. Use `tools/win98-3dnowcov` + host `DYNAREC_3DNOW_SUMMARY` telemetry as the primary acceptance gate for each newly enabled opcode.
 4. Only promote a new opcode mapping after deterministic `3DNOWCOV` pass and stable hash behavior.
 5. Avoid churn by using exact-op-first bring-up:
    - implement real dynarec lowering first, not helper-call substitution.
