@@ -85,4 +85,6 @@ docs/reference/x86*
 appimage-x86_64-cross/output/86Box-latest-x86_64.AppImage.zsync
 
 scripts/dynarec/.analyze-s03a-log.bin
-tools/win98-microstress/win98-wl05-perf-combined.iso
+tools/win98-micr*
+tools/win98-mic
+scripts/dynarec/.analyze-churn-log.bin
