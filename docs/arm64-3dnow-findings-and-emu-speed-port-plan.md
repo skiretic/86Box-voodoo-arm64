@@ -346,3 +346,14 @@ Observed:
 
 Decision:
 - choose `PFMUL` as first arith hot-op target.
+
+## In-Flight Slice (2026-04-26)
+
+- File:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/src/codegen_new/codegen_backend_arm64_uops.c`
+- Change:
+  - exact-semantics register-pressure cleanup for `PFRCP` / `PFRSQRT` lowerers
+  - no estimate/refinement ops; behavior remains full-precision path
+- Status:
+  - build/sign passes
+  - telemetry validation pending
