@@ -55,8 +55,22 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 - per-phase: avg/p50/p95/p99 for `q3`, `3dmark99`, `wl05`
 - churn: `ratio_promote_no_immediates_per_dirty_hit`
 
+## Host Noise Control (Required)
+- Before each run, record host-noise notes:
+- active heavy apps/processes
+- any known background load (indexing, builds, browser/video, etc.)
+- Mark each run as `clean` or `noisy`.
+- If a run is clearly noise-affected (outlier with matching host-load evidence), mark it tainted and replace it.
+- Baseline lock requires `3 clean valid runs`, not just 3 valid runs.
+- Final baseline artifact must include:
+- run-by-run noise notes
+- rejected/replaced run list with reason
+- final clean run IDs used for aggregate lock.
+
 ## Acceptance for Baseline Set
-- Exactly 3 valid runs.
+- Exactly 3 clean valid runs.
 - No marker-sequence failures.
 - No correctness/hash anomalies in workload checks.
 - Report includes both speed and churn metrics.
+- Baseline lock line is present:
+- `BASELINE LOCKED: use these averages as comparison gate before any new code.`
