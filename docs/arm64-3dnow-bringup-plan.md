@@ -28,7 +28,7 @@ Validation run (`3dnowcov-r2`) confirms stable baseline and usable harness:
 - skipped opcodes are expected on non-3DNowExt profile:
   - `0c PI2FW`, `1c PF2IW`, `8a PFNACC`, `8e PFPNACC`, `bb PSWAPD`
 - host telemetry (`86BOX_3DNOW_COV_STATS=1`) confirms heavy runtime coverage (`DYNAREC_3DNOW_SUMMARY` with high total/recompiled counts and explicit fallback count).
-- Current logging-on runs also emit `DYNAREC_3DNOW_OPSUMMARY` when `86BOX_3DNOW_COV_STATS=1` is enabled.
+- Current logging-on runs also emit `DYNAREC_3DNOW_OPSUMMARY` when `86BOX_3DNOW_COV_STATS=1` is enabled, including arith subgroup counters (`pfadd`, `pfsub`, `pfsubr`, `pfmul`, `pfacc`, `pavgusb`) for phase-1 hot-op selection.
 
 ## Safety Rules
 
