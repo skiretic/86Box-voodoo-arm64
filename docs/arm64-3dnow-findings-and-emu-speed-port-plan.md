@@ -88,6 +88,8 @@ Current `ndr-3dnow-lab`:
 
 ### Phase A: Logging Port (Requested)
 
+Status: completed.
+
 1. Bring over `src/86box.c` logging hunk from `ndr-analysis`.
 2. Add `scripts/dynarec/analyze-emu-speed-log.sh`.
 3. Sanity validation:
@@ -102,7 +104,25 @@ Acceptance criteria:
 Rollback trigger:
 - Build failure or runtime instability attributable to title-update/logging path.
 
-### Phase B: 3DNow Optimization Wave 1 (High ROI)
+### Phase B: Baseline Capture and Lock
+
+Status: completed.
+
+1. Capture exactly 3 clean valid runs with fixed order:
+   - `Q3 -> 3DMark99 -> WL-05`
+2. Press `1` at each phase boundary and once at run end.
+3. For each run collect:
+   - `EMU_SPEED_SUMMARY`
+   - `EMU_PHASE_MARKERS`
+   - `EMU_PHASE_SPEED_SUMMARY` per phase
+   - `S03_LOG` churn ratio (`ratio_promote_no_immediates_per_dirty_hit`)
+4. Reject any run with invalid marker sequencing or noise-tainted host evidence.
+5. Lock the baseline artifact and freeze the comparison gate.
+
+Locked artifact:
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+
+### Phase C: 3DNow Optimization Wave 1 (High ROI)
 
 1. `PFRCP`/`PFRSQRT` optimization experiment:
    - add ARM64 estimate/refinement instruction support path
@@ -114,7 +134,7 @@ Rollback trigger:
    - correctness unchanged (`3DNOWCOV` and workload markers remain stable)
    - speed/dip profile improves in targeted workloads
 
-### Phase C: 3DNow Optimization Wave 2 (Shuffle/Pack Reduction)
+### Phase D: 3DNow Optimization Wave 2 (Shuffle/Pack Reduction)
 
 Targets:
 - `PFNACC`
@@ -129,7 +149,7 @@ Gates:
 - no change in deterministic correctness markers
 - maintain `fallback=0` behavior where currently achieved
 
-### Phase D: Optional MMX-enter overhead experiment
+### Phase E: Optional MMX-enter overhead experiment
 
 Goal:
 - evaluate impact of reducing helper-call overhead around MMX entry path.
@@ -153,7 +173,7 @@ Constraint:
 ## Suggested Implementation Order
 
 1. Port emu-speed logging (`src/86box.c` + parser script).
-2. Re-establish baseline artifact with `EMU_SPEED_SUMMARY`.
+2. Capture and lock the 3-run baseline.
 3. Optimize `PFRCP`/`PFRSQRT`.
 4. Optimize shuffle-heavy ops (`PFNACC`, `PFPNACC`, `PSWAPD`, `PI2FW`).
 5. Evaluate optional MMX-enter path work only after steps 1-4.
@@ -166,12 +186,37 @@ Constraint:
 - Verified runtime marker emission includes:
   - `PERF_PHASE_MARK seq=1 ... source=qt_shortcut reason=manual`
 
+### Current Logging-On Baseline Artifact
+
+- This is the current artifact for runs with `86BOX_3DNOW_COV_STATS=1` enabled.
+- Run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`
+- Logfile:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2/86box.log`
+- Marker validation:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- Whole-run speed:
+  - `avg=99.610`
+  - `p50=100`
+  - `p95=101`
+  - `p99=103`
+- 3DNow family summary:
+  - `DYNAREC_3DNOW_OPSUMMARY total=4010 recip=189 shuffle_pack=0 arith=3527 cmp=186 conv=108 other=0 pfrcp=75 pfrsqrt=20 pfnacc=0 pfpnacc=0 pswapd=0 pi2fw=0`
+- Interpretation:
+  - this run is the baseline artifact for logging-on family-mix analysis
+  - reciprocal/sqrt is active in this workload
+  - shuffle/pack family is cold in this workload
+
 ### Locked Baseline Artifact
 
 - Baseline lock file:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 - Gate line in artifact:
   - `BASELINE LOCKED: use these averages as comparison gate before any new code.`
+- Baseline capture was done after logging verification in the follow-on session, not during the initial logging-port validation pass.
+- The locked 3-run artifact remains the pre-logging comparison gate; the logging-on artifact above is the current op-family baseline.
 - Accepted runs:
   - `2026-04-25_21-41-24-Windows 98 Gaming PC-baseline-prelock-r1`
   - `2026-04-25_21-51-14-Windows 98 Gaming PC-baseline-prelock-r2`

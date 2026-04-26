@@ -21,3 +21,5 @@ uint32_t ropPAVGUSB(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t 
 uint32_t ropPI2FD(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
 uint32_t ropPI2FW(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
 uint32_t ropPSWAPD(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc);
+
+void dynarec_3dnow_cov_log_op_summary(void);

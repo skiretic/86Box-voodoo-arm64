@@ -16,10 +16,108 @@
 #include "codegen_ops_3dnow.h"
 #include "codegen_ops_helpers.h"
 
-#define ropParith(func)                                                                            \
+static uint64_t dynarec_3dnow_op_total;
+static uint64_t dynarec_3dnow_op_recip;
+static uint64_t dynarec_3dnow_op_shuffle_pack;
+static uint64_t dynarec_3dnow_op_arith;
+static uint64_t dynarec_3dnow_op_cmp;
+static uint64_t dynarec_3dnow_op_conv;
+static uint64_t dynarec_3dnow_op_other;
+static uint64_t dynarec_3dnow_op_pfrcp;
+static uint64_t dynarec_3dnow_op_pfrsqrt;
+static uint64_t dynarec_3dnow_op_pfnacc;
+static uint64_t dynarec_3dnow_op_pfpnacc;
+static uint64_t dynarec_3dnow_op_pswapd;
+static uint64_t dynarec_3dnow_op_pi2fw;
+
+static void
+dynarec_3dnow_cov_count_op(uint8_t opcode)
+{
+    dynarec_3dnow_op_total++;
+
+    switch (opcode) {
+        case 0x96:
+            dynarec_3dnow_op_recip++;
+            dynarec_3dnow_op_pfrcp++;
+            break;
+        case 0x97:
+            dynarec_3dnow_op_recip++;
+            dynarec_3dnow_op_pfrsqrt++;
+            break;
+        case 0xa6:
+        case 0xa7:
+        case 0xb6:
+            dynarec_3dnow_op_recip++;
+            break;
+        case 0x8a:
+            dynarec_3dnow_op_shuffle_pack++;
+            dynarec_3dnow_op_pfnacc++;
+            break;
+        case 0x8e:
+            dynarec_3dnow_op_shuffle_pack++;
+            dynarec_3dnow_op_pfpnacc++;
+            break;
+        case 0xbb:
+            dynarec_3dnow_op_shuffle_pack++;
+            dynarec_3dnow_op_pswapd++;
+            break;
+        case 0x0c:
+            dynarec_3dnow_op_conv++;
+            dynarec_3dnow_op_pi2fw++;
+            break;
+        case 0x0d:
+        case 0x1c:
+        case 0x1d:
+            dynarec_3dnow_op_conv++;
+            break;
+        case 0x9a:
+        case 0x9e:
+        case 0xaa:
+        case 0xae:
+        case 0xb4:
+        case 0xbf:
+            dynarec_3dnow_op_arith++;
+            break;
+        case 0x90:
+        case 0x94:
+        case 0xa0:
+        case 0xa4:
+        case 0xb0:
+            dynarec_3dnow_op_cmp++;
+            break;
+        default:
+            dynarec_3dnow_op_other++;
+            break;
+    }
+}
+
+void
+dynarec_3dnow_cov_log_op_summary(void)
+{
+    if (!dynarec_3dnow_op_total)
+        return;
+
+    pclog("DYNAREC_3DNOW_OPSUMMARY total=%llu recip=%llu shuffle_pack=%llu arith=%llu cmp=%llu conv=%llu other=%llu pfrcp=%llu pfrsqrt=%llu pfnacc=%llu pfpnacc=%llu pswapd=%llu pi2fw=%llu\n",
+          (unsigned long long) dynarec_3dnow_op_total,
+          (unsigned long long) dynarec_3dnow_op_recip,
+          (unsigned long long) dynarec_3dnow_op_shuffle_pack,
+          (unsigned long long) dynarec_3dnow_op_arith,
+          (unsigned long long) dynarec_3dnow_op_cmp,
+          (unsigned long long) dynarec_3dnow_op_conv,
+          (unsigned long long) dynarec_3dnow_op_other,
+          (unsigned long long) dynarec_3dnow_op_pfrcp,
+          (unsigned long long) dynarec_3dnow_op_pfrsqrt,
+          (unsigned long long) dynarec_3dnow_op_pfnacc,
+          (unsigned long long) dynarec_3dnow_op_pfpnacc,
+          (unsigned long long) dynarec_3dnow_op_pswapd,
+          (unsigned long long) dynarec_3dnow_op_pi2fw);
+}
+
+#define ropParith(func, opid)                                                                      \
     uint32_t rop##func(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode),                  \
                        uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)                          \
     {                                                                                              \
+        dynarec_3dnow_cov_count_op(opid);                                                           \
         int dest_reg = (fetchdat >> 3) & 7;                                                        \
                                                                                                    \
         uop_MMX_ENTER(ir);                                                                         \
@@ -42,20 +140,21 @@
     }
 
 // clang-format off
-ropParith(PFADD)
-ropParith(PFCMPEQ)
-ropParith(PFCMPGE)
-ropParith(PFCMPGT)
-ropParith(PFMAX)
-ropParith(PFMIN)
-ropParith(PFMUL)
-ropParith(PFSUB)
-ropParith(PMULHRW)
-ropParith(PAVGUSB)
+ropParith(PFADD, 0x9e)
+ropParith(PFCMPEQ, 0xb0)
+ropParith(PFCMPGE, 0x90)
+ropParith(PFCMPGT, 0xa0)
+ropParith(PFMAX, 0xa4)
+ropParith(PFMIN, 0x94)
+ropParith(PFMUL, 0xb4)
+ropParith(PFSUB, 0x9a)
+ropParith(PMULHRW, 0xb7)
+ropParith(PAVGUSB, 0xbf)
     // clang-format on
 
 uint32_t ropPF2ID(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x1d);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -80,6 +179,7 @@ uint32_t ropPF2ID(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uin
 uint32_t
 ropPF2IW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x1c);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -104,6 +204,7 @@ ropPF2IW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
 uint32_t
 ropPFACC(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0xae);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -128,6 +229,7 @@ ropPFACC(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
 uint32_t
 ropPFNACC(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x8a);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -155,6 +257,7 @@ ropPFNACC(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fe
 uint32_t
 ropPFPNACC(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x8e);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -182,6 +285,7 @@ ropPFPNACC(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t f
 uint32_t
 ropPFSUBR(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0xaa);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -206,6 +310,7 @@ ropPFSUBR(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fe
 uint32_t
 ropPI2FD(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x0d);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -230,6 +335,7 @@ ropPI2FD(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
 uint32_t
 ropPI2FW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x0c);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -254,6 +360,7 @@ ropPI2FW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
 uint32_t
 ropPSWAPD(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0xbb);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -278,6 +385,7 @@ ropPSWAPD(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fe
 uint32_t
 ropPFRCPIT(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0xa6);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -300,6 +408,7 @@ ropPFRCPIT(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t f
 uint32_t
 ropPFRCP(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x96);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -323,6 +432,7 @@ ropPFRCP(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
 uint32_t
 ropPFRSQRT(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0x97);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -347,6 +457,7 @@ ropPFRSQRT(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t f
 uint32_t
 ropPFRSQIT1(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
 {
+    dynarec_3dnow_cov_count_op(0xa7);
     uop_MMX_ENTER(ir);
 
     codegen_mark_code_present(block, cs + op_pc, 2);
