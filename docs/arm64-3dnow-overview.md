@@ -55,6 +55,7 @@ Baseline note:
 - includes:
   - `DYNAREC_3DNOW_OPSUMMARY_PARSED ...`
   - `DYNAREC_3DNOW_ARITH_BREAKDOWN ...`
+  - `DYNAREC_3DNOW_RECIP_BREAKDOWN ...`
 
 Interpretation:
 - `Z=0`: every executed 3DNow/3DNowExt op in that run used dynarec lowering.

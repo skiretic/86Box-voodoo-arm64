@@ -392,14 +392,57 @@ Decision:
 - accept as phase-1 stability/correctness win
 - keep locked pre-logging 3-run baseline unchanged as gate
 
-## Next Target (Phase-1)
+## Recip Refine Telemetry Refresh (2026-04-26)
 
-- Target opcode:
-  - `PFMUL` (hottest arith op in telemetry)
-- Goal:
-  - reduce ARM64 lowerer instruction count/register pressure in exact-semantics path
+### Tooling Update
+
+- Files:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/src/codegen_new/codegen_ops_3dnow.c`
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/scripts/dynarec/analyze-emu-speed-log.sh`
+- Change:
+  - split reciprocal-refine counters into explicit fields:
+    - `pfrcpit1` (`a6`)
+    - `pfrsqit1` (`a7`)
+    - `pfrcpit2` (`b6`)
+  - parser now emits:
+    - `DYNAREC_3DNOW_RECIP_BREAKDOWN ...`
+
+### Telemetry Run Artifact
+
+- Run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_13-20-21-Windows 98 Gaming PC-3dnow-recip-refine-telemetry-r1`
+- Log:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_13-20-21-Windows 98 Gaming PC-3dnow-recip-refine-telemetry-r1/86box.log`
+- Marker gate:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- 3DNow dispatch:
+  - `DYNAREC_3DNOW_SUMMARY tag=final total=4276 recompiled=4276 fallback=0`
+
+### Recip Breakdown
+
+- `pfrcp=84`
+- `pfrsqrt=20`
+- `pfrcpit1=56`
+- `pfrsqit1=0`
+- `pfrcpit2=56`
+
+Interpretation:
+- `PFRCP` is still the hottest reciprocal op.
+- refine ops are active (`a6`/`b6`) and worth tracking.
+- `a7` is cold in this workload.
+
+## Next Target (Phase-1, Retargeted)
+
+- Prior `PFMUL` target is dropped for now:
+  - backend `PFMUL` lowering is already a single `FMUL.V2S` instruction, so trim headroom is low.
+- New target lane:
+  - reciprocal refine path (`PFRCPIT1`/`PFRCPIT2`) with exact semantics preserved.
+- Execution plan:
+  - first optimize shared `ropPFRCPIT` path if real instruction savings exist.
+  - if savings are marginal, move to next highest-impact reciprocal path (`PFRCP`) where runtime volume is highest.
 - Guardrails:
-  - no estimate/refinement behavior change
-  - keep `3DNOWCOV` hashes exact
+  - no estimate/refinement semantic changes
   - keep `fallback=0`
-  - keep marker-valid run format (`seq=0..3`)
+  - keep marker-valid full workload flow (`seq=0..3`)
