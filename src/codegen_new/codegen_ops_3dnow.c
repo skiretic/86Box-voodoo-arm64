@@ -209,8 +209,9 @@ uint32_t ropPF2ID(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uin
         uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
         target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
         codegen_check_seg_read(block, ir, target_seg);
-        uop_MEM_LOAD_REG(ir, IREG_temp0_Q, ireg_seg_base(target_seg), IREG_eaaddr);
-        uop_PF2ID(ir, IREG_MM(dest_reg), IREG_temp0_Q);
+        /* PF2ID depends only on source, so memory operand can load directly into dst. */
+        uop_MEM_LOAD_REG(ir, IREG_MM(dest_reg), ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_PF2ID(ir, IREG_MM(dest_reg), IREG_MM(dest_reg));
     }
 
     codegen_mark_code_present(block, cs + op_pc + 1, 1);
@@ -365,8 +366,9 @@ ropPI2FD(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
         uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
         target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
         codegen_check_seg_read(block, ir, target_seg);
-        uop_MEM_LOAD_REG(ir, IREG_temp0_Q, ireg_seg_base(target_seg), IREG_eaaddr);
-        uop_PI2FD(ir, IREG_MM(dest_reg), IREG_temp0_Q);
+        /* PI2FD depends only on source, so memory operand can load directly into dst. */
+        uop_MEM_LOAD_REG(ir, IREG_MM(dest_reg), ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_PI2FD(ir, IREG_MM(dest_reg), IREG_MM(dest_reg));
     }
 
     codegen_mark_code_present(block, cs + op_pc + 1, 1);
@@ -390,8 +392,9 @@ ropPI2FW(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
         uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
         target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
         codegen_check_seg_read(block, ir, target_seg);
-        uop_MEM_LOAD_REG(ir, IREG_temp0_Q, ireg_seg_base(target_seg), IREG_eaaddr);
-        uop_PI2FW(ir, IREG_MM(dest_reg), IREG_temp0_Q);
+        /* PI2FW depends only on source, so memory operand can load directly into dst. */
+        uop_MEM_LOAD_REG(ir, IREG_MM(dest_reg), ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_PI2FW(ir, IREG_MM(dest_reg), IREG_MM(dest_reg));
     }
 
     codegen_mark_code_present(block, cs + op_pc + 1, 1);
@@ -415,8 +418,9 @@ ropPSWAPD(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fe
         uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
         target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
         codegen_check_seg_read(block, ir, target_seg);
-        uop_MEM_LOAD_REG(ir, IREG_temp0_Q, ireg_seg_base(target_seg), IREG_eaaddr);
-        uop_PSWAPD(ir, IREG_MM(dest_reg), IREG_temp0_Q);
+        /* PSWAPD consumes source only; direct dst load trims one temporary. */
+        uop_MEM_LOAD_REG(ir, IREG_MM(dest_reg), ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_PSWAPD(ir, IREG_MM(dest_reg), IREG_MM(dest_reg));
     }
 
     codegen_mark_code_present(block, cs + op_pc + 1, 1);
@@ -464,8 +468,9 @@ ropPFRCP(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fet
         uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
         target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
         codegen_check_seg_read(block, ir, target_seg);
-        uop_MEM_LOAD_REG(ir, IREG_temp0_Q, ireg_seg_base(target_seg), IREG_eaaddr);
-        uop_PFRCP(ir, IREG_MM(dest_reg), IREG_temp0_Q);
+        /* Scalar reciprocal uses only lane 0; load directly into dst to reduce temp pressure. */
+        uop_MEM_LOAD_REG(ir, IREG_MM(dest_reg), ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_PFRCP(ir, IREG_MM(dest_reg), IREG_MM(dest_reg));
     }
 
     codegen_mark_code_present(block, cs + op_pc + 1, 1);
@@ -488,8 +493,9 @@ ropPFRSQRT(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t f
         uop_MOV_IMM(ir, IREG_oldpc, cpu_state.oldpc);
         target_seg = codegen_generate_ea(ir, op_ea_seg, fetchdat, op_ssegs, &op_pc, op_32, 0);
         codegen_check_seg_read(block, ir, target_seg);
-        uop_MEM_LOAD_REG(ir, IREG_temp0_Q, ireg_seg_base(target_seg), IREG_eaaddr);
-        uop_PFRSQRT(ir, IREG_MM(dest_reg), IREG_temp0_Q);
+        /* Scalar inverse-sqrt uses only lane 0; load directly into dst to reduce temp pressure. */
+        uop_MEM_LOAD_REG(ir, IREG_MM(dest_reg), ireg_seg_base(target_seg), IREG_eaaddr);
+        uop_PFRSQRT(ir, IREG_MM(dest_reg), IREG_MM(dest_reg));
     }
 
     codegen_mark_code_present(block, cs + op_pc + 1, 1);
