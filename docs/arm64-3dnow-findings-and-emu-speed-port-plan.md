@@ -119,7 +119,9 @@ Status: completed.
 4. Reject any run with invalid marker sequencing or noise-tainted host evidence.
 5. Lock the baseline artifact and freeze the comparison gate.
 
-Locked artifact:
+Active locked artifact:
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+Historical prior lock:
 - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 
 ### Phase C: 3DNow Optimization Wave 1 (High ROI)
@@ -213,17 +215,29 @@ Constraint:
 
 ### Locked Baseline Artifact
 
-- Baseline lock file:
+- Active fixed-266 MHz post-Qt workload lock:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+  - aggregate gate values:
+    - `avg=99.638000`
+    - `p99=102.333333`
+    - `dips_lt95=16.666667`
+    - `dips_lt90=2.666667`
+- Historical prior workload lock:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
-- Gate line in artifact:
+
+- Historical 2026-04-25 lock file:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- Gate line in historical artifact:
   - `BASELINE LOCKED: use these averages as comparison gate before any new code.`
-- Baseline capture was done after logging verification in the follow-on session, not during the initial logging-port validation pass.
-- The locked 3-run artifact remains the pre-logging comparison gate; the logging-on artifact above is the current op-family baseline.
-- Accepted runs:
+- Historical baseline capture was done after logging verification in the follow-on session, not during the initial logging-port validation pass.
+- Current policy:
+  - the active workload comparison gate is the 2026-04-26 fixed-266 MHz post-Qt lock above
+  - the logging-on artifact above remains the current op-family baseline
+- Historical accepted runs:
   - `2026-04-25_21-41-24-Windows 98 Gaming PC-baseline-prelock-r1`
   - `2026-04-25_21-51-14-Windows 98 Gaming PC-baseline-prelock-r2`
   - `2026-04-25_22-00-12-Windows 98 Gaming PC-baseline-prelock-r3`
-- Rejected replacements:
+- Historical rejected replacements:
   - `2026-04-25_21-37-57-Windows 98 Gaming PC-baseline-prelock-r1`
   - `2026-04-25_21-40-40-Windows 98 Gaming PC-baseline-prelock-r1`
 
@@ -610,7 +624,7 @@ Interpretation:
   - `ee4d5c5ae` (`qt: pace main loop with single-step pc_run`)
 - acceptance scope:
   - keep change as runtime pacing/stability slice (non-opcode semantic).
-  - retain existing baseline lock policy (`baseline-lock-2026-04-25-3run.md`) and logging-on opcode-mix baseline.
+  - retain the active fixed-266 MHz post-Qt baseline lock policy (`baseline-lock-2026-04-26-postqt-266-3run.md`) and the logging-on opcode-mix baseline.
 - correctness guard remained green in sanity passes:
   - `3DNOWCOV_TOTAL hash=28aeb9ef`
   - `MRUNALL`/`MICROSTRESS` expected hash set matched.
