@@ -158,26 +158,47 @@ Constraint:
 4. Optimize shuffle-heavy ops (`PFNACC`, `PFPNACC`, `PSWAPD`, `PI2FW`).
 5. Evaluate optional MMX-enter path work only after steps 1-4.
 
-## Baseline Prep Update (2026-04-25 late)
+## Baseline Lock Update (2026-04-25)
 
 - Emu-speed sample logging is active and parser support is present.
 - Phase marker logging is active with run-start auto marker and manual markers.
-- Hotkey capture was stabilized with a single Qt shortcut path, and the effective marker key is now `1` for baseline capture reliability.
+- Hotkey capture is stabilized with a single Qt shortcut path, and the effective marker key is `1` for baseline capture reliability.
 - Verified runtime marker emission includes:
   - `PERF_PHASE_MARK seq=1 ... source=qt_shortcut reason=manual`
 
-### Baseline capture plan to execute next
+### Locked Baseline Artifact
 
-1. Capture 3 runs with fixed order:
-   - `Q3 -> 3DMark99 -> WL-05`
-2. Press `1` at each phase boundary and once at workload end.
-3. For each run collect:
-   - `EMU_SPEED_SUMMARY`
-   - `EMU_PHASE_MARKERS`
-   - `EMU_PHASE_SPEED_SUMMARY` per phase
-   - `S03_LOG` churn ratio (`ratio_promote_no_immediates_per_dirty_hit`)
-4. Record host-noise notes per run (`clean` vs `noisy`) and reject noise-tainted outliers.
-5. Exclude any run with invalid marker sequencing.
-6. Establish baseline from averages/dispersion across `3 clean valid runs` before starting new optimization code.
-7. Write and freeze baseline lock artifact with explicit gate line:
-   - `BASELINE LOCKED: use these averages as comparison gate before any new code.`
+- Baseline lock file:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- Gate line in artifact:
+  - `BASELINE LOCKED: use these averages as comparison gate before any new code.`
+- Accepted runs:
+  - `2026-04-25_21-41-24-Windows 98 Gaming PC-baseline-prelock-r1`
+  - `2026-04-25_21-51-14-Windows 98 Gaming PC-baseline-prelock-r2`
+  - `2026-04-25_22-00-12-Windows 98 Gaming PC-baseline-prelock-r3`
+- Rejected replacements:
+  - `2026-04-25_21-37-57-Windows 98 Gaming PC-baseline-prelock-r1`
+  - `2026-04-25_21-40-40-Windows 98 Gaming PC-baseline-prelock-r1`
+
+### Locked Comparison Values
+
+- Whole-run mean avg:
+  - `99.564333`
+- Whole-run mean p50:
+  - `100`
+- Whole-run mean p95:
+  - `101`
+- Whole-run mean p99:
+  - `102`
+- Whole-run mean churn ratio:
+  - `0.001144`
+
+### Baseline Capture Notes
+
+- The accepted 3-run set was captured with the fixed order:
+  - `Q3 -> 3DMark99 -> WL-05`
+- Marker validation passed on all 3 accepted runs:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- Host-noise notes were clean for all 3 accepted runs.
