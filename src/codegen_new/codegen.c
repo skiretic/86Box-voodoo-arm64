@@ -56,6 +56,7 @@ dynarec_3dnow_cov_log_summary(const char *tag)
           (unsigned long long) total_dispatches,
           (unsigned long long) dynarec_3dnow_recompiled_dispatches,
           (unsigned long long) dynarec_3dnow_fallback_dispatches);
+    dynarec_3dnow_cov_log_op_summary();
 }
 
 static void

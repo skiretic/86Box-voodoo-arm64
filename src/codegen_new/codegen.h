@@ -74,6 +74,8 @@ extern uint16_t *codeblock_hash;
 
 extern uint8_t *block_write_data;
 
+void dynarec_3dnow_cov_log_op_summary(void);
+
 /*Code block uses FPU*/
 #define CODEBLOCK_HAS_FPU 1
 /*Code block is always entered with the same FPU top-of-stack*/

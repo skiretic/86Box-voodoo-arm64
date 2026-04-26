@@ -12,6 +12,10 @@ Current project status (2026-04-23):
 - Final validation + soak telemetry show no fallback:
   - `s03g-ext-pswapd`: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=48 fallback=0`
   - `s03h-game-3dnow-soak-01`: `DYNAREC_3DNOW_SUMMARY tag=final total=4427 recompiled=4427 fallback=0`
+- Pre-logging lock stays as the comparison gate:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- Current logging-on analysis baseline is separate and used for opcode-mix reads:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`
 
 ## Authoritative Sources in This Repo
 
@@ -97,3 +101,4 @@ Therefore:
 6. For performance-feel checks, keep coverage telemetry opt-in:
    - default runs: `86BOX_3DNOW_COV_STATS=0`
    - dispatch-proof runs: `86BOX_3DNOW_COV_STATS=1` and parse `DYNAREC_3DNOW_SUMMARY`.
+7. For opcode-mix work, use the logging-on baseline run above and read `DYNAREC_3DNOW_OPSUMMARY`.

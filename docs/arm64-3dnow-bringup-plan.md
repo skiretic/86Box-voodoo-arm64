@@ -10,6 +10,10 @@ Current final state (2026-04-23):
 - Host telemetry confirms no fallback in validation and gameplay soak runs:
   - `s03g-ext-pswapd`: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=48 fallback=0`
   - `s03h-game-3dnow-soak-01`: `DYNAREC_3DNOW_SUMMARY tag=final total=4427 recompiled=4427 fallback=0`
+- Pre-logging locked baseline still stands as the comparison gate:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- Current logging-on analysis baseline for op-family mix is separate:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`
 
 ## Baseline Evidence (Lab Entry)
 
@@ -21,6 +25,7 @@ Validation run (`3dnowcov-r2`) confirms stable baseline and usable harness:
 - skipped opcodes are expected on non-3DNowExt profile:
   - `0c PI2FW`, `1c PF2IW`, `8a PFNACC`, `8e PFPNACC`, `bb PSWAPD`
 - host telemetry (`86BOX_3DNOW_COV_STATS=1`) confirms heavy runtime coverage (`DYNAREC_3DNOW_SUMMARY` with high total/recompiled counts and explicit fallback count).
+- Current logging-on runs also emit `DYNAREC_3DNOW_OPSUMMARY` when `86BOX_3DNOW_COV_STATS=1` is enabled.
 
 ## Safety Rules
 
@@ -104,6 +109,7 @@ Implementation notes:
 Gate:
 - `3DNOWCOV` must remain `fail=0` and total hash stable against phase baseline for covered opcodes.
 - no crash/hang in guest run.
+- For perf-family analysis, use the logging-on baseline artifact from `2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`.
 
 Rollback trigger:
 - any `3DNOWCOV_ERROR`, hash drift for stable cases, or emulator instability.

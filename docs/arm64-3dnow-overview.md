@@ -11,6 +11,12 @@ Current state:
   - `s03g-ext-pswapd`: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=48 fallback=0`
   - `s03h-game-3dnow-soak-01`: `DYNAREC_3DNOW_SUMMARY tag=final total=4427 recompiled=4427 fallback=0`
 
+Baseline note:
+- Pre-logging locked baseline artifact:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- Current logging-on analysis baseline:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`
+
 ## Where To Read Next
 
 1. `docs/arm64-3dnow-opcode-coverage-tracker.md`
@@ -49,4 +55,3 @@ Interpretation:
 - ARM64-only behavior changes for this bring-up.
 - Keep x86-64 behavior unchanged.
 - Prefer real dynarec lowering first (no helper substitution for new opcode paths).
-
