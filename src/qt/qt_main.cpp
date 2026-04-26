@@ -456,35 +456,35 @@ main_thread_fn()
             drawits += static_cast<int>(new_time - old_time);
         old_time = new_time;
         if ((drawits > 0 || fast_forward) && !dopause) {
-            /* Yes, so run frames now. */
-            do {
+            /*
+             * Pace with one pc_run() per scheduler pass.
+             * We intentionally avoid burst catch-up (multi-frame loop) because it can
+             * overshoot after dips and amplify <100/>100 speed oscillation.
+             */
 #ifdef USE_INSTRUMENT
-                uint64_t start_time = elapsed_timer.nsecsElapsed();
+            uint64_t start_time = elapsed_timer.nsecsElapsed();
 #endif
-                /* Run a block of code. */
-                pc_run();
+            pc_run();
 
 #ifdef USE_INSTRUMENT
-                if (instru_enabled) {
-                    uint64_t elapsed_us       = (elapsed_timer.nsecsElapsed() - start_time) / 1000;
-                    uint64_t total_elapsed_ms = (uint64_t) ((double) tsc / cpu_s->rspeed * 1000);
-                    printf("[instrument] %llu, %llu\n", total_elapsed_ms, elapsed_us);
-                    if (instru_run_ms && total_elapsed_ms >= instru_run_ms)
-                        break;
-                }
-#endif
-                /* Every 2 emulated seconds we save the machine status. */
-                if (++frames >= (force_10ms ? 200 : 2000) && nvr_dosave) {
-                    qt_nvr_save();
-                    nvr_dosave = 0;
-                    frames     = 0;
-                }
-                
-                drawits -= force_10ms ? 10 : 1;
-                if (drawits > 50 || fast_forward)
+            if (instru_enabled) {
+                uint64_t elapsed_us       = (elapsed_timer.nsecsElapsed() - start_time) / 1000;
+                uint64_t total_elapsed_ms = (uint64_t) ((double) tsc / cpu_s->rspeed * 1000);
+                printf("[instrument] %llu, %llu\n", total_elapsed_ms, elapsed_us);
+                if (instru_run_ms && total_elapsed_ms >= instru_run_ms)
                     drawits = 0;
+            }
+#endif
+            /* Every 2 emulated seconds we save the machine status. */
+            if (++frames >= (force_10ms ? 200 : 2000) && nvr_dosave) {
+                qt_nvr_save();
+                nvr_dosave = 0;
+                frames     = 0;
+            }
 
-            } while (drawits > 0);
+            drawits -= force_10ms ? 10 : 1;
+            if (drawits > 50 || fast_forward)
+                drawits = 0;
         } else {
             /* Just so we dont overload the host OS. */
 
