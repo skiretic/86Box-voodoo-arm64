@@ -303,3 +303,46 @@ Decision:
   - `pavgusb`
 - Next execution step (pending run):
   - capture one clean telemetry run and pick the hottest arith opcode for backend instruction-count reduction.
+
+## Arith Hot-Op Selection Run (2026-04-26)
+
+### Selection Artifact
+
+- Run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-13-28-Windows 98 Gaming PC-3dnow-telemetry-r3`
+- Log:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-13-28-Windows 98 Gaming PC-3dnow-telemetry-r3/86box.log`
+
+### Gate Status
+
+- Marker validation:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- 3DNow dispatch:
+  - `DYNAREC_3DNOW_SUMMARY tag=final total=4311 recompiled=4311 fallback=0`
+- Guest correctness:
+  - microstress hashes matched expected lock values (quick/normal/smc).
+
+### Speed/Consistency Read (vs logging-on baseline)
+
+Comparison baseline:
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2/86box.log`
+
+Observed:
+- whole-run `avg`: `99.542` vs `99.610` (near-flat / `-0.068`)
+- whole-run `p99`: `102` vs `103` (improved)
+- `dips_lt95`: `13` vs `21` (improved)
+- `dips_lt90`: `1` vs `7` (improved)
+
+### Arith Breakdown (new parser output)
+
+- `pfmul=1982` (hottest)
+- `pfadd=1095`
+- `pfsub=455`
+- `pfacc=167`
+- `pfsubr=104`
+- `pavgusb=0`
+
+Decision:
+- choose `PFMUL` as first arith hot-op target.
