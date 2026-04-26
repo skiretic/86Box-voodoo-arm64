@@ -10,6 +10,9 @@ Current state:
 - Latest full telemetry checkpoints show no fallback:
   - `s03g-ext-pswapd`: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=48 fallback=0`
   - `s03h-game-3dnow-soak-01`: `DYNAREC_3DNOW_SUMMARY tag=final total=4427 recompiled=4427 fallback=0`
+- Latest phase-1 accepted run after alias-safe `PFRCP` fix:
+  - `3dnow-pfrcp-aliasfix-realcheck-r2`: `DYNAREC_3DNOW_SUMMARY tag=final total=3827 recompiled=3827 fallback=0`
+  - run artifact: `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-40-10-Windows 98 Gaming PC-3dnow-pfrcp-aliasfix-realcheck-r2`
 
 Baseline note:
 - Pre-logging locked baseline artifact:
