@@ -29,6 +29,12 @@ static uint64_t dynarec_3dnow_op_pfnacc;
 static uint64_t dynarec_3dnow_op_pfpnacc;
 static uint64_t dynarec_3dnow_op_pswapd;
 static uint64_t dynarec_3dnow_op_pi2fw;
+static uint64_t dynarec_3dnow_op_pfadd;
+static uint64_t dynarec_3dnow_op_pfsub;
+static uint64_t dynarec_3dnow_op_pfsubr;
+static uint64_t dynarec_3dnow_op_pfmul;
+static uint64_t dynarec_3dnow_op_pfacc;
+static uint64_t dynarec_3dnow_op_pavgusb;
 
 static void
 dynarec_3dnow_cov_count_op(uint8_t opcode)
@@ -71,11 +77,27 @@ dynarec_3dnow_cov_count_op(uint8_t opcode)
             dynarec_3dnow_op_conv++;
             break;
         case 0x9a:
+            dynarec_3dnow_op_pfsub++;
+            dynarec_3dnow_op_arith++;
+            break;
         case 0x9e:
+            dynarec_3dnow_op_pfadd++;
+            dynarec_3dnow_op_arith++;
+            break;
         case 0xaa:
+            dynarec_3dnow_op_pfsubr++;
+            dynarec_3dnow_op_arith++;
+            break;
         case 0xae:
+            dynarec_3dnow_op_pfacc++;
+            dynarec_3dnow_op_arith++;
+            break;
         case 0xb4:
+            dynarec_3dnow_op_pfmul++;
+            dynarec_3dnow_op_arith++;
+            break;
         case 0xbf:
+            dynarec_3dnow_op_pavgusb++;
             dynarec_3dnow_op_arith++;
             break;
         case 0x90:
@@ -97,7 +119,7 @@ dynarec_3dnow_cov_log_op_summary(void)
     if (!dynarec_3dnow_op_total)
         return;
 
-    pclog("DYNAREC_3DNOW_OPSUMMARY total=%llu recip=%llu shuffle_pack=%llu arith=%llu cmp=%llu conv=%llu other=%llu pfrcp=%llu pfrsqrt=%llu pfnacc=%llu pfpnacc=%llu pswapd=%llu pi2fw=%llu\n",
+    pclog("DYNAREC_3DNOW_OPSUMMARY total=%llu recip=%llu shuffle_pack=%llu arith=%llu cmp=%llu conv=%llu other=%llu pfrcp=%llu pfrsqrt=%llu pfnacc=%llu pfpnacc=%llu pswapd=%llu pi2fw=%llu pfadd=%llu pfsub=%llu pfsubr=%llu pfmul=%llu pfacc=%llu pavgusb=%llu\n",
           (unsigned long long) dynarec_3dnow_op_total,
           (unsigned long long) dynarec_3dnow_op_recip,
           (unsigned long long) dynarec_3dnow_op_shuffle_pack,
@@ -110,7 +132,13 @@ dynarec_3dnow_cov_log_op_summary(void)
           (unsigned long long) dynarec_3dnow_op_pfnacc,
           (unsigned long long) dynarec_3dnow_op_pfpnacc,
           (unsigned long long) dynarec_3dnow_op_pswapd,
-          (unsigned long long) dynarec_3dnow_op_pi2fw);
+          (unsigned long long) dynarec_3dnow_op_pi2fw,
+          (unsigned long long) dynarec_3dnow_op_pfadd,
+          (unsigned long long) dynarec_3dnow_op_pfsub,
+          (unsigned long long) dynarec_3dnow_op_pfsubr,
+          (unsigned long long) dynarec_3dnow_op_pfmul,
+          (unsigned long long) dynarec_3dnow_op_pfacc,
+          (unsigned long long) dynarec_3dnow_op_pavgusb);
 }
 
 #define ropParith(func, opid)                                                                      \

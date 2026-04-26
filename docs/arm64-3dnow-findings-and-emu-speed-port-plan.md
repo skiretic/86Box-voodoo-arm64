@@ -204,6 +204,8 @@ Constraint:
   - `p99=103`
 - 3DNow family summary:
   - `DYNAREC_3DNOW_OPSUMMARY total=4010 recip=189 shuffle_pack=0 arith=3527 cmp=186 conv=108 other=0 pfrcp=75 pfrsqrt=20 pfnacc=0 pfpnacc=0 pswapd=0 pi2fw=0`
+  - format now also includes arith subgroup fields:
+    - `pfadd=... pfsub=... pfsubr=... pfmul=... pfacc=... pavgusb=...`
 - Interpretation:
   - this run is the baseline artifact for logging-on family-mix analysis
   - reciprocal/sqrt is active in this workload
@@ -292,5 +294,12 @@ Decision:
 ### Next Target
 
 - Continue 3DNow optimization phase 1 with exact-semantics-only work.
-- First target:
-  - expand opcode-mix visibility for hot arithmetic subgroup inside current `arith` bucket, then pick the top op for backend instruction-count reduction.
+- Arith subgroup visibility slice is now landed in `DYNAREC_3DNOW_OPSUMMARY`:
+  - `pfadd`
+  - `pfsub`
+  - `pfsubr`
+  - `pfmul`
+  - `pfacc`
+  - `pavgusb`
+- Next execution step (pending run):
+  - capture one clean telemetry run and pick the hottest arith opcode for backend instruction-count reduction.

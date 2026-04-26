@@ -98,6 +98,11 @@ BEGIN {
     marker_start_seen = 0;
     marker_max_seq = 0;
     marker_current_seq = 0;
+
+    op_summary_seen = 0;
+    op_keys_count = split("total recip shuffle_pack arith cmp conv other pfrcp pfrsqrt pfnacc pfpnacc pswapd pi2fw pfadd pfsub pfsubr pfmul pfacc pavgusb", op_keys, " ");
+    for (i = 1; i <= op_keys_count; i++)
+        opv[op_keys[i]] = 0;
 }
 
 /PERF_PHASE_MARK/ {
@@ -117,6 +122,21 @@ BEGIN {
     if (match($0, /percent=[0-9]+/)) {
         p = substr($0, RSTART + 8, RLENGTH - 8) + 0;
         add_sample(phase_name_for_seq(marker_current_seq), p);
+    }
+}
+
+/DYNAREC_3DNOW_OPSUMMARY/ {
+    op_summary_seen = 1;
+    for (i = 1; i <= NF; i++) {
+        if (index($i, "=") > 0) {
+            split($i, kv, "=");
+            key = kv[1];
+            val = kv[2];
+            gsub(/[^A-Za-z0-9_]/, "", key);
+            gsub(/[^0-9.-]/, "", val);
+            if ((key in opv) && (val != ""))
+                opv[key] = val + 0;
+        }
     }
 }
 
@@ -144,5 +164,16 @@ END {
     print_phase_summary("3dmark99", phase_n["3dmark99"] + 0);
     print_phase_summary("wl05", phase_n["wl05"] + 0);
     print_phase_summary("post_wl05", phase_n["post_wl05"] + 0);
+
+    if (op_summary_seen) {
+        printf("DYNAREC_3DNOW_OPSUMMARY_PARSED");
+        for (i = 1; i <= op_keys_count; i++)
+            printf(" %s=%d", op_keys[i], opv[op_keys[i]]);
+        printf("\n");
+        printf("DYNAREC_3DNOW_ARITH_BREAKDOWN pfadd=%d pfsub=%d pfsubr=%d pfmul=%d pfacc=%d pavgusb=%d\n",
+               opv["pfadd"], opv["pfsub"], opv["pfsubr"], opv["pfmul"], opv["pfacc"], opv["pavgusb"]);
+    } else {
+        print "DYNAREC_3DNOW_OPSUMMARY_PARSED missing=1";
+    }
 }
 ' "${LOGFILE}"

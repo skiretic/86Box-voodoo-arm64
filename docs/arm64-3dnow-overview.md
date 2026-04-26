@@ -45,6 +45,11 @@ Baseline note:
 - `D:\SCRIPTS\COV3D_RUN.BAT D:`
 4. Parse host log for:
 - `DYNAREC_3DNOW_SUMMARY tag=final total=X recompiled=Y fallback=Z`
+5. Parse consolidated speed + opcode mix summary with:
+- `./scripts/dynarec/analyze-emu-speed-log.sh <86box.log>`
+- includes:
+  - `DYNAREC_3DNOW_OPSUMMARY_PARSED ...`
+  - `DYNAREC_3DNOW_ARITH_BREAKDOWN ...`
 
 Interpretation:
 - `Z=0`: every executed 3DNow/3DNowExt op in that run used dynarec lowering.

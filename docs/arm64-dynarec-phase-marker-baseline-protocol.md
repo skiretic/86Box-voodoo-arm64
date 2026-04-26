@@ -36,6 +36,8 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 - `EMU_PHASE_SPEED_SUMMARY phase=3dmark99 ...`
 - `EMU_PHASE_SPEED_SUMMARY phase=wl05 ...`
 - optional `EMU_PHASE_SPEED_SUMMARY phase=post_wl05 ...`
+- `DYNAREC_3DNOW_OPSUMMARY_PARSED ...` (latest 3DNow opcode-family snapshot)
+- `DYNAREC_3DNOW_ARITH_BREAKDOWN ...` (arith subgroup counters: `pfadd/pfsub/pfsubr/pfmul/pfacc/pavgusb`)
 
 ## Baseline Lock Status
 - Baseline capture is complete and locked.
