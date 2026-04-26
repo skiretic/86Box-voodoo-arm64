@@ -25,6 +25,9 @@ static uint64_t dynarec_3dnow_op_conv;
 static uint64_t dynarec_3dnow_op_other;
 static uint64_t dynarec_3dnow_op_pfrcp;
 static uint64_t dynarec_3dnow_op_pfrsqrt;
+static uint64_t dynarec_3dnow_op_pfrcpit1;
+static uint64_t dynarec_3dnow_op_pfrsqit1;
+static uint64_t dynarec_3dnow_op_pfrcpit2;
 static uint64_t dynarec_3dnow_op_pfnacc;
 static uint64_t dynarec_3dnow_op_pfpnacc;
 static uint64_t dynarec_3dnow_op_pswapd;
@@ -51,9 +54,16 @@ dynarec_3dnow_cov_count_op(uint8_t opcode)
             dynarec_3dnow_op_pfrsqrt++;
             break;
         case 0xa6:
+            dynarec_3dnow_op_recip++;
+            dynarec_3dnow_op_pfrcpit1++;
+            break;
         case 0xa7:
+            dynarec_3dnow_op_recip++;
+            dynarec_3dnow_op_pfrsqit1++;
+            break;
         case 0xb6:
             dynarec_3dnow_op_recip++;
+            dynarec_3dnow_op_pfrcpit2++;
             break;
         case 0x8a:
             dynarec_3dnow_op_shuffle_pack++;
@@ -119,7 +129,7 @@ dynarec_3dnow_cov_log_op_summary(void)
     if (!dynarec_3dnow_op_total)
         return;
 
-    pclog("DYNAREC_3DNOW_OPSUMMARY total=%llu recip=%llu shuffle_pack=%llu arith=%llu cmp=%llu conv=%llu other=%llu pfrcp=%llu pfrsqrt=%llu pfnacc=%llu pfpnacc=%llu pswapd=%llu pi2fw=%llu pfadd=%llu pfsub=%llu pfsubr=%llu pfmul=%llu pfacc=%llu pavgusb=%llu\n",
+    pclog("DYNAREC_3DNOW_OPSUMMARY total=%llu recip=%llu shuffle_pack=%llu arith=%llu cmp=%llu conv=%llu other=%llu pfrcp=%llu pfrsqrt=%llu pfrcpit1=%llu pfrsqit1=%llu pfrcpit2=%llu pfnacc=%llu pfpnacc=%llu pswapd=%llu pi2fw=%llu pfadd=%llu pfsub=%llu pfsubr=%llu pfmul=%llu pfacc=%llu pavgusb=%llu\n",
           (unsigned long long) dynarec_3dnow_op_total,
           (unsigned long long) dynarec_3dnow_op_recip,
           (unsigned long long) dynarec_3dnow_op_shuffle_pack,
@@ -129,6 +139,9 @@ dynarec_3dnow_cov_log_op_summary(void)
           (unsigned long long) dynarec_3dnow_op_other,
           (unsigned long long) dynarec_3dnow_op_pfrcp,
           (unsigned long long) dynarec_3dnow_op_pfrsqrt,
+          (unsigned long long) dynarec_3dnow_op_pfrcpit1,
+          (unsigned long long) dynarec_3dnow_op_pfrsqit1,
+          (unsigned long long) dynarec_3dnow_op_pfrcpit2,
           (unsigned long long) dynarec_3dnow_op_pfnacc,
           (unsigned long long) dynarec_3dnow_op_pfpnacc,
           (unsigned long long) dynarec_3dnow_op_pswapd,
@@ -411,9 +424,9 @@ ropPSWAPD(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fe
 }
 
 uint32_t
-ropPFRCPIT(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
+ropPFRCPIT(codeblock_t *block, ir_data_t *ir, uint8_t opcode, uint32_t fetchdat, uint32_t op_32, uint32_t op_pc)
 {
-    dynarec_3dnow_cov_count_op(0xa6);
+    dynarec_3dnow_cov_count_op(opcode);
     int dest_reg = (fetchdat >> 3) & 7;
 
     uop_MMX_ENTER(ir);
@@ -484,9 +497,9 @@ ropPFRSQRT(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), uint32_t f
 }
 
 uint32_t
-ropPFRSQIT1(codeblock_t *block, ir_data_t *ir, UNUSED(uint8_t opcode), UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
+ropPFRSQIT1(codeblock_t *block, ir_data_t *ir, uint8_t opcode, UNUSED(uint32_t fetchdat), UNUSED(uint32_t op_32), uint32_t op_pc)
 {
-    dynarec_3dnow_cov_count_op(0xa7);
+    dynarec_3dnow_cov_count_op(opcode);
     uop_MMX_ENTER(ir);
 
     codegen_mark_code_present(block, cs + op_pc, 2);

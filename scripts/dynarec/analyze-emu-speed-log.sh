@@ -100,7 +100,7 @@ BEGIN {
     marker_current_seq = 0;
 
     op_summary_seen = 0;
-    op_keys_count = split("total recip shuffle_pack arith cmp conv other pfrcp pfrsqrt pfnacc pfpnacc pswapd pi2fw pfadd pfsub pfsubr pfmul pfacc pavgusb", op_keys, " ");
+    op_keys_count = split("total recip shuffle_pack arith cmp conv other pfrcp pfrsqrt pfrcpit1 pfrsqit1 pfrcpit2 pfnacc pfpnacc pswapd pi2fw pfadd pfsub pfsubr pfmul pfacc pavgusb", op_keys, " ");
     for (i = 1; i <= op_keys_count; i++)
         opv[op_keys[i]] = 0;
 }
@@ -172,6 +172,8 @@ END {
         printf("\n");
         printf("DYNAREC_3DNOW_ARITH_BREAKDOWN pfadd=%d pfsub=%d pfsubr=%d pfmul=%d pfacc=%d pavgusb=%d\n",
                opv["pfadd"], opv["pfsub"], opv["pfsubr"], opv["pfmul"], opv["pfacc"], opv["pavgusb"]);
+        printf("DYNAREC_3DNOW_RECIP_BREAKDOWN pfrcp=%d pfrsqrt=%d pfrcpit1=%d pfrsqit1=%d pfrcpit2=%d\n",
+               opv["pfrcp"], opv["pfrsqrt"], opv["pfrcpit1"], opv["pfrsqit1"], opv["pfrcpit2"]);
     } else {
         print "DYNAREC_3DNOW_OPSUMMARY_PARSED missing=1";
     }
