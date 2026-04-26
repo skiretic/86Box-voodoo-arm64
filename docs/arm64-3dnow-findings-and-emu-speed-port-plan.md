@@ -176,5 +176,8 @@ Constraint:
    - `EMU_PHASE_MARKERS`
    - `EMU_PHASE_SPEED_SUMMARY` per phase
    - `S03_LOG` churn ratio (`ratio_promote_no_immediates_per_dirty_hit`)
-4. Exclude any run with invalid marker sequencing.
-5. Establish baseline from averages/dispersion across the 3 valid runs before starting new optimization code.
+4. Record host-noise notes per run (`clean` vs `noisy`) and reject noise-tainted outliers.
+5. Exclude any run with invalid marker sequencing.
+6. Establish baseline from averages/dispersion across `3 clean valid runs` before starting new optimization code.
+7. Write and freeze baseline lock artifact with explicit gate line:
+   - `BASELINE LOCKED: use these averages as comparison gate before any new code.`
