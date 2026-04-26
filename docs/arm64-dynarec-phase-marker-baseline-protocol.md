@@ -58,6 +58,20 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
   - churn mean `0.001144`
 - Continue to use the locked artifact as the comparison gate before any new code.
 
+## Current Analysis Checkpoint (2026-04-26)
+- Accepted phase-1 follow-on run (does not replace locked gate baseline):
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-40-10-Windows 98 Gaming PC-3dnow-pfrcp-aliasfix-realcheck-r2`
+- Gate validity:
+  - `start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`
+- Correctness:
+  - `3DNOWCOV_TOTAL hash=28aeb9ef` matched expected
+- Speed signal vs logging-on baseline (`3dnow-opcount-r2`):
+  - `avg`: `99.671` vs `99.610` (`+0.061`)
+  - dips `<95`: `17` vs `21`
+  - dips `<90`: `3` vs `7`
+- Churn note:
+  - `ratio_promote_no_immediates_per_dirty_hit`: `0.001180` vs `0.001174` (tiny increase, accepted for stability gain)
+
 ## Host Noise Control (Required)
 - Before each run, record host-noise notes:
   - active heavy apps/processes

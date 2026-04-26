@@ -1889,9 +1889,14 @@ codegen_PFRCP(codeblock_t *block, uop_t *uop)
     int src_size_a = IREG_GET_SIZE(uop->src_reg_a_real);
 
     if (REG_IS_Q(dest_size) && REG_IS_Q(src_size_a)) {
-        /* Keep exact semantics while minimizing temporary FP register use. */
-        host_arm64_FMOV_S_ONE(block, dest_reg);
-        host_arm64_FDIV_S(block, dest_reg, dest_reg, src_reg_a);
+        /* Keep exact semantics and preserve src when ModRM aliases dst/src. */
+        if (dest_reg == src_reg_a) {
+            host_arm64_FMOV_S_ONE(block, REG_V_TEMP);
+            host_arm64_FDIV_S(block, dest_reg, REG_V_TEMP, src_reg_a);
+        } else {
+            host_arm64_FMOV_S_ONE(block, dest_reg);
+            host_arm64_FDIV_S(block, dest_reg, dest_reg, src_reg_a);
+        }
         host_arm64_DUP_V2S(block, dest_reg, dest_reg, 0);
     } else
         fatal("PFRCP %02x\n", uop->dest_reg_a_real);

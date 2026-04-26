@@ -347,13 +347,59 @@ Observed:
 Decision:
 - choose `PFMUL` as first arith hot-op target.
 
-## In-Flight Slice (2026-04-26)
+## Recip Alias-Safe Lock (2026-04-26)
+
+### Change Locked In
 
 - File:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/src/codegen_new/codegen_backend_arm64_uops.c`
 - Change:
-  - exact-semantics register-pressure cleanup for `PFRCP` / `PFRSQRT` lowerers
-  - no estimate/refinement ops; behavior remains full-precision path
-- Status:
-  - build/sign passes
-  - telemetry validation pending
+  - keep exact-semantics `PFRCP` lowerer
+  - when `dst==src`, use temp-one path to avoid source clobber alias hazard
+  - keep trimmed temp path for non-alias case
+
+### Lock Run Artifact
+
+- Run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-40-10-Windows 98 Gaming PC-3dnow-pfrcp-aliasfix-realcheck-r2`
+- Log:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-40-10-Windows 98 Gaming PC-3dnow-pfrcp-aliasfix-realcheck-r2/86box.log`
+- Marker gate:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- 3DNow dispatch:
+  - `DYNAREC_3DNOW_SUMMARY tag=final total=3827 recompiled=3827 fallback=0`
+- Guest correctness:
+  - `3DNOWCOV_TOTAL hash=28aeb9ef` matched
+  - row hashes matched expected lock set
+
+### Delta Summary (vs Logging-On Baseline)
+
+Comparison baseline:
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2/86box.log`
+
+Observed:
+- whole-run `avg`: `99.671` vs `99.610` (`+0.061`)
+- whole-run `p95`: `101` vs `101` (flat)
+- whole-run `p99`: `102` vs `103` (improved)
+- `dips_lt100`: `86` vs `91` (improved)
+- `dips_lt95`: `17` vs `21` (improved)
+- `dips_lt90`: `3` vs `7` (improved)
+- churn `ratio_promote_no_immediates_per_dirty_hit`: `0.001180` vs `0.001174` (tiny regression, accepted)
+
+Decision:
+- accept as phase-1 stability/correctness win
+- keep locked pre-logging 3-run baseline unchanged as gate
+
+## Next Target (Phase-1)
+
+- Target opcode:
+  - `PFMUL` (hottest arith op in telemetry)
+- Goal:
+  - reduce ARM64 lowerer instruction count/register pressure in exact-semantics path
+- Guardrails:
+  - no estimate/refinement behavior change
+  - keep `3DNOWCOV` hashes exact
+  - keep `fallback=0`
+  - keep marker-valid run format (`seq=0..3`)
