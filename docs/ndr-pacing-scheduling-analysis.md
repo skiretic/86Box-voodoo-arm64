@@ -20,7 +20,7 @@ To preserve comparability with the existing lock, keep the original 3-run workfl
 
 Run-shape requirements:
 
-- Exactly 3 clean valid runs (same policy as locked baseline protocol).
+- Exactly 3 accepted runs count toward the gate, and each accepted run must be both clean and valid. Mark every attempt as `clean`, `noisy`, or `tainted`; noisy/tainted attempts do not count and must be replaced with the rejection reason recorded in the decision log.
 - Phase-marker validity in each run: `start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`.
 - `MRUNALL` must complete all three sub-modes with `MICRO_SUMMARY status=OK`.
 - WL-05 totals must match locked canonical values for the fixed VM profile:
@@ -31,7 +31,8 @@ Run-shape requirements:
 Baseline references:
 
 - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/arm64-dynarec-phase-marker-baseline-protocol.md`
-- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- active lock: `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+- superseded predecessor: `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 
 ## Artifact Location and Naming (Canonical)
 
@@ -45,6 +46,7 @@ Per-run directory shape (from telemetry launcher scripts):
 - required host files in each run dir:
   - `86box.log`
   - `run-metadata.txt`
+  - `wl05-hashes.txt` (host-side transcription or copied guest output containing the quick/normal/smc totals for that run)
 
 Guest-side WL-05 logs are written in VM at:
 
@@ -55,27 +57,31 @@ Guest-side WL-05 logs are written in VM at:
 
 ## Primary Gate Runbook (Operator)
 
-1. Launch telemetry run (host):
+1. Before launch, record host-noise notes in `run-metadata.txt` and label the attempt `clean`, `noisy`, or `tainted`. If known heavy background work is active, postpone the run instead of counting it.
+2. Launch telemetry run (host):
    - `env 86BOX_3DNOW_COV_STATS=1 ./scripts/dynarec/launch-vm-telemetry-run.sh <run_tag>`
    - capture `run_dir` from launcher output.
-2. Execute locked workload in guest in order:
+3. Execute locked workload in guest in order:
    - run Q3 demo four.
-   - press hotkey `1` to mark transition to 3DMark99.
+   - while switching from Q3 to 3DMark99 in the guest, press hotkey `1` to mark that transition.
    - run 3DMark99.
-   - press hotkey `1` to mark transition to WL-05.
+   - while switching from 3DMark99 to WL-05 in the guest, press hotkey `1` again to mark that transition.
    - run `D:\SCRIPTS\MRUNALL.BAT D:`.
-   - press hotkey `1` after WL-05 completion to close sequence (`seq=3`).
+   - after WL-05 completes, press hotkey `1` a third time while exiting/closing out the guest-side workload sequence to emit `seq=3`.
    - config lock: keep Q3 and 3DMark99 settings/profile identical to locked baseline runs (no settings changes during comparability runs).
-3. Parse host log:
+4. Parse host log:
    - `./scripts/dynarec/analyze-emu-speed-log.sh <run_dir>/86box.log`
-4. Validate marker and speed gate:
+5. Validate per-run marker and correctness prerequisites:
    - `EMU_PHASE_MARKERS ... valid_for_q3_3dmark_wl05=1`
-   - aggregate thresholds from this document pass.
-5. Validate WL-05 correctness totals from guest output/logs:
+   - no correctness/hash anomalies in locked workload checks
+   - if this attempt is noisy, tainted, or invalid, mark it `Rejected/Replaced` immediately and do not count it toward the 3-run aggregate
+   - only evaluate aggregate thresholds after exactly 3 accepted clean valid runs exist
+6. Validate WL-05 correctness totals from guest output/logs and persist them host-side in `<run_dir>/wl05-hashes.txt` (or an equivalent file referenced from `run-metadata.txt`):
    - quick `45db7b65`
    - normal `2520dd5e`
    - smc `b86f22a1`
-6. Record run verdict and notes in decision log (below).
+7. After exactly 3 accepted clean valid runs exist, evaluate the 3-run aggregate thresholds from this document against the current active lock.
+8. Record run verdict and notes in decision log (below).
 
 ## Consistency Pass/Fail Thresholds (Primary Gate)
 
@@ -85,7 +91,7 @@ Evaluate on 3-run aggregate against the locked baseline:
 - whole-run `p99 <= 103`
 - whole-run `dips<95 <= 24`
 - whole-run `dips<90 <= 12`
-- whole-run `crossings`: non-increasing vs locked baseline aggregate (or explicitly justified in decision log)
+- whole-run `crossings <=` locked baseline aggregate; if `crossings` worsens, the slice fails the primary gate and may be retained only as non-promotable exploratory evidence until a re-lock or explicit gate change is approved
 - no correctness/hash anomalies in locked workload checks
 
 These are intentionally conservative guardrails for pacing work; if they are too strict or too loose after several slices, retune once and re-lock explicitly.
@@ -98,7 +104,7 @@ These are intentionally conservative guardrails for pacing work; if they are too
 
 ## Decision Log (Working)
 
-Use this table as the active tracker while implementing. Update status and notes as each candidate is reviewed/landed.
+Use this table as the active tracker while implementing. Record one row per attempt, not one row per candidate. A candidate that gets a rethink pass should therefore appear as `A1`, `A2`, and so on.
 
 Iteration policy:
 
@@ -107,17 +113,19 @@ Iteration policy:
 - Log both attempts in this table with evidence and reason for the revised approach.
 - Only mark a candidate `Rejected` after at least one documented revision attempt, unless a hard correctness/safety blocker is discovered.
 - Experimental cleanup is required: if an attempt is rejected, remove broken/abandoned code paths instead of leaving them deactivated behind flags, dead branches, or commented-out blocks.
+- `Decision` values: `Keep`, `Reject`, `Defer`.
+- `Status` values: `Planned`, `In progress`, `Gate-failed`, `Reverted`, `Landed`, `Deferred`.
 
-| Date | Candidate | Decision | Status | Change/Notes | Evidence |
-| --- | --- | --- | --- | --- | --- |
-| 2026-04-26 | C1 | Keep | Planned | Phase 1 only: ns debt accounting, preserve single-run-per-pass; phase 2 catch-up behind guard. | Primary workload gate + artifact run dir |
-| 2026-04-26 | C2 | Keep (deferred) | Deferred | Throughput-track only; requires opcode stress + baseline signature before default-on. | Correctness gate + workload gate |
-| 2026-04-26 | C3 | Keep | Planned | Remove fixed 1 ms contention sleep; require lock-scope audit checklist before landing. | Audit checklist + workload gate |
-| 2026-04-26 | C4 | Keep | Planned | FIFO wake/wait smoothing and bounded drain after C1/C3/C5/C6 slices. | Workload gate + correctness checks |
-| 2026-04-26 | C5 | Keep | Planned | Improve renderer handoff cadence using mailbox/coalescing approach. | Workload gate visual smoothness signal |
-| 2026-04-26 | C6 | Keep | Planned | Pair with C5 to reduce render timer/swap pacing conflicts. | Workload gate + phase summaries |
-| 2026-04-26 | C7 | Keep | Planned | Reduce UI timer churn; avoid risky `processEvents()` reentrancy in runtime-sensitive paths. | Workload gate + UI sanity checks |
-| 2026-04-26 | C8 | Keep | Planned | Correct telemetry sampling interval to reduce false dip/rebound reporting. | Telemetry consistency across runs |
+| Date | Candidate | Attempt | Decision | Status | Change/Notes | Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-04-26 | C1 | A1 | Keep | Planned | Phase 1 only: ns debt accounting, preserve single-run-per-pass; phase 2 catch-up behind guard. | Primary workload gate + artifact run dir |
+| 2026-04-26 | C2 | A0 | Defer | Deferred | Throughput-track only; requires opcode stress + baseline signature before default-on. | Correctness gate + workload gate |
+| 2026-04-26 | C3 | A1 | Keep | Planned | Remove fixed 1 ms contention sleep; require lock-scope audit checklist before landing. | Audit checklist + workload gate |
+| 2026-04-26 | C4 | A1 | Keep | Planned | FIFO wake/wait smoothing and bounded drain after C1/C3/C5/C6 slices. | Workload gate + correctness checks |
+| 2026-04-26 | C5 | A1 | Keep | Planned | Improve renderer handoff cadence using mailbox/coalescing approach. | Workload gate visual smoothness signal |
+| 2026-04-26 | C6 | A1 | Keep | Planned | Pair with C5 to reduce render timer/swap pacing conflicts. | Workload gate + phase summaries |
+| 2026-04-26 | C7 | A1 | Keep | Planned | Reduce UI timer churn; avoid risky `processEvents()` reentrancy in runtime-sensitive paths. | Workload gate + UI sanity checks |
+| 2026-04-26 | C8 | A1 | Keep | Planned | Correct telemetry sampling interval to reduce false dip/rebound reporting; requires immediate re-lock before post-C8 gate comparisons. | Telemetry consistency across runs + re-lock artifact |
 
 ## Track-Oriented Candidate Map
 
@@ -455,6 +463,8 @@ Patch Sketch:
 
 ## Consistency-First Rollout Plan
 
+Rollback handling rule: a rollback is not by itself a rejection. If rollback criteria trigger and there is no hard correctness/safety blocker, revert and clean up the attempt, log it as `Gate-failed` or `Reverted`, update the hypothesis, and execute one revised attempt before marking the candidate `Rejected`. Do not use subjective "felt worse" assessments alone; attach either primary-gate deltas or a reproducible regression symptom.
+
 1. C1 phase 1 only: high-resolution debt accounting while preserving single-run-per-pass semantics.
 
 Rollback criteria: revert if guest time visibly runs slow or `dips<95`/`dips<90` worsen in the same workload.
@@ -477,11 +487,13 @@ Rollback criteria: revert if UI responsiveness or shutdown/settings flows regres
 
 6. C8: correct telemetry sampling interval so dip metrics reflect real behavior.
 
-Rollback criteria: revert if telemetry becomes inconsistent across equivalent runs.
+Promotion rule: treat C8 as a measurement-system change, not as a direct gate-improvement slice. Do not claim pass/fail improvement against the pre-C8 lock from post-C8 metrics alone. After C8 lands, immediately run the re-lock procedure and establish a new active 3-run baseline before evaluating subsequent consistency slices against aggregate speed thresholds.
+
+Rollback criteria: revert if the updated sampler cannot produce stable, internally consistent summaries on the locked workload or if the follow-on re-lock cannot be completed cleanly.
 
 ## Promotion Gate To Throughput Track
 
-Proceed to throughput-oriented refactors only after consistency track changes are stable on the defined workload and show net improvement in jitter-focused metrics (`p99`, `dips<95`, `dips<90`, crossings) without correctness regressions.
+Proceed to throughput-oriented refactors only after the consistency track passes the current active 3-run lock (original lock before any metric-definition change; re-locked baseline after C8 or any other measurement change) and shows net improvement in jitter-focused metrics (`p99`, `dips<95`, `dips<90`, `crossings`) without correctness regressions.
 
 ## Correctness Gate (Guest Opcode Stress)
 
@@ -511,7 +523,7 @@ C2 and related deeper CPU/device pipeline work target higher-clock guest feasibi
 
 ## Re-Lock Procedure (When Thresholds/Workload Need To Change)
 
-Only re-lock when changes are intentional and documented (for example workload-definition updates or gate-math retuning).
+Only re-lock when changes are intentional and documented (for example workload-definition updates, gate-math retuning, or telemetry/measurement changes that alter reported gate metrics).
 
 Required steps:
 

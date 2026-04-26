@@ -10,7 +10,9 @@ Current final state (2026-04-23):
 - Host telemetry confirms no fallback in validation and gameplay soak runs:
   - `s03g-ext-pswapd`: `DYNAREC_3DNOW_SUMMARY tag=final total=48 recompiled=48 fallback=0`
   - `s03h-game-3dnow-soak-01`: `DYNAREC_3DNOW_SUMMARY tag=final total=4427 recompiled=4427 fallback=0`
-- Pre-logging locked baseline still stands as the comparison gate:
+- Active fixed-266 MHz post-Qt baseline is the current comparison gate:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+- Historical prior workload lock:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 - Current logging-on analysis baseline for op-family mix is separate:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`
