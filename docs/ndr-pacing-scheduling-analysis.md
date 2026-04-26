@@ -1,0 +1,525 @@
+# Runtime Pacing and Scheduling Analysis
+
+Branch: `ndr-pacing-lab`
+
+Scope: Qt main loop pacing/cadence, debt and backlog handling, timer/wake/sleep cadence, scheduler interactions causing bursty work, and UI/main-thread contention paths tied to runtime pacing.
+
+Primary objective: smoother feel and consistency (lower p99 jitter, fewer `dips<95`/`dips<90`, fewer crossings), not just higher average speed.
+
+Secondary objective: higher host throughput for emulating faster-clocked guest CPUs is valuable, but treated here as a separate, larger refactor track after consistency fixes are stable.
+
+Initial analysis constraints (historical, for first draft): analysis/report only; no code edits, patch application, commits, branch changes, or VM launch during the initial write-up pass.
+
+## Defined Primary Workload Gate (Locked Baseline)
+
+To preserve comparability with the existing lock, keep the original 3-run workflow unchanged:
+
+1. Quake III timedemo (`demo four`)
+2. 3DMark99
+3. WL-05 microstress via `MRUNALL.BAT` (quick + normal + smc)
+
+Run-shape requirements:
+
+- Exactly 3 clean valid runs (same policy as locked baseline protocol).
+- Phase-marker validity in each run: `start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`.
+- `MRUNALL` must complete all three sub-modes with `MICRO_SUMMARY status=OK`.
+- WL-05 totals must match locked canonical values for the fixed VM profile:
+  - quick: `45db7b65`
+  - normal: `2520dd5e`
+  - smc: `b86f22a1`
+
+Baseline references:
+
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/arm64-dynarec-phase-marker-baseline-protocol.md`
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+
+## Artifact Location and Naming (Canonical)
+
+Host-side run artifacts are stored under:
+
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec`
+
+Per-run directory shape (from telemetry launcher scripts):
+
+- `${STAMP}-${VM_NAME}-${RUN_TAG}` (for example `2026-04-26_12-40-10-Windows 98 Gaming PC-<tag>`)
+- required host files in each run dir:
+  - `86box.log`
+  - `run-metadata.txt`
+
+Guest-side WL-05 logs are written in VM at:
+
+- `C:\PERF_LOG\wl05-micro-quick.log`
+- `C:\PERF_LOG\wl05-micro-normal.log`
+- `C:\PERF_LOG\wl05-micro-smc.log`
+- `C:\PERF_LOG\wl05-micro-last.txt`
+
+## Primary Gate Runbook (Operator)
+
+1. Launch telemetry run (host):
+   - `env 86BOX_3DNOW_COV_STATS=1 ./scripts/dynarec/launch-vm-telemetry-run.sh <run_tag>`
+   - capture `run_dir` from launcher output.
+2. Execute locked workload in guest in order:
+   - run Q3 demo four.
+   - press hotkey `1` to mark transition to 3DMark99.
+   - run 3DMark99.
+   - press hotkey `1` to mark transition to WL-05.
+   - run `D:\SCRIPTS\MRUNALL.BAT D:`.
+   - press hotkey `1` after WL-05 completion to close sequence (`seq=3`).
+   - config lock: keep Q3 and 3DMark99 settings/profile identical to locked baseline runs (no settings changes during comparability runs).
+3. Parse host log:
+   - `./scripts/dynarec/analyze-emu-speed-log.sh <run_dir>/86box.log`
+4. Validate marker and speed gate:
+   - `EMU_PHASE_MARKERS ... valid_for_q3_3dmark_wl05=1`
+   - aggregate thresholds from this document pass.
+5. Validate WL-05 correctness totals from guest output/logs:
+   - quick `45db7b65`
+   - normal `2520dd5e`
+   - smc `b86f22a1`
+6. Record run verdict and notes in decision log (below).
+
+## Consistency Pass/Fail Thresholds (Primary Gate)
+
+Evaluate on 3-run aggregate against the locked baseline:
+
+- whole-run `avg >= 99.3`
+- whole-run `p99 <= 103`
+- whole-run `dips<95 <= 24`
+- whole-run `dips<90 <= 12`
+- whole-run `crossings`: non-increasing vs locked baseline aggregate (or explicitly justified in decision log)
+- no correctness/hash anomalies in locked workload checks
+
+These are intentionally conservative guardrails for pacing work; if they are too strict or too loose after several slices, retune once and re-lock explicitly.
+
+## Non-Goals (This Document)
+
+- Do not change the locked primary gate workflow (`Q3 demo four -> 3DMark99 -> WL-05/MRUNALL`) during consistency-track slices.
+- Do not add new mandatory workloads to the primary gate in this phase.
+- Do not treat throughput-track refactors (C2-class `pc_run` restructuring and related pipeline work) as in-scope for consistency slices.
+
+## Decision Log (Working)
+
+Use this table as the active tracker while implementing. Update status and notes as each candidate is reviewed/landed.
+
+Iteration policy:
+
+- No first-try abandonment: if a candidate attempt fails gate criteria, do one focused rethink pass (hypothesis update + revised patch plan) before marking it rejected/deferred.
+- Strategy-level defer carve-out: a candidate may be marked `Deferred` before first implementation attempt when this document explicitly places it in the deferred track (for example C2 throughput track).
+- Log both attempts in this table with evidence and reason for the revised approach.
+- Only mark a candidate `Rejected` after at least one documented revision attempt, unless a hard correctness/safety blocker is discovered.
+- Experimental cleanup is required: if an attempt is rejected, remove broken/abandoned code paths instead of leaving them deactivated behind flags, dead branches, or commented-out blocks.
+
+| Date | Candidate | Decision | Status | Change/Notes | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| 2026-04-26 | C1 | Keep | Planned | Phase 1 only: ns debt accounting, preserve single-run-per-pass; phase 2 catch-up behind guard. | Primary workload gate + artifact run dir |
+| 2026-04-26 | C2 | Keep (deferred) | Deferred | Throughput-track only; requires opcode stress + baseline signature before default-on. | Correctness gate + workload gate |
+| 2026-04-26 | C3 | Keep | Planned | Remove fixed 1 ms contention sleep; require lock-scope audit checklist before landing. | Audit checklist + workload gate |
+| 2026-04-26 | C4 | Keep | Planned | FIFO wake/wait smoothing and bounded drain after C1/C3/C5/C6 slices. | Workload gate + correctness checks |
+| 2026-04-26 | C5 | Keep | Planned | Improve renderer handoff cadence using mailbox/coalescing approach. | Workload gate visual smoothness signal |
+| 2026-04-26 | C6 | Keep | Planned | Pair with C5 to reduce render timer/swap pacing conflicts. | Workload gate + phase summaries |
+| 2026-04-26 | C7 | Keep | Planned | Reduce UI timer churn; avoid risky `processEvents()` reentrancy in runtime-sensitive paths. | Workload gate + UI sanity checks |
+| 2026-04-26 | C8 | Keep | Planned | Correct telemetry sampling interval to reduce false dip/rebound reporting. | Telemetry consistency across runs |
+
+## Track-Oriented Candidate Map
+
+Consistency Track (default, near-term priority):
+
+1. C1. Main Qt pacing loop uses millisecond debt, abrupt debt reset, and no deadline model
+2. C3. Blit mutex contention injects explicit 1 ms sleeps and covers too much runtime work
+3. C5. Renderer buffer handoff drops frames when Qt/render side lags
+4. C6. OpenGL render timer cadence can conflict with render/swap pacing
+5. C4. GPU FIFO wake/wait paths create bursty producer-consumer scheduling under heavy 3D load
+6. C7. UI timers and `processEvents()` paths add recurring main-thread contention
+7. C8. Speed sampling uses a nominal 1 second interval and can over-report dip/rebound events
+
+Throughput Track (deferred, larger refactor):
+
+1. C2. `pc_run()` uses coarse 1 ms / 10 ms work packets while holding the blit mutex
+
+## C1 (Consistency): Main Qt Pacing Loop Debt/Clamp
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_main.cpp`, `main_thread_fn`, lines 437, 450, 456, 458, 485, 486, 501.
+
+Why this can cause wobble/smoothness loss: `drawits` accumulates elapsed milliseconds, runs one `pc_run()` per loop, then subtracts 1 or 10. Under heavy load, `pc_run()` can take longer than the quantum, so debt grows. When load eases, positive debt drives continuous work until drained, or the `drawits > 50` clamp abruptly erases backlog. That can produce dip, catch-up, rebound, and crossings.
+
+Confidence: high
+
+Change risk: medium
+
+Machine-agnostic fix proposal: replace integer millisecond debt with a monotonic nanosecond deadline accumulator, clamp debt softly, and remove abrupt reset while preserving one `pc_run()` per scheduler pass in v1. Keep behavior deterministic by basing guest work on elapsed host time, not host-specific tuning. Treat bounded multi-run catch-up as a separate phase-2 experiment behind a flag.
+
+Expected metric direction: `avg` neutral to slight up, `p99` down, `dips<100` down, `dips<95` down, `dips<90` down, `crossings` down.
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_main.cpp:445
+- uint64_t old_time = elapsed_timer.elapsed();
+- int      drawits = frames = 0;
++ qint64 old_ns = elapsed_timer.nsecsElapsed();
++ qint64 debt_ns = 0;
++ const qint64 quantum_ns = force_10ms ? 10'000'000 : 1'000'000;
++ const qint64 max_debt_ns = 50'000'000;
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_main.cpp:450
+- const uint64_t new_time = elapsed_timer.elapsed();
+- drawits += static_cast<int>(new_time - old_time);
+- old_time = new_time;
+- if ((drawits > 0 || fast_forward) && !dopause) {
++ const qint64 new_ns = elapsed_timer.nsecsElapsed();
++ debt_ns += new_ns - old_ns;
++ old_ns = new_ns;
++ debt_ns = std::min(debt_ns, max_debt_ns);
++ if (((debt_ns >= quantum_ns) || fast_forward) && !dopause) {
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_main.cpp:485
+- drawits -= force_10ms ? 10 : 1;
+- if (drawits > 50 || fast_forward)
+-     drawits = 0;
++ debt_ns -= quantum_ns;
++ if (fast_forward)
++     debt_ns = 0;
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_main.cpp:488
+- } else {
++ }
++ if ((debt_ns < quantum_ns) && !fast_forward) {
+```
+
+Phase sequencing:
+
+1. Phase 1 (default): debt accounting/smoothing only, with single-run-per-pass semantics preserved.
+2. Phase 2 (optional experiment): bounded catch-up (for example max 2 runs/pass) behind compile/runtime guard.
+
+## C2 (Throughput, Deferred): Coarse `pc_run()` Work Packets
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c`, `pc_run`, lines 2094, 2110, 2111, 2122.
+
+Why this is in the throughput track: each call executes `cpu_s->rspeed / 1000` cycles, or `/100` when `force_10ms` is enabled. That makes runtime work arrive in coarse packets and can limit scalability at higher guest clocks. Splitting this path may improve throughput, but it also changes timing cadence and can reduce consistency if done prematurely.
+
+Confidence: medium for consistency gains, high for throughput impact
+
+Change risk: high
+
+Machine-agnostic fix proposal: if/when pursued, split emulation into smaller internal quanta while preserving total requested cycles per host quantum, but gate behind a compile/runtime flag and validate timing-sensitive correctness before defaulting on. This is deferred until consistency-first pacing/render fixes are landed and measured.
+
+Expected metric direction: `avg` potentially up, `p99` mixed/uncertain until validated, `dips<100` mixed, `dips<95` mixed, `dips<90` mixed, `crossings` mixed.
+
+Validation requirement before default-on: pass a guest opcode stress harness with stable baseline hash/signature, using a methodology similar to existing guest-tool validation flows (for example `3DNOWCOV`).
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c:2110
+- startblit();
+- cpu_exec((int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000));
++ int32_t total_cycles = (int32_t) cpu_s->rspeed / (force_10ms ? 100 : 1000);
++ int32_t slice_cycles = (int32_t) cpu_s->rspeed / 4000; /* 0.25 ms guest chunks */
++ if (slice_cycles <= 0)
++     slice_cycles = total_cycles;
++ while (total_cycles > 0) {
++     int32_t run_cycles = MIN(total_cycles, slice_cycles);
++     cpu_exec(run_cycles);
++     total_cycles -= run_cycles;
++     if (dopause || is_quit || hard_reset_pending)
++         break;
++ }
+```
+
+## C3 (Consistency): Blit Mutex Contention Sleep
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_platform.cpp`, `startblit`, lines 764, 766, 771; `endblit`, lines 775, 777, 779, 783. Related caller: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c`, `pc_run`, lines 2110 and 2122.
+
+Why this can cause wobble/smoothness loss: `endblit()` sleeps for 1 ms whenever contention is detected. Under UI/render contention, that inserts artificial stalls into the emulation cadence. Also, `pc_run()` holds the blit mutex across CPU execution, mouse, joystick, and timer work, so UI operations can block or be blocked by unrelated runtime work.
+
+Confidence: high
+
+Change risk: medium
+
+Machine-agnostic fix proposal: narrow the mutex scope to shared video state only, remove fixed sleep, and use a fair handoff or queued renderer synchronization. Avoid sleeping as a contention policy.
+
+Expected metric direction: `avg` slight up, `p99` down, `dips<100` down, `dips<95` down, `dips<90` down, `crossings` down.
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c:2110
+- startblit();
+  cpu_exec(...);
+  ack_pause();
+  ...
+  joystick_process(0);
+- endblit();
+
+# Later, only around operations that actually touch shared blit/video state:
++ startblit();
++ mouse_process();
++ joystick_process(0);
++ endblit();
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_platform.cpp:779
+- if (blitmx_contention > 0) {
+-     std::this_thread::sleep_for(std::chrono::milliseconds(1));
+- }
++ if (blitmx_contention > 0) {
++     std::this_thread::yield();
++ }
+```
+
+Lock-scope audit checklist before landing:
+
+1. Enumerate every operation currently inside `startblit()`/`endblit()` and classify as:
+   - must hold blit mutex (shared video state)
+   - safe outside mutex
+2. Verify `mouse_process()` / `joystick_process()` call paths do not rely on implicit serialization from blit mutex.
+3. Verify monitor screenshot / blit-complete paths remain race-free under renderer switching.
+4. Re-run renderer-toggle and shutdown paths that previously motivated contention sleep (`video_toggle_option` path).
+
+## C4 (Consistency): GPU FIFO Burst Wake/Wait
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/video/vid_voodoo_fifo.c`, `voodoo_queue_command`, lines 183, 190, 201, 203, 243, 244. Related: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/video/vid_voodoo_fifo.c`, `voodoo_fifo_thread`, lines 381, 386, 388, 391, 1065. Similar patterns: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/video/vid_s3.c`, `s3_wait_fifo_idle`, lines 516, 520, `s3_queue`, line 541, and `fifo_thread`, lines 11184 and 11189.
+
+Why this can cause wobble/smoothness loss: the producer wakes the FIFO thread only at high occupancy, then the consumer drains the FIFO in one burst. When full, producer paths use 1 ms timed waits. This can alternate between CPU-side stalls and large GPU-side work bursts, especially under Voodoo/S3 heavy load.
+
+Confidence: medium-high
+
+Change risk: medium
+
+Machine-agnostic fix proposal: wake at lower watermarks, use hysteresis, and bound FIFO drain batches by elapsed emulated or host-neutral work budget. Replace repeated 1 ms timeout polling with event-driven backpressure where possible.
+
+Expected metric direction: `avg` neutral to slight up, `p99` down, `dips<100` down, `dips<95` down, `dips<90` down, `crossings` down.
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/video/vid_voodoo_fifo.c:243
+- if (FIFO_ENTRIES > 0xe000)
++ if (FIFO_ENTRIES > FIFO_WAKE_HIGH_WATERMARK)
+      voodoo_wake_fifo_thread(voodoo);
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/video/vid_voodoo_fifo.c:391
+- while (!FIFO_EMPTY) {
++ int batch = 0;
++ while (!FIFO_EMPTY && batch++ < FIFO_MAX_BATCH) {
+      ...
+  }
++ if (!FIFO_EMPTY)
++     voodoo_wake_fifo_thread(voodoo);
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/video/vid_voodoo_fifo.c:201
+- thread_wait_event(voodoo->fifo_not_full_event, 1);
++ thread_wait_event(voodoo->fifo_not_full_event, FIFO_WAIT_SHORT);
+```
+
+## C5 (Consistency): Renderer Buffer Handoff Drops Frames
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_rendererstack.cpp`, `RendererStack::blit`, lines 507, 509, 510, 526, 528, 529. Related: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_softwarerenderer.cpp`, `SoftwareRenderer::onBlit`, lines 82, 90, 91, 98. Related: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::onBlit`, lines 1155, 1176, 1189.
+
+Why this can cause wobble/smoothness loss: if the current render buffer is still marked busy, the blit path immediately completes and returns without handing a frame to Qt. That protects emulation throughput but creates uneven visual cadence. Under load, frame drops can cluster, then rebound when the Qt side catches up.
+
+Confidence: medium-high
+
+Change risk: medium
+
+Machine-agnostic fix proposal: use a latest-frame mailbox or bounded wait. Coalesce frames explicitly instead of opportunistically dropping based on whichever buffer index is current.
+
+Expected metric direction: `avg` neutral, `p99` down for visual frame time, `dips<100` slight down, `dips<95` slight down, `dips<90` slight down, `crossings` down for rendered cadence.
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_rendererstack.cpp:509
+- if (... || std::get<std::atomic_flag *>(imagebufs[currentBuf])->test_and_set()) {
+-     video_blit_complete_monitor(m_monitor_index);
+-     return;
+- }
++ int selected = find_free_or_latest_buffer();
++ if (selected < 0) {
++     mark_pending_latest_blit(x, y, w, h);
++     video_blit_complete_monitor(m_monitor_index);
++     return;
++ }
++ currentBuf = selected;
++ std::get<std::atomic_flag *>(imagebufs[currentBuf])->test_and_set();
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_rendererstack.cpp:528
+  emit blitToRenderer(currentBuf, sx, sy, sw, sh);
++ drain_pending_latest_blit_if_any();
+```
+
+## C6 (Consistency): OpenGL Render Timer Cadence
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::OpenGLRenderer`, lines 819, 821, 823. `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::initialize`, lines 858, 842, 906, 908. `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::onBlit`, lines 1155, 1189, 1190.
+
+Why this can cause wobble/smoothness loss: render timing is either a default Qt timer with `ceil(1000 / video_framerate)` or immediate render on each blit. The timer does not set `Qt::PreciseTimer`, and when vsync is enabled the render timer can fight swap pacing. Immediate rendering can also make queued blit processing expensive.
+
+Confidence: medium
+
+Change risk: low-medium
+
+Machine-agnostic fix proposal: set precise timer type, use deadline-based frame scheduling, and coalesce render requests. When vsync is enabled, avoid an independent coarse frame timer unless explicitly needed.
+
+Expected metric direction: `avg` neutral, `p99` down for render cadence, `dips<100` slight down, `dips<95` slight down, `dips<90` slight down, `crossings` down.
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp:821
+  , renderTimer(new QTimer(this))
+  {
++     renderTimer->setTimerType(Qt::PreciseTimer);
+      connect(renderTimer, &QTimer::timeout, this, [this]() { this->render(); });
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp:906
+- if (video_framerate != -1) {
+-     renderTimer->start(ceilf(1000.f / (float) video_framerate));
+- }
++ if (video_framerate != -1 && !video_vsync) {
++     scheduleNextRenderDeadline();
++ }
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp:1189
+- if (video_framerate == -1)
+-     render();
++ requestRenderCoalesced();
+```
+
+## C7 (Consistency): UI Timer Contention
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_mainwindow.cpp`, frame-rate timer, lines 198, 199, 202, 207, 210. LED keyboard timer, lines 241, 242, 243, 244, 245. Other contention paths: lines 934, 936, 941, 1150, 1799, 2329, 2331.
+
+Why this can cause wobble/smoothness loss: the Qt main thread receives recurring UI timers while also processing queued blits. The LED timer runs every 20 ms and resets `prev_*` variables inside the lambda, so it likely updates icons every tick instead of only on change. Manual `QApplication::processEvents()` can also inject reentrant UI work into sensitive paths.
+
+Confidence: medium
+
+Change risk: low
+
+Machine-agnostic fix proposal: make the LED previous-state variables persistent, reduce timer churn, and avoid `processEvents()` in runtime-visible paths unless guarded by pause/settings state.
+
+Expected metric direction: `avg` neutral, `p99` down slightly, `dips<100` down slightly, `dips<95` down slightly, `dips<90` neutral to slight down, `crossings` down slightly.
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_mainwindow.cpp:244
+  connect(ledKeyboardTimer, &QTimer::timeout, this, [this]() {
+-     uint8_t prev_caps = 255, prev_num = 255, prev_scroll = 255, prev_kana = 255;
++     static uint8_t prev_caps = 255, prev_num = 255, prev_scroll = 255, prev_kana = 255;
+      uint8_t caps, num, scroll, kana;
+      keyboard_get_states(&caps, &num, &scroll, &kana);
+      ...
++     prev_caps = caps;
++     prev_num = num;
++     prev_scroll = scroll;
++     prev_kana = kana;
+  });
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_mainwindow.cpp:934
+- QApplication::processEvents();
++ processEventsOnlyWhenPausedOrModal();
+```
+
+## C8 (Consistency Telemetry): Speed Sampling Uses Nominal 1 Second
+
+File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_main.cpp`, one-second timer, lines 869, 870, 873, 874. `/Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c`, `pc_onesec`, lines 2170, 2172, 2173, 2175. `/Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c`, title update, lines 2131, 2135, 2162.
+
+Why this can cause wobble/smoothness loss in reported metrics: `pc_onesec()` assumes each timer callback represents exactly one second. Even with `onesec` set to `Qt::PreciseTimer`, callback dispatch can still be delayed when the Qt main thread is busy. In those cases `fps` is sampled over a longer interval but reported as a fixed one-second percentage, creating apparent dip/rebound noise even when true cadence is steadier.
+
+Confidence: medium
+
+Change risk: low
+
+Machine-agnostic fix proposal: measure actual elapsed time between samples with a monotonic clock and compute speed percentage from real sample duration.
+
+Expected metric direction: `avg` more accurate, `p99` unchanged for runtime but cleaner for telemetry, `dips<100` down for false positives, `dips<95` down for false positives, `dips<90` down for false positives, `crossings` down for false positives.
+
+Patch Sketch:
+
+```diff
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c:2170
+  void pc_onesec(void)
+  {
++     static uint32_t last_ms;
++     uint32_t now_ms = plat_get_ticks();
++     uint32_t elapsed_ms = last_ms ? now_ms - last_ms : 1000;
++     last_ms = now_ms;
+      fps = framecount;
+      framecount = 0;
++     fps_sample_elapsed_ms = elapsed_ms;
+      title_update = 1;
+  }
+
+# /Users/anthony/projects/code/86Box-voodoo-arm64/src/86box.c:2135
+- speed_percent = fps / (force_10ms ? 1 : 10);
++ speed_percent = compute_speed_percent(fps, fps_sample_elapsed_ms, force_10ms);
+```
+
+## Consistency-First Rollout Plan
+
+1. C1 phase 1 only: high-resolution debt accounting while preserving single-run-per-pass semantics.
+
+Rollback criteria: revert if guest time visibly runs slow or `dips<95`/`dips<90` worsen in the same workload.
+
+2. C3: narrow/remove blit-mutex contention sleep and audit lock scope.
+
+Rollback criteria: revert if renderer races, blit corruption, or renderer-switch instability appears.
+
+3. C5 + C6 together: improve frame handoff cadence and avoid timer/swap double pacing.
+
+Rollback criteria: revert if visual stutter worsens or frame presentation correctness regresses.
+
+4. C4: smooth FIFO wake/wait and bounded drain behavior.
+
+Rollback criteria: revert if Voodoo/S3 correctness regresses, deadlocks appear, or `p99`/crossings do not improve.
+
+5. C7: reduce UI timer churn and avoid reentrant `processEvents()` in runtime-sensitive paths.
+
+Rollback criteria: revert if UI responsiveness or shutdown/settings flows regress.
+
+6. C8: correct telemetry sampling interval so dip metrics reflect real behavior.
+
+Rollback criteria: revert if telemetry becomes inconsistent across equivalent runs.
+
+## Promotion Gate To Throughput Track
+
+Proceed to throughput-oriented refactors only after consistency track changes are stable on the defined workload and show net improvement in jitter-focused metrics (`p99`, `dips<95`, `dips<90`, crossings) without correctness regressions.
+
+## Correctness Gate (Guest Opcode Stress)
+
+Goal: prevent timing/behavior regressions from being masked by average-speed improvements.
+
+1. Keep a dedicated guest opcode stress tool for throughput-track changes, following the existing guest validation pattern (`START`/per-op `PASS|FAIL`/`DONE` markers plus deterministic hash/checksum output).
+2. Cover semantic behavior, not just raw encodings: include touched opcode families, operand forms (reg-reg/reg-mem/mem-reg where applicable), prefix/mode variants, and flag/exception-sensitive paths.
+3. Record and version a known-good baseline hash/signature for the selected guest CPU profile(s).
+4. Promotion criterion for throughput-track patches: defined workload passes and opcode harness baseline matches (or approved/understood deltas only).
+5. Keep throughput-track features behind a guard until both workload and opcode-gate criteria are satisfied.
+
+Scope baseline for C2-style work:
+
+- Keep current locked gates (`Q3 demo four`, `3DMark99`, `WL-05/MRUNALL`) mandatory.
+- Keep existing deterministic guest correctness suites (for example `3DNOWCOV`) mandatory where relevant.
+- Add/maintain opcode stress coverage for instruction families touched by the change (integer ALU, branches/control transfer, memory addressing/forms, flags/exception behavior, FPU/MMX/3DNow when touched).
+- Treat throughput patches as non-promotable until opcode stress signatures are stable on chosen CPU profile(s).
+
+## Deferred Throughput Track
+
+C2 and related deeper CPU/device pipeline work target higher-clock guest feasibility and may improve average throughput, but should remain behind a guard until timing-sensitive correctness and consistency impact are validated.
+
+## Optional Secondary Workloads (Non-Blocking For Primary Gate)
+
+- 3DMark2000 full run: recommended as secondary cross-check because it is controllable and repeatable in this environment.
+- UT99 timedemo loop: useful exploratory signal, but not primary-gate material until a deterministic stop/exit harness is in place.
+
+## Re-Lock Procedure (When Thresholds/Workload Need To Change)
+
+Only re-lock when changes are intentional and documented (for example workload-definition updates or gate-math retuning).
+
+Required steps:
+
+1. Capture exactly 3 clean valid runs using the updated intended gate definition.
+2. Preserve marker validity requirements and correctness/hash checks in each run.
+3. Publish a new lock artifact (same style as baseline lock docs) with:
+   - accepted run IDs
+   - rejected/replaced run IDs and reasons
+   - aggregate metrics and thresholds
+4. Include a concise old-vs-new comparison and rationale in the lock artifact.
+5. Update this document’s gate section and baseline reference in the same change.
