@@ -14,6 +14,9 @@ Current final state (2026-04-23):
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 - Current logging-on analysis baseline for op-family mix is separate:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`
+- Latest stability slice lock (no semantic math change):
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_10-29-33-Windows 98 Gaming PC-3dnow-recip-safe-pfrcpit-r2`
+  - result: marker-valid, `fallback=0`, flatter dip profile (`dips_lt100` and `dips_lt90` improved) with near-flat mean speed.
 
 ## Baseline Evidence (Lab Entry)
 

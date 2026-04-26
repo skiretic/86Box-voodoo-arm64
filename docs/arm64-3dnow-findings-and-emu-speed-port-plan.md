@@ -247,3 +247,50 @@ Constraint:
   - `max_seq=3`
   - `valid_for_q3_3dmark_wl05=1`
 - Host-noise notes were clean for all 3 accepted runs.
+
+## Phase-1 Stability Slice Lock (2026-04-26)
+
+### Change Locked In
+
+- File:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/src/codegen_new/codegen_ops_3dnow.c`
+- Change:
+  - In `ropPFRCPIT`, skip `uop_MOV` when `dst==src` (no-op self move elision).
+- Scope:
+  - ARM64 dynarec 3DNow front-end only.
+  - No math semantic change.
+
+### Lock Run Artifact
+
+- Run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_10-29-33-Windows 98 Gaming PC-3dnow-recip-safe-pfrcpit-r2`
+- Log:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_10-29-33-Windows 98 Gaming PC-3dnow-recip-safe-pfrcpit-r2/86box.log`
+- Marker gate:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- 3DNow dispatch:
+  - `DYNAREC_3DNOW_SUMMARY tag=final total=4256 recompiled=4256 fallback=0`
+
+### Delta Summary (vs Logging-On Baseline)
+
+Comparison baseline:
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2/86box.log`
+
+Observed:
+- whole-run `avg`: `99.605` vs `99.610` (flat / `-0.005`)
+- whole-run `p95`: `101` vs `101` (flat)
+- whole-run `p99`: `103` vs `103` (flat)
+- `dips_lt100`: `87` vs `91` (improved)
+- `dips_lt95`: `21` vs `21` (flat)
+- `dips_lt90`: `4` vs `7` (improved)
+
+Decision:
+- Treat as a stability-positive, correctness-safe micro-optimization and keep it.
+
+### Next Target
+
+- Continue 3DNow optimization phase 1 with exact-semantics-only work.
+- First target:
+  - expand opcode-mix visibility for hot arithmetic subgroup inside current `arith` bucket, then pick the top op for backend instruction-count reduction.
