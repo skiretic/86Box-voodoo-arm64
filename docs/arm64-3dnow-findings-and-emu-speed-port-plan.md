@@ -507,6 +507,38 @@ Expected impact:
 - low but broad compile-time/register-pressure reduction in mem-source paths.
 - no algorithmic/math behavior change.
 
+### Validation Run (`3dnow-memtrim-fullrun-r1`)
+
+- Run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_14-13-29-Windows 98 Gaming PC-3dnow-memtrim-fullrun-r1`
+- Log:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_14-13-29-Windows 98 Gaming PC-3dnow-memtrim-fullrun-r1/86box.log`
+- Marker gate:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- 3DNow dispatch:
+  - `DYNAREC_3DNOW_SUMMARY tag=final total=3978 recompiled=3978 fallback=0`
+- Operator correctness note:
+  - guest-reported `3DNOWCOV` and `MRUNALL` hashes matched expected lock values.
+
+### Delta Snapshot
+
+- vs logging-on baseline (`3dnow-opcount-r2`):
+  - `avg`: `99.609` vs `99.610` (`-0.001`, flat)
+  - `p95`: `101` vs `101` (flat)
+  - `p99`: `103` vs `103` (flat)
+  - `dips_lt100`: `87` vs `91` (improved)
+  - `dips_lt95`: `20` vs `21` (improved)
+  - `dips_lt90`: `5` vs `7` (improved)
+- churn note:
+  - `ratio_promote_no_immediates_per_dirty_hit=0.001268`
+  - `unexpected_noimm_without_bmask=0`
+
+Interpretation:
+- bundle appears correctness-safe with neutral mean speed and slightly better dip profile.
+- churn ratio moved up versus earlier checkpoints; keep as noted tradeoff for review.
+
 ## Scene-Target Capture Plan (For Stubborn <100% Scene)
 
 Goal:
