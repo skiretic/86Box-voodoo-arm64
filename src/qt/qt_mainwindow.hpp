@@ -186,6 +186,7 @@ private:
     bool shownonce           = false;
     bool resizableonce       = false;
     bool vnc_enabled         = false;
+    QShortcut *phase_marker_shortcut = nullptr;
 
     /* Full screen ON and OFF signals */
     bool fs_on_signal  = false;

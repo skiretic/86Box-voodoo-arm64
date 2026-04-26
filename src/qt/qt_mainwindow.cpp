@@ -795,6 +795,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(new QShortcut(QKeySequence(Qt::SHIFT + Qt::Key_F10), this), &QShortcut::activated, this, []() {});
 #endif
 
+    phase_marker_shortcut = new QShortcut(this);
+    phase_marker_shortcut->setContext(Qt::ApplicationShortcut);
+    connect(phase_marker_shortcut, &QShortcut::activated, this, []() {
+        perf_phase_marker_advance("qt_shortcut");
+    });
+
     connect(this, &MainWindow::initRendererMonitor, this, &MainWindow::initRendererMonitorSlot);
     connect(this, &MainWindow::initRendererMonitorForNonQtThread, this, &MainWindow::initRendererMonitorSlot, Qt::BlockingQueuedConnection);
     connect(this, &MainWindow::destroyRendererMonitor, this, &MainWindow::destroyRendererMonitorSlot);
@@ -1013,6 +1019,11 @@ MainWindow::updateShortcuts()
     accID = FindAccelerator("force_interpretation");
     seq   = QKeySequence::fromString(acc_keys[accID].seq);
     ui->actionForce_interpretation->setShortcut(seq);
+
+    accID = FindAccelerator("phase_marker");
+    seq   = QKeySequence(QStringLiteral("1"));
+    if (phase_marker_shortcut != nullptr)
+        phase_marker_shortcut->setKey(seq);
 }
 
 void
@@ -1499,7 +1510,7 @@ MainWindow::FindAcceleratorSeq(const char *name)
 {
     int accID = FindAccelerator(name);
     if (accID == -1)
-        return false;
+        return QKeySequence();
 
     return (QKeySequence::fromString(acc_keys[accID].seq));
 }
@@ -1520,6 +1531,7 @@ MainWindow::eventFilter(QObject *receiver, QEvent *event)
             if ((QKeySequence) (ke->key() | (ke->modifiers() & ~Qt::KeypadModifier)) == FindAcceleratorSeq("release_mouse") || (QKeySequence) (ke->key() | ke->modifiers()) == FindAcceleratorSeq("release_mouse")) {
                 plat_mouse_capture(0);
             }
+
         }
 
         if (event->type() == QEvent::KeyPress && video_fullscreen != 0) {

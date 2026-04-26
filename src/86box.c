@@ -317,6 +317,11 @@ struct accelKey def_acc_keys[NUM_ACCELS] = {
         .name="force_interpretation",
         .desc="Force interpretation",
         .seq="Ctrl+Alt+I"
+    },
+    {
+        .name="phase_marker",
+        .desc="Mark performance phase transition",
+        .seq="1"
     }
 };
 
@@ -364,6 +369,75 @@ static wchar_t mouse_msg[3][200];
 
 static ATOMIC_INT do_pause_ack = 0;
 static ATOMIC_INT pause_ack = 0;
+
+#define PERF_PHASE_MARK_DEBOUNCE_MS 500U
+static ATOMIC_INT perf_phase_marker_initialized = 0;
+static ATOMIC_INT perf_phase_marker_seq = 0;
+static ATOMIC_INT perf_phase_marker_last_ms = 0;
+
+static const char *
+perf_phase_name_for_seq(int seq)
+{
+    switch (seq) {
+        case 0:
+            return "q3";
+        case 1:
+            return "3dmark99";
+        case 2:
+            return "wl05";
+        case 3:
+            return "run_complete";
+        default:
+            return "post_wl05";
+    }
+}
+
+static void
+perf_phase_marker_emit(int seq, const char *source, const char *reason, uint32_t host_ms, uint32_t delta_ms)
+{
+    pclog("PERF_PHASE_MARK seq=%d phase=%s source=%s reason=%s host_ms=%" PRIu32 " delta_ms=%" PRIu32 "\n",
+          seq, perf_phase_name_for_seq(seq), source, reason, host_ms, delta_ms);
+}
+
+static void
+perf_phase_marker_run_start(void)
+{
+    uint32_t now_ms = plat_get_ticks();
+
+    ATOMIC_STORE(perf_phase_marker_seq, 0);
+    ATOMIC_STORE(perf_phase_marker_last_ms, (int) now_ms);
+    ATOMIC_STORE(perf_phase_marker_initialized, 1);
+
+    perf_phase_marker_emit(0, "auto", "run_start", now_ms, 0);
+}
+
+void
+perf_phase_marker_advance(const char *source)
+{
+    uint32_t now_ms;
+    uint32_t delta_ms;
+    int      seq;
+
+    if ((source == NULL) || (source[0] == '\0'))
+        source = "unknown";
+
+    if (!ATOMIC_LOAD(perf_phase_marker_initialized))
+        perf_phase_marker_run_start();
+
+    now_ms   = plat_get_ticks();
+    delta_ms = now_ms - (uint32_t) ATOMIC_LOAD(perf_phase_marker_last_ms);
+
+    if (delta_ms < PERF_PHASE_MARK_DEBOUNCE_MS) {
+        pclog("PERF_PHASE_MARK_IGNORED source=%s reason=debounce host_ms=%" PRIu32 " delta_ms=%" PRIu32 "\n",
+              source, now_ms, delta_ms);
+        return;
+    }
+
+    seq = ATOMIC_LOAD(perf_phase_marker_seq) + 1;
+    ATOMIC_STORE(perf_phase_marker_seq, seq);
+    ATOMIC_STORE(perf_phase_marker_last_ms, (int) now_ms);
+    perf_phase_marker_emit(seq, source, "manual", now_ms, delta_ms);
+}
 
 #define LOG_SIZE_BUFFER 8192            /* Log size buffer */
 
@@ -1350,6 +1424,12 @@ usage:
 
     gdbstub_init();
 
+    /*
+     * Seed phase marker sequence for perf runs. The first manual hotkey
+     * press becomes seq=1, so parsers can split Q3 -> 3DMark99 -> WL-05.
+     */
+    perf_phase_marker_run_start();
+
     /* All good! */
     return 1;
 }
@@ -2049,7 +2129,10 @@ pc_run(void)
     }
 
     if (title_update) {
+        int speed_percent;
+
         mouse_msg_idx = ((mouse_type == MOUSE_TYPE_NONE) || (mouse_input_mode >= 1)) ? 2 : !!mouse_capture;
+        speed_percent = fps / (force_10ms ? 1 : 10);
 #ifdef SCREENSHOT_MODE
         if (force_10ms)
             fps = ((fps + 2) / 5) * 5;
@@ -2061,7 +2144,7 @@ pc_run(void)
          * mouse_msg[] stores suffixes only on macOS (see update_mouse_msg).
          * Build the title without passing non-ASCII chars through swprintf.
          */
-        swprintf(temp, sizeof_w(temp), L"%i%%", fps / (force_10ms ? 1 : 10));
+        swprintf(temp, sizeof_w(temp), L"%i%%", speed_percent);
         if (mouse_msg[mouse_msg_idx][0]) {
             wcsncat(temp, L" - ", sizeof_w(temp) - wcslen(temp) - 1);
             wcsncat(temp, mouse_msg[mouse_msg_idx], sizeof_w(temp) - wcslen(temp) - 1);
@@ -2069,9 +2152,15 @@ pc_run(void)
         /* Needed due to modifying the UI on the non-main thread is a big no-no. */
         dispatch_async_f(dispatch_get_main_queue(), wcsdup((const wchar_t *) temp), _ui_window_title);
 #else
-        swprintf(temp, sizeof_w(temp), mouse_msg[mouse_msg_idx], fps / (force_10ms ? 1 : 10));
+        swprintf(temp, sizeof_w(temp), mouse_msg[mouse_msg_idx], speed_percent);
         ui_window_title(temp);
 #endif
+        /*
+         * Log every title poll sample so host-side parsers can compute
+         * emulation-speed averages and dip frequency over a full workload.
+         */
+        pclog("EMU_SPEED_SAMPLE percent=%d fps_raw=%d force_10ms=%d\n",
+              speed_percent, fps, force_10ms);
         title_update = 0;
     }
 }
