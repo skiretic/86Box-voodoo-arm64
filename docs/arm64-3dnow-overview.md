@@ -22,11 +22,13 @@ Baseline note:
 
 ## Where To Read Next
 
-1. `docs/arm64-3dnow-opcode-coverage-tracker.md`
+1. `docs/README.md`
+- Current docs map for this branch (active vs archived).
+2. `docs/arm64-3dnow-opcode-coverage-tracker.md`
 - Source of truth for per-opcode status and run history.
-2. `docs/arm64-3dnow-authoritative-notes.md`
+3. `docs/arm64-3dnow-authoritative-notes.md`
 - Canonical opcode/CPUID references and implementation rules.
-3. `docs/arm64-3dnow-bringup-plan.md`
+4. `docs/arm64-3dnow-bringup-plan.md`
 - Historical phase plan and completion criteria.
 
 ## Key Code Locations
