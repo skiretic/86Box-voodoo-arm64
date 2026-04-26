@@ -7,13 +7,15 @@
 - This tracker is the live checklist for bring-up sequencing.
 - New dev start point: `docs/arm64-3dnow-overview.md`.
 
-## Current Coverage Snapshot (Baseline)
+## Current Coverage Snapshot (Validated)
 
-Baseline validation run:
-- run tag: `3dnowcov-r2`
-- guest result: `3DNOWCOV_COUNTS pass=19 fail=0 skip=5 iters=200000`
-- guest total hash: `83e69a2e`
-- status: harness stable; Phase 1 ARM64 curated mapping landed in code, guest validation pending.
+Latest validation state:
+- guest result: `3DNOWCOV_COUNTS pass=24 fail=0 skip=0 iters=200000`
+- guest total hash: `28aeb9ef`
+- status: harness stable; full 3DNow + 3DNowExt ARM64 dynarec mapping validated.
+- latest real-workload confirmation run:
+  - `3dnow-pfrcp-aliasfix-realcheck-r2`
+  - `DYNAREC_3DNOW_SUMMARY tag=final total=3827 recompiled=3827 fallback=0`
 
 Legend:
 - `PASS` = validated on current emulated profile
@@ -23,30 +25,30 @@ Legend:
 
 | imm8 | Mnemonic | Class | Guest Validation | ARM64 Dynarec |
 | --- | --- | --- | --- | --- |
-| `0d` | `PI2FD` | 3DNow base | PASS | Enabled (pending validation) |
-| `1d` | `PF2ID` | 3DNow base | PASS | Enabled (pending validation) |
-| `90` | `PFCMPGE` | 3DNow base | PASS | Enabled (pending validation) |
-| `94` | `PFMIN` | 3DNow base | PASS | Enabled (pending validation) |
-| `96` | `PFRCP` | 3DNow base | PASS | Enabled (pending validation) |
-| `97` | `PFRSQRT` | 3DNow base | PASS | Enabled (pending validation) |
-| `9a` | `PFSUB` | 3DNow base | PASS | Enabled (pending validation) |
-| `9e` | `PFADD` | 3DNow base | PASS | Enabled (pending validation) |
-| `a0` | `PFCMPGT` | 3DNow base | PASS | Enabled (pending validation) |
-| `a4` | `PFMAX` | 3DNow base | PASS | Enabled (pending validation) |
-| `a6` | `PFRCPIT1` | 3DNow base | PASS | Enabled (pending validation) |
-| `a7` | `PFRSQIT1` | 3DNow base | PASS | Enabled (pending validation) |
-| `aa` | `PFSUBR` | 3DNow base | PASS | Enabled (pending validation) |
+| `0d` | `PI2FD` | 3DNow base | PASS | Validated |
+| `1d` | `PF2ID` | 3DNow base | PASS | Validated |
+| `90` | `PFCMPGE` | 3DNow base | PASS | Validated |
+| `94` | `PFMIN` | 3DNow base | PASS | Validated |
+| `96` | `PFRCP` | 3DNow base | PASS | Validated |
+| `97` | `PFRSQRT` | 3DNow base | PASS | Validated |
+| `9a` | `PFSUB` | 3DNow base | PASS | Validated |
+| `9e` | `PFADD` | 3DNow base | PASS | Validated |
+| `a0` | `PFCMPGT` | 3DNow base | PASS | Validated |
+| `a4` | `PFMAX` | 3DNow base | PASS | Validated |
+| `a6` | `PFRCPIT1` | 3DNow base | PASS | Validated |
+| `a7` | `PFRSQIT1` | 3DNow base | PASS | Validated |
+| `aa` | `PFSUBR` | 3DNow base | PASS | Validated |
 | `ae` | `PFACC` | 3DNow base | PASS | Enabled (validated) |
-| `b0` | `PFCMPEQ` | 3DNow base | PASS | Enabled (pending validation) |
-| `b4` | `PFMUL` | 3DNow base | PASS | Enabled (pending validation) |
-| `b6` | `PFRCPIT2` | 3DNow base | PASS | Enabled (pending validation) |
+| `b0` | `PFCMPEQ` | 3DNow base | PASS | Validated |
+| `b4` | `PFMUL` | 3DNow base | PASS | Validated |
+| `b6` | `PFRCPIT2` | 3DNow base | PASS | Validated |
 | `b7` | `PMULHRW` | 3DNow base | PASS | Enabled (validated) |
 | `bf` | `PAVGUSB` | 3DNow base | PASS | Enabled (validated) |
-| `0c` | `PI2FW` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
-| `1c` | `PF2IW` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
-| `8a` | `PFNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
-| `8e` | `PFPNACC` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
-| `bb` | `PSWAPD` | 3DNowExt | SKIP_NO_3DNOWEXT | Not enabled yet |
+| `0c` | `PI2FW` | 3DNowExt | PASS (on Ext profile) | Validated |
+| `1c` | `PF2IW` | 3DNowExt | PASS (on Ext profile) | Validated |
+| `8a` | `PFNACC` | 3DNowExt | PASS (on Ext profile) | Validated |
+| `8e` | `PFPNACC` | 3DNowExt | PASS (on Ext profile) | Validated |
+| `bb` | `PSWAPD` | 3DNowExt | PASS (on Ext profile) | Validated |
 
 ### Base 3DNow Companion Opcodes (`0F xx`, not `0F 0F ... imm8`)
 
@@ -69,22 +71,22 @@ Status values:
 
 | imm8 | Mnemonic | Phase Target | ARM64 Dynarec Status | Notes |
 | --- | --- | --- | --- | --- |
-| `0d` | `PI2FD` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `1d` | `PF2ID` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `90` | `PFCMPGE` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `94` | `PFMIN` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `96` | `PFRCP` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `97` | `PFRSQRT` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `9a` | `PFSUB` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `9e` | `PFADD` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `a0` | `PFCMPGT` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `a4` | `PFMAX` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `a6` | `PFRCPIT1` | Phase 1 | Enabled | Curated ARM64 table entry added via `ropPFRCPIT`; validate in next run. |
-| `a7` | `PFRSQIT1` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `aa` | `PFSUBR` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `b0` | `PFCMPEQ` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `b4` | `PFMUL` | Phase 1 | Enabled | Curated ARM64 table entry added; validate in next run. |
-| `b6` | `PFRCPIT2` | Phase 1 | Enabled | Curated ARM64 table entry added via `ropPFRCPIT`; validate in next run. |
+| `0d` | `PI2FD` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `1d` | `PF2ID` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `90` | `PFCMPGE` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `94` | `PFMIN` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `96` | `PFRCP` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `97` | `PFRSQRT` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `9a` | `PFSUB` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `9e` | `PFADD` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `a0` | `PFCMPGT` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `a4` | `PFMAX` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `a6` | `PFRCPIT1` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `a7` | `PFRSQIT1` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `aa` | `PFSUBR` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `b0` | `PFCMPEQ` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `b4` | `PFMUL` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
+| `b6` | `PFRCPIT2` | Phase 1 | Validated | ARM64 dynarec mapped and validation-complete. |
 | `ae` | `PFACC` | Phase 2 | Validated | ARM64 lowering switched to `FADDP.V2S` pairwise path and matched harness baseline. |
 | `b7` | `PMULHRW` | Phase 2 | Validated | ARM64 lowering uses `SMULL + SRSHR + XTN` and matches harness baseline. |
 | `bf` | `PAVGUSB` | Phase 2 | Validated | ARM64 lowering uses `URHADD.V8B` and matches harness baseline. |
