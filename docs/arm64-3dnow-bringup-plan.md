@@ -29,6 +29,10 @@ Validation run (`3dnowcov-r2`) confirms stable baseline and usable harness:
   - `0c PI2FW`, `1c PF2IW`, `8a PFNACC`, `8e PFPNACC`, `bb PSWAPD`
 - host telemetry (`86BOX_3DNOW_COV_STATS=1`) confirms heavy runtime coverage (`DYNAREC_3DNOW_SUMMARY` with high total/recompiled counts and explicit fallback count).
 - Current logging-on runs also emit `DYNAREC_3DNOW_OPSUMMARY` when `86BOX_3DNOW_COV_STATS=1` is enabled, including arith subgroup counters (`pfadd`, `pfsub`, `pfsubr`, `pfmul`, `pfacc`, `pavgusb`) for phase-1 hot-op selection.
+- Latest arith hot-op selection run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-13-28-Windows 98 Gaming PC-3dnow-telemetry-r3`
+  - gate-valid (`seq=0..3`), `fallback=0`, expected microstress hashes matched.
+  - parser arith breakdown picked `pfmul` as hottest (`pfmul=1982`) for next exact-semantics optimization slice.
 
 ## Safety Rules
 
