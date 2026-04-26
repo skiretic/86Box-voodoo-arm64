@@ -20,7 +20,9 @@ Current state:
   - details and run deltas are tracked in `docs/arm64-3dnow-findings-and-emu-speed-port-plan.md` (`Qt Pacing` + `Oscillation Pattern Analysis` sections).
 
 Baseline note:
-- Pre-logging locked baseline artifact:
+- Active workload baseline lock (fixed 266 MHz, post-Qt pacing):
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+- Historical prior workload lock:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 - Current logging-on analysis baseline:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`

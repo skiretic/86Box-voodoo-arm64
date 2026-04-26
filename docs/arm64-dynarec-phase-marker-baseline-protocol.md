@@ -11,9 +11,9 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 - Logging starts automatically at run launch.
 - Marker sequence semantics:
   - `seq=0` is auto-emitted at run start.
-  - press 1 (`seq=1`): transition to `3DMark99`.
-  - press 2 (`seq=2`): transition to `WL-05`.
-  - press 3 (`seq=3`): WL-05 finished / run complete.
+  - while switching from `Q3` to `3DMark99`, press `1` once to emit `seq=1`.
+  - while switching from `3DMark99` to `WL-05`, press `1` again to emit `seq=2`.
+  - after `WL-05` completes and the guest-side workload sequence is being closed out, press `1` a third time to emit `seq=3`.
 
 ## Final Implementation Status
 - Accelerator key `phase_marker` exists in core keybind list.
@@ -40,26 +40,25 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 - `DYNAREC_3DNOW_ARITH_BREAKDOWN ...` (arith subgroup counters: `pfadd/pfsub/pfsubr/pfmul/pfacc/pavgusb`)
 
 ## Baseline Lock Status
-- Baseline capture is complete and locked.
-- Locked artifact:
-  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- Active 266 MHz post-Qt baseline capture is complete and locked.
+- Active locked artifact:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
 - Accepted runs:
-  - `2026-04-25_21-41-24-Windows 98 Gaming PC-baseline-prelock-r1`
-  - `2026-04-25_21-51-14-Windows 98 Gaming PC-baseline-prelock-r2`
-  - `2026-04-25_22-00-12-Windows 98 Gaming PC-baseline-prelock-r3`
-- Rejected replacements:
-  - `2026-04-25_21-37-57-Windows 98 Gaming PC-baseline-prelock-r1`
-  - `2026-04-25_21-40-40-Windows 98 Gaming PC-baseline-prelock-r1`
+  - `2026-04-26_15-50-15-Windows 98 Gaming PC-s03a-telemetry`
+  - `2026-04-26_16-00-51-Windows 98 Gaming PC-s03a-telemetry`
+  - `2026-04-26_16-12-37-Windows 98 Gaming PC-s03a-telemetry`
 - Locked aggregate:
-  - whole-run avg mean `99.564333`
+  - whole-run avg mean `99.638000`
   - whole-run p50 mean `100`
   - whole-run p95 mean `101`
-  - whole-run p99 mean `102`
-  - churn mean `0.001144`
-- Continue to use the locked artifact as the comparison gate before any new code.
+  - whole-run p99 mean `102.333333`
+  - whole-run raw crossings@100 mean `127.333333`
+- Superseded prior lock artifact:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- Continue to use the active locked artifact as the comparison gate for fixed 266 MHz post-Qt pacing work.
 
-## Current Analysis Checkpoint (2026-04-26)
-- Accepted phase-1 follow-on run (does not replace locked gate baseline):
+## Historical Pre-Re-Lock Checkpoint (2026-04-26)
+- Accepted phase-1 follow-on run (useful historical checkpoint, but superseded as the active gate baseline):
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-40-10-Windows 98 Gaming PC-3dnow-pfrcp-aliasfix-realcheck-r2`
 - Gate validity:
   - `start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`
@@ -72,7 +71,7 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 - Churn note:
   - `ratio_promote_no_immediates_per_dirty_hit`: `0.001180` vs `0.001174` (tiny increase, accepted for stability gain)
 - Runtime pacing companion checkpoint:
-  - Qt single-step pacing (`ee4d5c5ae`) was validated with the same marker workflow.
+  - Qt single-step pacing lane was validated with the same marker workflow and later re-locked on the fixed 266 MHz profile.
   - phase-marker protocol itself did not change; still `seq=0..3` for normal `Q3 -> 3DMark99 -> WL-05` runs.
 
 ## Host Noise Control (Required)
