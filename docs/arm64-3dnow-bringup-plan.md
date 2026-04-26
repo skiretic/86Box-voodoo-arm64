@@ -17,6 +17,10 @@ Current final state (2026-04-23):
 - Latest stability slice lock (no semantic math change):
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_10-29-33-Windows 98 Gaming PC-3dnow-recip-safe-pfrcpit-r2`
   - result: marker-valid, `fallback=0`, flatter dip profile (`dips_lt100` and `dips_lt90` improved) with near-flat mean speed.
+- Post-bring-up runtime pacing slice (2026-04-26):
+  - Qt main-thread pacing updated to single-step `pc_run()` scheduling (`ee4d5c5ae`) to reduce burst catch-up wobble under sustained host pressure.
+  - this slice does not modify 3DNow opcode semantics or decode-table coverage status.
+  - acceptance remains guarded by unchanged `3DNOWCOV` / workload hash checks plus telemetry deltas.
 
 ## Baseline Evidence (Lab Entry)
 

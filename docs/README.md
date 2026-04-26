@@ -5,7 +5,7 @@
 - `arm64-3dnow-overview.md`  
   quick entry point and current status
 - `arm64-3dnow-findings-and-emu-speed-port-plan.md`  
-  live execution log, run deltas, next target
+  live execution log, run deltas, next target, and Qt pacing experiment notes (`2026-04-26` sections)
 - `arm64-3dnow-bringup-plan.md`  
   phased 3DNow bring-up history and guardrails
 - `arm64-3dnow-authoritative-notes.md`  

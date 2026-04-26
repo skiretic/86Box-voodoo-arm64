@@ -539,6 +539,82 @@ Interpretation:
 - bundle appears correctness-safe with neutral mean speed and slightly better dip profile.
 - churn ratio moved up versus earlier checkpoints; keep as noted tradeoff for review.
 
+## Qt Pacing Experiment Transfer Note (2026-04-26)
+
+- Tested a generic upstream-safe pacing tweak in Qt main loop:
+  - single `pc_run()` per scheduler pass (removed burst `do/while` catch-up loop).
+- Initial subjective check on `ndr-analysis` (without this branch's 3DNow dynarec slice active) felt worse, especially in Q3.
+- Supporting telemetry from that quick run:
+  - run: `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_14-40-21-Windows 98 Gaming PC-churn-telemetry`
+  - `EMU_SPEED_SUMMARY samples=500 avg=99.474 dips_lt100=110 dips_lt95=25 dips_lt90=4`
+- Decision:
+  - do apples-to-apples retest on `ndr-3dnow-lab` before accepting/rejecting pacing change.
+  - rationale: fallback/interpreter mix vs 3DNow dynarec path can materially shift pacing behavior.
+
+## Oscillation Pattern Analysis (2026-04-26, Non-Scene-Sliced)
+
+### Scope and Data
+
+- New run with Qt pacing change on `ndr-3dnow-lab`:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_14-53-12-Windows 98 Gaming PC-s03a-telemetry/86box.log`
+- Prior comparable run (same branch family, pre-pacing-change checkpoint):
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_14-13-29-Windows 98 Gaming PC-3dnow-memtrim-fullrun-r1/86box.log`
+- Important limit:
+  - these host logs do not include explicit phase tags for Q3/3DMark/WL-05 boundaries.
+  - analysis below is whole-run and warmup-trimmed, not scene-sliced.
+
+### Startup Outlier Clarification
+
+- In the new run, first `EMU_SPEED_SAMPLE` appears at log line `29` and is `12%`.
+- There are `507` speed samples total.
+- We treat first ~20 samples (~20s at ~1Hz) as warmup-sensitive and report both raw and trimmed interpretations.
+
+### Observed Metrics (trim first 20 samples)
+
+- New (`s03a-telemetry`):
+  - `avg=99.667`
+  - `stddev=1.759`
+  - `dips_lt100=90`
+  - `dips_lt95=16`
+  - `dips_lt90=2`
+  - `spikes_gt100=65`
+  - `crossings(100-boundary)=61`
+- Prior (`3dnow-memtrim-fullrun-r1`):
+  - `avg=99.624`
+  - `stddev=1.958`
+  - `dips_lt100=83`
+  - `dips_lt95=18`
+  - `dips_lt90=5`
+  - `spikes_gt100=59`
+  - `crossings(100-boundary)=67`
+
+### Interpretation (Constrained to What Data Supports)
+
+- Supported by data:
+  - deep dips improved (`<90`: `5 -> 2`).
+  - severe dip band improved slightly (`<95`: `18 -> 16`).
+  - overall jitter envelope improved (`stddev`: `1.958 -> 1.759`).
+  - crossings around 100 reduced (`67 -> 61`), consistent with somewhat smoother behavior.
+- Also true:
+  - shallow sub-100 events increased (`<100`: `83 -> 90`).
+  - `>100` spikes also increased (`59 -> 65`).
+- Coherent read:
+  - change appears to trade fewer deep drops for more shallow wobble near 100.
+  - this matches operator report of “feels smoother at bad points” without claiming blanket improvement in every oscillation metric.
+- Not claimable from current data:
+  - exact per-scene (Q3 vs 3DMark vs WL-05) effect, because no scene boundary markers are present in this log.
+
+### Branch Acceptance Snapshot
+
+- accepted branch change:
+  - `ee4d5c5ae` (`qt: pace main loop with single-step pc_run`)
+- acceptance scope:
+  - keep change as runtime pacing/stability slice (non-opcode semantic).
+  - retain existing baseline lock policy (`baseline-lock-2026-04-25-3run.md`) and logging-on opcode-mix baseline.
+- correctness guard remained green in sanity passes:
+  - `3DNOWCOV_TOTAL hash=28aeb9ef`
+  - `MRUNALL`/`MICROSTRESS` expected hash set matched.
+
 ## Scene-Target Capture Plan (For Stubborn <100% Scene)
 
 Goal:

@@ -71,6 +71,9 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
   - dips `<90`: `3` vs `7`
 - Churn note:
   - `ratio_promote_no_immediates_per_dirty_hit`: `0.001180` vs `0.001174` (tiny increase, accepted for stability gain)
+- Runtime pacing companion checkpoint:
+  - Qt single-step pacing (`ee4d5c5ae`) was validated with the same marker workflow.
+  - phase-marker protocol itself did not change; still `seq=0..3` for normal `Q3 -> 3DMark99 -> WL-05` runs.
 
 ## Host Noise Control (Required)
 - Before each run, record host-noise notes:

@@ -16,6 +16,9 @@ Current project status (2026-04-23):
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 - Current logging-on analysis baseline is separate and used for opcode-mix reads:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_05-49-33-Windows 98 Gaming PC-3dnow-opcount-r2`
+- Runtime pacing note (2026-04-26):
+  - `src/qt/qt_main.cpp` pacing change (`ee4d5c5ae`) is a scheduler cadence adjustment, not a 3DNow opcode semantic change.
+  - semantic correctness gate remains unchanged: `3DNOWCOV` hash + workload hash checks must still match expected values.
 
 ## Authoritative Sources in This Repo
 
