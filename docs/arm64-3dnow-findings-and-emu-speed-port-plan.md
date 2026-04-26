@@ -446,3 +446,83 @@ Interpretation:
   - no estimate/refinement semantic changes
   - keep `fallback=0`
   - keep marker-valid full workload flow (`seq=0..3`)
+
+## PFRCP Mem-Path Slice Checkpoint (2026-04-26)
+
+### Change Under Test
+
+- File:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/src/codegen_new/codegen_ops_3dnow.c`
+- Change:
+  - `ropPFRCP` and `ropPFRSQRT` mem-operand path now load directly into destination MMX reg before uop call.
+  - intent is lower temp-register pressure only; math semantics unchanged.
+
+### Run Artifact (`r3`)
+
+- Run:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_13-40-46-Windows 98 Gaming PC-3dnow-pfrcp-memdst-r3`
+- Log:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_13-40-46-Windows 98 Gaming PC-3dnow-pfrcp-memdst-r3/86box.log`
+- Marker gate:
+  - `start_seen=1`
+  - `max_seq=3`
+  - `valid_for_q3_3dmark_wl05=1`
+- 3DNow dispatch:
+  - `DYNAREC_3DNOW_SUMMARY tag=final total=3741 recompiled=3741 fallback=0`
+- Operator correctness note:
+  - guest-reported WL-05 hashes matched expected lock values.
+
+### Delta Snapshot
+
+- vs logging-on baseline (`3dnow-opcount-r2`):
+  - `avg`: `99.614` vs `99.610` (`+0.004`)
+  - `p95`: `101` vs `101` (flat)
+  - `p99`: `103` vs `103` (flat)
+  - `dips_lt100`: `69` vs `91` (improved)
+  - `dips_lt95`: `19` vs `21` (improved)
+  - `dips_lt90`: `5` vs `7` (improved)
+
+### Logging Note
+
+- `MICRO_*` lines are not emitted in captured host logs for this workflow.
+- WL-05 hash verification is currently taken from guest console output/screenshot, while host log remains source of phase/speed/fallback telemetry.
+
+## One-Shot Low-Return Bundle (2026-04-26)
+
+### Code Bundle
+
+- File:
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/src/codegen_new/codegen_ops_3dnow.c`
+- Scope:
+  - keep exact semantics while trimming mem-operand temp usage for source-only ops.
+- Included ops:
+  - `PFRCP` mem path (`96`) direct-load-to-dst
+  - `PFRSQRT` mem path (`97`) direct-load-to-dst
+  - `PF2ID` mem path (`1d`) direct-load-to-dst
+  - `PI2FD` mem path (`0d`) direct-load-to-dst
+  - `PI2FW` mem path (`0c`) direct-load-to-dst
+  - `PSWAPD` mem path (`bb`) direct-load-to-dst
+
+Expected impact:
+- low but broad compile-time/register-pressure reduction in mem-source paths.
+- no algorithmic/math behavior change.
+
+## Scene-Target Capture Plan (For Stubborn <100% Scene)
+
+Goal:
+- isolate one reproducible scene that never holds `100%`, then capture evidence for that scene only.
+
+Minimal steps:
+1. Keep normal run flow (`Q3 -> 3DMark99 -> WL-05`) and marker gate.
+2. In the problematic app/scene, hold camera/view fixed for a fixed interval (for example 60s).
+3. During that interval:
+   - place one marker at scene start and one at scene end using current marker key.
+   - keep inputs deterministic (no random navigation while sampling).
+4. Parse host log and compute scene-window stats only:
+   - avg/p95/p99
+   - dip counts (`<100`, `<95`, `<90`)
+   - 3DNow recip/arith breakdown in same run.
+5. Compare scene-window stats across builds; ignore whole-run noise for pass/fail.
+
+If we want this cleaner in tooling:
+- add explicit scene-window parser mode that slices by marker pair (`seq=N` to `seq=N+1`) and prints a dedicated `EMU_SCENE_SPEED_SUMMARY`.

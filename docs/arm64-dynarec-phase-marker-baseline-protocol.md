@@ -91,3 +91,11 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 - Report includes both speed and churn metrics.
 - Baseline lock line is present:
   - `BASELINE LOCKED: use these averages as comparison gate before any new code.`
+
+## WL-05 Hash Logging Clarification
+- In this workflow, host `86box.log` is used for:
+  - phase markers
+  - emu-speed samples
+  - dynarec summaries and opcode-family counters
+- `WL-05` (`MRUNALL` / `MICROSTRESS`) hash lines are verified from guest-visible output/screenshot.
+- Do not expect `MICRO_*` lines in host logs unless separate guest-to-host log plumbing is added.
