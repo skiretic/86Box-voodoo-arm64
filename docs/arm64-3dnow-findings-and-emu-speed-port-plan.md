@@ -438,10 +438,10 @@ Interpretation:
 - Prior `PFMUL` target is dropped for now:
   - backend `PFMUL` lowering is already a single `FMUL.V2S` instruction, so trim headroom is low.
 - New target lane:
-  - reciprocal refine path (`PFRCPIT1`/`PFRCPIT2`) with exact semantics preserved.
+  - reciprocal path, prioritizing `PFRCP` with refine telemetry as supporting signal.
 - Execution plan:
-  - first optimize shared `ropPFRCPIT` path if real instruction savings exist.
-  - if savings are marginal, move to next highest-impact reciprocal path (`PFRCP`) where runtime volume is highest.
+  - shared `ropPFRCPIT` path was reviewed and is already near-minimal (`reg-reg` self-move elided, mem path single load to dst).
+  - next code slice moves to `PFRCP` lane for any further exact-semantics cleanup with measurable impact.
 - Guardrails:
   - no estimate/refinement semantic changes
   - keep `fallback=0`
