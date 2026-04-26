@@ -13,6 +13,11 @@ Current state:
 - Latest phase-1 accepted run after alias-safe `PFRCP` fix:
   - `3dnow-pfrcp-aliasfix-realcheck-r2`: `DYNAREC_3DNOW_SUMMARY tag=final total=3827 recompiled=3827 fallback=0`
   - run artifact: `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/2026-04-26_12-40-10-Windows 98 Gaming PC-3dnow-pfrcp-aliasfix-realcheck-r2`
+- Latest non-opcode runtime pacing slice (Qt main loop):
+  - branch commit: `ee4d5c5ae` (`qt: pace main loop with single-step pc_run`)
+  - intent: reduce burst catch-up wobble by doing one `pc_run()` per scheduler pass.
+  - correctness guard: `3DNOWCOV`/`MRUNALL` expected hashes remained unchanged in sanity runs.
+  - details and run deltas are tracked in `docs/arm64-3dnow-findings-and-emu-speed-port-plan.md` (`Qt Pacing` + `Oscillation Pattern Analysis` sections).
 
 Baseline note:
 - Pre-logging locked baseline artifact:
