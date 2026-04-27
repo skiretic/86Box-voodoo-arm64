@@ -58,6 +58,17 @@ Guest-side WL-05 logs are written in VM at:
 ## Primary Gate Runbook (Operator)
 
 1. Before launch, record host-noise notes in `run-metadata.txt` and label the attempt `clean`, `noisy`, or `tainted`. If known heavy background work is active, postpone the run instead of counting it.
+   - minimum preflight host check commands:
+     - `date`
+     - `uptime`
+     - `ps -axo pid,ppid,pcpu,pmem,comm | sort -k3 -nr | head -n 20`
+     - `memory_pressure | sed -n '1,30p'`
+     - `iostat -w 1 -c 2 | tail -n 10`
+     - `pmset -g therm | sed -n '1,40p'`
+   - preflight interpretation:
+     - if thermal/performance warnings are present, mark run `noisy` and postpone.
+     - if swap activity is non-zero or host load is clearly dominated by unrelated heavy work, postpone.
+     - if unavoidable host activity exists but run proceeds, record it explicitly in `run-metadata.txt` and treat outliers as replaceable.
 2. Launch telemetry run (host):
    - `env 86BOX_3DNOW_COV_STATS=1 ./scripts/dynarec/launch-vm-telemetry-run.sh <run_tag>`
    - capture `run_dir` from launcher output.
@@ -118,7 +129,7 @@ Iteration policy:
 
 | Date | Candidate | Attempt | Decision | Status | Change/Notes | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-04-26 | C1 | A1 | Keep | Planned | Phase 1 only: ns debt accounting, preserve single-run-per-pass; phase 2 catch-up behind guard. | Primary workload gate + artifact run dir |
+| 2026-04-26 | C1 | A1 | Keep | Landed | Phase 1 landed in `src/qt/qt_main.cpp`: ns debt accounting + soft debt cap, single-run-per-pass preserved, no phase-2 bounded catch-up. Follow-on revisit retained: evaluate larger-cap/no-cap variants as non-default tuning after current consistency slices. | 3-run gate set: `c1-phase1-a1-r1b`, `c1-phase1-a1-r2c`, `c1-phase1-a1-r3`; markers valid in all runs; operator-confirmed WL-05 hashes matched lock. Aggregate vs active lock: avg `99.655` vs `99.638` (`+0.017`), p99 `102.000` vs `102.333` (`-0.333`), dips<95 `16.333` vs `16.667` (`-0.333`), dips<90 `2.667` vs `2.667` (`+0.000`), crossings `122.333` vs `127.333` (`-5.000`). |
 | 2026-04-26 | C2 | A0 | Defer | Deferred | Throughput-track only; requires opcode stress + baseline signature before default-on. | Correctness gate + workload gate |
 | 2026-04-26 | C3 | A1 | Keep | Planned | Remove fixed 1 ms contention sleep; require lock-scope audit checklist before landing. | Audit checklist + workload gate |
 | 2026-04-26 | C4 | A1 | Keep | Planned | FIFO wake/wait smoothing and bounded drain after C1/C3/C5/C6 slices. | Workload gate + correctness checks |
@@ -197,6 +208,13 @@ Phase sequencing:
 
 1. Phase 1 (default): debt accounting/smoothing only, with single-run-per-pass semantics preserved.
 2. Phase 2 (optional experiment): bounded catch-up (for example max 2 runs/pass) behind compile/runtime guard.
+
+Follow-on revisit (deferred, non-blocking):
+
+- Revisit C1 debt cap tuning after current consistency-track slices:
+  - larger soft cap variant (for example 75-100 ms)
+  - no-cap variant (for controlled comparability test only)
+- Keep any such variant out of default path until it passes the same locked workload gate and correctness checks.
 
 ## C2 (Throughput, Deferred): Coarse `pc_run()` Work Packets
 

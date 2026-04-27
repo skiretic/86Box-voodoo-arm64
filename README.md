@@ -6,16 +6,20 @@
 
 ---
 
-This branch is focused on **ARM64 (AArch64) new-dynarec correctness and performance work** for 86Box on Apple Silicon. The current campaign centers on guarded improvements to relative branch/call shaping and low-overhead telemetry for validation, while preserving fallback correctness and x86-64 behavior.
+This branch is focused on **ARM64 (AArch64) new-dynarec correctness and pacing/performance work** for 86Box on Apple Silicon. It combines dynarec implementation slices, workload-gated validation, and Qt runtime pacing improvements, while preserving fallback correctness and x86-64 behavior.
 
-Active development in this branch includes:
-- ARM64-only A-013 branch-path shaping extensions (`BL/B`, `CBNZ`, `BEQ`, and guarded conditional patch templates)
-- low-noise dynarec telemetry policy for perf-sensitive runs (summary-on, trace opt-in)
-- repeatable Win98 workload validation gates (Q3 / 3DMark / WL-05 hash lock)
+Current branch scope includes:
+- ARM64 dynarec tuning lanes (`S-02`, `S-03`, `A-013`) for immediate handling, churn reduction, and branch-path shaping
+- ARM64 3DNow bring-up and validation (`3DNOWCOV` harness + opcode-family telemetry), including fixes for PFACC/PFRCP/PFRSQRT and 3DNowExt companion paths
+- Qt pacing work for consistency under load (single-step `pc_run` pacing landed, follow-on pacing slices in progress on `ndr-pacing-lab`)
+- repeatable Win98 workload gates and artifacts for comparability (`Q3 demo four -> 3DMark99 -> WL-05/MRUNALL`)
+- baseline lock and host-noise policy docs to keep run-to-run comparisons valid
 
 ### What's included
 
-- **ARM64 dynarec branch-work tooling** — scripts and analyzers for A-013/S-03 telemetry runs
+- **ARM64 dynarec branch-work tooling** — scripts and analyzers for S-lane/A-lane telemetry runs
+- **3DNow bring-up tooling** — guest-side coverage workflow and host-side parser/report integration
+- **Qt pacing execution docs** — active lock artifacts and slice-by-slice scheduling analysis
 - **macOS Apple Silicon build/sign flow** — local signed app workflow used by validation runs
 - **Docs-first implementation tracking** — active checkpointing in `docs/arm64-dynarec-*.md`
 
