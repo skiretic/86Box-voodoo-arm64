@@ -78,6 +78,17 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 - Before each run, record host-noise notes:
   - active heavy apps/processes
   - any known background load (indexing, builds, browser/video, etc.)
+- Run this preflight host check before launch and keep a short note with the run:
+  - `date`
+  - `uptime`
+  - `ps -axo pid,ppid,pcpu,pmem,comm | sort -k3 -nr | head -n 20`
+  - `memory_pressure | sed -n '1,30p'`
+  - `iostat -w 1 -c 2 | tail -n 10`
+  - `pmset -g therm | sed -n '1,40p'`
+- Preflight guidance:
+  - postpone if `pmset -g therm` shows thermal/performance warnings.
+  - postpone if swap activity is non-zero or a non-test workload is clearly saturating host CPU.
+  - if proceeding with known background load, mark run `noisy` and replace if it becomes an outlier.
 - Mark each run as `clean` or `noisy`.
 - If a run is clearly noise-affected (outlier with matching host-load evidence), mark it tainted and replace it.
 - Baseline lock requires `3 clean valid runs`, not just 3 valid runs.
