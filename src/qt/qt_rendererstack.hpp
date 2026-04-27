@@ -133,6 +133,11 @@ private:
     int currentBuf      = 0;
     int isMouseDown     = 0;
     int m_monitor_index = 0;
+    int pending_x       = 0;
+    int pending_y       = 0;
+    int pending_w       = 0;
+    int pending_h       = 0;
+    bool has_pending_blit = false;
 
     std::vector<std::tuple<uint8_t *, std::atomic_flag *>> imagebufs;
 
