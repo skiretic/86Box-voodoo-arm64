@@ -18,6 +18,8 @@
 ## Support docs (not archived)
 
 - `upstream-sync-workflow.md`
+- `branch-diary-ndr-pacing-lab.md`
+  commit timeline + cleanup/upstreaming map for the NDR/3DNow/Qt split history
 
 ## Archived legacy docs
 
