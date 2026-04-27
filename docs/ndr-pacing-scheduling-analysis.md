@@ -4,7 +4,7 @@ Branch: `ndr-pacing-lab`
 
 Scope: Qt main loop pacing/cadence, debt and backlog handling, timer/wake/sleep cadence, scheduler interactions causing bursty work, and UI/main-thread contention paths tied to runtime pacing.
 
-Primary objective: smoother feel and consistency (lower p99 jitter, fewer `dips<95`/`dips<90`, fewer crossings), not just higher average speed.
+Primary objective: smoother feel and consistency around the `100%` target (frametime-style stability), not just higher average speed. Prefer runs that spend more time near `100%` with fewer low-tail dips and fewer abrupt sample-to-sample swings.
 
 Secondary objective: higher host throughput for emulating faster-clocked guest CPUs is valuable, but treated here as a separate, larger refactor track after consistency fixes are stable.
 
@@ -31,8 +31,8 @@ Run-shape requirements:
 Baseline references:
 
 - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/arm64-dynarec-phase-marker-baseline-protocol.md`
-- active lock: `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
-- superseded predecessor: `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- active post-Qt gate lock (current comparison baseline): `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+- pre-Qt anchor (historical reference, before `ee4d5c5ae`): `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 
 ## Artifact Location and Naming (Canonical)
 
@@ -91,21 +91,38 @@ Guest-side WL-05 logs are written in VM at:
    - quick `45db7b65`
    - normal `2520dd5e`
    - smc `b86f22a1`
-7. After exactly 3 accepted clean valid runs exist, evaluate the 3-run aggregate thresholds from this document against the current active lock.
+7. After exactly 3 accepted clean valid runs exist, evaluate the smoothness-first primary gate and secondary guardrails from this document against the current active lock.
 8. Record run verdict and notes in decision log (below).
 
 ## Consistency Pass/Fail Thresholds (Primary Gate)
 
-Evaluate on 3-run aggregate against the locked baseline:
+Evaluate on 3-run aggregate against the locked baseline using a smoothness-first gate.
+
+Primary smoothness gate (must pass):
+
+- center-band occupancy must not regress versus lock:
+  - `% samples in 99-101`
+  - `% samples in 98-102`
+- low-tail behavior must not regress versus lock:
+  - `% samples <95`
+  - `% samples <90`
+- burst/swing behavior must not regress versus lock:
+  - `% samples >103` (and `>=105` when present)
+  - adjacent-sample jump severity (`|delta|` mean and `% jumps >=3/5/8`)
+- no correctness/hash anomalies in locked workload checks
+
+Secondary guardrails (still required):
 
 - whole-run `avg >= 99.3`
 - whole-run `p99 <= 103`
 - whole-run `dips<95 <= 24`
 - whole-run `dips<90 <= 12`
-- whole-run `crossings <=` locked baseline aggregate; if `crossings` worsens, the slice fails the primary gate and may be retained only as non-promotable exploratory evidence until a re-lock or explicit gate change is approved
-- no correctness/hash anomalies in locked workload checks
+- whole-run `crossings <=` locked baseline aggregate; if `crossings` worsens, the slice fails the gate and may be retained only as non-promotable exploratory evidence until a re-lock or explicit gate change is approved
 
-These are intentionally conservative guardrails for pacing work; if they are too strict or too loose after several slices, retune once and re-lock explicitly.
+Notes:
+
+- The smoothness metrics above are derived from whole-run raw `EMU_SPEED_SAMPLE percent=<n>` series (include startup, same as lock style).
+- Optional warmup-trimmed summaries may be recorded as secondary context only; they are not the promotion gate.
 
 ## Non-Goals (This Document)
 
@@ -132,12 +149,41 @@ Iteration policy:
 | 2026-04-26 | C1 | A1 | Keep | Landed | Phase 1 landed in `src/qt/qt_main.cpp`: ns debt accounting + soft debt cap, single-run-per-pass preserved, no phase-2 bounded catch-up. Follow-on revisit retained: evaluate larger-cap/no-cap variants as non-default tuning after current consistency slices. | 3-run gate set: `c1-phase1-a1-r1b`, `c1-phase1-a1-r2c`, `c1-phase1-a1-r3`; markers valid in all runs; operator-confirmed WL-05 hashes matched lock. Aggregate vs active lock: avg `99.655` vs `99.638` (`+0.017`), p99 `102.000` vs `102.333` (`-0.333`), dips<95 `16.333` vs `16.667` (`-0.333`), dips<90 `2.667` vs `2.667` (`+0.000`), crossings `122.333` vs `127.333` (`-5.000`). |
 | 2026-04-26 | C2 | A0 | Defer | Deferred | Throughput-track only; requires opcode stress + baseline signature before default-on. | Correctness gate + workload gate |
 | 2026-04-27 | C3 | A1 | Keep | Landed | Phase 1 narrow patch in `src/qt/qt_platform.cpp` kept: replaced fixed contention sleep (`sleep_for(1 ms)`) with cooperative `std::this_thread::yield()` in `endblit()`. Lock-scope narrowing remains deferred. | 3-run gate set: `c3-a1-r1`, `c3-a1-r2`, `c3-a1-r3`; each run had valid markers (`start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`) and locked WL-05 hashes (`quick=45db7b65`, `normal=2520dd5e`, `smc=b86f22a1`, `status=OK`) recorded in per-run `wl05-hashes.txt`. Aggregate vs active lock: avg `99.661` vs `99.638` (`+0.023`), p99 `101.667` vs `102.333` (`-0.667`), dips<95 `15.667` vs `16.667` (`-1.000`), dips<90 `2.667` vs `2.667` (`+0.000`), crossings `118.000` vs `127.333` (`-9.333`). Aggregate vs previous landed code-change cluster (C1 A1): avg `+0.006`, p99 `-0.333`, dips<95 `-0.666`, dips<90 `+0.000`, crossings `-4.333`. |
-| 2026-04-26 | C4 | A1 | Keep | Planned | FIFO wake/wait smoothing and bounded drain after C1/C3/C5/C6 slices. | Workload gate + correctness checks |
+| 2026-04-26 | C4 | A1 | Keep | Planned | FIFO wake/wait smoothing and bounded drain after landed consistency baseline (`C1 + C3`). | Workload gate + correctness checks |
 | 2026-04-27 | C5 | A1 | Keep | Gate-failed | Initial mailbox/coalescing patch in `src/qt/qt_rendererstack.cpp` used pending/current rectangle union when draining backlog. | Early run signal regressed jitter metrics: `c5-a1-r1` tainted outlier (`min=0`, replaced), accepted runs `c5-a1-r2b` + `c5-a1-r3b` still trended worse vs lock/C1 on `dips<90` and crossings (`r2b crossings=127`, `r3b crossings=165`). Focused rethink required before reject. |
 | 2026-04-27 | C5 | A2 | Reject | Reverted | Focused rethink tested bounded latest-frame mailbox drain in `src/qt/qt_rendererstack.cpp` (no rectangle-union burst path), but consistency gate still regressed on jitter metrics. Cleanup completed: C5 mailbox/coalescing code paths removed and `qt_rendererstack` restored to pre-C5 behavior. | 3-run gate set: `c5-a2-r1`, `c5-a2-r2`, `c5-a2-r3`; markers valid in all runs and WL-05 hashes locked (`quick=45db7b65`, `normal=2520dd5e`, `smc=b86f22a1`, `status=OK`). Aggregate vs active lock: avg `99.553` vs `99.638` (`-0.085`), p99 `102.333` vs `102.333` (`+0.000`), dips<95 `19.333` vs `16.667` (`+2.667`), dips<90 `6.333` vs `2.667` (`+3.667`), crossings `132.000` vs `127.333` (`+4.667`, gate fail). |
-| 2026-04-26 | C6 | A1 | Keep | Planned | Pair with C5 to reduce render timer/swap pacing conflicts. | Workload gate + phase summaries |
+| 2026-04-27 | C6 | A1 | Reject | Reverted | Operator-directed reject after smoothness-focused review; C6 render-timer cadence/coalescing patch removed and `src/qt/qt_openglrenderer.cpp` restored to pre-C6 behavior. | Early signal run `c6-a1-r1` stayed near-100 on average but worsened low-tail smoothness vs lock/C3 (notably `<90` events), so slice is non-promotable. |
 | 2026-04-26 | C7 | A1 | Keep | Planned | Reduce UI timer churn; avoid risky `processEvents()` reentrancy in runtime-sensitive paths. | Workload gate + UI sanity checks |
 | 2026-04-26 | C8 | A1 | Keep | Planned | Correct telemetry sampling interval to reduce false dip/rebound reporting; requires immediate re-lock before post-C8 gate comparisons. | Telemetry consistency across runs + re-lock artifact |
+
+## Delta Reference (266 MHz)
+
+Reference basis:
+
+- pre-Qt baseline lock: `baseline-lock-2026-04-25-3run.md` (accepted runs at commit `c9b56425...`)
+- C1 aggregate: `c1-phase1-a1-r1b`, `c1-phase1-a1-r2c`, `c1-phase1-a1-r3`
+- C3 aggregate: `c3-a1-r1`, `c3-a1-r2`, `c3-a1-r3`
+
+Before/After Delta Summary:
+
+- Pre-Qt -> C1
+  - avg: `+0.09%`
+  - p99: `-0.33%`
+  - dips<100: `-1.21%`
+  - dips<95: `-18.33%`
+  - dips<90: `-66.67%`
+- C1 -> C3
+  - avg: `+0.01%`
+  - p99: `-0.33%`
+  - dips<100: `+0.00%`
+  - dips<95: `-4.08%`
+  - dips<90: `+0.00%`
+- Pre-Qt -> C3
+  - avg: `+0.10%`
+  - p99: `-0.33%`
+  - dips<100: `-1.21%`
+  - dips<95: `-21.67%`
+  - dips<90: `-66.67%`
 
 ## Track-Oriented Candidate Map
 
@@ -145,11 +191,14 @@ Consistency Track (default, near-term priority):
 
 1. C1. Main Qt pacing loop uses millisecond debt, abrupt debt reset, and no deadline model
 2. C3. Blit mutex contention injects explicit 1 ms sleeps and covers too much runtime work
-3. C5. Renderer buffer handoff drops frames when Qt/render side lags
-4. C6. OpenGL render timer cadence can conflict with render/swap pacing
-5. C4. GPU FIFO wake/wait paths create bursty producer-consumer scheduling under heavy 3D load
-6. C7. UI timers and `processEvents()` paths add recurring main-thread contention
-7. C8. Speed sampling uses a nominal 1 second interval and can over-report dip/rebound events
+3. C4. GPU FIFO wake/wait paths create bursty producer-consumer scheduling under heavy 3D load
+4. C7. UI timers and `processEvents()` paths add recurring main-thread contention
+5. C8. Speed sampling uses a nominal 1 second interval and can over-report dip/rebound events
+
+Historical rejected slices (not in forward queue):
+
+- C5 (A2 rejected, reverted)
+- C6 (A1 rejected, reverted)
 
 Throughput Track (deferred, larger refactor):
 
@@ -167,7 +216,7 @@ Change risk: medium
 
 Machine-agnostic fix proposal: replace integer millisecond debt with a monotonic nanosecond deadline accumulator, clamp debt softly, and remove abrupt reset while preserving one `pc_run()` per scheduler pass in v1. Keep behavior deterministic by basing guest work on elapsed host time, not host-specific tuning. Treat bounded multi-run catch-up as a separate phase-2 experiment behind a flag.
 
-Expected metric direction: `avg` neutral to slight up, `p99` down, `dips<100` down, `dips<95` down, `dips<90` down, `crossings` down.
+Expected metric direction: center-band occupancy (`99-101`, `98-102`) up, low-tail (`<95`, `<90`) down, jump severity down; with legacy summaries trending `p99` down, `dips<95` down, `dips<90` down, `crossings` down, and `avg` neutral to slight up.
 
 Patch Sketch:
 
@@ -229,7 +278,7 @@ Change risk: high
 
 Machine-agnostic fix proposal: if/when pursued, split emulation into smaller internal quanta while preserving total requested cycles per host quantum, but gate behind a compile/runtime flag and validate timing-sensitive correctness before defaulting on. This is deferred until consistency-first pacing/render fixes are landed and measured.
 
-Expected metric direction: `avg` potentially up, `p99` mixed/uncertain until validated, `dips<100` mixed, `dips<95` mixed, `dips<90` mixed, `crossings` mixed.
+Expected metric direction: center-band/tail/jump behavior mixed/uncertain until validated; throughput may rise but consistency signals (`p99`, tails, crossings) are not assumed improved.
 
 Validation requirement before default-on: pass a guest opcode stress harness with stable baseline hash/signature, using a methodology similar to existing guest-tool validation flows (for example `3DNOWCOV`).
 
@@ -264,7 +313,7 @@ Change risk: medium
 
 Machine-agnostic fix proposal: narrow the mutex scope to shared video state only, remove fixed sleep, and use a fair handoff or queued renderer synchronization. Avoid sleeping as a contention policy.
 
-Expected metric direction: `avg` slight up, `p99` down, `dips<100` down, `dips<95` down, `dips<90` down, `crossings` down.
+Expected metric direction: center-band occupancy up, low-tail and jump severity down; legacy summaries should trend `p99` down, `dips<95` down, `dips<90` down, `crossings` down, with `avg` slight up.
 
 Patch Sketch:
 
@@ -313,7 +362,7 @@ Change risk: medium
 
 Machine-agnostic fix proposal: wake at lower watermarks, use hysteresis, and bound FIFO drain batches by elapsed emulated or host-neutral work budget. Replace repeated 1 ms timeout polling with event-driven backpressure where possible.
 
-Expected metric direction: `avg` neutral to slight up, `p99` down, `dips<100` down, `dips<95` down, `dips<90` down, `crossings` down.
+Expected metric direction: center-band occupancy up, low-tail and jump severity down; legacy summaries should trend `p99` down, `dips<95` down, `dips<90` down, `crossings` down, with `avg` neutral to slight up.
 
 Patch Sketch:
 
@@ -337,9 +386,11 @@ Patch Sketch:
 + thread_wait_event(voodoo->fifo_not_full_event, FIFO_WAIT_SHORT);
 ```
 
-## C5 (Consistency): Renderer Buffer Handoff Drops Frames
+## C5 (Consistency, Historical Rejected): Renderer Buffer Handoff Drops Frames
 
 File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_rendererstack.cpp`, `RendererStack::blit`, lines 507, 509, 510, 526, 528, 529. Related: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_softwarerenderer.cpp`, `SoftwareRenderer::onBlit`, lines 82, 90, 91, 98. Related: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::onBlit`, lines 1155, 1176, 1189.
+
+Status note: attempted through `C5 A2`, then rejected and reverted.
 
 Why this can cause wobble/smoothness loss: if the current render buffer is still marked busy, the blit path immediately completes and returns without handing a frame to Qt. That protects emulation throughput but creates uneven visual cadence. Under load, frame drops can cluster, then rebound when the Qt side catches up.
 
@@ -349,7 +400,7 @@ Change risk: medium
 
 Machine-agnostic fix proposal: use a latest-frame mailbox or bounded wait. Coalesce frames explicitly instead of opportunistically dropping based on whichever buffer index is current.
 
-Expected metric direction: `avg` neutral, `p99` down for visual frame time, `dips<100` slight down, `dips<95` slight down, `dips<90` slight down, `crossings` down for rendered cadence.
+Expected metric direction: center-band occupancy slight up and rendered-cadence jump severity down, with low-tail slight down; legacy summaries expected near-neutral `avg`, lower visual `p99`, and lower crossings.
 
 Patch Sketch:
 
@@ -373,9 +424,11 @@ Patch Sketch:
 + drain_pending_latest_blit_if_any();
 ```
 
-## C6 (Consistency): OpenGL Render Timer Cadence
+## C6 (Consistency, Historical Rejected): OpenGL Render Timer Cadence
 
 File/function/lines: `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::OpenGLRenderer`, lines 819, 821, 823. `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::initialize`, lines 858, 842, 906, 908. `/Users/anthony/projects/code/86Box-voodoo-arm64/src/qt/qt_openglrenderer.cpp`, `OpenGLRenderer::onBlit`, lines 1155, 1189, 1190.
+
+Status note: attempted as `C6 A1`, then rejected and reverted after smoothness-focused review.
 
 Why this can cause wobble/smoothness loss: render timing is either a default Qt timer with `ceil(1000 / video_framerate)` or immediate render on each blit. The timer does not set `Qt::PreciseTimer`, and when vsync is enabled the render timer can fight swap pacing. Immediate rendering can also make queued blit processing expensive.
 
@@ -385,7 +438,7 @@ Change risk: low-medium
 
 Machine-agnostic fix proposal: set precise timer type, use deadline-based frame scheduling, and coalesce render requests. When vsync is enabled, avoid an independent coarse frame timer unless explicitly needed.
 
-Expected metric direction: `avg` neutral, `p99` down for render cadence, `dips<100` slight down, `dips<95` slight down, `dips<90` slight down, `crossings` down.
+Expected metric direction (hypothesis, not accepted): center-band occupancy slight up and jump severity slight down, with low-tail slight down; legacy summaries expected near-neutral `avg`, lower visual `p99`, and lower crossings.
 
 Patch Sketch:
 
@@ -422,7 +475,7 @@ Change risk: low
 
 Machine-agnostic fix proposal: make the LED previous-state variables persistent, reduce timer churn, and avoid `processEvents()` in runtime-visible paths unless guarded by pause/settings state.
 
-Expected metric direction: `avg` neutral, `p99` down slightly, `dips<100` down slightly, `dips<95` down slightly, `dips<90` neutral to slight down, `crossings` down slightly.
+Expected metric direction: center-band occupancy slight up, jump severity slight down, and low-tail neutral to slight down; legacy summaries should show near-neutral `avg`, slightly lower `p99`, and slightly lower crossings.
 
 Patch Sketch:
 
@@ -457,7 +510,7 @@ Change risk: low
 
 Machine-agnostic fix proposal: measure actual elapsed time between samples with a monotonic clock and compute speed percentage from real sample duration.
 
-Expected metric direction: `avg` more accurate, `p99` unchanged for runtime but cleaner for telemetry, `dips<100` down for false positives, `dips<95` down for false positives, `dips<90` down for false positives, `crossings` down for false positives.
+Expected metric direction: center-band/tail/jump metrics become more faithful (fewer false positives), with runtime itself unchanged; legacy summaries should read cleaner (`dips`/crossings less noisy) while true runtime behavior remains comparable.
 
 Patch Sketch:
 
@@ -492,19 +545,15 @@ Rollback criteria: revert if guest time visibly runs slow or `dips<95`/`dips<90`
 
 Rollback criteria: revert if renderer races, blit corruption, or renderer-switch instability appears.
 
-3. C5 + C6 together: improve frame handoff cadence and avoid timer/swap double pacing.
-
-Rollback criteria: revert if visual stutter worsens or frame presentation correctness regresses.
-
-4. C4: smooth FIFO wake/wait and bounded drain behavior.
+3. C4: smooth FIFO wake/wait and bounded drain behavior.
 
 Rollback criteria: revert if Voodoo/S3 correctness regresses, deadlocks appear, or `p99`/crossings do not improve.
 
-5. C7: reduce UI timer churn and avoid reentrant `processEvents()` in runtime-sensitive paths.
+4. C7: reduce UI timer churn and avoid reentrant `processEvents()` in runtime-sensitive paths.
 
 Rollback criteria: revert if UI responsiveness or shutdown/settings flows regress.
 
-6. C8: correct telemetry sampling interval so dip metrics reflect real behavior.
+5. C8: correct telemetry sampling interval so dip metrics reflect real behavior.
 
 Promotion rule: treat C8 as a measurement-system change, not as a direct gate-improvement slice. Do not claim pass/fail improvement against the pre-C8 lock from post-C8 metrics alone. After C8 lands, immediately run the re-lock procedure and establish a new active 3-run baseline before evaluating subsequent consistency slices against aggregate speed thresholds.
 
@@ -512,7 +561,7 @@ Rollback criteria: revert if the updated sampler cannot produce stable, internal
 
 ## Promotion Gate To Throughput Track
 
-Proceed to throughput-oriented refactors only after the consistency track passes the current active 3-run lock (original lock before any metric-definition change; re-locked baseline after C8 or any other measurement change) and shows net improvement in jitter-focused metrics (`p99`, `dips<95`, `dips<90`, `crossings`) without correctness regressions.
+Proceed to throughput-oriented refactors only after the consistency track passes the current active 3-run lock (original lock before any metric-definition change; re-locked baseline after C8 or any other measurement change) and shows net improvement in smoothness-first metrics (center-band occupancy, low-tail rates, overshoot/jump severity), while legacy guardrails (`p99`, `dips<95`, `dips<90`, `crossings`) and correctness remain clean.
 
 ## Correctness Gate (Guest Opcode Stress)
 
