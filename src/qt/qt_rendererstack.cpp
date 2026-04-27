@@ -506,43 +506,14 @@ take_screenshot_clipboard_monitor(int sx, int sy, int sw, int sh, int i)
 void
 RendererStack::blit(int x, int y, int w, int h)
 {
-    if ((x < 0) || (y < 0) || (w <= 0) || (h <= 0) || (w > 2048) || (h > 2048) || ((w + y) > 2048) || ((h + x) > 2048) || (switchInProgress) || (monitors[m_monitor_index].target_buffer == NULL) || imagebufs.empty()) {
+    if ((x < 0) || (y < 0) || (w <= 0) || (h <= 0) || (w > 2048) || (h > 2048) || ((w + y) > 2048) || ((h + x) > 2048) || (switchInProgress) || (monitors[m_monitor_index].target_buffer == NULL) || imagebufs.empty() || std::get<std::atomic_flag *>(imagebufs[currentBuf])->test_and_set()) {
         video_blit_complete_monitor(m_monitor_index);
         return;
     }
-
-    if (std::get<std::atomic_flag *>(imagebufs[currentBuf])->test_and_set()) {
-        // Mailbox: keep most recent pending blit region when renderer is behind.
-        pending_x         = x;
-        pending_y         = y;
-        pending_w         = w;
-        pending_h         = h;
-        has_pending_blit  = true;
-        video_blit_complete_monitor(m_monitor_index);
-        return;
-    }
-
-    if (has_pending_blit) {
-        const int x1 = (x < pending_x) ? x : pending_x;
-        const int y1 = (y < pending_y) ? y : pending_y;
-        const int x2 = ((x + w) > (pending_x + pending_w)) ? (x + w) : (pending_x + pending_w);
-        const int y2 = ((y + h) > (pending_y + pending_h)) ? (y + h) : (pending_y + pending_h);
-        x                = x1;
-        y                = y1;
-        w                = x2 - x1;
-        h                = y2 - y1;
-        has_pending_blit = false;
-    }
-    if ((x < 0) || (y < 0) || ((x + w) > 2048) || ((y + h) > 2048) || (w <= 0) || (h <= 0)) {
-        std::get<std::atomic_flag *>(imagebufs[currentBuf])->clear();
-        video_blit_complete_monitor(m_monitor_index);
-        return;
-    }
-
     sx = x;
     sy = y;
     sw = this->w = w;
-    sh = this->h = h;
+    sh = this->h       = h;
     uint8_t *imagebits = std::get<uint8_t *>(imagebufs[currentBuf]);
     for (int y1 = y; y1 < (y + h); y1++) {
         auto scanline = imagebits + (y1 * rendererWindow->getBytesPerRow()) + (x * 4);
