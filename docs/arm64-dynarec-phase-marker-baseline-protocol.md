@@ -42,19 +42,19 @@ Establish a repeatable baseline workflow with one operator hotkey and zero per-p
 ## Baseline Lock Status
 - Active 266 MHz post-Qt baseline capture is complete and locked.
 - Active locked artifact:
-  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-27-c3-reconfirm-3run.md`
 - Accepted runs:
-  - `2026-04-26_15-50-15-Windows 98 Gaming PC-s03a-telemetry`
-  - `2026-04-26_16-00-51-Windows 98 Gaming PC-s03a-telemetry`
-  - `2026-04-26_16-12-37-Windows 98 Gaming PC-s03a-telemetry`
+  - `2026-04-27_17-00-45-Windows 98 Gaming PC-c3-baseline-reconfirm-r1`
+  - `2026-04-27_17-13-23-Windows 98 Gaming PC-c3-baseline-reconfirm-r2`
+  - `2026-04-27_17-24-01-Windows 98 Gaming PC-c3-baseline-reconfirm-r3`
 - Locked aggregate:
-  - whole-run avg mean `99.638000`
+  - whole-run avg mean `99.566667`
   - whole-run p50 mean `100`
   - whole-run p95 mean `101`
   - whole-run p99 mean `102.333333`
-  - whole-run raw crossings@100 mean `127.333333`
+  - whole-run raw crossings@100 mean `97.333333`
 - Superseded prior lock artifact:
-  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
 - Continue to use the active locked artifact as the comparison gate for fixed 266 MHz post-Qt pacing work.
 
 ## Historical Pre-Re-Lock Checkpoint (2026-04-26)

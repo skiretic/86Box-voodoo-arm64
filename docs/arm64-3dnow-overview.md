@@ -21,7 +21,7 @@ Current state:
 
 Baseline note:
 - Active workload baseline lock (fixed 266 MHz, post-Qt pacing):
-  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-27-c3-reconfirm-3run.md`
 - Historical prior workload lock:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 - Current logging-on analysis baseline:

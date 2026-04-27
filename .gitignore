@@ -84,7 +84,7 @@ docs/perf-artifact*
 docs/perf-artifacts/*
 !docs/perf-artifacts/arm64-dynarec/
 docs/perf-artifacts/arm64-dynarec/*
-!docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md
+!docs/perf-artifacts/arm64-dynarec/baseline-lock-*.md
 scripts/win9*
 docs/reference/x86*
 appimage-x86_64-cross/output/86Box-latest-x86_64.AppImage.zsync

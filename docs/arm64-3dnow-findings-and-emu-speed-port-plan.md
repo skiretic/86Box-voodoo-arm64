@@ -120,7 +120,7 @@ Status: completed.
 5. Lock the baseline artifact and freeze the comparison gate.
 
 Active locked artifact:
-- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+- `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-27-c3-reconfirm-3run.md`
 Historical prior lock:
 - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 
@@ -216,12 +216,12 @@ Constraint:
 ### Locked Baseline Artifact
 
 - Active fixed-266 MHz post-Qt workload lock:
-  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+  - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-27-c3-reconfirm-3run.md`
   - aggregate gate values:
-    - `avg=99.638000`
+    - `avg=99.566667`
     - `p99=102.333333`
-    - `dips_lt95=16.666667`
-    - `dips_lt90=2.666667`
+    - `dips_lt95=19.333333`
+    - `dips_lt90=6.666667`
 - Historical prior workload lock:
   - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 
@@ -231,7 +231,7 @@ Constraint:
   - `BASELINE LOCKED: use these averages as comparison gate before any new code.`
 - Historical baseline capture was done after logging verification in the follow-on session, not during the initial logging-port validation pass.
 - Current policy:
-  - the active workload comparison gate is the 2026-04-26 fixed-266 MHz post-Qt lock above
+  - the active workload comparison gate is the 2026-04-27 fixed-266 MHz C3-reconfirm lock above
   - the logging-on artifact above remains the current op-family baseline
 - Historical accepted runs:
   - `2026-04-25_21-41-24-Windows 98 Gaming PC-baseline-prelock-r1`
@@ -624,7 +624,7 @@ Interpretation:
   - `ee4d5c5ae` (`qt: pace main loop with single-step pc_run`)
 - acceptance scope:
   - keep change as runtime pacing/stability slice (non-opcode semantic).
-  - retain the active fixed-266 MHz post-Qt baseline lock policy (`baseline-lock-2026-04-26-postqt-266-3run.md`) and the logging-on opcode-mix baseline.
+  - retain the active fixed-266 MHz post-Qt baseline lock policy (`baseline-lock-2026-04-27-c3-reconfirm-3run.md`) and the logging-on opcode-mix baseline.
 - correctness guard remained green in sanity passes:
   - `3DNOWCOV_TOTAL hash=28aeb9ef`
   - `MRUNALL`/`MICROSTRESS` expected hash set matched.
