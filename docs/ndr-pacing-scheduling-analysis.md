@@ -31,8 +31,8 @@ Run-shape requirements:
 Baseline references:
 
 - `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/arm64-dynarec-phase-marker-baseline-protocol.md`
-- active post-Qt gate lock (current comparison baseline): `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
-- pre-Qt anchor (historical reference, before `ee4d5c5ae`): `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
+- active post-qt-pacing gate lock (current comparison baseline, fixed 266 MHz lane): `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-26-postqt-266-3run.md`
+- pre-qt-pacing anchor (historical reference before commit `ee4d5c5ae`, `qt: pace main loop with single-step pc_run`): `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-25-3run.md`
 
 ## Artifact Location and Naming (Canonical)
 
@@ -148,6 +148,7 @@ Iteration policy:
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-04-26 | C1 | A1 | Keep | Landed | Phase 1 landed in `src/qt/qt_main.cpp`: ns debt accounting + soft debt cap, single-run-per-pass preserved, no phase-2 bounded catch-up. Follow-on revisit retained: evaluate larger-cap/no-cap variants as non-default tuning after current consistency slices. | 3-run gate set: `c1-phase1-a1-r1b`, `c1-phase1-a1-r2c`, `c1-phase1-a1-r3`; markers valid in all runs; operator-confirmed WL-05 hashes matched lock. Aggregate vs active lock: avg `99.655` vs `99.638` (`+0.017`), p99 `102.000` vs `102.333` (`-0.333`), dips<95 `16.333` vs `16.667` (`-0.333`), dips<90 `2.667` vs `2.667` (`+0.000`), crossings `122.333` vs `127.333` (`-5.000`). |
 | 2026-04-26 | C2 | A0 | Defer | Deferred | Throughput-track only; requires opcode stress + baseline signature before default-on. | Correctness gate + workload gate |
+| 2026-04-26 | Q0 (carry-in) | A1 | Keep | Landed | Pre-C1 Qt pacing carry-in from prior branch state: `ee4d5c5ae` (`qt: pace main loop with single-step pc_run`) in `src/qt/qt_main.cpp`. This is the lane-defining post-qt-pacing base change that preceded C1 on `ndr-pacing-lab`. | Captured by post-qt-pacing lock artifact (`baseline-lock-2026-04-26-postqt-266-3run.md`) old-vs-new vs pre-qt-pacing lock: avg `+0.073667`, p99 `+0.333333`, dips<95 `-3.333333`, dips<90 `-5.333333`, crossings `+6.666667`. |
 | 2026-04-27 | C3 | A1 | Keep | Landed | Phase 1 narrow patch in `src/qt/qt_platform.cpp` kept: replaced fixed contention sleep (`sleep_for(1 ms)`) with cooperative `std::this_thread::yield()` in `endblit()`. Lock-scope narrowing remains deferred. | 3-run gate set: `c3-a1-r1`, `c3-a1-r2`, `c3-a1-r3`; each run had valid markers (`start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`) and locked WL-05 hashes (`quick=45db7b65`, `normal=2520dd5e`, `smc=b86f22a1`, `status=OK`) recorded in per-run `wl05-hashes.txt`. Aggregate vs active lock: avg `99.661` vs `99.638` (`+0.023`), p99 `101.667` vs `102.333` (`-0.667`), dips<95 `15.667` vs `16.667` (`-1.000`), dips<90 `2.667` vs `2.667` (`+0.000`), crossings `118.000` vs `127.333` (`-9.333`). Aggregate vs previous landed code-change cluster (C1 A1): avg `+0.006`, p99 `-0.333`, dips<95 `-0.666`, dips<90 `+0.000`, crossings `-4.333`. |
 | 2026-04-26 | C4 | A1 | Keep | Planned | FIFO wake/wait smoothing and bounded drain after landed consistency baseline (`C1 + C3`). | Workload gate + correctness checks |
 | 2026-04-27 | C5 | A1 | Keep | Gate-failed | Initial mailbox/coalescing patch in `src/qt/qt_rendererstack.cpp` used pending/current rectangle union when draining backlog. | Early run signal regressed jitter metrics: `c5-a1-r1` tainted outlier (`min=0`, replaced), accepted runs `c5-a1-r2b` + `c5-a1-r3b` still trended worse vs lock/C1 on `dips<90` and crossings (`r2b crossings=127`, `r3b crossings=165`). Focused rethink required before reject. |
@@ -160,13 +161,13 @@ Iteration policy:
 
 Reference basis:
 
-- pre-Qt baseline lock: `baseline-lock-2026-04-25-3run.md` (accepted runs at commit `c9b56425...`)
+- pre-qt-pacing baseline lock: `baseline-lock-2026-04-25-3run.md` (accepted runs at commit `c9b56425...`)
 - C1 aggregate: `c1-phase1-a1-r1b`, `c1-phase1-a1-r2c`, `c1-phase1-a1-r3`
 - C3 aggregate: `c3-a1-r1`, `c3-a1-r2`, `c3-a1-r3`
 
 Before/After Delta Summary:
 
-- Pre-Qt -> C1
+- pre-qt-pacing -> C1
   - avg: `+0.09%`
   - p99: `-0.33%`
   - dips<100: `-1.21%`
@@ -178,12 +179,18 @@ Before/After Delta Summary:
   - dips<100: `+0.00%`
   - dips<95: `-4.08%`
   - dips<90: `+0.00%`
-- Pre-Qt -> C3
+- pre-qt-pacing -> C3
   - avg: `+0.10%`
   - p99: `-0.33%`
   - dips<100: `-1.21%`
   - dips<95: `-21.67%`
   - dips<90: `-66.67%`
+
+Interpretation note:
+
+- `C1 -> C3` is a consistency refinement, not a large throughput jump. Some metrics are intentionally flat because `C1` had already reduced them near floor (for example `dips<90` remained `2.667` and `dips<100` remained `81.667` on 3-run mean).
+- The improvement signal for `C3` is in jitter/churn control: lower `p99`, fewer `dips<95`, and fewer crossings versus `C1`.
+- Read flat low-tail deltas in `C1 -> C3` as "no regression at already-low levels," not as evidence that `C3` failed to improve consistency.
 
 ## Track-Oriented Candidate Map
 
