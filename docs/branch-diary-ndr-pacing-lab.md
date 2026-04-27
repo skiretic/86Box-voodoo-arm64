@@ -27,6 +27,7 @@ What this should communicate to reviewers:
 ## Scope and split points
 
 Current branch: `ndr-pacing-lab`
+Author scope for this diary: `skiretic` commits only (non-`skiretic` upstream commits in ancestry are intentionally excluded from the summaries below).
 
 - `master` divergence base: `123c135cf5ce703e0a406e88f6f49677370e7cd7`
 - `ndr-analysis` tip anchor: `7205f82e9c045ff335af2570880f8c2630f76a12`
@@ -35,10 +36,10 @@ Current branch: `ndr-pacing-lab`
 
 Commit counts along this path:
 
-- `master..ndr-analysis`: 63 commits
-- `ndr-analysis..ndr-3dnow-lab`: 48 commits
-- `ndr-3dnow-lab..ndr-pacing-lab`: 9 commits
-- total from `master` base to current `ndr-pacing-lab`: 120 commits
+- `master..ndr-analysis`: 54 (`skiretic` authored)
+- `ndr-analysis..ndr-3dnow-lab`: 48 (`skiretic` authored)
+- `ndr-3dnow-lab..ndr-pacing-lab`: 10 (`skiretic` authored)
+- total from `master` base to current `ndr-pacing-lab`: 112 (`skiretic` authored)
 
 ## High-level timeline
 
@@ -128,16 +129,6 @@ Key commits:
 - `532de825b` C5 mailbox/coalescing handoff attempt
 - `9f8058a4c` reject C5 and revert rendererstack mailbox path
 
-## Additional non-lane work that came along
-
-These are real but not central to the ARM64 NDR/3DNow/Qt threads:
-
-- `7439eabcd` x86-64 JIT stack alignment slow-path fix (Linux)
-- `598194588` linker optimization issue fix in codegen/new
-- `35f6e131c` LPT ECP bug fix
-- `eb5dba42c` Windows char pipe reconnect fix
-- `02cdffa26` clang bitfield warning fix
-
 ## Upstream cleanup map (suggested)
 
 ### Stack A: ARM64 dynarec telemetry and branch-shaping core
@@ -187,17 +178,15 @@ a=7205f82e9c045ff335af2570880f8c2630f76a12
 b=d891888615e0273a100169c38be123ab55d87334
 
 # phase logs
- git log --reverse --date=short --format='%h %ad %s' --no-merges $base..$a
- git log --reverse --date=short --format='%h %ad %s' --no-merges $a..$b
- git log --reverse --date=short --format='%h %ad %s' --no-merges $b..ndr-pacing-lab
+ git log --reverse --date=short --format='%h %ad %s' --no-merges --author='skiretic' $base..$a
+ git log --reverse --date=short --format='%h %ad %s' --no-merges --author='skiretic' $a..$b
+ git log --reverse --date=short --format='%h %ad %s' --no-merges --author='skiretic' $b..ndr-pacing-lab
 
 # code-heavy view (exclude docs)
- git log --reverse --oneline --no-merges $base..ndr-pacing-lab -- . ':(exclude)docs/**'
+ git log --reverse --oneline --no-merges --author='skiretic' $base..ndr-pacing-lab -- . ':(exclude)docs/**'
 ```
 
 ## Notes
 
-- working tree currently has local uncommitted edits in:
-  - `docs/ndr-pacing-scheduling-analysis.md`
-  - `src/qt/qt_mainwindow.cpp`
+- working tree state changes frequently; use `git status --short` for current local edits.
 - this diary is descriptive; it does not change commit history.
