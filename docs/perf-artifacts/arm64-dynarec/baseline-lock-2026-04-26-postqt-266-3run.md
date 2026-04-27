@@ -64,4 +64,4 @@ This lock supersedes `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-
 - clean valid runs used: `3/3`
 - rejected/replaced/excluded attempts listed above: `4`
 - no marker failures in accepted runs
-- current active comparison gate for fixed 266 MHz post-Qt pacing work: this artifact
+- superseded as active gate by `/Users/anthony/projects/code/86Box-voodoo-arm64/docs/perf-artifacts/arm64-dynarec/baseline-lock-2026-04-27-c3-reconfirm-3run.md`
