@@ -130,6 +130,9 @@ Key commits:
 - `6ba0dcab9` C3 A1 pass, cooperative endblit contention yield
 - `532de825b` C5 mailbox/coalescing handoff attempt
 - `9f8058a4c` reject C5 and revert rendererstack mailbox path
+- `87a24f060` C7 A1 working patch restoration before locked retest sequence
+- `88e96fd1f` C7 A2 retain/trim landing with finalized retest docs
+- `bac6b8d1d` C8 telemetry-sampling correctness landing (measurement fix only)
 
 ## Upstream cleanup map (suggested)
 
