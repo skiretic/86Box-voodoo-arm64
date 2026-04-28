@@ -6,7 +6,7 @@ Prepare a PR-ready branch based on `upstream/master` that contains only the real
 
 ## Preferred Strategy
 
-Use a rebase-first workflow (instead of broad cherry-picking) to preserve commit context while removing branch noise.
+Use a fresh branch from `upstream/master` and transplant only code paths (`src/`, `cmake/`, and top-level CMake files) from `arm64-and-pacing`. Avoid replaying history.
 
 ## Phase 0: Safety and Baseline
 
@@ -17,23 +17,21 @@ Use a rebase-first workflow (instead of broad cherry-picking) to preserve commit
 3. Record current known-good build command:
    - `./scripts/setup-and-build.sh build`
 
-## Phase 1: History Cleanup Since Split from `master`
+## Phase 1: Create Fresh Upstream Branch
 
-1. Identify fork point with your `master`.
-2. Run interactive rebase from that fork point.
-3. During rebase, classify commits:
-   - keep: functional emulator changes
-   - squash: small fixups into parent functional commit
-   - drop: docs-only, experiment-only logging/telemetry scaffolding (if clearly non-functional)
-   - defer-drop: instrumentation needed temporarily for validation
-4. Produce a cleaned commit stack that still builds.
+1. Fetch latest upstream refs.
+2. Create a new branch from `upstream/master` (for example `arm64-codeonly-pr`).
+3. Keep this branch history clean (no cherry-pick/rebase replay from branch history).
 
-## Phase 2: Rebase Clean Stack Onto `upstream/master`
+## Phase 2: Transplant Code-Only Changes
 
-1. Fetch latest upstream.
-2. Rebase cleaned branch onto `upstream/master`.
-3. Resolve conflicts while preserving cleaned intent.
-4. Push to a dedicated branch name for this PR prep flow.
+1. Copy only code-bearing paths from `arm64-and-pacing` into the fresh branch:
+   - `src/`
+   - `cmake/`
+   - `CMakeLists.txt`
+   - `CMakePresets.json` (if needed)
+2. Do not copy `docs/`, `scripts/`, `tools/`, `research/`, perf artifacts, or other workflow scaffolding.
+3. Review diff and prune any accidental non-code files.
 
 ## Phase 3: Validation (Normal Workload)
 
@@ -49,13 +47,13 @@ Use a rebase-first workflow (instead of broad cherry-picking) to preserve commit
    - telemetry counters
    - temporary timing/reporting hooks
    - experiment/debug toggles without runtime product value
-2. Keep any instrumentation that is required for stable runtime behavior or user-facing diagnostics.
+2. Keep only instrumentation required for stable runtime behavior or intentional product diagnostics.
 3. Rebuild and rerun workload validation.
 
 ## Phase 5: Final PR Preparation
 
 1. Final pass for dead code/macros/includes left by removals.
-2. Ensure minimal, reviewable commit structure.
+2. Prefer a minimal commit structure (single code-only commit or small logical split).
 3. Push final branch and prepare PR summary focused on functional changes only.
 
 ## Acceptance Criteria
@@ -69,4 +67,4 @@ Use a rebase-first workflow (instead of broad cherry-picking) to preserve commit
 
 ## Fallback Option
 
-If rebase cleanup becomes too tangled, switch to selective cherry-pick onto a fresh `upstream/master` branch using a curated commit list.
+If direct path transplant pulls too much, narrow scope further to subpaths (`src/codegen_new`, specific dynarec files) and build incrementally.
