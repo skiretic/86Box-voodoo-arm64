@@ -948,14 +948,11 @@ MainWindow::closeEvent(QCloseEvent *event)
     for (int i = 1; i < MONITORS_NUM; i++) {
         if (renderers[i] && renderers[i]->isHidden()) {
             renderers[i]->show();
-            processEventsOnlyWhenPausedOrModal();
             renderers[i]->switchRenderer(RendererStack::Renderer::Software);
-            processEventsOnlyWhenPausedOrModal();
         }
     }
 
     qt_nvr_save();
-    processEventsOnlyWhenPausedOrModal();
     cpu_thread_run = 0;
     event->accept();
 }
@@ -1163,9 +1160,6 @@ MainWindow::showEvent(QShowEvent *event)
     }
     if (window_remember && vid_resize == 1) {
         ui->stackedWidget->setFixedSize(window_w, window_h);
-#ifndef Q_OS_MACOS
-        processEventsOnlyWhenPausedOrModal();
-#endif
         this->adjustSize();
     }
 }
@@ -1813,7 +1807,6 @@ MainWindow::on_actionResizable_window_triggered(bool checked)
         if (monitors[i].target_buffer && show_second_monitors) {
             renderers[i]->show();
             renderers[i]->switchRenderer((RendererStack::Renderer) vid_api);
-            processEventsOnlyWhenPausedOrModal();
         }
     }
 }
