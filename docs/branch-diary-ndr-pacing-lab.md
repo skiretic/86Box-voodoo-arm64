@@ -8,7 +8,7 @@ This is the "what actually happened" log for this line of work so cleanup and up
 
 ## PR intent summary
 
-This branch line is focused on ARM64 dynarec improvement work with validated 3DNow bring-up and a scoped Qt pacing follow-up. The intent is to upstream this as one cleaned PR after rebasing onto current upstream.
+This branch line is focused on ARM64 dynarec improvement work with validated 3DNow bring-up and a scoped Qt pacing follow-up. The pacing lane reached a provisional stop after C7 A2, then was briefly reopened for C8 telemetry-sampling correctness (measurement fix only) before returning to cleanup/consolidation for upstreaming.
 
 Planned delivery strategy:
 
@@ -120,6 +120,8 @@ What changed:
 - staged C1 and C3 pacing slices with gate evidence
 - attempted C5 mailbox/coalescing handoff, then rejected/reverted after A2 gate fail
 - moved gate emphasis to smoothness-first and clarified post-Qt baseline lineage
+- completed C7 A2 retain/trim pass
+- reopened C8 telemetry-sampling correction to normalize speed samples before final branch cleanup (no C8 re-lock run set executed in this branch scope)
 
 Key commits:
 
@@ -145,7 +147,7 @@ Drop/avoid exporting dead trial points; their reverts already neutralize most of
 
 ### Stack C: Qt pacing changes
 
-Target: keep `ee4d5c5ae`, C1/C3 validated behavior, exclude C5 rejected path.
+Target: keep `ee4d5c5ae`, C1/C3 validated behavior, C7 A2 final state, and C8 telemetry-sampling correction; exclude C5/C6 rejected paths. C8 is retained as a measurement-definition update without branch-local re-lock expansion.
 
 ### Stack D: Tooling/harnesses
 

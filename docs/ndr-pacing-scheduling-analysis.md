@@ -10,6 +10,10 @@ Secondary objective: higher host throughput for emulating faster-clocked guest C
 
 Initial analysis constraints (historical, for first draft): analysis/report only; no code edits, patch application, commits, branch changes, or VM launch during the initial write-up pass.
 
+## Current Branch Status (2026-04-27)
+
+Consistency tuning on `ndr-pacing-lab` was paused after C7 A2, then briefly reopened for C8 telemetry-sampling correctness on 2026-04-27. C7 A2 remains landed by operator decision. C8 A1 is now landed as a measurement fix, and this branch stops without running a C8 re-lock.
+
 ## Defined Primary Workload Gate (Locked Baseline)
 
 To preserve comparability with the existing lock, keep the original 3-run workflow unchanged:
@@ -157,7 +161,7 @@ Iteration policy:
 | 2026-04-27 | C6 | A1 | Reject | Reverted | Operator-directed reject after smoothness-focused review; C6 render-timer cadence/coalescing patch removed and `src/qt/qt_openglrenderer.cpp` restored to pre-C6 behavior. | Early signal run `c6-a1-r1` stayed near-100 on average but worsened low-tail smoothness vs lock/C3 (notably `<90` events), so slice is non-promotable. |
 | 2026-04-27 | C7 | A1 | Keep | Gate-failed | Qt/UI minimal-risk patch in `src/qt/qt_mainwindow.cpp`: made LED previous-state values persistent, reduced LED timer interval to 100 ms, and routed runtime-sensitive `processEvents()` callsites through pause/modal/settings-gated helper (`ExcludeUserInputEvents` + `ExcludeSocketNotifiers`). | 3-run gate set: `c7-a1-r1`, `c7-a1-r2`, `c7-a1-r3`; markers valid in all runs (`start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`) and WL-05 hashes locked (`quick=45db7b65`, `normal=2520dd5e`, `smc=b86f22a1`, `status=OK`) in per-run `wl05-hashes.txt`. Aggregate vs active lock (`c3-baseline-reconfirm`): avg `99.546` vs `99.567` (`-0.021`), p99 `102.333` vs `102.333` (`+0.000`), dips<95 `15.333` vs `19.333` (`-4.000`), dips<90 `8.667` vs `6.667` (`+2.000`), crossings `97.667` vs `97.333` (`+0.334`, gate fail). Smoothness read: mixed (`<95` and `>103` improved, but `<90`, `99..101` occupancy, and jump severity regressed). Detailed report: `docs/perf-artifacts/arm64-dynarec/c7-a1-2026-04-27-3run.md`. |
 | 2026-04-27 | C7 | A2 | Keep | Landed | Focused rethink pass kept low-risk LED persistence/100 ms timer changes and trimmed runtime-adjacent `processEventsOnlyWhenPausedOrModal()` callsites in `src/qt/qt_mainwindow.cpp` (`closeEvent`, `showEvent`, monitor resize/renderer switch path). Guarded helper remains only for language-change UI path. | A2-consistent 3-run set: `c7-a1-retest-r2`, `c7-a1-retest-r3`, `c7-a1-retest-r4`; markers valid in all runs and WL-05 hashes locked (`quick=45db7b65`, `normal=2520dd5e`, `smc=b86f22a1`, `status=OK`). Aggregate vs active lock: avg `99.335` vs `99.567` (`-0.232`), p99 `102.000` vs `102.333` (`-0.333`), dips<95 `18.667` vs `19.333` (`-0.666`), dips<90 `3.333` vs `6.667` (`-3.334`), crossings `42.333` vs `97.333` (`-55.000`). Signal mixed but operator-directed keep; detailed report: `docs/perf-artifacts/arm64-dynarec/c7-a2-2026-04-27-3run.md`. |
-| 2026-04-26 | C8 | A1 | Keep | Planned | Correct telemetry sampling interval to reduce false dip/rebound reporting; requires immediate re-lock before post-C8 gate comparisons. | Telemetry consistency across runs + re-lock artifact |
+| 2026-04-27 | C8 | A1 | Keep | Landed | Telemetry-sampling correctness landed in `src/86box.c`: speed percent now uses measured elapsed sample duration from `pc_onesec()` (`sample_ms`) instead of assuming exact 1-second callbacks; runtime behavior unchanged. | Validation run `c8-a1-r1`: markers valid (`start_seen=1`, `max_seq=3`, `valid_for_q3_3dmark_wl05=1`), WL-05 hashes operator-confirmed OK, sample timing stable (`sample_ms` avg `999.998`, min `997`, max `1002`). Same-run math comparison (`new` vs synthetic `old`): avg `+0.330`, p99 `+1`, dips<95 `-1`, dips<90 `+0`, crossings `+13`, consistent with metric-definition change (not runtime tuning). Operator scope decision: no C8 re-lock on this branch. |
 
 ## Delta Reference (266 MHz)
 
@@ -200,7 +204,7 @@ Interpretation note:
 - `C1 -> C3` is a consistency refinement, not a large throughput jump. Some metrics are intentionally flat because `C1` had already reduced them near floor (for example `dips<90` remained `2.667` and `dips<100` remained `81.667` on 3-run mean).
 - The improvement signal for `C3` is in jitter/churn control: lower `p99`, fewer `dips<95`, and fewer crossings versus `C1`.
 - Read flat low-tail deltas in `C1 -> C3` as "no regression at already-low levels," not as evidence that `C3` failed to improve consistency.
-- The 2026-04-27 C3 reconfirm lock is the active baseline by operator decision; versus the superseded 2026-04-26 lock it shows lower crossing churn and no `>=105` overshoots in the accepted set, with weaker low-tail counts. Treat this as the authoritative reference point for subsequent C7/C8 comparisons.
+- The 2026-04-27 C3 reconfirm lock is the active baseline by operator decision; versus the superseded 2026-04-26 lock it shows lower crossing churn and no `>=105` overshoots in the accepted set, with weaker low-tail counts. Treat this as the authoritative reference point for this branch's completed C7 work.
 
 ## Track-Oriented Candidate Map
 
