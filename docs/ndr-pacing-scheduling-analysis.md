@@ -576,7 +576,7 @@ Rollback criteria: revert if UI responsiveness or shutdown/settings flows regres
 
 5. C8: correct telemetry sampling interval so dip metrics reflect real behavior.
 
-Promotion rule: treat C8 as a measurement-system change, not as a direct gate-improvement slice. Do not claim pass/fail improvement against the pre-C8 lock from post-C8 metrics alone. After C8 lands, immediately run the re-lock procedure and establish a new active 3-run baseline before evaluating subsequent consistency slices against aggregate speed thresholds.
+Promotion rule: treat C8 as a measurement-system change, not as a direct gate-improvement slice. Do not claim pass/fail improvement against the pre-C8 lock from post-C8 metrics alone. Default policy is to re-lock immediately after C8 lands before evaluating subsequent consistency slices. For this branch scope, operator explicitly ended tuning after C8 A1 and skipped a C8 re-lock run set.
 
 Rollback criteria: revert if the updated sampler cannot produce stable, internally consistent summaries on the locked workload or if the follow-on re-lock cannot be completed cleanly.
 
