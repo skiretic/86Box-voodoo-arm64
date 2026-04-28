@@ -336,6 +336,7 @@ extern int writelnum;
 /* emulator % */
 int fps;
 int framecount;
+static uint32_t fps_sample_elapsed_ms = 1000;
 
 extern int CPUID;
 extern int output;
@@ -2129,10 +2130,22 @@ pc_run(void)
     }
 
     if (title_update) {
-        int speed_percent;
+        int      speed_percent;
+        int      target_fps;
+        uint32_t elapsed_ms;
+        int64_t  numerator;
 
         mouse_msg_idx = ((mouse_type == MOUSE_TYPE_NONE) || (mouse_input_mode >= 1)) ? 2 : !!mouse_capture;
-        speed_percent = fps / (force_10ms ? 1 : 10);
+        target_fps    = force_10ms ? 100 : 1000;
+        elapsed_ms    = fps_sample_elapsed_ms ? fps_sample_elapsed_ms : 1;
+
+        /*
+         * Use real sample duration for title speed percent so delayed timer
+         * callbacks do not create false dip/rebound spikes in telemetry.
+         */
+        numerator     = (int64_t) fps * 100000LL;
+        speed_percent = (int) ((numerator + ((int64_t) elapsed_ms * target_fps / 2)) /
+                               ((int64_t) elapsed_ms * target_fps));
 #ifdef SCREENSHOT_MODE
         if (force_10ms)
             fps = ((fps + 2) / 5) * 5;
@@ -2159,8 +2172,8 @@ pc_run(void)
          * Log every title poll sample so host-side parsers can compute
          * emulation-speed averages and dip frequency over a full workload.
          */
-        pclog("EMU_SPEED_SAMPLE percent=%d fps_raw=%d force_10ms=%d\n",
-              speed_percent, fps, force_10ms);
+        pclog("EMU_SPEED_SAMPLE percent=%d fps_raw=%d force_10ms=%d sample_ms=%" PRIu32 "\n",
+              speed_percent, fps, force_10ms, elapsed_ms);
         title_update = 0;
     }
 }
@@ -2169,6 +2182,14 @@ pc_run(void)
 void
 pc_onesec(void)
 {
+    static uint32_t last_sample_ms = 0;
+    uint32_t        now_ms         = plat_get_ticks();
+
+    fps_sample_elapsed_ms = last_sample_ms ? (now_ms - last_sample_ms) : 1000;
+    if (!fps_sample_elapsed_ms)
+        fps_sample_elapsed_ms = 1;
+    last_sample_ms = now_ms;
+
     fps        = framecount;
     framecount = 0;
 
