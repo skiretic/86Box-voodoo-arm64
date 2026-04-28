@@ -628,8 +628,7 @@ host_arm64_branch_set_offset(uint32_t *opcode, void *dest)
 
     a013_ensure_telemetry_env();
 
-    /* A-013h:
-       Most branch patch sites come from B.cond-skip + B templates emitted by
+    /* Most branch patch sites come from B.cond-skip + B templates emitted by
        host_arm64_B??_ helpers. Only collapse/track when we see that exact
        template shape to avoid touching unrelated neighboring instructions. */
     if (((branch_insn & 0xfc000000u) == OPCODE_B) &&
@@ -650,8 +649,7 @@ host_arm64_branch_set_offset(uint32_t *opcode, void *dest)
         }
     }
 
-    /* A-013i:
-       Apply the same guarded template collapse to TBZ/TBNZ skip+branch forms,
+    /* Apply the same guarded template collapse to TBZ/TBNZ skip+branch forms,
        which are used by a subset of ARM64 uop patch paths (e.g., tag tests). */
     if (((branch_insn & 0xfc000000u) == OPCODE_B) &&
         ((cond_insn & 0x7e000000u) == OPCODE_TBZ) &&
@@ -689,8 +687,7 @@ host_arm64_BEQ(codeblock_t *block, void *dest)
     uint8_t *branch_src;
     int      is_local;
 
-    /* A-013g:
-       Prefer direct B.EQ when imm19-reachable, then bridge via inverse
+    /* Prefer direct B.EQ when imm19-reachable, then bridge via inverse
        conditional + B(imm26), and preserve MOVX+BR fallback for far targets. */
     a013_ensure_telemetry_env();
     codegen_alloc(block, 24);
@@ -1686,8 +1683,7 @@ host_arm64_ZIP2_V2S(codeblock_t *block, int dst_reg, int src_n_reg, int src_m_re
     codegen_addlong(block, OPCODE_ZIP2_V2S | Rd(dst_reg) | Rn(src_n_reg) | Rm(src_m_reg));
 }
 
-/* A-013e telemetry:
-   Tracks relative-vs-fallback path usage for call/jump lowering and logs
+/* Tracks relative-vs-fallback path usage for call/jump lowering and logs
    periodic summaries with low overhead. */
 static int      a013_env_init          = 0;
 static int      a013_telemetry_enabled = 0;
@@ -1863,8 +1859,7 @@ host_arm64_call(codeblock_t *block, void *dst_addr)
     uint8_t *branch_src;
     int      is_local;
 
-    /* A-013 core behavior:
-       Prefer direct BL for local in-range JIT targets; otherwise preserve
+    /* Prefer direct BL for local in-range JIT targets; otherwise preserve
        existing absolute MOVX+BLR fallback for correctness. */
     a013_ensure_telemetry_env();
     codegen_alloc(block, 4);
@@ -1898,8 +1893,7 @@ host_arm64_jump(codeblock_t *block, uintptr_t dst_addr)
     void    *dst_ptr = (void *) dst_addr;
     int      is_local;
 
-    /* A-013 core behavior:
-       Prefer direct B for local in-range JIT targets; otherwise preserve
+    /* Prefer direct B for local in-range JIT targets; otherwise preserve
        existing absolute MOVX+BR fallback for correctness. */
     a013_ensure_telemetry_env();
     codegen_alloc(block, 4);
@@ -1934,13 +1928,13 @@ host_arm64_mov_imm(codeblock_t *block, int reg, uint32_t imm_data)
     /* Fast-path constants that fit a single MOVZ lane update. */
     if (imm_is_imm16(imm_data))
         host_arm64_MOVZ_IMM(block, reg, imm_data);
-    /* S-02b: use MOVN for one-lane "all ones" patterns to avoid MOVZ+MOVK. */
+    /* Use MOVN for one-lane "all ones" patterns to avoid MOVZ+MOVK. */
     else if (imm_is_movn16(imm_data)) {
         int hw = ((imm_data & 0xffff0000u) == 0xffff0000u) ? 0 : 1;
         uint32_t movn_imm = hw ? ((~imm_data >> 16) & 0xffffu) : ((~imm_data) & 0xffffu);
         codegen_addlong(block, OPCODE_MOVN_W | MOV_WIDE_HW(hw) | IMM16(movn_imm) | Rd(reg));
     } else if ((imm_encoding = host_arm64_find_imm(imm_data)) != 0) {
-        /* S-02b: logical-immediate encoding emits one ORR-immediate from WZR. */
+        /* Logical-immediate encoding emits one ORR-immediate from WZR. */
         codegen_addlong(block, OPCODE_ORR_IMM | Rd(reg) | Rn(REG_WZR) | IMM_LOGICAL(imm_encoding));
     } else {
         /* Conservative fallback preserves existing behavior when no single-op form exists. */

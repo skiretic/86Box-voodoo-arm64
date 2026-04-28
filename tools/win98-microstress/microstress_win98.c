@@ -323,7 +323,7 @@ _start(void)
 
     tiny_write_line("MICROSTRESS_START");
 
-    /* Fold phase checksums into one short signature so VM-side reporting stays compact. */
+    /* Fold workload-step checksums into one short signature so VM-side reporting stays compact. */
     chk = run_phase("imm_store", IMM_STORE_ITERS_DEFAULT / div, phase_imm_store, &err);
     if (err)
         ExitProcess(3U);
