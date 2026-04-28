@@ -93,4 +93,3 @@ scripts/dynarec/.analyze-s03a-log.bin
 tools/win98-micr*
 tools/win98-mic
 scripts/dynarec/.analyze-churn-log.bin
-docs/*
