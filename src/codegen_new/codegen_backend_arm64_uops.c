@@ -795,7 +795,7 @@ codegen_MMX_ENTER(codeblock_t *block, uop_t *uop)
     host_arm64_call(block, x86_int);
     host_arm64_B(block, codegen_exit_rout);
 
-    /* S-01 fix: patch against the active write cursor; block->data can point at stale
+    /* Patch against the active write cursor; block->data can point at stale
        bytes here when block emission is still in-flight. */
     host_arm64_branch_set_offset(branch_ptr, &block_write_data[block_pos]);
 
@@ -3820,7 +3820,7 @@ codegen_direct_write_16_imm(codeblock_t *block, void *p, uint16_t imm_data)
 void
 codegen_direct_write_32_imm(codeblock_t *block, void *p, uint32_t imm_data)
 {
-    /* 32-bit immediate store fast path used by S-02a hook coverage in generic emitters. */
+    /* 32-bit immediate store fast path used by generic emitters. */
     host_arm64_mov_imm(block, REG_W16, imm_data);
 
     if (in_range12_w((uintptr_t) p - (uintptr_t) &cpu_state))

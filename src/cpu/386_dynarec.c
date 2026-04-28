@@ -57,7 +57,7 @@ int inrecomp                = 0;
 int cpu_block_end           = 0;
 int cpu_end_block_after_ins = 0;
 
-/* S-03a telemetry is observability-only: counters/logging around churn paths with
+/* Telemetry is observability-only: counters/logging around churn paths with
    no behavior changes to block policy or execution decisions. */
 static int dynarec_s03a_env_init          = 0;
 static int dynarec_s03a_stats_enabled     = 0;
@@ -72,29 +72,29 @@ static uint64_t dynarec_s03a_dirty_list_hits         = 0;
 static uint64_t dynarec_s03a_promote_byte_mask       = 0;
 static uint64_t dynarec_s03a_promote_no_immediates   = 0;
 #if defined(__aarch64__) || defined(_M_ARM64)
-/*S-03b ARM64-only telemetry: counts delayed NO_IMMEDIATES promotions. */
+/* ARM64-only telemetry: counts delayed NO_IMMEDIATES promotions. */
 static uint64_t dynarec_s03b_defer_no_immediates     = 0;
-/*S-03c ARM64-only telemetry: counts retry-state resets after stable execution.
-  This validates that stale retry debt is being cleared before future churn.*/
+/* ARM64-only telemetry: counts retry-state resets after stable execution.
+   This validates that stale retry debt is being cleared before future churn. */
 static uint64_t dynarec_s03c_retry_resets            = 0;
-/*S-03e ARM64-only telemetry: burst-aware escalation observability. */
+/* ARM64-only telemetry: burst-aware escalation observability. */
 static uint64_t dynarec_s03e_burst_resets            = 0;
 static uint64_t dynarec_s03e_burst_promotions        = 0;
-/*S-03e ARM64-only epoch: monotonically advances on dirty-list transitions so
-  per-block retry state can distinguish dense bursts from stale retries. */
+/* ARM64-only epoch: monotonically advances on dirty-list transitions so
+   per-block retry state can distinguish dense bursts from stale retries. */
 static uint32_t dynarec_s03e_dirty_epoch             = 0;
 #endif
 static uint64_t dynarec_s03a_recompiled_execs        = 0;
 static uint64_t dynarec_s03a_recompile_rebuild_paths = 0;
 
 #if defined(__aarch64__) || defined(_M_ARM64)
-/*S-03b ARM64-only policy: require repeated BYTE_MASK dirty-list hits before
-  NO_IMMEDIATES promotion to avoid premature slow-immediate escalation. */
-/*S-03d tuning: raise threshold to 3 consecutive dirty-list retries so transient
-  churn is more likely to recover via retry-decay before forcing NO_IMMEDIATES.*/
+/* ARM64-only policy: require repeated BYTE_MASK dirty-list hits before
+   NO_IMMEDIATES promotion to avoid premature slow-immediate escalation. */
+/* Tuning: raise threshold to 3 consecutive dirty-list retries so transient
+   churn is more likely to recover via retry-decay before forcing NO_IMMEDIATES. */
 #    define DYNAREC_S03B_NO_IMM_THRESHOLD 3
-/*S-03e tuning: retry bursts must stay temporally dense; large gaps reset burst
-  accumulation instead of carrying stale debt into later promotions.*/
+/* Tuning: retry bursts must stay temporally dense; large gaps reset burst
+   accumulation instead of carrying stale debt into later promotions. */
 #    define DYNAREC_S03E_BURST_GAP_MAX 64
 #endif
 
@@ -603,9 +603,9 @@ exec386_dynarec_dyn(void)
             }
         }
 #    ifdef USE_NEW_DYNAREC
-        /*S-03c ARM64-only: if a BYTE_MASK block executes stably outside the
-          dirty list, clear stale retry debt so a distant future dirty hit does
-          not trigger premature NO_IMMEDIATES promotion.*/
+        /* ARM64-only: if a BYTE_MASK block executes stably outside the dirty
+           list, clear stale retry debt so a distant future dirty hit does not
+           trigger premature NO_IMMEDIATES promotion. */
 #        if defined(__aarch64__) || defined(_M_ARM64)
         if (valid_block && !(block->flags & CODEBLOCK_IN_DIRTY_LIST) && (block->flags & CODEBLOCK_BYTE_MASK)
             && !(block->flags & CODEBLOCK_NO_IMMEDIATES) && block->dirty_list_recompile_hits) {
@@ -633,10 +633,10 @@ exec386_dynarec_dyn(void)
             if (had_byte_mask) {
                 if (!had_no_immediates) {
 #if defined(__aarch64__) || defined(_M_ARM64)
-                    /*S-03b ARM64-only: wait for repeated dirty-list BYTE_MASK
-                      hits before NO_IMMEDIATES promotion.*/
-                    /*S-03e ARM64-only: require retries to occur in a dense
-                      burst window; stale widely-spaced retries are reset.*/
+                    /* ARM64-only: wait for repeated dirty-list BYTE_MASK
+                       hits before NO_IMMEDIATES promotion. */
+                    /* Require retries to occur in a dense burst window;
+                       stale widely-spaced retries are reset. */
                     dynarec_s03e_dirty_epoch++;
                     {
                         const uint16_t cur_epoch = (uint16_t) dynarec_s03e_dirty_epoch;

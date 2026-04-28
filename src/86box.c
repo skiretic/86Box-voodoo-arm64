@@ -1426,8 +1426,8 @@ usage:
     gdbstub_init();
 
     /*
-     * Seed phase marker sequence for perf runs. The first manual hotkey
-     * press becomes seq=1, so parsers can split Q3 -> 3DMark99 -> WL-05.
+     * Initialize the performance marker sequence at startup so the first
+     * manual hotkey press is recorded as seq=1.
      */
     perf_phase_marker_run_start();
 

@@ -39,11 +39,11 @@ typedef struct codeblock_t {
     uint8_t  ins;
     uint8_t  TOP;
 #if defined(__aarch64__) || defined(_M_ARM64)
-    /*S-03b ARM64-only: per-block retry counter used to delay NO_IMMEDIATES
-      promotion until churn repeats, reducing premature slow-immediate mode.*/
+    /* ARM64-only: per-block retry counter used to delay NO_IMMEDIATES
+      promotion until churn repeats, reducing premature slow-immediate mode. */
     uint8_t  dirty_list_recompile_hits;
-    /*S-03e ARM64-only: tracks the most recent dirty-list epoch seen by this
-      block so promotion can require a dense burst, not stale spaced-out hits.*/
+    /* ARM64-only: tracks the most recent dirty-list epoch seen by this
+      block so promotion can require a dense burst, not stale spaced-out hits. */
     uint16_t dirty_list_last_epoch;
 #endif
     int      valid;

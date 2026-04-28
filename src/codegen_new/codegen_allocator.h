@@ -35,7 +35,7 @@ uint8_t *codeblock_allocator_get_ptr(struct mem_block_t *block);
 /*Cache clean memory block list*/
 void codegen_allocator_clean_blocks(struct mem_block_t *block);
 
-/* A-013 classification helpers:
+/* Branch classification helpers:
    - codegen_allocator_contains_host_ptr(): tells whether a host pointer targets
      the JIT allocator arena (candidate for direct local branch).
    - codegen_allocator_can_branch_imm14(): validates AArch64 TBZ/TBNZ immediate

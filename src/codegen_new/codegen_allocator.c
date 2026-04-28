@@ -224,8 +224,7 @@ codegen_allocator_can_branch_imm14(const uint8_t *src_insn_addr, const void *dst
     if (!src_insn_addr || !dst)
         return false;
 
-    /* A-013i range gate:
-       AArch64 TBZ/TBNZ uses signed imm14 scaled by 4 bytes, so legal offsets
+    /* AArch64 TBZ/TBNZ uses signed imm14 scaled by 4 bytes, so legal offsets
        are [-2^15, 2^15) and must be 4-byte aligned. */
     offset = (intptr_t) ((const uint8_t *) dst - src_insn_addr);
     if (offset & 3)
@@ -241,8 +240,7 @@ codegen_allocator_can_branch_imm26(const uint8_t *src_insn_addr, const void *dst
     if (!src_insn_addr || !dst)
         return false;
 
-    /* A-013 range gate:
-       AArch64 B/BL uses signed imm26 scaled by 4 bytes, so legal offsets are
+    /* AArch64 B/BL uses signed imm26 scaled by 4 bytes, so legal offsets are
        [-2^27, 2^27) and must be 4-byte aligned. */
     offset = (intptr_t) ((const uint8_t *) dst - src_insn_addr);
     if (offset & 3)
@@ -258,8 +256,7 @@ codegen_allocator_can_branch_imm19(const uint8_t *src_insn_addr, const void *dst
     if (!src_insn_addr || !dst)
         return false;
 
-    /* A-013 range gate:
-       AArch64 CBZ/CBNZ uses signed imm19 scaled by 4 bytes, so legal offsets
+    /* AArch64 CBZ/CBNZ uses signed imm19 scaled by 4 bytes, so legal offsets
        are [-2^20, 2^20) and must be 4-byte aligned. */
     offset = (intptr_t) ((const uint8_t *) dst - src_insn_addr);
     if (offset & 3)
