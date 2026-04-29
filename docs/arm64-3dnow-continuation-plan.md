@@ -6,9 +6,12 @@ Expand ARM64 dynarec 3DNow/3DNowExt coverage beyond the current validated subset
 
 ## Current Baseline (Known Good)
 
-- ARM64 mapped 3DNow opcodes: 24
-- x86-host mapped 3DNow opcodes (in this tree): 16
+- Interpreter base table (`OP_TABLE(3DNOW)`): 19 opcodes
+- Interpreter Ext table (`OP_TABLE(3DNOWE)`): 24 opcodes
+- ARM64 dynarec mapped 3DNow/Ext opcodes: 24
+- x86-host dynarec mapped 3DNow/Ext opcodes (in this tree): 16
 - ARM64 currently covers all x86-host mapped ops plus 8 additional ops.
+- On an Ext-capable guest profile, ARM64 dynarec is at parity with interpreter imm8 coverage (24/24).
 - Existing validated-heavy opcodes include:
   - `PF2IW`, `PI2FW`
   - `PFNACC`, `PFPNACC`, `PFACC`
@@ -20,36 +23,45 @@ Legend:
 - `Y` = mapped in that table
 - `N` = not mapped in that table
 
-| Opcode | Mnemonic | Hit In Workload | ARM64 Map | x86-64 Map |
+| Opcode | Mnemonic | Hit In Workload | Interpreter Base (`3DNOW`) | Interpreter Ext (`3DNOWE`) | ARM64 Dynarec | x86-64 Dynarec |
 |---|---|---:|---:|---:|
-| `0x0c` | `PI2FW`   | Y | Y | N |
-| `0x1c` | `PF2IW`   | Y | Y | N |
-| `0x8a` | `PFNACC`  | Y | Y | N |
-| `0x8e` | `PFPNACC` | Y | Y | N |
-| `0xae` | `PFACC`   | Y | Y | N |
-| `0xb7` | `PMULHRW` | Y | Y | N |
-| `0xbb` | `PSWAPD`  | Y | Y | N |
-| `0xbf` | `PAVGUSB` | Y | Y | N |
-| `0x0d` | `PI2FD`   | Y | Y | Y |
-| `0x1d` | `PF2ID`   | Y | Y | Y |
-| `0x90` | `PFCMPGE` | Y | Y | Y |
-| `0x94` | `PFMIN`   | Y | Y | Y |
-| `0x96` | `PFRCP`   | Y | Y | Y |
-| `0x97` | `PFRSQRT` | Y | Y | Y |
-| `0x9a` | `PFSUB`   | Y | Y | Y |
-| `0x9e` | `PFADD`   | Y | Y | Y |
-| `0xa0` | `PFCMPGT` | Y | Y | Y |
-| `0xa4` | `PFMAX`   | Y | Y | Y |
-| `0xa6` | `PFRCPIT` | Y | Y | Y |
-| `0xa7` | `PFRSQIT1`| Y | Y | Y |
-| `0xaa` | `PFSUBR`  | Y | Y | Y |
-| `0xb0` | `PFCMPEQ` | Y | Y | Y |
-| `0xb4` | `PFMUL`   | Y | Y | Y |
-| `0xb6` | `PFRCPIT` | Y | Y | Y |
+| `0x0c` | `PI2FW`   | Y | N | Y | Y | N |
+| `0x1c` | `PF2IW`   | Y | N | Y | Y | N |
+| `0x8a` | `PFNACC`  | Y | N | Y | Y | N |
+| `0x8e` | `PFPNACC` | Y | N | Y | Y | N |
+| `0xae` | `PFACC`   | Y | Y | Y | Y | N |
+| `0xb7` | `PMULHRW` | Y | Y | Y | Y | N |
+| `0xbb` | `PSWAPD`  | Y | N | Y | Y | N |
+| `0xbf` | `PAVGUSB` | Y | Y | Y | Y | N |
+| `0x0d` | `PI2FD`   | Y | Y | Y | Y | Y |
+| `0x1d` | `PF2ID`   | Y | Y | Y | Y | Y |
+| `0x90` | `PFCMPGE` | Y | Y | Y | Y | Y |
+| `0x94` | `PFMIN`   | Y | Y | Y | Y | Y |
+| `0x96` | `PFRCP`   | Y | Y | Y | Y | Y |
+| `0x97` | `PFRSQRT` | Y | Y | Y | Y | Y |
+| `0x9a` | `PFSUB`   | Y | Y | Y | Y | Y |
+| `0x9e` | `PFADD`   | Y | Y | Y | Y | Y |
+| `0xa0` | `PFCMPGT` | Y | Y | Y | Y | Y |
+| `0xa4` | `PFMAX`   | Y | Y | Y | Y | Y |
+| `0xa6` | `PFRCPIT` | Y | Y | Y | Y | Y |
+| `0xa7` | `PFRSQIT1`| Y | Y | Y | Y | Y |
+| `0xaa` | `PFSUBR`  | Y | Y | Y | Y | Y |
+| `0xb0` | `PFCMPEQ` | Y | Y | Y | Y | Y |
+| `0xb4` | `PFMUL`   | Y | Y | Y | Y | Y |
+| `0xb6` | `PFRCPIT` | Y | Y | Y | Y | Y |
 
 Summary:
 - Overlap with x86-64 mapped set: 16 opcodes
 - ARM64-only mapped extras (also hit): 8 opcodes
+
+## Coverage Model Clarification
+
+- There are two interpreter opcode tables:
+  - Base-only: `OP_TABLE(3DNOW)` (19)
+  - Ext-capable: `OP_TABLE(3DNOWE)` (24)
+- Runtime selects table by guest CPU feature bit (`3DNowExt` present or not).
+- Current `win98-3dnowcov` opcase set (24) matches the Ext table.
+- Companion non-imm8 opcodes (`PREFETCH`/`FEMMS`) are tracked separately from imm8 table counts.
 
 ## Guardrails
 
@@ -86,6 +98,21 @@ Exit criteria:
 
 Exit criteria:
 - Every target opcode is classified as `ready`, `needs lowerer`, or `blocked`.
+
+## Validation Protocol for New Opcodes
+
+For each newly added opcode, require all of the following before marking validated:
+
+1. Interpreter semantics check:
+   - Confirm behavior against expected opcode semantics and nearby established patterns.
+2. Differential path check:
+   - Verify interpreter and dynarec produce matching output for deterministic vectors.
+3. Deterministic regression check:
+   - Verify per-op and total hash stability on repeated runs with fixed seeds/inputs.
+4. Workload sanity check:
+   - Confirm no functional regressions in normal workload usage.
+5. Batch isolation:
+   - Land in small slices (1-3 opcodes) so any mismatch is attributable and quickly reversible.
 
 ## Phase 3: Implementation Batches (Hot First)
 
