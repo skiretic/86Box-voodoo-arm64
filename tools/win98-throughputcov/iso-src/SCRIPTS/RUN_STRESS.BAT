@@ -1,0 +1,8 @@
+@echo off
+set CDROM=%1
+if "%CDROM%"=="" set CDROM=D:
+
+echo [THROUGHPUTCOV] STRESS start
+%CDROM%\THROUGHCOV.EXE STRESS
+set ERR=%ERRORLEVEL%
+echo [THROUGHPUTCOV] STRESS exit=%ERR%

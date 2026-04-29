@@ -1,0 +1,8 @@
+@echo off
+set CDROM=%1
+if "%CDROM%"=="" set CDROM=D:
+
+echo [THROUGHPUTCOV] FULL start
+%CDROM%\THROUGHCOV.EXE FULL
+set ERR=%ERRORLEVEL%
+echo [THROUGHPUTCOV] FULL exit=%ERR%

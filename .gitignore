@@ -93,3 +93,5 @@ scripts/dynarec/.analyze-s03a-log.bin
 tools/win98-micr*
 tools/win98-mic
 scripts/dynarec/.analyze-churn-log.bin
+tools/win98-throughputcov/suite-iso-root/
+tools/win98-throughputcov/win98-throughput-suite.iso

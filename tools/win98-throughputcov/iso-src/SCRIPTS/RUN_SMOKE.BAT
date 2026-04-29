@@ -1,0 +1,8 @@
+@echo off
+set CDROM=%1
+if "%CDROM%"=="" set CDROM=D:
+
+echo [THROUGHPUTCOV] SMOKE start
+%CDROM%\THROUGHCOV.EXE SMOKE
+set ERR=%ERRORLEVEL%
+echo [THROUGHPUTCOV] SMOKE exit=%ERR%
