@@ -195,3 +195,34 @@ b=d891888615e0273a100169c38be123ab55d87334
 
 - working tree state changes frequently; use `git status --short` for current local edits.
 - this diary is descriptive; it does not change commit history.
+
+## Post-upstream-sync sanity check (2026-04-29)
+
+Purpose: validate that logging and pacing behavior still look healthy after pulling upstream commits into `ndr-pacing-lab` while preserving local instrumentation files.
+
+Run:
+- tag: `pacing-validate-r1`
+- workload order: `Q3 demo four -> 3DMark99 full loop -> MRUNALL`
+- markers: `seq=0..3` valid
+- WL-05 hashes: quick `45db7b65`, normal `2520dd5e`, smc `b86f22a1` (`status=OK`)
+
+Host-log sanity:
+- `DYNAREC_S03A_SUMMARY` streaming and advancing
+- `DYNAREC_3DNOW_SUMMARY tag=final total=3581 recompiled=3581 fallback=0`
+- `DYNAREC_3DNOW_OPSUMMARY` present
+- `EMU_SPEED_SAMPLE` present with `sample_ms` ~`999-1001`
+- no `ERROR/assert/panic` hits
+
+Smoothness snapshot (`r1`):
+- samples `537`
+- avg `99.706`, p99 `102`, min `86`, max `104`
+- `<95 = 15` (`2.79%`)
+- `<90 = 1` (`0.19%`)
+- `>103 = 2` (`0.37%`)
+- `>=105 = 0`
+- crossings `102`
+
+Comparison to active pre-upstream lock (`baseline-lock-2026-04-27-c3-reconfirm-3run` aggregate):
+- low-tail and average are within expected single-run noise; no obvious regression signal
+- crossings slightly higher than lock mean (`102` vs `97.33`) but not actionable from one run
+- interpretation: logging/pacing path appears healthy after upstream sync; use standard 3-run aggregate for any formal re-lock decision

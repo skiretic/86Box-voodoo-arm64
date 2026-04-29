@@ -77,6 +77,10 @@ scripts/analyze-jit-log
 V4_4500_AGP_SD_1.18.rom
 docs/rage128-pro/
 research/solo1-drivers/ESS 1938S Driver.iso
+
+# Win98 throughput coverage generated artifacts
+tools/win98-throughputcov/**/*.iso
+tools/win98-throughputcov/**/*.exe
 AGENTS.md
 docs/videocommo*
 docs/perf-artifact*
@@ -93,3 +97,4 @@ scripts/dynarec/.analyze-s03a-log.bin
 tools/win98-micr*
 tools/win98-mic
 scripts/dynarec/.analyze-churn-log.bin
+tools/win98-throughputcov/*
