@@ -147,6 +147,7 @@ extern const device_t cmi8738_6ch_onboard_device;
 
 /* Covox ISA */
 extern const device_t voicemasterkey_device;
+extern const device_t soundmaster_device;
 extern const device_t soundmasterplus_device;
 extern const device_t isadacr0_device;
 extern const device_t isadacr1_device;
@@ -222,6 +223,9 @@ extern const device_t gus_device;
 extern const device_t gus_v37_device;
 extern const device_t gus_max_device;
 extern const device_t gus_ace_device;
+
+/* IBM Music Feature Card */
+extern const device_t imfc_device;
 
 /* IBM PS/1 Audio Card */
 extern const device_t ps1snd_device;

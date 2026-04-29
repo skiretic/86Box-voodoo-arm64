@@ -38,9 +38,11 @@ add_library(snd OBJECT
     snd_azt2316a.c
     snd_azt2320.c
     snd_cms.c
+    snd_csm.c
     snd_cmi8x38.c
     snd_covox.c
     snd_cs423x.c
+    snd_imfc.cpp
     snd_gus.c
     snd_sb.c
     snd_sb_dsp.c
@@ -203,7 +205,7 @@ endif()
 if(SOFTMODEM)
     target_compile_definitions(snd PRIVATE USE_SOFTMODEM)
 endif()
- 
+
 find_package(PkgConfig)
 pkg_check_modules(SERIALPORT libserialport)
 
