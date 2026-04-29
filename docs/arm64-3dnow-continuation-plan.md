@@ -2,7 +2,7 @@
 
 ## Goal
 
-Expand ARM64 dynarec 3DNow/3DNowExt coverage beyond the current validated subset, while preserving correctness and performance.
+Close x86-64 dynarec 3DNow/3DNowExt gaps to reach parity with the already-validated ARM64 mapped surface, while preserving correctness and stability.
 
 ## Current Baseline (Known Good)
 
@@ -53,6 +53,25 @@ Legend:
 Summary:
 - Overlap with x86-64 mapped set: 16 opcodes
 - ARM64-only mapped extras (also hit): 8 opcodes
+
+## Active x86-64 Parity Backlog
+
+Current x86-64 dynarec imm8 gaps relative to ARM64 (from matrix above):
+- `0x0c` `PI2FW`
+- `0x1c` `PF2IW`
+- `0x8a` `PFNACC`
+- `0x8e` `PFPNACC`
+- `0xae` `PFACC`
+- `0xb7` `PMULHRW`
+- `0xbb` `PSWAPD`
+- `0xbf` `PAVGUSB`
+
+Companion non-imm8 gaps (already validated on ARM64, fallback on x86-64):
+- `0F 0D /r` `PREFETCH/PREFETCHW`
+- `0F 0E` `FEMMS`
+
+Completion condition for this track:
+- x86-64 dynarec column matches ARM64 dynarec coverage for the implemented 86Box 3DNow surface in this plan.
 
 ## Coverage Model Clarification
 
@@ -155,8 +174,12 @@ Exit criteria:
 - Incremental implementation commits on `ndr-pacing-lab`.
 - Validation notes added under `docs/perf-artifacts/arm64-dynarec/` as needed.
 
-## Immediate Next Actions
+## Immediate Next Actions (x86-64 parity track)
 
-1. Refresh coverage capture and regenerate top-opcode ranking.
-2. Draft the unmapped-opcode audit table.
-3. Start first hot-opcode implementation batch.
+1. Reconfirm current x86-64 gap list from `recomp_opcodes_3DNOW` and `recomp_opcodes_0f{,_no_mmx}`.
+2. Implement one small x86-64 gap slice (1-3 opcodes).
+3. Run validation gate:
+   - `3DNOWCOV` pass/hash check
+   - normal workload sanity (`Q3 -> 3DMark99 -> MRUNALL`)
+   - host log checks (`DYNAREC_3DNOW_SUMMARY`, fallback behavior, no errors)
+4. Update matrix and tracker immediately after each landed slice.

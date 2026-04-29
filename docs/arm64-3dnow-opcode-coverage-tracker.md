@@ -9,6 +9,18 @@
 
 ## Current Coverage Snapshot (Validated)
 
+## Current Track Focus (2026-04-29)
+
+Primary goal now:
+- bring x86-64 dynarec 3DNow coverage to parity with ARM64 for the implemented in-tree surface.
+
+At-a-glance parity status:
+- Interpreter Ext imm8 surface: `24/24`
+- ARM64 dynarec imm8 mapped: `24/24` (validated)
+- x86-64 dynarec imm8 mapped: `16/24`
+- x86-64 imm8 backlog: `0c, 1c, 8a, 8e, ae, b7, bb, bf`
+- x86-64 companion backlog: `0F 0D /r (PREFETCH/PREFETCHW)`, `0F 0E (FEMMS)`
+
 Latest validation state:
 - guest result: `3DNOWCOV_COUNTS pass=24 fail=0 skip=0 iters=200000`
 - guest total hash: `28aeb9ef`
