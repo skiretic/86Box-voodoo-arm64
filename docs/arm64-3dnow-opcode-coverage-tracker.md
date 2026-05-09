@@ -114,6 +114,7 @@ Update this table every time a 3DNow bring-up slice lands or a validation run co
 
 | Date (ET) | Change / Run | Result | Coverage Delta | Notes |
 | --- | --- | --- | --- | --- |
+| 2026-05-08 | `d3now-sanity-r1` checkpoint on `master-new` anchor `729a74e53` | `DONE` | No opcode-map change | Post-reset telemetry sanity confirmed expected behavior on legacy scripts: `DYNAREC_3DNOW_SUMMARY tag=final total=3083 recompiled=3083 fallback=0` (`86BOX_3DNOW_COV_STATS=1`). |
 | 2026-04-22 | `3dnowcov-r1` first full harness run | `pass=17 fail=2 skip=5`, `ERROR` | Detected false-fail vectors on `PFMIN`/`PFMAX` | Prompted finite-input fix in harness. |
 | 2026-04-22 | harness finite-domain fix + compact output | Build/ISO updated | N/A | Made one-screen screenshot workflow deterministic. |
 | 2026-04-22 | `3dnowcov-r2` rerun | `pass=19 fail=0 skip=5`, `DONE` | Baseline interpreter coverage stable | Ready to start Phase 1 ARM64 dynarec mapping. |

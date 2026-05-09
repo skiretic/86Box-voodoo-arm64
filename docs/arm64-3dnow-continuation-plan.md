@@ -6,6 +6,10 @@ Close x86-64 dynarec 3DNow/3DNowExt gaps to reach parity with the already-valida
 
 ## Current Baseline (Known Good)
 
+- Checkpoint refresh (2026-05-08, `master-new` @ `729a74e53`):
+  - `d3now-sanity-r1` telemetry run preserved expected behavior on the pre-release anchor.
+  - Host summary: `DYNAREC_3DNOW_SUMMARY tag=final total=3083 recompiled=3083 fallback=0`.
+
 - Interpreter base table (`OP_TABLE(3DNOW)`): 19 opcodes
 - Interpreter Ext table (`OP_TABLE(3DNOWE)`): 24 opcodes
 - ARM64 dynarec mapped 3DNow/Ext opcodes: 24
