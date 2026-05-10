@@ -332,8 +332,7 @@ lpt_devices_init(void)
             if (lpt->port.attached) {
                 /* Attach character device shim. */
                 lpt->port.lpt.control = -1; /* force update on first control write */
-                device_context_inst(device, i + 1);
-                lpt_attach(
+                lpt_attach_ex(i,
                     lpt->port.chardev.write ? lpt_char_write_data : NULL,
                     (lpt->port.chardev.control || (lpt->port.chardev.flags & (CHAR_LPT_USESTROBE | CHAR_LPT_PTI))) ? lpt_char_write_ctrl : NULL,
                     (lpt->port.chardev.write && (lpt->port.chardev.flags & CHAR_LPT_USESTROBE)) ? lpt_char_strobe : NULL,
@@ -346,21 +345,30 @@ lpt_devices_init(void)
                 if (lpt->port.chardev.read)
                     timer_set_delay_u64(&lpt->char_timer, (uint64_t) (2.0 * (double) TIMER_USEC));
             }
+            lpt_ports[i].attached = LPT_PORT_HOTPLUGGABLE; /* we're hotpluggable unless further lpt_attach attempts are made */
+        } else {
+            lpt_ports[i].attached = LPT_PORT_DETACHED;
         }
     }
 }
 
 void *
-lpt_attach(void    (*write_data)(uint8_t val, void *priv),
-           void    (*write_ctrl)(uint8_t val, void *priv),
-           void    (*strobe)(uint8_t old, uint8_t val,void *priv),
-           uint8_t (*read_status)(void *priv),
-           uint8_t (*read_ctrl)(void *priv),
-           void    (*epp_write_data)(uint8_t is_addr, uint8_t val, void *priv),
-           void    (*epp_request_read)(uint8_t is_addr, void *priv),
-           void    *priv)
+lpt_attach_ex(int     port,
+              void    (*write_data)(uint8_t val, void *priv),
+              void    (*write_ctrl)(uint8_t val, void *priv),
+              void    (*strobe)(uint8_t old, uint8_t val, void *priv),
+              uint8_t (*read_status)(void *priv),
+              uint8_t (*read_ctrl)(void *priv),
+              void    (*epp_write_data)(uint8_t is_addr, uint8_t val, void *priv),
+              void    (*epp_request_read)(uint8_t is_addr, void *priv),
+              void    *priv)
 {
-    int port                        = device_get_instance() - 1;
+    /* Make sure this port becomes non-hotpluggable if a hotpluggable dropdown
+       device and a non-hotpluggable external device are both trying to claim it. */
+    uint8_t attached         = lpt_ports[port].attached;
+    lpt_ports[port].attached = LPT_PORT_NOTHOTPLUGGABLE;
+    if (attached)
+        return NULL;
 
     lpt_devs[port].write_data       = write_data;
     lpt_devs[port].write_ctrl       = write_ctrl;
@@ -380,8 +388,11 @@ lpt_devices_close(void)
     for (uint8_t i = 0; i < PARALLEL_MAX; i++) {
         memset(&(lpt_devs[i]), 0x00, sizeof(lpt_device_t));
 
-        if (lpt_ports[i].lpt)
+        if (lpt_ports[i].lpt) {
+            lpt_ports[i].lpt->port.attached = 0;
+
             timer_disable(&lpt_ports[i].lpt->char_timer);
+        }
     }
 }
 
@@ -480,7 +491,9 @@ lpt_fifo_out_callback(void *priv)
                 if (ret & DMA_OVER)
                     /* Internal flag to indicate we have finished the DMA reads. */
                     dev->dma_stat = 0x08;
-            }
+            } else
+                /* Clear bit 2 in order to make it clear we're waiting for DMA. */
+                dev->fifo_stat &= 0xfb;
 
             timer_advance_u64(&dev->fifo_out_timer,
                               (uint64_t) ((1000000.0 / 2500000.0) * (double) TIMER_USEC));
@@ -658,9 +671,8 @@ lpt_write(const uint16_t port, const uint8_t val, void *priv)
                 if (((dev->ecr & 0x0c) != 0x08) && ((val & 0x0c) == 0x08)) { /* transition to dmaEn && !serviceIntr */
                     dev->dma_stat = 0x00;
                     dev->state = LPT_STATE_READ_DMA;
-                } else if ((val & 0x0c) != 0x08) { /* !dmaEn || serviceIntr */
+                } else if ((val & 0x0c) != 0x08) /* !dmaEn || serviceIntr */
                     dev->state = LPT_STATE_WRITE_FIFO;
-                }
                 if (((dev->char_pti_mode & 0xef) == 0xe3) && dev->port.chardev.write) {
                     /* PTI ECP modes: tell the other end to begin ECP transfer (Select).
                        There's a control write (nInit|ackIntEn) right before this ECR
@@ -902,15 +914,20 @@ lpt_read(const uint16_t port, void *priv)
                 lpt_char_callback(dev);
             }
 
-            ret = dev->ret_ecr | dev->fifo_stat | (dev->dma_stat & 0x04);
-            if (fifo_get_full(dev->fifo))
-                ret |= 0x02;
-            else
-                ret &= ~0x02;
-            if (fifo_get_empty(dev->fifo))
+            ret = (dev->ret_ecr & 0xfc);
+
+            if ((dev->ecr & 0xe0) > 0x20) {
+                ret |= dev->fifo_stat | (dev->dma_stat & 0x04);
+                if (fifo_get_full(dev->fifo))
+                    ret |= 0x02;
+                else
+                    ret &= ~0x02;
+                if (fifo_get_empty(dev->fifo))
+                    ret |= 0x01;
+                else
+                    ret &= ~0x01;
+            } else
                 ret |= 0x01;
-            else
-                ret &= ~0x01;
             break;
 
         case 0x0403: case 0x0407:

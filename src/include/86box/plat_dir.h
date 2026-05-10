@@ -163,6 +163,7 @@ plat_dir_read(plat_dir_t *context)
 #    define plat_dir_get_name(context)      ((context)->data.cFileName)
 #    define plat_dir_get_size(context)      (((uint64_t) (context)->data.nFileSizeHigh << 32) | (context)->data.nFileSizeLow)
 #    define plat_dir_convert_time(ft)       (((((uint64_t) ft.dwHighDateTime << 32) | ft.dwLowDateTime) - 116444736000000000ULL) / 10000000ULL)
+#    define PLAT_DIR_HAS_BIRTHTIME          1
 #    define plat_dir_get_birthtime(context) (plat_dir_convert_time((context)->data.ftCreationTime))
 #    define plat_dir_get_mtime(context)     (plat_dir_convert_time((context)->data.ftLastWriteTime))
 #    define plat_dir_get_atime(context)     (plat_dir_convert_time((context)->data.ftLastAccessTime))
@@ -390,6 +391,7 @@ plat_dir_read(plat_dir_t *context)
 
 #    define plat_dir_get_name(context)      ((context)->data.name)
 #    define plat_dir_get_size(context)      (LIKELY((context)->data.datalength != NULL) ? *(context)->data.datalength : 0)
+#    define PLAT_DIR_HAS_BIRTHTIME          1
 #    define plat_dir_get_birthtime(context) (LIKELY((context)->data.crtime != NULL) ? (context)->data.crtime->tv_sec : 0)
 #    define plat_dir_get_mtime(context)     (LIKELY((context)->data.mtime != NULL) ? (context)->data.mtime->tv_sec : 0)
 #    define plat_dir_get_atime(context)     (LIKELY((context)->data.atime != NULL) ? (context)->data.atime->tv_sec : 0)
@@ -425,6 +427,7 @@ typedef struct {
     size_t         path_len;
     DIR           *find;
     struct dirent *data;
+    struct dirent  root_data;
     struct stat    stats;
     uint8_t        stats_valid;
 } plat_dir_t;
@@ -443,14 +446,19 @@ plat_dir_open(plat_dir_t *context, const char *path)
         return 0;
     }
 
-    /* First entry is always . so we pre-load it for the default entry behavior. */
-    context->stats_valid = 0xff;
-    context->data        = readdir(context->find);
-    if (!context->data) {
+    context->stats_valid = !stat(path, &context->stats);
+    if (!context->stats_valid || !S_ISDIR(context->stats.st_mode)) {
         closedir(context->find);
         free(context->path);
         return 0;
     }
+
+    /* Represent the base directory as a synthetic '.' entry. d_type is left
+     * DT_UNKNOWN (zeroed by memset) since stats is already valid and all
+     * plat_dir_is_* macros fall through to the stat path when d_type is unknown. */
+    memset(&context->root_data, 0, sizeof(context->root_data));
+    strcpy(context->root_data.d_name, ".");
+    context->data = &context->root_data;
     return 1;
 }
 
@@ -465,6 +473,9 @@ static inline int
 plat_dir_rewind(plat_dir_t *context)
 {
     rewinddir(context->find);
+    context->path[context->path_dir_len] = '\0';
+    context->data                        = &context->root_data;
+    context->stats_valid                 = 1;
     return 1;
 }
 
@@ -479,7 +490,7 @@ plat_dir_count_children(plat_dir_t *context)
             continue;
         ret++;
     }
-    rewinddir(context->find);
+    plat_dir_rewind(context);
     return ret;
 }
 
@@ -500,7 +511,8 @@ plat_dir_read(plat_dir_t *context)
 
 #    define plat_dir_get_name(context) ((context)->data->d_name)
 #    define plat_dir_get_size(context) (plat_dir_stat((context))->st_size)
-#    ifdef st_birthtime
+#    ifdef st_birthtime /* hack: assume the platform remaps st_birthtime at header level */
+#        define PLAT_DIR_HAS_BIRTHTIME          1
 #        define plat_dir_get_birthtime(context) (plat_dir_stat((context))->st_birthtime)
 #    else
 #        define plat_dir_get_birthtime(context) (0)
@@ -548,6 +560,8 @@ static inline const char *
 plat_dir_get_path(plat_dir_t *context)
 {
     if (context->path[context->path_dir_len])
+        return context->path;
+    if (plat_dir_is_special_entry(plat_dir_get_name(context)))
         return context->path;
     size_t len = context->path_dir_len + strlen(plat_dir_get_name(context)) + 2;
     if (len > context->path_len) {

@@ -175,6 +175,7 @@ extern "C" void qt_blit(int x, int y, int w, int h, int monitor_index);
 
 extern MainWindow *main_window;
 
+#ifdef Q_OS_WINDOWS
 static bool
 canProcessUiEventsInCurrentState()
 {
@@ -190,6 +191,7 @@ processEventsOnlyWhenPausedOrModal()
         return;
     QApplication::processEvents(QEventLoop::ExcludeUserInputEvents | QEventLoop::ExcludeSocketNotifiers);
 }
+#endif
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
