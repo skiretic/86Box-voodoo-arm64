@@ -226,3 +226,30 @@ Comparison to active pre-upstream lock (`baseline-lock-2026-04-27-c3-reconfirm-3
 - low-tail and average are within expected single-run noise; no obvious regression signal
 - crossings slightly higher than lock mean (`102` vs `97.33`) but not actionable from one run
 - interpretation: logging/pacing path appears healthy after upstream sync; use standard 3-run aggregate for any formal re-lock decision
+
+## Post-upstream-sync telemetry smoke (2026-05-10, `master-new`)
+
+Purpose: verify that the `master-new <- upstream/master` merge preserved expected telemetry/logging behavior before push.
+
+Merge context:
+- `master-new` was synced from `upstream/master` with merge commit `d00b9e4e6`
+- backup anchor created before merge: `backup/master-new-pre-sync-20260510-142433`
+
+Run:
+- launcher: `./scripts/dynarec/launch-vm-telemetry-run.sh s03a`
+- run dir: `docs/perf-artifacts/arm64-dynarec/2026-05-10_14-26-33-Windows 98 Gaming PC-s03a`
+- launch status: `launch_failed=0`
+
+Host-log sanity:
+- `DYNAREC_S03A_SUMMARY` streaming and advancing
+- `EMU_SPEED_SAMPLE` present and continuing during run
+- no `ERROR/fatal/assert/segfault/abort/panic` hits in `86box.log`
+
+Sampling snapshot:
+- `EMU_SPEED_SAMPLE` count `582`
+- `sample_ms` min `426`, max `1004`, avg `999.014`
+- dominant steady-state cadence remains ~`1s` (`998-1001` seen repeatedly near tail)
+
+Interpretation:
+- telemetry pipeline and core logging behavior remained intact after sync
+- no immediate post-merge runtime/logging regression signal observed in this smoke run
