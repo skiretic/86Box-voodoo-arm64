@@ -108,6 +108,8 @@ Do not use GitHub's "Sync fork" button for this fork. Use the local workflow in 
 
 This creates a dated sync branch, merges `upstream/master` there, and preserves known fork-owned docs such as `README.md` if they conflict.
 
+For recurring intake on `master-new`, use the direct merge checklist in `docs/upstream-sync-workflow.md` ("For `master-new`: direct recurring intake").
+
 Licensing
 ---------
 

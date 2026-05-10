@@ -2,6 +2,11 @@
 
 Use this workflow instead of GitHub's "Sync fork" button. It keeps upstream code moving into the fork without rewriting `master` or blindly replacing fork-specific docs.
 
+## Scope Note (2026-05-10)
+
+This document covers sync mechanics for baseline branches (for example `master` and `master-new`).
+For active debug branches with local instrumentation policy, see `docs/upstream-sync-dev-branch-playbook.md`.
+
 ## Recommended flow
 
 From a clean working tree:
@@ -17,6 +22,41 @@ That script will:
 - create a dated branch like `sync/upstream-2026-03-10`
 - merge `upstream/master` into that sync branch
 - restore known fork-owned files from the pre-merge `master` snapshot, even if Git fast-forwards cleanly into upstream history
+
+## Point-In-Time Sync Rule
+
+You do not need to stop upstream activity while syncing.
+`git fetch upstream` defines a point-in-time snapshot for your merge.
+If upstream moves again during your local merge/validation window, those newer commits are handled in the next sync cycle.
+
+## For `master-new`: direct recurring intake
+
+When the target is `master-new`, use a direct merge into `master-new` instead of the dated sync-branch script path:
+
+```bash
+git switch master-new
+git status --short --branch
+git fetch upstream
+git fetch origin --prune
+git branch backup/master-new-pre-sync-$(date +%Y%m%d-%H%M%S)
+git log --oneline master-new..upstream/master
+git merge --no-ff upstream/master
+```
+
+Conflict policy:
+
+- tooling/instrumentation/workflow files: keep local first (`ours`), then manually port required upstream hunks
+- shared emulator/runtime code: prefer upstream (`theirs`), then re-apply intended local behavior
+
+After conflict resolution:
+
+```bash
+git status
+git add <resolved-files>
+git commit
+# run build + smoke validation
+git push origin master-new
+```
 
 ## Fork-owned files currently restored from the fork branch
 

@@ -2,13 +2,17 @@
 
 ## Goal
 
-Keep `ndr-pacing-lab` close to `upstream/master` so debugging matches what users run, while preserving local logging/tooling needed for investigation.
+Keep active development branches close to `upstream/master` so debugging matches what users run, while preserving local logging/tooling needed for investigation.
 
 ## Branch Roles
 
 - `ndr-pacing-lab`
   - Primary dev/debug branch.
   - Keeps instrumentation, logging helpers, and workflow docs/scripts.
+- `master-new`
+  - Primary integration branch for current fork line.
+  - Receives recurring upstream intake merges.
+  - Must preserve local tooling and workflow surfaces during conflict resolution.
 - `arm64-codeonly-pr` (or future `arm64-upstream-track`)
   - Clean upstream-facing branch.
   - Mirrors what is intended for upstream compatibility and release behavior.
@@ -20,6 +24,8 @@ Use upstream-first syncing with explicit conflict policy:
 1. Pull all upstream commits into `ndr-pacing-lab`.
 2. For conflict files tied to local debug instrumentation, keep `ndr-pacing-lab` versions unless there is a specific reason to adopt upstream hunk(s).
 3. For unrelated subsystems, prefer upstream.
+
+For `master-new`, apply the same conflict policy: protect local tooling surfaces first, then selectively import upstream hunks where required.
 
 This keeps debug capability intact while tracking upstream changes everywhere else.
 
@@ -40,15 +46,18 @@ Conflicts in these files should be reviewed with extra care:
 ## Recurring Sync Procedure
 
 1. Preflight:
-   - `git switch ndr-pacing-lab`
+   - `git switch <target-branch>`
    - `git status --short --branch` (must be clean or intentionally staged)
 2. Refresh remotes:
    - `git fetch upstream`
    - `git fetch origin --prune`
+   - note: this fetch is your point-in-time upstream snapshot
 3. Inspect upstream delta:
-   - `git log --oneline ndr-pacing-lab..upstream/master`
+   - `git log --oneline <target-branch>..upstream/master`
    - Optional sensitive-file check:
-     - `git log --oneline ndr-pacing-lab..upstream/master -- <sensitive files...>`
+     - `git log --oneline <target-branch>..upstream/master -- <sensitive files...>`
+4. Create rollback anchor:
+   - `git branch backup/<target-branch>-pre-sync-$(date +%Y%m%d-%H%M%S)`
 4. Merge upstream:
    - `git merge --no-ff upstream/master`
 5. Resolve conflicts:
@@ -59,7 +68,7 @@ Conflicts in these files should be reviewed with extra care:
    - quick sanity run
    - targeted debug run if dynarec paths changed
 7. Commit merge resolution and push:
-   - `git push origin ndr-pacing-lab`
+   - `git push origin <target-branch>`
 
 ## Conflict Handling Guidance
 
@@ -74,6 +83,7 @@ Do not blindly accept both sides in instrumentation hotspots.
 ## Safety Rules
 
 - Do not rebase away debug history on `ndr-pacing-lab` during active investigation cycles.
+- Do not rebase shared integration history on `master-new`; keep upstream intake as merge commits.
 - Do not delete logging hooks without confirming equivalent observability remains.
 - If a sync introduces behavior drift, keep the merge commit and revert narrowly by file/hunk instead of hard-resetting branch history.
 
