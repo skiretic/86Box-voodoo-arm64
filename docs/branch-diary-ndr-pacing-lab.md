@@ -253,3 +253,43 @@ Sampling snapshot:
 Interpretation:
 - telemetry pipeline and core logging behavior remained intact after sync
 - no immediate post-merge runtime/logging regression signal observed in this smoke run
+
+## Post-upstream-sync 3DNow telemetry smoke (2026-05-14, `master-new`)
+
+Purpose: validate that the latest `master-new <- upstream/master` sync preserved 3DNow dynarec telemetry/logging behavior and still builds/runs cleanly.
+
+Merge context:
+- `master-new` was synced from `upstream/master` with merge commit `81e9dcb42`
+- upstream point-in-time anchor after fetch: `aeb2dc106`
+- backup anchor created before merge: `backup/master-new-pre-sync-20260514-200829`
+- sensitive dynarec/logging file diff vs backup was empty for the tracked hotspot list
+
+Build/smoke:
+- `./scripts/setup-and-build.sh build` completed successfully
+- `./build/src/86Box.app/Contents/MacOS/86Box --help` completed successfully
+
+Run:
+- launcher: `env 86BOX_3DNOW_COV_STATS=1 ./scripts/dynarec/launch-vm-telemetry-run.sh post-upstream-3dnow-smoke-20260514-r1`
+- launch status: `launch_failed=0`
+- effective env: `86BOX_NEW_DYNAREC_STATS=1`, `86BOX_NEW_DYNAREC_TELEMETRY=0`, `86BOX_A013_TRACE=0`, `86BOX_3DNOW_COV_STATS=1`
+- guest workload: user-driven v13 kit smoke
+
+Host-log sanity:
+- `DYNAREC_S03A_SUMMARY` streaming and advancing
+- `EMU_SPEED_SAMPLE` present
+- no `ERROR/fatal/assert/segfault/abort/panic` hits in `86box.log`
+- no `DEBUGCON`/guest stdout markers captured; validation evidence below is host dynarec telemetry
+
+3DNow final summary:
+- `DYNAREC_3DNOW_SUMMARY tag=final total=4554 recompiled=4554 fallback=0`
+- `DYNAREC_3DNOW_OPSUMMARY total=4554 recip=201 shuffle_pack=0 arith=3988 cmp=228 conv=137 other=0 pfrcp=83 pfrsqrt=24 pfrcpit1=47 pfrsqit1=0 pfrcpit2=47 pfnacc=0 pfpnacc=0 pswapd=0 pi2fw=0 pfadd=1130 pfsub=522 pfsubr=129 pfmul=2008 pfacc=199 pavgusb=0`
+
+Analyzer snapshot:
+- `EMU_SPEED_SUMMARY samples=758 avg=98.850 p50=100 p95=101 p99=103 min=0 max=105 dips_lt100=94 dips_lt95=36 dips_lt90=25`
+- `DYNAREC_3DNOW_ARITH_BREAKDOWN pfadd=1130 pfsub=522 pfsubr=129 pfmul=2008 pfacc=199 pavgusb=0`
+- `DYNAREC_3DNOW_RECIP_BREAKDOWN pfrcp=83 pfrsqrt=24 pfrcpit1=47 pfrsqit1=0 pfrcpit2=47`
+
+Interpretation:
+- latest upstream sync preserved local 3DNow telemetry/logging behavior
+- every executed 3DNow opcode in this smoke used dynarec lowering (`fallback=0`)
+- no immediate build, launch, or host-log regression signal observed
