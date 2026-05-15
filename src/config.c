@@ -418,7 +418,6 @@ static void
 load_machine(void)
 {
     ini_section_t cat = ini_find_section(config, "Machine");
-    ini_section_t migration_cat;
     const char   *p;
     const char   *migrate_from = NULL;
     int           c;
@@ -465,10 +464,8 @@ load_machine(void)
                 machine = machine_get_machine_from_internal_name(machine_migrations[i].new);
                 if (machine != -1) {
                     migrate_from = p;
-                    if (machine_migrations[i].new_bios) {
-                        migration_cat = ini_find_or_create_section(config, machine_get_device(machine)->name);
-                        ini_section_set_string(migration_cat, "bios", machine_migrations[i].new_bios);
-                    }
+                    if (machine_migrations[i].new_bios)
+                        ini_set_string(config, machine_get_device(machine)->name, "bios", machine_migrations[i].new_bios);
                 }
                 break;
             }
@@ -1146,7 +1143,7 @@ load_ports(void)
             cat2 = ini_find_section(config, temp);
         }
         int old_mode = ini_section_get_int(cat2, "mode", -1);
-        if (old_mode >= 3) { /* passthrough (4 on v5.3 Windows, 3 otherwise) */
+        if (old_mode >= 3) { /* passthrough (4 on 5.3 Windows due to enum mistake, 3 otherwise) */
             sprintf(temp, "Serial Passthrough (COM) #%i", c + 1);
             ini_rename_section(cat2, temp);
             ini_section_delete_var(cat2, "mode");

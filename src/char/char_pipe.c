@@ -212,6 +212,7 @@ client:
 
                 snprintf(msg, sizeof(msg), "%s: Could not connect to %s: %s", dev->port->name, dev->path_out, strerror(err));
                 ui_msgbox(MBX_ERROR | MBX_ANSI, msg);
+                dev->path_out[dev->path_len] = prev;
                 goto errmsg;
             }
         }
@@ -496,10 +497,17 @@ static const device_config_t char_pipe_config[] = {
     {
         .name           = "path",
         .description    = "Pipe path",
+#ifdef _WIN32
         .type           = CONFIG_STRING,
         .default_string = NULL,
         .default_int    = 0,
         .file_filter    = NULL,
+#else
+        .type           = CONFIG_FNAME,
+        .default_string = NULL,
+        .default_int    = 1,
+        .file_filter    = "FIFO / terminal (*.*)|*.*",
+#endif
         .spinner        = { 0 },
         .selection      = { { 0 } },
         .bios           = { { 0 } }
@@ -548,7 +556,7 @@ const device_t char_pipe_com_device = {
 const device_t char_pipe_lpt_device = {
     .name          = "Named Pipe (LPT)",
     .internal_name = "pipe",
-    .flags         = DEVICE_LPT,
+    .flags         = DEVICE_LPT | DEVICE_HOTPLUG,
     .local         = 0,
     .init          = char_pipe_init,
     .close         = char_pipe_close,
