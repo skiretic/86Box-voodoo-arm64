@@ -15,8 +15,8 @@
 #ifndef PLAT_DIR_H
 #define PLAT_DIR_H
 
-/* Windows and Termux needs the POSIX re-implementations */
-#if defined(_WIN32) || defined(__TERMUX__)
+/* Windows (non-MinGW) and Termux need the POSIX re-implementations */
+#if (defined(_WIN32) && !defined(__MINGW32__)) || defined(__TERMUX__)
 #    ifdef _MAX_FNAME
 #        define MAXNAMLEN _MAX_FNAME
 #    else
@@ -28,11 +28,7 @@ struct dirent {
     long           d_ino;
     unsigned short d_reclen;
     unsigned short d_off;
-#    ifdef UNICODE
-    wchar_t d_name[MAXNAMLEN + 1];
-#    else
-    char d_name[MAXNAMLEN + 1];
-#    endif
+    char           d_name[MAXNAMLEN + 1];
 };
 #    define d_namlen d_reclen
 
@@ -42,11 +38,7 @@ typedef struct DIR_t {
     long  handle; /* open handle to Win32 system */
     short sts;    /* last known status code */
     char *dta;    /* internal work data */
-#    ifdef UNICODE
-    wchar_t dir[MAXDIRLEN + 1]; /* open dir */
-#    else
-    char dir[MAXDIRLEN + 1]; /* open dir */
-#    endif
+    char  dir[MAXDIRLEN + 1]; /* open dir */
     struct dirent dent; /* actual directory entry */
 } DIR;
 
@@ -64,11 +56,11 @@ extern int            closedir(DIR *);
 
 #    define rewinddir(dirp) seekdir(dirp, 0L)
 #else
-/* On linux and macOS, use the standard functions and types */
+/* On MinGW, Linux and macOS, use the standard functions and types */
 #    include <dirent.h>
 #endif
 
-#define plat_dir_is_special_entry(fn) (((fn)[0] == '.') && (((fn)[1] == '\0') || (((fn)[1] == '.') && ((fn)[2] == '\0'))))
+#define plat_dir_is_special_entry(fn) (((fn)[0] == '.') && (!(fn)[1] || (((fn)[1] == '.') && !(fn)[2])))
 
 #ifdef _WIN32
 #    ifndef FILE_ATTRIBUTE_DIRECTORY
@@ -93,7 +85,7 @@ plat_dir_open(plat_dir_t *context, const char *path)
     snprintf(context->path, context->path_len, "%s\\*", path);
 
     /* First entry is always . so we pre-load it for the default entry behavior. */
-    context->find = FindFirstFileA(context->path, &context->data);
+    context->find = FindFirstFileExA(context->path, FindExInfoBasic, &context->data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
     if (context->find == INVALID_HANDLE_VALUE) {
         free(context->path);
         return 0;
@@ -147,17 +139,37 @@ plat_dir_count_children(plat_dir_t *context)
     return ret;
 }
 
+static const char *plat_dir_get_path(plat_dir_t *context);
+
 static inline int
 plat_dir_read(plat_dir_t *context)
 {
     context->path[context->path_dir_len] = '\0';
-    while (1) {
-        if (!FindNextFileA(context->find, &context->data))
-            return 0;
-        else if (plat_dir_is_special_entry(context->data.cFileName))
-            continue;
-        return 1;
+    while (FindNextFileA(context->find, &context->data)) {
+        if (!plat_dir_is_special_entry(context->data.cFileName)) {
+            /* If this entry is a symlink, follow it and fill the target's attributes instead. */
+            if ((context->data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && (context->data.dwReserved0 == IO_REPARSE_TAG_SYMLINK)) {
+                HANDLE file = CreateFileA(plat_dir_get_path(context), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+                if (file != INVALID_HANDLE_VALUE) {
+                    char buf[4096];
+                    if (UNLIKELY(GetFinalPathNameByHandleA(file, buf, sizeof(buf), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS) <= 0))
+                        buf[0] = '\0';
+                    CloseHandle(file);
+                    if (LIKELY(buf[0])) {
+                        HANDLE find = FindFirstFileExA(buf, FindExInfoBasic, &context->data, FindExSearchNameMatch, NULL, FIND_FIRST_EX_LARGE_FETCH);
+                        if (LIKELY(find != INVALID_HANDLE_VALUE)) {
+                            FindClose(find);
+                            return 1;
+                        }
+                    }
+
+                }
+            } else {
+                return 1;
+            }
+        }
     }
+    return 0;
 }
 
 #    define plat_dir_get_name(context)      ((context)->data.cFileName)
@@ -177,7 +189,6 @@ plat_dir_read(plat_dir_t *context)
 #    endif
 #    define plat_dir_is_file(context)       (!((context)->data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
 #    define plat_dir_is_dir(context)        (!plat_dir_is_file((context)))
-#    define plat_dir_is_symlink(context)    (((context)->data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) && ((context)->data.dwReserved0 == IO_REPARSE_TAG_SYMLINK))
 #    define plat_dir_is_char(context)       (0)
 #    define plat_dir_is_block(context)      (0)
 #    define plat_dir_is_pipe(context)       (0)
@@ -338,6 +349,24 @@ plat_dir_fill_attributes(plat_dir_t *context, uint8_t *buf)
     return ret;
 }
 
+static void
+plat_dir_read_base(plat_dir_t *context)
+{
+    /* Get base directory attributes, including the child count. */
+    context->attr_list.dirattr |= ATTR_DIR_ENTRYCOUNT;
+    if (!fgetattrlist(context->find, &context->attr_list, context->attr_buf, context->attr_len, 0))
+        plat_dir_fill_attributes(context, context->attr_buf);
+    else
+        memset(&context->data, 0, sizeof(context->data));
+    context->data.name = ".";
+
+    /* Save the base directory's child count, or a sentinel value if it was not reported. */
+    context->dir_entrycount = context->data.entrycount ? *context->data.entrycount : (uint32_t) -1;
+
+    /* Don't get child count for child directories. */
+    context->attr_list.dirattr &= ~ATTR_DIR_ENTRYCOUNT;
+}
+
 static inline int
 plat_dir_open(plat_dir_t *context, const char *path)
 {
@@ -363,14 +392,11 @@ plat_dir_open(plat_dir_t *context, const char *path)
     context->attr_list.bitmapcount = ATTR_BIT_MAP_COUNT;
     context->attr_list.commonattr  = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_ERROR |
                                      ATTR_CMN_OBJTYPE |
-                                     ATTR_CMN_CRTIME | ATTR_CMN_MODTIME | ATTR_CMN_CHGTIME | ATTR_CMN_ACCTIME |
+                                     ATTR_CMN_CRTIME | ATTR_CMN_MODTIME | ATTR_CMN_CHGTIME | ATTR_CMN_ACCTIME
 #    ifdef PLAT_DIR_EXTRA_ATTRIBUTES
-                                     ATTR_CMN_OWNERID | ATTR_CMN_GRPID | ATTR_CMN_ACCESSMASK
-#    else
-                                     0
+                                     | ATTR_CMN_OWNERID | ATTR_CMN_GRPID | ATTR_CMN_ACCESSMASK
 #    endif
                                      ;
-    context->attr_list.dirattr     = ATTR_DIR_ENTRYCOUNT;
     context->attr_list.fileattr    = 
 #    ifdef PLAT_DIR_EXTRA_ATTRIBUTES
                                      ATTR_FILE_LINKCOUNT | ATTR_FILE_DEVTYPE |
@@ -378,19 +404,7 @@ plat_dir_open(plat_dir_t *context, const char *path)
                                      ATTR_FILE_DATALENGTH;
 
     /* Get attributes for the base directory separately, as . and .. are not included in getattrlistbulk. */
-    if (fgetattrlist(context->find, &context->attr_list, context->attr_buf, context->attr_len, 0)) {
-        free(context->path);
-        free(context->attr_buf);
-        return 0;
-    }
-    plat_dir_fill_attributes(context, context->attr_buf);
-    context->data.name = ".";
-
-    /* Save the base directory's child count. */
-    context->dir_entrycount = *context->data.entrycount;
-
-    /* We don't need the entry count for child directories. */
-    context->attr_list.dirattr &= ~ATTR_DIR_ENTRYCOUNT;
+    plat_dir_read_base(context);
 
     return 1;
 }
@@ -406,12 +420,28 @@ plat_dir_close(plat_dir_t *context)
 static inline int
 plat_dir_rewind(plat_dir_t *context)
 {
-    return lseek(context->find, 0, SEEK_SET) == 0;
+    if (lseek(context->find, 0, SEEK_SET))
+        return 0;
+    context->attr_remain = 0;
+    plat_dir_read_base(context);
+    return 1;
 }
 
 static inline size_t
 plat_dir_count_children(plat_dir_t *context)
 {
+    if (context->dir_entrycount == (uint32_t) -1) {
+        /* Undocumented behavior: ATTR_DIR_ENTRYCOUNT is not reported by some
+           filesystems, such as SMB shares. Count children manually if so. */
+        context->dir_entrycount = 0;
+        lseek(context->find, 0, SEEK_SET);
+        struct attrlist attr_list = { .commonattr = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME };
+        uint8_t buf[4096];
+        int entries;
+        while ((entries = getattrlistbulk(context->find, &attr_list, buf, sizeof(buf), 0)) > 0)
+            context->dir_entrycount += entries;
+        lseek(context->find, 0, SEEK_SET);
+    }
     return context->dir_entrycount;
 }
 
@@ -431,30 +461,37 @@ plat_dir_read(plat_dir_t *context)
     /* Fill attributes for this entry and move on to the next one. */
     context->attr_ptr += plat_dir_fill_attributes(context, context->attr_ptr);
     context->attr_remain--;
+
+    /* If this entry is a symlink, follow it and fill the target's attributes instead. */
+    if (LIKELY(context->data.objtype) && (*context->data.objtype == VLNK)) {
+        uint8_t buf[4096];
+        if (!getattrlistat(context->find, context->data.name, &context->attr_list, buf, sizeof(buf), 0))
+            plat_dir_fill_attributes(context, buf);
+    }
+
     return 1;
 }
 
 #    define plat_dir_get_name(context)      ((context)->data.name)
-#    define plat_dir_get_size(context)      (LIKELY((context)->data.datalength != NULL) ? *(context)->data.datalength : 0)
+#    define plat_dir_get_size(context)      (LIKELY((context)->data.datalength) ? *(context)->data.datalength : 0)
 #    define PLAT_DIR_HAS_BIRTHTIME          1
-#    define plat_dir_get_birthtime(context) (LIKELY((context)->data.crtime != NULL) ? (context)->data.crtime->tv_sec : 0)
-#    define plat_dir_get_mtime(context)     (LIKELY((context)->data.mtime != NULL) ? (context)->data.mtime->tv_sec : 0)
-#    define plat_dir_get_atime(context)     (LIKELY((context)->data.atime != NULL) ? (context)->data.atime->tv_sec : 0)
-#    define plat_dir_get_ctime(context)     (LIKELY((context)->data.ctime != NULL) ? (context)->data.ctime->tv_sec : 0)
+#    define plat_dir_get_birthtime(context) (LIKELY((context)->data.crtime) ? (context)->data.crtime->tv_sec : 0)
+#    define plat_dir_get_mtime(context)     (LIKELY((context)->data.mtime) ? (context)->data.mtime->tv_sec : 0)
+#    define plat_dir_get_atime(context)     (LIKELY((context)->data.atime) ? (context)->data.atime->tv_sec : 0)
+#    define plat_dir_get_ctime(context)     (LIKELY((context)->data.ctime) ? (context)->data.ctime->tv_sec : 0)
 #    ifdef PLAT_DIR_EXTRA_ATTRIBUTES
-#        define plat_dir_get_mode(context)  (LIKELY((context)->data.mode != NULL) ? *(context)->data.mode : 0)
-#        define plat_dir_get_nlink(context) (LIKELY((context)->data.linkcount != NULL) ? *(context)->data.linkcount : 0)
-#        define plat_dir_get_uid(context)   (LIKELY((context)->data.uid != NULL) ? *(context)->data.uid : 0)
-#        define plat_dir_get_gid(context)   (LIKELY((context)->data.gid != NULL) ? *(context)->data.gid : 0)
-#        define plat_dir_get_dev(context)   (LIKELY((context)->data.devtype != NULL) ? *(context)->data.devtype : 0)
+#        define plat_dir_get_mode(context)  (LIKELY((context)->data.mode) ? *(context)->data.mode : 0)
+#        define plat_dir_get_nlink(context) (LIKELY((context)->data.linkcount) ? *(context)->data.linkcount : 0)
+#        define plat_dir_get_uid(context)   (LIKELY((context)->data.uid) ? *(context)->data.uid : 0)
+#        define plat_dir_get_gid(context)   (LIKELY((context)->data.gid) ? *(context)->data.gid : 0)
+#        define plat_dir_get_dev(context)   (LIKELY((context)->data.devtype) ? *(context)->data.devtype : 0)
 #    endif
-#    define plat_dir_is_file(context)       (LIKELY((context)->data.objtype != NULL) ? (*(context)->data.objtype == VREG) : 0)
-#    define plat_dir_is_dir(context)        (LIKELY((context)->data.objtype != NULL) ? (*(context)->data.objtype == VDIR) : 0)
-#    define plat_dir_is_symlink(context)    (LIKELY((context)->data.objtype != NULL) ? (*(context)->data.objtype == VLNK) : 0)
-#    define plat_dir_is_char(context)       (LIKELY((context)->data.objtype != NULL) ? (*(context)->data.objtype == VCHR) : 0)
-#    define plat_dir_is_block(context)      (LIKELY((context)->data.objtype != NULL) ? (*(context)->data.objtype == VBLK) : 0)
-#    define plat_dir_is_pipe(context)       (LIKELY((context)->data.objtype != NULL) ? (*(context)->data.objtype == VFIFO) : 0)
-#    define plat_dir_is_socket(context)     (LIKELY((context)->data.objtype != NULL) ? (*(context)->data.objtype == VSOCK) : 0)
+#    define plat_dir_is_file(context)       (LIKELY((context)->data.objtype) ? (*(context)->data.objtype == VREG) : 0)
+#    define plat_dir_is_dir(context)        (LIKELY((context)->data.objtype) ? (*(context)->data.objtype == VDIR) : 0)
+#    define plat_dir_is_char(context)       (LIKELY((context)->data.objtype) ? (*(context)->data.objtype == VCHR) : 0)
+#    define plat_dir_is_block(context)      (LIKELY((context)->data.objtype) ? (*(context)->data.objtype == VBLK) : 0)
+#    define plat_dir_is_pipe(context)       (LIKELY((context)->data.objtype) ? (*(context)->data.objtype == VFIFO) : 0)
+#    define plat_dir_is_socket(context)     (LIKELY((context)->data.objtype) ? (*(context)->data.objtype == VSOCK) : 0)
 #    define plat_dir_is_hidden(context)     (plat_dir_get_name((context))[0] == '.')
 #    define plat_dir_is_system(context)     (plat_dir_is_char((context)) || plat_dir_is_block((context)) || plat_dir_is_socket((context)))
 #else
@@ -474,7 +511,7 @@ typedef struct {
     size_t         path_len;
     DIR           *find;
     struct dirent *data;
-    struct dirent  root_data;
+    struct dirent  base_data;
     struct stat    stats;
     uint8_t        stats_valid;
 } plat_dir_t;
@@ -503,9 +540,10 @@ plat_dir_open(plat_dir_t *context, const char *path)
     /* Represent the base directory as a synthetic '.' entry. d_type is left
        DT_UNKNOWN (zeroed by memset) since stats is already valid and all
        plat_dir_is_* macros fall through to the stat path when d_type is unknown. */
-    memset(&context->root_data, 0, sizeof(context->root_data));
-    strcpy(context->root_data.d_name, ".");
-    context->data = &context->root_data;
+    memset(&context->base_data, 0, sizeof(context->base_data));
+    strcpy(context->base_data.d_name, ".");
+    context->data = &context->base_data;
+
     return 1;
 }
 
@@ -521,8 +559,10 @@ plat_dir_rewind(plat_dir_t *context)
 {
     rewinddir(context->find);
     context->path[context->path_dir_len] = '\0';
-    context->data                        = &context->root_data;
-    context->stats_valid                 = 1;
+    if (context->data != &context->base_data) {
+        context->data        = &context->base_data;
+        context->stats_valid = !stat(context->path, &context->stats);
+    }
     return 1;
 }
 
@@ -577,7 +617,6 @@ plat_dir_read(plat_dir_t *context)
 
 #    define plat_dir_is_file_stat(context)    (S_ISREG(plat_dir_stat((context))->st_mode))
 #    define plat_dir_is_dir_stat(context)     (S_ISDIR(plat_dir_stat((context))->st_mode))
-#    define plat_dir_is_symlink_stat(context) (S_ISLNK(plat_dir_stat((context))->st_mode))
 #    define plat_dir_is_char_stat(context)    (S_ISCHR(plat_dir_stat((context))->st_mode))
 #    define plat_dir_is_block_stat(context)   (S_ISBLK(plat_dir_stat((context))->st_mode))
 #    define plat_dir_is_pipe_stat(context)    (S_ISFIFO(plat_dir_stat((context))->st_mode))
@@ -586,7 +625,6 @@ plat_dir_read(plat_dir_t *context)
 #    if defined(DT_UNKNOWN) && defined(DT_REG) && defined(DT_DIR)
 #        define plat_dir_is_file(context)    (((context)->data->d_type == DT_UNKNOWN) ? plat_dir_is_file_stat((context)) : ((context)->data->d_type == DT_REG))
 #        define plat_dir_is_dir(context)     (((context)->data->d_type == DT_UNKNOWN) ? plat_dir_is_dir_stat((context)) : ((context)->data->d_type == DT_DIR))
-#        define plat_dir_is_symlink(context) (((context)->data->d_type == DT_UNKNOWN) ? plat_dir_is_symlink_stat((context)) : ((context)->data->d_type == DT_LNK))
 #        define plat_dir_is_char(context)    (((context)->data->d_type == DT_UNKNOWN) ? plat_dir_is_char_stat((context)) : ((context)->data->d_type == DT_CHR))
 #        define plat_dir_is_block(context)   (((context)->data->d_type == DT_UNKNOWN) ? plat_dir_is_block_stat((context)) : ((context)->data->d_type == DT_BLK))
 #        define plat_dir_is_pipe(context)    (((context)->data->d_type == DT_UNKNOWN) ? plat_dir_is_pipe_stat((context)) : ((context)->data->d_type == DT_FIFO))
@@ -594,7 +632,6 @@ plat_dir_read(plat_dir_t *context)
 #    else
 #        define plat_dir_is_file    plat_dir_is_file_stat
 #        define plat_dir_is_dir     plat_dir_is_dir_stat
-#        define plat_dir_is_symlink plat_dir_is_symlink_stat
 #        define plat_dir_is_char    plat_dir_is_char_stat
 #        define plat_dir_is_block   plat_dir_is_block_stat
 #        define plat_dir_is_pipe    plat_dir_is_pipe_stat
@@ -605,7 +642,7 @@ plat_dir_read(plat_dir_t *context)
 #    define plat_dir_is_system(context) (plat_dir_is_char((context)) || plat_dir_is_block((context)) || plat_dir_is_socket((context)))
 #endif
 
-static inline const char *
+static const char *
 plat_dir_get_path(plat_dir_t *context)
 {
     if (context->path[context->path_dir_len])

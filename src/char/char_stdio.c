@@ -79,6 +79,7 @@ typedef struct {
 #ifdef _WIN32
     HANDLE       fd_in;
     HANDLE       fd_out;
+    unsigned int stdout_redirected   : 1;
     unsigned int prev_in_mode_valid  : 1;
     unsigned int prev_out_mode_valid : 1;
     DWORD        prev_in_mode;
@@ -216,6 +217,13 @@ char_stdio_close(void *priv)
     char_stdio_t *dev = (char_stdio_t *) priv;
 
     /* Resume logging to stdout if it had been stopped. */
+#ifdef _WIN32
+    if (dev->stdout_redirected) {
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+        CloseHandle(dev->fd_out);
+    } else
+#endif
     if (dev->prev_log) {
         fclose(stdlog);
         stdlog = dev->prev_log;
@@ -286,8 +294,8 @@ char_stdio_init(const device_t *info)
         if (stdio_claimed_by) {
             char_stdio_log(dev->log, "Standard input/output already claimed by %s\n", stdio_claimed_by);
 
-            snprintf(msg, sizeof(msg), "%s: Virtual console already in use by %s", dev->port->name, stdio_claimed_by);
-            ui_msgbox(MBX_INFO | MBX_ANSI, msg);
+            snprintf(msg, sizeof(msg), plat_get_string(STRING_CHARDEV_VCON_IN_USE), dev->port->name, stdio_claimed_by);
+            ui_msgbox(MBX_INFO, msg);
 
             dev->fd_in = dev->fd_out =
 #ifdef _WIN32
@@ -309,9 +317,16 @@ char_stdio_init(const device_t *info)
         /* Spawn a console if one isn't present. (GUI executable) */
         char_stdio_log(dev->log, "No Windows console, spawning one\n");
         pc_debug_console();
-        dev->fd_in = GetStdHandle(STD_INPUT_HANDLE);
+        dev->fd_in  = GetStdHandle(STD_INPUT_HANDLE);
+        dev->fd_out = CreateFileA("CONOUT$", GENERIC_WRITE, FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (CHAR_FD_VALID(dev->fd_out))
+            dev->stdout_redirected = 1;
+        else
+            goto use_stdout;
+    } else {
+use_stdout:
+        dev->fd_out = GetStdHandle(STD_OUTPUT_HANDLE);
     }
-    dev->fd_out = GetStdHandle(STD_OUTPUT_HANDLE);
 
     /* Set console title. */
     if (CHAR_FD_VALID(dev->fd_in) || CHAR_FD_VALID(dev->fd_out)) {
@@ -366,8 +381,8 @@ char_stdio_init(const device_t *info)
 #    endif
 
                         if (mode == CHAR_STDIO_MODE_PTY) {
-                            snprintf(msg, sizeof(msg), "%s: Attached to %s", dev->port->name, pty);
-                            ui_msgbox(MBX_INFO | MBX_ANSI, msg);
+                            snprintf(msg, sizeof(msg), plat_get_string(STRING_CHARDEV_ATTACHED), dev->port->name, pty);
+                            ui_msgbox(MBX_INFO, msg);
                         } else {
                             /* Build environment variables. */
                             static const char *pipe_cmd = "PIPECMD="
@@ -388,7 +403,7 @@ char_stdio_init(const device_t *info)
                             /* Determine command to execute. */
                             const char *cmd;
                             if (mode == CHAR_STDIO_MODE_TERM) {
-                                cmd = "eval $PIPECMD";
+                                cmd = "sh -c \"$PIPECMD\";reset;clear";
                             } else {
                                 cmd = device_get_config_string("command");
                                 if (!cmd || !cmd[0]) {
@@ -426,8 +441,8 @@ char_stdio_init(const device_t *info)
             err = errno;
             char_stdio_log(dev->log, "posix_openpt failed (%d)\n", err);
 errmsg:
-            snprintf(msg, sizeof(msg), "%s: Could not create pseudoterminal: %s", dev->port->name, strerror(err));
-            ui_msgbox(MBX_ERROR | MBX_ANSI, msg);
+            snprintf(msg, sizeof(msg), plat_get_string(STRING_CHARDEV_TERMINAL_ERROR), dev->port->name, strerror(err));
+            ui_msgbox(MBX_ERROR, msg);
             close(dev->fd_out);
             dev->fd_out = -1;
         }
@@ -472,7 +487,12 @@ errmsg:
         char_stdio_log(dev->log, "Disconnecting logging from stdout\n");
         dev->prev_log = stdlog;
 #ifdef _WIN32
-        stdlog = plat_fopen("NUL", "w");
+        if (dev->stdout_redirected) {
+            freopen("NUL", "w", stdout);
+            freopen("NUL", "w", stderr);
+        } else {
+            stdlog = plat_fopen("NUL", "w");
+        }
 #else
         stdlog = plat_fopen("/dev/null", "w");
 #endif
@@ -528,7 +548,7 @@ static const device_config_t char_stdio_config[] = {
 const device_t char_stdio_com_device = {
     .name          = "Virtual Console (COM)",
     .internal_name = "stdio",
-    .flags         = DEVICE_COM,
+    .flags         = DEVICE_COM | DEVICE_HOTPLUG,
     .local         = 0,
     .init          = char_stdio_init,
     .close         = char_stdio_close,

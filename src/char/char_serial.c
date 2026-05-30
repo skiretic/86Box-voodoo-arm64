@@ -255,7 +255,7 @@ char_serial_connect(char_serial_t *dev, int startup)
         char fmt[512];
         snprintf(fmt, sizeof(fmt), "FormatMessageA failed");
         FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), fmt, sizeof(fmt), NULL);
-        snprintf(msg, sizeof(msg), "%s: Could not connect to %s: %s", dev->port->name, path, fmt);
+        snprintf(msg, sizeof(msg), plat_get_string(STRING_CHARDEV_CONNECT_ERROR), dev->port->name, path, fmt);
         goto errmsg;
     }
 
@@ -284,7 +284,7 @@ char_serial_connect(char_serial_t *dev, int startup)
         char_serial_log(dev->log, "Path is not a TTY\n");
     }
     if (err) {
-        snprintf(msg, sizeof(msg), "%s: Could not connect to %s: %s", dev->port->name, path, strerror(err));
+        snprintf(msg, sizeof(msg), plat_get_string(STRING_CHARDEV_CONNECT_ERROR), dev->port->name, path, strerror(err));
         goto errmsg;
     }
 
@@ -331,7 +331,7 @@ char_serial_connect(char_serial_t *dev, int startup)
 errmsg:
     char_serial_disconnect(dev);
     if (startup)
-        ui_msgbox(MBX_ERROR | MBX_ANSI, msg);
+        ui_msgbox(MBX_ERROR, msg);
     else
         char_serial_log(dev->log, "%s\n", msg);
     return 0;
@@ -803,7 +803,7 @@ static const device_config_t char_serial_config[] = {
 const device_t char_serial_passthrough_com_device = {
     .name          = "Serial Passthrough (COM)",
     .internal_name = "serial_passthrough",
-    .flags         = DEVICE_COM,
+    .flags         = DEVICE_COM | DEVICE_HOTPLUG,
     .local         = 0,
     .init          = char_serial_init,
     .close         = char_serial_close,
