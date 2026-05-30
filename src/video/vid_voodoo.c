@@ -81,6 +81,23 @@ voodoo_env_is_disabled(const char *value)
     return !strcmp(value, "0") || !strcmp(value, "off") || !strcmp(value, "false") || !strcmp(value, "disabled");
 }
 
+static uint64_t
+voodoo_env_u64(const char *name, uint64_t fallback)
+{
+    const char *value = getenv(name);
+    char       *end;
+    uint64_t    parsed;
+
+    if (!value || !*value)
+        return fallback;
+
+    parsed = strtoull(value, &end, 0);
+    if (end == value)
+        return fallback;
+
+    return parsed;
+}
+
 static void
 voodoo_init_relax_settings(voodoo_t *voodoo)
 {
@@ -104,6 +121,22 @@ voodoo_init_relax_settings(voodoo_t *voodoo)
     voodoo->lfb_relax_ignore_draw = relax_enabled && (!strcmp(relax_env, "nodraw") || !strcmp(relax_env, "2") || !strcmp(relax_env, "3") || !strcmp(relax_env, "4") || !strcmp(relax_env, "frontsync"));
     voodoo->lfb_relax_ignore_fb_writes = relax_enabled && (!strcmp(relax_env, "nowrites") || !strcmp(relax_env, "3") || !strcmp(relax_env, "4") || !strcmp(relax_env, "frontsync"));
     voodoo->lfb_relax_front_sync = relax_enabled && (!strcmp(relax_env, "4") || !strcmp(relax_env, "frontsync"));
+}
+
+static void
+voodoo_init_validation_settings(voodoo_t *voodoo)
+{
+    const char *validate_env = getenv("VOODOO_VALIDATE");
+
+    if (!validate_env || !*validate_env || voodoo_env_is_disabled(validate_env))
+        return;
+
+    voodoo->validate_enabled = 1;
+    voodoo->validate_verify  = !strcmp(validate_env, "verify") || !strcmp(validate_env, "shadow");
+    voodoo->validate_limit   = voodoo_env_u64("VOODOO_VALIDATE_LIMIT", 256);
+    voodoo->validate_max_span = voodoo_env_u64("VOODOO_VALIDATE_MAX_SPAN", 2048);
+    voodoo->validate_log_limit = voodoo_env_u64("VOODOO_VALIDATE_LOG_LIMIT", 16);
+    voodoo->validate_fb_tolerance = voodoo_env_u64("VOODOO_VALIDATE_FB_TOL", 5);
 }
 
 static void
@@ -1157,6 +1190,7 @@ voodoo_card_init(void)
     voodoo_t *voodoo = calloc(1, sizeof(voodoo_t));
 
     voodoo_init_relax_settings(voodoo);
+    voodoo_init_validation_settings(voodoo);
     voodoo->bilinear_enabled  = device_get_config_int("bilinear");
     voodoo->dithersub_enabled = device_get_config_int("dithersub");
     voodoo->scrfilter         = device_get_config_int("dacfilter");
@@ -1320,6 +1354,7 @@ voodoo_2d3d_card_init(int type)
     voodoo_t *voodoo = calloc(1, sizeof(voodoo_t));
 
     voodoo_init_relax_settings(voodoo);
+    voodoo_init_validation_settings(voodoo);
     voodoo->bilinear_enabled  = device_get_config_int("bilinear");
     voodoo->dithersub_enabled = device_get_config_int("dithersub");
     voodoo->scrfilter         = device_get_config_int("dacfilter");
@@ -1572,6 +1607,88 @@ voodoo_card_close(voodoo_t *voodoo)
               voodoo->readl_fb_relaxed_buf[2],
               voodoo->readl_reg_count,
               voodoo->readl_tex_count);
+    }
+    if (voodoo->validate_enabled) {
+        pclog("Voodoo validate (type=%d verify=%d): spans=%" PRIu64 " jit=%" PRIu64 " interp=%" PRIu64
+              " verify=%" PRIu64 " skipped=%" PRIu64 " mismatch_spans=%" PRIu64
+              " fb_mismatches=%" PRIu64 " fb_within_tol=%" PRIu64 " fb_over_tol=%" PRIu64
+              " fb_zero_nonzero=%" PRIu64 " fb_tol=%" PRIu64 " fb_max_d565=(%d,%d,%d)"
+              " aux_mismatches=%" PRIu64 " state_mismatches=%" PRIu64 "\n",
+              voodoo->type,
+              voodoo->validate_verify,
+              voodoo->validate_spans,
+              voodoo->validate_jit_spans,
+              voodoo->validate_interp_spans,
+              voodoo->validate_verify_spans,
+              voodoo->validate_verify_skipped,
+              voodoo->validate_verify_mismatch_spans,
+              voodoo->validate_fb_mismatches,
+              voodoo->validate_fb_within_tolerance_mismatches,
+              voodoo->validate_fb_over_tolerance_mismatches,
+              voodoo->validate_fb_zero_nonzero_mismatches,
+              voodoo->validate_fb_tolerance,
+              voodoo->validate_fb_max_dr,
+              voodoo->validate_fb_max_dg,
+              voodoo->validate_fb_max_db,
+              voodoo->validate_aux_mismatches,
+              voodoo->validate_state_mismatches);
+        for (int c = 0; c < VOODOO_VALIDATE_MODE_BUCKETS; c++) {
+            const voodoo_validate_mode_bucket_t *bucket = &voodoo->validate_mode_buckets[c];
+
+            if (!bucket->valid)
+                continue;
+
+            pclog("Voodoo validate mode[%d]: spans=%" PRIu64 " fb=%" PRIu64 " within_tol=%" PRIu64
+                  " over_tol=%" PRIu64 " zero_nonzero=%" PRIu64 " aux=%" PRIu64 " state=%" PRIu64
+                  " max_d565=(%d,%d,%d) fbzMode=%08x depth=%d rgb_w=%d depth_w=%d alpha_en=%d"
+                  " fogMode=%08x fog_en=%d fog_add=%d fog_mult=%d fog_src=%02x fog_const=%d"
+                  " fbzColorPath=%08x tex_en=%d cc_mselect=%d cc_add=%d cca_mselect=%d cca_add=%d"
+                  " alphaMode=%08x alpha_test=%d alpha_blend=%d alpha_func=%d src_afunc=%d dest_afunc=%d"
+                  " textureMode0=%08x tex0_kind=%08x tex0_local=%d tex0_tri=%d"
+                  " textureMode1=%08x tex1_kind=%08x tex1_local=%d tex1_tri=%d\n",
+                  c,
+                  bucket->spans,
+                  bucket->fb_mismatches,
+                  bucket->fb_within_tolerance_mismatches,
+                  bucket->fb_over_tolerance_mismatches,
+                  bucket->fb_zero_nonzero_mismatches,
+                  bucket->aux_mismatches,
+                  bucket->state_mismatches,
+                  bucket->fb_max_dr,
+                  bucket->fb_max_dg,
+                  bucket->fb_max_db,
+                  bucket->fbzMode,
+                  (bucket->fbzMode >> 5) & 7,
+                  !!(bucket->fbzMode & FBZ_RGB_WMASK),
+                  !!(bucket->fbzMode & FBZ_DEPTH_WMASK),
+                  !!(bucket->fbzMode & FBZ_ALPHA_ENABLE),
+                  bucket->fogMode,
+                  !!(bucket->fogMode & FOG_ENABLE),
+                  !!(bucket->fogMode & FOG_ADD),
+                  !!(bucket->fogMode & FOG_MULT),
+                  bucket->fogMode & (FOG_Z | FOG_ALPHA),
+                  !!(bucket->fogMode & FOG_CONSTANT),
+                  bucket->fbzColorPath,
+                  !!(bucket->fbzColorPath & FBZCP_TEXTURE_ENABLED),
+                  (bucket->fbzColorPath >> 10) & 7,
+                  (bucket->fbzColorPath >> 14) & 3,
+                  (bucket->fbzColorPath >> 19) & 7,
+                  (bucket->fbzColorPath >> 23) & 3,
+                  bucket->alphaMode,
+                  !!(bucket->alphaMode & 1),
+                  !!(bucket->alphaMode & (1 << 4)),
+                  (bucket->alphaMode >> 1) & 7,
+                  (bucket->alphaMode >> 8) & 0xf,
+                  (bucket->alphaMode >> 12) & 0xf,
+                  bucket->textureMode[0],
+                  bucket->textureMode[0] & TEXTUREMODE_MASK,
+                  (bucket->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL,
+                  !!(bucket->textureMode[0] & TEXTUREMODE_TRILINEAR),
+                  bucket->textureMode[1],
+                  bucket->textureMode[1] & TEXTUREMODE_MASK,
+                  (bucket->textureMode[1] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL,
+                  !!(bucket->textureMode[1] & TEXTUREMODE_TRILINEAR));
+        }
     }
 
     for (uint8_t c = 0; c < TEX_CACHE_MAX; c++) {

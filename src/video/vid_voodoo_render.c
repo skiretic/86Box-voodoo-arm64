@@ -667,6 +667,115 @@ voodoo_tmu_fetch_and_blend(voodoo_t *voodoo, voodoo_params_t *params, voodoo_sta
 int voodoo_recomp = 0;
 #endif
 
+static inline int
+voodoo_validate_x_index(const voodoo_params_t *params, int x, int aux)
+{
+    if ((aux && params->aux_tiled) || (!aux && params->col_tiled))
+        return (x & 63) | ((x >> 6) * 128 * 32 / 2);
+
+    return x;
+}
+
+static void
+voodoo_validate_save_line(const voodoo_params_t *params, uint16_t *fb_mem, uint16_t *aux_mem,
+                          int x_start, int count, uint16_t *fb_save, uint16_t *aux_save)
+{
+    for (int c = 0; c < count; c++) {
+        int x = x_start + c;
+
+        fb_save[c]  = fb_mem[voodoo_validate_x_index(params, x, 0)];
+        aux_save[c] = aux_mem[voodoo_validate_x_index(params, x, 1)];
+    }
+}
+
+static void
+voodoo_validate_restore_line(const voodoo_params_t *params, uint16_t *fb_mem, uint16_t *aux_mem,
+                             int x_start, int count, const uint16_t *fb_save, const uint16_t *aux_save)
+{
+    for (int c = 0; c < count; c++) {
+        int x = x_start + c;
+
+        fb_mem[voodoo_validate_x_index(params, x, 0)]  = fb_save[c];
+        aux_mem[voodoo_validate_x_index(params, x, 1)] = aux_save[c];
+    }
+}
+
+static int
+voodoo_validate_state_mismatch(const voodoo_state_t *jit_state, const voodoo_state_t *interp_state)
+{
+    return jit_state->stipple != interp_state->stipple;
+}
+
+static inline int
+voodoo_validate_abs_int(int value)
+{
+    return (value < 0) ? -value : value;
+}
+
+static void
+voodoo_validate_mode_accum(voodoo_t *voodoo, const voodoo_params_t *params, uint64_t spans,
+                           uint64_t fb_mismatches, uint64_t fb_within_tolerance_mismatches,
+                           uint64_t fb_over_tolerance_mismatches, uint64_t fb_zero_nonzero_mismatches,
+                           uint64_t aux_mismatches, uint64_t state_mismatches,
+                           int fb_max_dr, int fb_max_dg, int fb_max_db)
+{
+    voodoo_validate_mode_bucket_t *bucket  = NULL;
+    voodoo_validate_mode_bucket_t *replace = &voodoo->validate_mode_buckets[0];
+
+    for (int c = 0; c < VOODOO_VALIDATE_MODE_BUCKETS; c++) {
+        voodoo_validate_mode_bucket_t *candidate = &voodoo->validate_mode_buckets[c];
+
+        if (!candidate->valid) {
+            bucket = candidate;
+            break;
+        }
+
+        if (candidate->fbzMode == params->fbzMode &&
+            candidate->fbzColorPath == params->fbzColorPath &&
+            candidate->alphaMode == params->alphaMode &&
+            candidate->fogMode == params->fogMode &&
+            candidate->textureMode[0] == params->textureMode[0] &&
+            candidate->textureMode[1] == params->textureMode[1]) {
+            bucket = candidate;
+            break;
+        }
+
+        if (candidate->fb_mismatches < replace->fb_mismatches)
+            replace = candidate;
+    }
+
+    if (!bucket) {
+        if (fb_mismatches <= replace->fb_mismatches)
+            return;
+        bucket = replace;
+        memset(bucket, 0, sizeof(*bucket));
+    }
+
+    if (!bucket->valid) {
+        bucket->valid          = 1;
+        bucket->fbzMode        = params->fbzMode;
+        bucket->fbzColorPath   = params->fbzColorPath;
+        bucket->alphaMode      = params->alphaMode;
+        bucket->fogMode        = params->fogMode;
+        bucket->textureMode[0] = params->textureMode[0];
+        bucket->textureMode[1] = params->textureMode[1];
+    }
+
+    bucket->spans += spans;
+    bucket->fb_mismatches += fb_mismatches;
+    bucket->fb_within_tolerance_mismatches += fb_within_tolerance_mismatches;
+    bucket->fb_over_tolerance_mismatches += fb_over_tolerance_mismatches;
+    bucket->fb_zero_nonzero_mismatches += fb_zero_nonzero_mismatches;
+    bucket->aux_mismatches += aux_mismatches;
+    bucket->state_mismatches += state_mismatches;
+    if (fb_max_dr > bucket->fb_max_dr)
+        bucket->fb_max_dr = fb_max_dr;
+    if (fb_max_dg > bucket->fb_max_dg)
+        bucket->fb_max_dg = fb_max_dg;
+    if (fb_max_db > bucket->fb_max_db)
+        bucket->fb_max_db = fb_max_db;
+}
+
 static void
 voodoo_half_triangle(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int ystart, int yend, int odd_even)
 {
@@ -942,9 +1051,63 @@ voodoo_half_triangle(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *
 
 #ifndef NO_CODEGEN
         {
+            int             validate_active = 0;
+            int             validate_start  = 0;
+            int             validate_count  = 0;
+            uint16_t       *validate_fb_orig = NULL;
+            uint16_t       *validate_aux_orig = NULL;
+            uint16_t       *validate_fb_jit = NULL;
+            uint16_t       *validate_aux_jit = NULL;
+            voodoo_state_t  validate_state_orig;
+            voodoo_state_t  validate_state_jit;
+
+            if (voodoo->validate_enabled)
+                voodoo->validate_spans++;
+
             if (voodoo->use_recompiler && voodoo_draw) {
+                if (voodoo->validate_enabled)
+                    voodoo->validate_jit_spans++;
+
+                if (voodoo->validate_verify && voodoo->validate_verify_spans < voodoo->validate_limit) {
+                    int validate_end = (x < x2) ? x2 : x;
+
+                    validate_start = (x < x2) ? x : x2;
+                    validate_count = validate_end - validate_start + 1;
+                    if (validate_count > 0 && (uint64_t) validate_count <= voodoo->validate_max_span) {
+                        validate_fb_orig  = (uint16_t *) malloc((size_t) validate_count * sizeof(uint16_t));
+                        validate_aux_orig = (uint16_t *) malloc((size_t) validate_count * sizeof(uint16_t));
+                        validate_fb_jit   = (uint16_t *) malloc((size_t) validate_count * sizeof(uint16_t));
+                        validate_aux_jit  = (uint16_t *) malloc((size_t) validate_count * sizeof(uint16_t));
+
+                        if (validate_fb_orig && validate_aux_orig && validate_fb_jit && validate_aux_jit) {
+                            validate_state_orig = *state;
+                            voodoo_validate_save_line(params, fb_mem, aux_mem, validate_start, validate_count,
+                                                      validate_fb_orig, validate_aux_orig);
+                            validate_active = 1;
+                            voodoo->validate_verify_spans++;
+                        } else {
+                            voodoo->validate_verify_skipped++;
+                        }
+                    } else {
+                        voodoo->validate_verify_skipped++;
+                    }
+                }
+
                 voodoo_draw(state, params, x, real_y);
+
+                if (validate_active) {
+                    validate_state_jit = *state;
+                    voodoo_validate_save_line(params, fb_mem, aux_mem, validate_start, validate_count,
+                                              validate_fb_jit, validate_aux_jit);
+                    voodoo_validate_restore_line(params, fb_mem, aux_mem, validate_start, validate_count,
+                                                 validate_fb_orig, validate_aux_orig);
+                    *state = validate_state_orig;
+                } else {
+                    goto voodoo_codegen_span_done;
+                }
             } else
+                if (voodoo->validate_enabled)
+                    voodoo->validate_interp_spans++;
 #endif
             do {
                 int x_tiled = (x & 63) | ((x >> 6) * 128 * 32 / 2);
@@ -1394,6 +1557,150 @@ skip_pixel:
             } while (start_x != x2);
 
 #ifndef NO_CODEGEN
+            if (validate_active) {
+                int fb_mismatches    = 0;
+                int aux_mismatches   = 0;
+                int fb_within_tolerance_mismatches = 0;
+                int fb_over_tolerance_mismatches = 0;
+                int fb_zero_nonzero_mismatches = 0;
+                int fb_span_max_dr = 0;
+                int fb_span_max_dg = 0;
+                int fb_span_max_db = 0;
+                int first_fb_mismatch = -1;
+                int first_aux_mismatch = -1;
+                int state_mismatch;
+
+                for (int c = 0; c < validate_count; c++) {
+                    int      x_cmp = validate_start + c;
+                    uint16_t fb_interp = fb_mem[voodoo_validate_x_index(params, x_cmp, 0)];
+                    uint16_t aux_interp = aux_mem[voodoo_validate_x_index(params, x_cmp, 1)];
+
+                    if (validate_fb_jit[c] != fb_interp) {
+                        int jit_r    = (validate_fb_jit[c] >> 11) & 0x1f;
+                        int jit_g    = (validate_fb_jit[c] >> 5) & 0x3f;
+                        int jit_b    = validate_fb_jit[c] & 0x1f;
+                        int interp_r = (fb_interp >> 11) & 0x1f;
+                        int interp_g = (fb_interp >> 5) & 0x3f;
+                        int interp_b = fb_interp & 0x1f;
+                        int abs_dr   = voodoo_validate_abs_int(jit_r - interp_r);
+                        int abs_dg   = voodoo_validate_abs_int(jit_g - interp_g);
+                        int abs_db   = voodoo_validate_abs_int(jit_b - interp_b);
+
+                        if (first_fb_mismatch < 0)
+                            first_fb_mismatch = c;
+                        fb_mismatches++;
+                        if ((validate_fb_jit[c] == 0) != (fb_interp == 0))
+                            fb_zero_nonzero_mismatches++;
+                        if ((uint64_t) abs_dr <= voodoo->validate_fb_tolerance &&
+                            (uint64_t) abs_dg <= voodoo->validate_fb_tolerance &&
+                            (uint64_t) abs_db <= voodoo->validate_fb_tolerance)
+                            fb_within_tolerance_mismatches++;
+                        else
+                            fb_over_tolerance_mismatches++;
+                        if (abs_dr > fb_span_max_dr)
+                            fb_span_max_dr = abs_dr;
+                        if (abs_dg > fb_span_max_dg)
+                            fb_span_max_dg = abs_dg;
+                        if (abs_db > fb_span_max_db)
+                            fb_span_max_db = abs_db;
+                    }
+                    if (validate_aux_jit[c] != aux_interp) {
+                        if (first_aux_mismatch < 0)
+                            first_aux_mismatch = c;
+                        aux_mismatches++;
+                    }
+                }
+
+                state_mismatch = voodoo_validate_state_mismatch(&validate_state_jit, state);
+                if (fb_mismatches || aux_mismatches || state_mismatch) {
+                    voodoo->validate_verify_mismatch_spans++;
+                    voodoo->validate_fb_mismatches += (uint64_t) fb_mismatches;
+                    voodoo->validate_fb_within_tolerance_mismatches += (uint64_t) fb_within_tolerance_mismatches;
+                    voodoo->validate_fb_over_tolerance_mismatches += (uint64_t) fb_over_tolerance_mismatches;
+                    voodoo->validate_fb_zero_nonzero_mismatches += (uint64_t) fb_zero_nonzero_mismatches;
+                    if (fb_span_max_dr > voodoo->validate_fb_max_dr)
+                        voodoo->validate_fb_max_dr = fb_span_max_dr;
+                    if (fb_span_max_dg > voodoo->validate_fb_max_dg)
+                        voodoo->validate_fb_max_dg = fb_span_max_dg;
+                    if (fb_span_max_db > voodoo->validate_fb_max_db)
+                        voodoo->validate_fb_max_db = fb_span_max_db;
+                    voodoo->validate_aux_mismatches += (uint64_t) aux_mismatches;
+                    if (state_mismatch)
+                        voodoo->validate_state_mismatches++;
+                    voodoo_validate_mode_accum(voodoo, params, 1, (uint64_t) fb_mismatches,
+                                               (uint64_t) fb_within_tolerance_mismatches,
+                                               (uint64_t) fb_over_tolerance_mismatches,
+                                               (uint64_t) fb_zero_nonzero_mismatches,
+                                               (uint64_t) aux_mismatches, state_mismatch ? 1 : 0,
+                                               fb_span_max_dr, fb_span_max_dg, fb_span_max_db);
+
+                    if (voodoo->validate_logged_mismatches < voodoo->validate_log_limit) {
+                        int first_fb_x  = (first_fb_mismatch >= 0) ? validate_start + first_fb_mismatch : -1;
+                        int first_aux_x = (first_aux_mismatch >= 0) ? validate_start + first_aux_mismatch : -1;
+                        uint16_t jit_fb = 0;
+                        uint16_t interp_fb = 0;
+                        int      jit_r = 0, jit_g = 0, jit_b = 0;
+                        int      interp_r = 0, interp_g = 0, interp_b = 0;
+
+                        if (first_fb_mismatch >= 0) {
+                            int x_cmp = validate_start + first_fb_mismatch;
+
+                            jit_fb    = validate_fb_jit[first_fb_mismatch];
+                            interp_fb = fb_mem[voodoo_validate_x_index(params, x_cmp, 0)];
+                            jit_r     = (jit_fb >> 11) & 0x1f;
+                            jit_g     = (jit_fb >> 5) & 0x3f;
+                            jit_b     = jit_fb & 0x1f;
+                            interp_r  = (interp_fb >> 11) & 0x1f;
+                            interp_g  = (interp_fb >> 5) & 0x3f;
+                            interp_b  = interp_fb & 0x1f;
+                        }
+
+                        pclog("Voodoo validate mismatch: y=%d x=%d..%d fb=%d aux=%d state=%d first_fb_x=%d first_aux_x=%d"
+                              " jit_fb=%04x interp_fb=%04x d565=(%+d,%+d,%+d)"
+                              " fb_within_tol=%d fb_over_tol=%d fb_zero_nonzero=%d fb_span_max_d565=(%d,%d,%d)"
+                              " init_z=%08x init_w=%012llx init_ia=%d init_tmu0=(%012llx,%012llx,%012llx) lod=%d"
+                              " fbzMode=%08x fbzColorPath=%08x alphaMode=%08x textureMode0=%08x fogMode=%08x\n",
+                              real_y,
+                              validate_start,
+                              validate_start + validate_count - 1,
+                              fb_mismatches,
+                              aux_mismatches,
+                              state_mismatch,
+                              first_fb_x,
+                              first_aux_x,
+                              jit_fb,
+                              interp_fb,
+                              jit_r - interp_r,
+                              jit_g - interp_g,
+                              jit_b - interp_b,
+                              fb_within_tolerance_mismatches,
+                              fb_over_tolerance_mismatches,
+                              fb_zero_nonzero_mismatches,
+                              fb_span_max_dr,
+                              fb_span_max_dg,
+                              fb_span_max_db,
+                              (unsigned) validate_state_orig.z,
+                              (unsigned long long) validate_state_orig.w,
+                              validate_state_orig.ia,
+                              (unsigned long long) validate_state_orig.tmu0_s,
+                              (unsigned long long) validate_state_orig.tmu0_t,
+                              (unsigned long long) validate_state_orig.tmu0_w,
+                              validate_state_orig.lod,
+                              params->fbzMode,
+                              params->fbzColorPath,
+                              params->alphaMode,
+                              params->textureMode[0],
+                              params->fogMode);
+                        voodoo->validate_logged_mismatches++;
+                    }
+                }
+            }
+
+voodoo_codegen_span_done:
+            free(validate_fb_orig);
+            free(validate_aux_orig);
+            free(validate_fb_jit);
+            free(validate_aux_jit);
         }
 #endif
 

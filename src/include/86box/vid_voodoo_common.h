@@ -29,6 +29,27 @@
 
 #define TEX_CACHE_MAX   64
 
+#define VOODOO_VALIDATE_MODE_BUCKETS 16
+
+typedef struct voodoo_validate_mode_bucket_t {
+    int      valid;
+    uint32_t fbzMode;
+    uint32_t fbzColorPath;
+    uint32_t alphaMode;
+    uint32_t fogMode;
+    uint32_t textureMode[2];
+    uint64_t spans;
+    uint64_t fb_mismatches;
+    uint64_t fb_within_tolerance_mismatches;
+    uint64_t fb_over_tolerance_mismatches;
+    uint64_t fb_zero_nonzero_mismatches;
+    uint64_t aux_mismatches;
+    uint64_t state_mismatches;
+    int      fb_max_dr;
+    int      fb_max_dg;
+    int      fb_max_db;
+} voodoo_validate_mode_bucket_t;
+
 enum {
     VOODOO_1 = 0,
     VOODOO_SB50,
@@ -736,6 +757,29 @@ typedef struct voodoo_t {
     int      lfb_relax_ignore_draw;
     int      lfb_relax_ignore_fb_writes;
     int      lfb_relax_front_sync;
+    int      validate_enabled;
+    int      validate_verify;
+    uint64_t validate_limit;
+    uint64_t validate_max_span;
+    uint64_t validate_log_limit;
+    uint64_t validate_fb_tolerance;
+    uint64_t validate_spans;
+    uint64_t validate_jit_spans;
+    uint64_t validate_interp_spans;
+    uint64_t validate_verify_spans;
+    uint64_t validate_verify_skipped;
+    uint64_t validate_verify_mismatch_spans;
+    uint64_t validate_fb_mismatches;
+    uint64_t validate_fb_within_tolerance_mismatches;
+    uint64_t validate_fb_over_tolerance_mismatches;
+    uint64_t validate_fb_zero_nonzero_mismatches;
+    uint64_t validate_aux_mismatches;
+    uint64_t validate_state_mismatches;
+    uint64_t validate_logged_mismatches;
+    int      validate_fb_max_dr;
+    int      validate_fb_max_dg;
+    int      validate_fb_max_db;
+    voodoo_validate_mode_bucket_t validate_mode_buckets[VOODOO_VALIDATE_MODE_BUCKETS];
 
     int      force_blit_count;
     int      can_blit;
