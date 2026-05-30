@@ -80,3 +80,7 @@ research/solo1-drivers/ESS 1938S Driver.iso
 AGENTS.md
 docs/videocommo*
 docs/perf-artifact*
+tools/win98-*
+docs/archive/2026-04-26-legacy/*
+
+docs/archive/arm64-voodoo-optimization-investigation.md

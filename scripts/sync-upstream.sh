@@ -12,16 +12,11 @@ keep_ours_paths=(
   "README.md"
   "appimage"
   "docs/upstream-sync-workflow.md"
-  "scripts/README-jit-analyzer.md"
-  "scripts/analyze-jit-log-win32.c"
-  "scripts/analyze-jit-log.c"
-  "scripts/analyze-jit-log.py"
   "scripts/build-and-sign.sh"
   "scripts/clean-build-and-sign.sh"
   "scripts/setup-and-build.sh"
   "scripts/sync-upstream.sh"
   "scripts/test-with-vm.sh"
-  "voodoo-arm64-port"
 )
 
 restore_fork_owned_paths() {

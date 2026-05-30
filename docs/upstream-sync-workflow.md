@@ -25,7 +25,6 @@ That script will:
 - `appimage/`
 - `docs/upstream-sync-workflow.md`
 - fork-specific scripts in `scripts/`
-- `voodoo-arm64-port/`
 
 If more fork-specific docs or branding files should always stay local, add them to `keep_ours_paths` in [`scripts/sync-upstream.sh`](/Users/anthony/projects/code/86Box-voodoo-arm64/scripts/sync-upstream.sh).
 
