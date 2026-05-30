@@ -1310,8 +1310,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         }
 
         /* Interpreter: ((tmu_s/t + (1 << 13)) >> 14) */
-        addlong(ARM64_MOVZ_X(10, 1));
-        addlong(ARM64_LSL_IMM_X(10, 10, 13));
+        addlong(ARM64_MOVZ_X_HW(10, 0x2000, 0));
         addlong(ARM64_ADD_REG_X(5, 5, 10));
         addlong(ARM64_ADD_REG_X(6, 6, 10));
 
@@ -1326,8 +1325,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         addlong(ARM64_MUL_X(6, 6, 4));
 
         /* Interpreter: ((s/t * quotient) + (1 << 29)) >> 30 */
-        addlong(ARM64_MOVZ_X(10, 1));
-        addlong(ARM64_LSL_IMM_X(10, 10, 29));
+        addlong(ARM64_MOVZ_X_HW(10, 0x2000, 1));
         addlong(ARM64_ADD_REG_X(5, 5, 10));
         addlong(ARM64_ADD_REG_X(6, 6, 10));
 
