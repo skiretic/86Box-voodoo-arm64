@@ -70,16 +70,14 @@ plat_delay_ms(uint32_t count)
 #endif
 }
 
-wchar_t *
-ui_window_title(wchar_t *str)
+char *
+ui_window_title(char *str)
 {
     if (str == nullptr) {
-        static wchar_t title[512] = { 0 };
-
-        main_window->getTitle(title);
-        str = title;
+        QString title = main_window->getTitle();
+        str = title.toUtf8().data();
     } else
-        emit main_window->setTitle(QString::fromWCharArray(str));
+        emit main_window->setTitle(QString::fromUtf8(str));
 
     return str;
 }
@@ -152,21 +150,31 @@ plat_mouse_capture(int on)
 }
 
 int
-ui_msgbox_header(int flags, void *header, void *message)
+ui_msgbox_header(int flags, char *header, char *message)
 {
-    const auto hdr = (flags & MBX_ANSI) ? QString(static_cast<char *>(header)) : QString::fromWCharArray(static_cast<const wchar_t *>(header));
-    const auto msg = (flags & MBX_ANSI) ? QString(static_cast<char *>(message)) : QString::fromWCharArray(static_cast<const wchar_t *>(message));
+    const auto hdr = QString::fromUtf8(header);
+    const auto msg = QString::fromUtf8(message);
 
     // any error in early init
     if (main_window == nullptr) {
-        auto msgicon = QMessageBox::Icon::Critical;
-        if (flags & MBX_INFO)
-            msgicon = QMessageBox::Icon::Information;
-        else if (flags & MBX_QUESTION)
-            msgicon = QMessageBox::Icon::Question;
+        auto defaultheader = QString();
+        if (hdr.isEmpty()) {
+            if (flags & MBX_FATAL)
+                defaultheader = QObject::tr("Fatal error");
+            else if (flags & MBX_ERROR)
+                defaultheader = QObject::tr("Error");
+            else
+                defaultheader = EMU_NAME;
+        }
+
+        auto msgicon = QMessageBox::Icon::Information;
+        if (flags & (MBX_ERROR | MBX_FATAL))
+            msgicon = QMessageBox::Icon::Critical;
         else if (flags & MBX_WARNING)
             msgicon = QMessageBox::Icon::Warning;
-        QMessageBox msgBox(msgicon, hdr, msg);
+//        else if (flags & MBX_QUESTION)
+//            msgicon = QMessageBox::Icon::Question;
+        QMessageBox msgBox(msgicon, (defaultheader.isEmpty() ? hdr : defaultheader), msg);
         msgBox.exec();
     } else {
         // else scope it to main_window
@@ -194,7 +202,7 @@ ui_deinit_monitor(int monitor_index)
 }
 
 int
-ui_msgbox(int flags, void *message)
+ui_msgbox(int flags, char *message)
 {
     return ui_msgbox_header(flags, nullptr, message);
 }
@@ -210,13 +218,6 @@ void
 ui_sb_mt32lcd(char *str)
 {
     sb_mt32lcdtext = QString(str);
-    ui_sb_update_text();
-}
-
-void
-ui_sb_set_text_w(wchar_t *wstr)
-{
-    sb_text = QString::fromWCharArray(wstr);
     ui_sb_update_text();
 }
 

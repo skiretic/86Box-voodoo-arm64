@@ -24,11 +24,14 @@ add_library(snd OBJECT
     snd_resid.cpp
     midi.c
     snd_speaker.c
-    snd_pssj.c
+    snd_lpt_adlipt.c
+    snd_lpt_cms.c
     snd_lpt_dac.c
+    snd_lpt_dss.c
+    snd_lpt_tndlpt.c
+    snd_pssj.c
     snd_ac97_codec.c
     snd_ac97_via.c
-    snd_lpt_dss.c
     snd_ps1.c
     snd_adlib.c
     snd_adlibgold.c
@@ -42,6 +45,7 @@ add_library(snd OBJECT
     snd_cmi8x38.c
     snd_covox.c
     snd_cs423x.c
+    snd_imfc.cpp
     snd_gus.c
     snd_sb.c
     snd_sb_dsp.c
@@ -201,10 +205,22 @@ if(OPL4ML)
     target_sources(snd PRIVATE midi_opl4.c midi_opl4_yrw801.c)
 endif()
 
+if(SOUNDCANVAS)
+    target_compile_definitions(snd PRIVATE USE_SOUNDCANVAS)
+    target_sources(snd PRIVATE
+        midi_soundcanvas.c
+        clap/clap_event_list.c
+        clap/clap_host.c
+    )
+    if(NOT WIN32)
+        target_link_libraries(86Box dl)
+    endif()
+endif()
+
 if(SOFTMODEM)
     target_compile_definitions(snd PRIVATE USE_SOFTMODEM)
 endif()
- 
+
 find_package(PkgConfig)
 pkg_check_modules(SERIALPORT libserialport)
 

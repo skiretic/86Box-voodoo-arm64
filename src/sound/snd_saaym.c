@@ -24,6 +24,7 @@
 #include <86box/86box.h>
 #include <86box/device.h>
 #include <86box/io.h>
+#include <86box/sound.h>
 #include <86box/snd_cms.h>
 #include <86box/snd_saaym.h>
 #include <86box/sound.h>
@@ -95,14 +96,14 @@ saaym_read(uint16_t addr, void *priv)
 }
 
 static void
-saaym_get_music_buffer(int32_t *buffer, int len, void *priv)
+saaym_get_music_buffer(int32_t *buffer, uint16_t len, void *priv)
 {
     const saaym_t *saaym   = (const saaym_t *) priv;
     const int32_t *opm_buf = NULL;
 
     opm_buf = saaym->opm.update(saaym->opm.priv);
 
-    for (int c = 0; c < len * 2; c += 2) {
+    for (uint16_t c = 0; c < len * 2; c += 2) {
         double out_l = 0.0;
         double out_r = 0.0;
 
