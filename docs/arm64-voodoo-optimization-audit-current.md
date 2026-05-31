@@ -371,3 +371,24 @@ Validation:
 - clean coverage buckets included multiple `alpha_blend=1` modes, including `src_afunc=1 dest_afunc=5`, `src_afunc=4 dest_afunc=0`, `src_afunc=4 dest_afunc=4`, `src_afunc=2 dest_afunc=2`, and `src_afunc=2 dest_afunc=4`
 
 Status: P4 alpha blend multiply-round factoring corrected and closed by 51200000-span Quake 3 alpha-blend coverage.
+
+### 2026-05-30: P5 ARM64 texture fetch register lifetime corrected
+
+Implemented ARM64-local texture intermediate retention only:
+
+- removed the immediate `tex_s`/`tex_t` store-to-`LDP` reload pair before bilinear sampling
+- removed the immediate `tex_s`/`tex_t` store-to-`LDP` reload pair before point sampling
+- kept `tex_s`, `tex_t`, and integer `lod` in registers until sampling starts
+- stores final interpreter-visible `state->tex_s` and `state->tex_t` after mirror/bilinear offset adjustment and before destructive sample-coordinate shifts
+- preserved `state->lod`, `lod_frac[tmu]`, and `params->tex_lod[tmu][lod]` behavior
+- expanded verify state comparison to include `tex_s`, `tex_t`, `lod`, and `lod_frac[0..1]`
+- made no reciprocal math, x86-64, or shared semantic changes
+
+Validation:
+
+- build/sign passed
+- strict state verify passed: `verify=10240000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- 5x strict state soak passed: `verify=51200000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- clean coverage included dual-TMU trilinear/fog modes with `tex0_tri=1` and `tex1_tri=1`
+
+Status: P5 texture intermediate register lifetime corrected and closed by 51200000-span strict state soak.

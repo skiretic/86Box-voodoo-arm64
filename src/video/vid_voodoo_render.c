@@ -703,7 +703,12 @@ voodoo_validate_restore_line(const voodoo_params_t *params, uint16_t *fb_mem, ui
 static int
 voodoo_validate_state_mismatch(const voodoo_state_t *jit_state, const voodoo_state_t *interp_state)
 {
-    return jit_state->stipple != interp_state->stipple;
+    return jit_state->stipple != interp_state->stipple ||
+           jit_state->tex_s != interp_state->tex_s ||
+           jit_state->tex_t != interp_state->tex_t ||
+           jit_state->lod != interp_state->lod ||
+           jit_state->lod_frac[0] != interp_state->lod_frac[0] ||
+           jit_state->lod_frac[1] != interp_state->lod_frac[1];
 }
 
 static inline int
@@ -1658,6 +1663,8 @@ skip_pixel:
                         pclog("Voodoo validate mismatch: y=%d x=%d..%d fb=%d aux=%d state=%d first_fb_x=%d first_aux_x=%d"
                               " jit_fb=%04x interp_fb=%04x d565=(%+d,%+d,%+d)"
                               " fb_within_tol=%d fb_over_tol=%d fb_zero_nonzero=%d fb_span_max_d565=(%d,%d,%d)"
+                              " jit_state=(tex_s=%08x tex_t=%08x lod=%d lod_frac=(%d,%d) stipple=%08x)"
+                              " interp_state=(tex_s=%08x tex_t=%08x lod=%d lod_frac=(%d,%d) stipple=%08x)"
                               " init_z=%08x init_w=%012llx init_ia=%d init_tmu0=(%012llx,%012llx,%012llx) lod=%d"
                               " fbzMode=%08x fbzColorPath=%08x alphaMode=%08x textureMode0=%08x fogMode=%08x\n",
                               real_y,
@@ -1679,6 +1686,18 @@ skip_pixel:
                               fb_span_max_dr,
                               fb_span_max_dg,
                               fb_span_max_db,
+                              (unsigned) validate_state_jit.tex_s,
+                              (unsigned) validate_state_jit.tex_t,
+                              validate_state_jit.lod,
+                              validate_state_jit.lod_frac[0],
+                              validate_state_jit.lod_frac[1],
+                              validate_state_jit.stipple,
+                              (unsigned) state->tex_s,
+                              (unsigned) state->tex_t,
+                              state->lod,
+                              state->lod_frac[0],
+                              state->lod_frac[1],
+                              state->stipple,
                               (unsigned) validate_state_orig.z,
                               (unsigned long long) validate_state_orig.w,
                               validate_state_orig.ia,

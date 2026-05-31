@@ -1365,8 +1365,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         /* LSL x4, x4, #8 */
         addlong(ARM64_LSL_IMM_X(4, 4, 8));
 
-        /* Store tex_t: STR w6, [x0, #STATE_tex_t] */
-        addlong(ARM64_STR_W(6, 0, STATE_tex_t));
+        /* Keep tex_t live in w6 until sampling. */
 
         /* MOV w12, w11 -- save BSR result for shift */
         addlong(ARM64_MOV_REG(12, 11));
@@ -1383,8 +1382,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         /* AND w4, w4, #0xFF -- mantissa = low 8 bits */
         addlong(ARM64_AND_MASK(4, 4, 8));
 
-        /* Store tex_s: STR w5, [x0, #STATE_tex_s] */
-        addlong(ARM64_STR_W(5, 0, STATE_tex_s));
+        /* Keep tex_s live in w5 until sampling. */
 
         /* LDRB w4, [x19, x4] -- logtable[mantissa] */
         addlong(ARM64_LDRB_REG(4, 19, 4));
@@ -1414,7 +1412,11 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
         /* Store LOD: STR w4, [x0, #STATE_lod] */
         addlong(ARM64_STR_W(4, 0, STATE_lod));
-        addlong(ARM64_MOV_REG(6, 4));  /* keep LOD in w6 for bilinear/point-sample */
+        /* Sampling register contract: w4=tex_s, w5=tex_t, w6=lod. */
+        addlong(ARM64_MOV_REG(11, 4));
+        addlong(ARM64_MOV_REG(4, 5));
+        addlong(ARM64_MOV_REG(5, 6));
+        addlong(ARM64_MOV_REG(6, 11));
     } else {
         /* ============================================================
          * No perspective division (textureMode bit 0 clear)
@@ -1442,20 +1444,19 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         /* LSR x6, x6, #28 */
         addlong(ARM64_LSR_IMM_X(6, 6, 28));
 
-        /* STR w4, [x0, #STATE_tex_s] -- store low 32 bits (sufficient for tex coords).
-         * x86-64 stores 64-bit (RAX) but consumers read 32-bit, and STATE_tex_s (188)
-         * is NOT 8-byte aligned so STR_X would silently encode offset 184. */
-        addlong(ARM64_STR_W(4, 0, STATE_tex_s));
+        /* Keep tex_s live in w4 until sampling. */
 
         /* LSR w5, w5, #8 */
         addlong(ARM64_LSR_IMM(5, 5, 8));
 
-        /* STR w6, [x0, #STATE_tex_t] -- store low 32 bits for consistency */
-        addlong(ARM64_STR_W(6, 0, STATE_tex_t));
+        /* Keep tex_t live in w6 until sampling. */
 
         /* STR w5, [x0, #STATE_lod] */
         addlong(ARM64_STR_W(5, 0, STATE_lod));
-        addlong(ARM64_MOV_REG(6, 5));  /* keep LOD in w6 for bilinear/point-sample */
+        /* Sampling register contract: w4=tex_s, w5=tex_t, w6=lod. */
+        addlong(ARM64_MOV_REG(11, 5));
+        addlong(ARM64_MOV_REG(5, 6));
+        addlong(ARM64_MOV_REG(6, 11));
     }
 
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
@@ -1487,8 +1488,6 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             addlong(ARM64_SUB_REG(7, 7, 16));
             /* LSL w10, w10, w16  (1 << tex_lod) */
             addlong(ARM64_LSL_REG(10, 10, 16));
-            /* LDP w4, w5, [x0, #STATE_tex_s] -- load tex_s and tex_t */
-            addlong(ARM64_LDP_OFF_W(4, 5, 0, STATE_tex_s));
             /* LSL w10, w10, #3  ((1 << lod) << 3 = 1 << (lod+3)) */
             addlong(ARM64_LSL_IMM(10, 10, 3));
 
@@ -1513,6 +1512,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             addlong(ARM64_SUB_REG(4, 4, 10));
             /* SUB w5, w5, w10  (T -= (1 << (lod+3))) */
             addlong(ARM64_SUB_REG(5, 5, 10));
+            /* Preserve interpreter-visible final tex_s/tex_t before sampling shifts. */
+            addlong(ARM64_STR_W(4, 0, STATE_tex_s));
+            addlong(ARM64_STR_W(5, 0, STATE_tex_t));
             /* ASR w4, w4, w16  (S >>= tex_lod) */
             addlong(ARM64_ASR_REG(4, 4, 16));
             /* ASR w5, w5, w16  (T >>= tex_lod) */
@@ -1807,9 +1809,6 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
              * needs to strip the 4-bit sub-texel fraction too, hence lod+4. */
             addlong(ARM64_ADD_IMM(16, 16, 4));
 
-            /* LDP w4, w5, [x0, #STATE_tex_s] -- load tex_s and tex_t */
-            addlong(ARM64_LDP_OFF_W(4, 5, 0, STATE_tex_s));
-
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
                 int mirror_s_skip = block_pos;
@@ -1824,6 +1823,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                 addlong(ARM64_MVN(5, 5));
                 PATCH_FORWARD_TBxZ(mirror_t_skip);
             }
+
+            /* Preserve interpreter-visible final tex_s/tex_t before sampling shifts. */
+            addlong(ARM64_STR_W(4, 0, STATE_tex_s));
+            addlong(ARM64_STR_W(5, 0, STATE_tex_t));
 
             /* LSR w4, w4, w16  (S >> (tex_lod + 4)) */
             addlong(ARM64_LSR_REG(4, 4, 16));
