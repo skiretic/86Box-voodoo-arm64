@@ -1272,6 +1272,33 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
  *   v0-v7, v16-v17 = scratch NEON
  *   v8 = neon_01_w (pinned), v9 = neon_ff_w (pinned)
  * ======================================================================== */
+#define ARM64_EMIT_TEX_PARAM_LOD_LOAD(dst_reg, base_reg, lod_reg, param_offset) \
+    do {                                                                       \
+        addlong(ARM64_ADD_IMM_X(base_reg, 1, param_offset));                   \
+        addlong(ARM64_LDR_W_REG_LSL2(dst_reg, base_reg, lod_reg));             \
+    } while (0)
+
+#define ARM64_EMIT_TEX_MIRROR(coord_reg)           \
+    do {                                           \
+        int mirror_skip = block_pos;               \
+        addlong(ARM64_TBZ_PLACEHOLDER(coord_reg, 12)); \
+        addlong(ARM64_MVN(coord_reg, coord_reg));  \
+        PATCH_FORWARD_TBxZ(mirror_skip);           \
+    } while (0)
+
+#define ARM64_EMIT_TEX_COORD_WRAP(coord_reg, mask_reg) \
+    do {                                               \
+        addlong(ARM64_AND_REG(coord_reg, coord_reg, mask_reg)); \
+    } while (0)
+
+#define ARM64_EMIT_TEX_COORD_CLAMP(coord_reg, mask_reg, high_cond) \
+    do {                                                          \
+        addlong(ARM64_CMP_IMM(coord_reg, 0));                     \
+        addlong(ARM64_CSEL(coord_reg, 31, coord_reg, COND_LT));   \
+        addlong(ARM64_CMP_REG(coord_reg, mask_reg));              \
+        addlong(ARM64_CSEL(coord_reg, mask_reg, coord_reg, high_cond)); \
+    } while (0)
+
 static inline int
 codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int block_pos, int tmu)
 {
@@ -1480,8 +1507,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             addlong(ARM64_MOVZ_W(7, 8));
             /* Interpreter uses tex_lod[tmu][lod] for coordinate scaling,
              * while state->lod still selects the mip pointer and masks. */
-            addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_lod_n(tmu)));
-            addlong(ARM64_LDR_W_REG_LSL2(16, 14, 6));
+            ARM64_EMIT_TEX_PARAM_LOD_LOAD(16, 14, 6, PARAMS_tex_lod_n(tmu));
             /* MOV w10, #1 */
             addlong(ARM64_MOVZ_W(10, 1));
             /* SUB w7, w7, w16  (tex_shift = 8 - tex_lod) */
@@ -1493,19 +1519,11 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
-                /* TST w4, #0x1000; if set, NOT w4 */
-                /* Use TBZ: if bit 12 is zero, skip the NOT */
-                int mirror_s_skip = block_pos;
-                addlong(ARM64_TBZ_PLACEHOLDER(4, 12));
-                addlong(ARM64_MVN(4, 4));
-                PATCH_FORWARD_TBxZ(mirror_s_skip);
+                ARM64_EMIT_TEX_MIRROR(4);
             }
             /* Mirror T */
             if (params->tLOD[tmu] & LOD_TMIRROR_T) {
-                int mirror_t_skip = block_pos;
-                addlong(ARM64_TBZ_PLACEHOLDER(5, 12));
-                addlong(ARM64_MVN(5, 5));
-                PATCH_FORWARD_TBxZ(mirror_t_skip);
+                ARM64_EMIT_TEX_MIRROR(5);
             }
 
             /* SUB w4, w4, w10  (S -= (1 << (lod+3))) */
@@ -1571,9 +1589,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* Clamp or wrap S and T coordinates */
             if (!state->clamp_s[tmu]) {
                 /* AND w4, w4, params->tex_w_mask[tmu][lod] */
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
-                addlong(ARM64_AND_REG(4, 4, 15));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_w_mask_n(tmu));
+                ARM64_EMIT_TEX_COORD_WRAP(4, 15);
             }
 
             /* T1 = T + 1 */
@@ -1582,27 +1599,19 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             if (state->clamp_t[tmu]) {
                 /* Clamp T1 to [0, tex_h_mask] and T0 to [0, tex_h_mask] */
                 /* Load tex_h_mask[tmu][lod] */
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_h_mask_n(tmu));
 
                 /* Clamp T1: if negative, 0; if > mask, mask */
-                addlong(ARM64_CMP_IMM(13, 0));
-                addlong(ARM64_CSEL(13, 31, 13, COND_LT));
-                addlong(ARM64_CMP_REG(13, 15));
-                addlong(ARM64_CSEL(13, 15, 13, COND_HI));
+                ARM64_EMIT_TEX_COORD_CLAMP(13, 15, COND_HI);
 
                 /* Clamp T0: if negative, 0; if > mask, mask */
-                addlong(ARM64_CMP_IMM(5, 0));
-                addlong(ARM64_CSEL(5, 31, 5, COND_LT));
-                addlong(ARM64_CMP_REG(5, 15));
-                addlong(ARM64_CSEL(5, 15, 5, COND_HI));
+                ARM64_EMIT_TEX_COORD_CLAMP(5, 15, COND_HI);
             } else {
                 /* AND T1 with tex_h_mask */
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 6));
-                addlong(ARM64_AND_REG(13, 13, 15));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_h_mask_n(tmu));
+                ARM64_EMIT_TEX_COORD_WRAP(13, 15);
                 /* AND T0 with tex_h_mask */
-                addlong(ARM64_AND_REG(5, 5, 15));
+                ARM64_EMIT_TEX_COORD_WRAP(5, 15);
             }
 
             /* Compute row addresses:
@@ -1625,8 +1634,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* Handle S clamping for bilinear (need S and S+1 texels) */
             if (state->clamp_s[tmu]) {
                 /* Load tex_w_mask[tmu][lod] */
-                addlong(ARM64_ADD_IMM_X(15, 1, PARAMS_tex_w_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 15, 6));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 15, 6, PARAMS_tex_w_mask_n(tmu));
 
                 /* bilinear_shift is in w17 */
 
@@ -1677,8 +1685,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                 }
             } else {
                 /* Non-clamped: check if S wraps at texture edge */
-                addlong(ARM64_ADD_IMM_X(15, 1, PARAMS_tex_w_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 15, 6));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 15, 6, PARAMS_tex_w_mask_n(tmu));
 
                 /* bilinear_shift is in w17 */
 

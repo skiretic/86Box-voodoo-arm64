@@ -613,3 +613,26 @@ state_mismatches=0
   `rejects=0`, `code_bytes=42788`, `code_max=1868`.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N1 ARM64 texture address emit refactor slice 1
+
+- Added ARM64-local macro emitter helpers for texture parameter indexed loads,
+  mirror tests, and clamp/wrap coordinate emission.
+- Converted the bilinear path in `codegen_texture_fetch()` only.
+- Kept generated-code size stable and preserved the live-register contract:
+  `w4=tex_s`, `w5=tex_t`, `w6=lod`.
+- Preserved `STATE_tex_s`, `STATE_tex_t`, `STATE_lod`, and
+  `STATE_lod_frac_n(tmu)` store placement.
+- Initial function-helper version failed short verify with a texture-state
+  mismatch in the bilinear/trilinear fog bucket, so helpers were changed to
+  macros that keep `addlong()` and patch helpers in the caller `block_pos`
+  scope.
+- Build/sign passed after source edits.
+- Short verify with metrics passed:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted:
+  `mru_hits=865095`, `scan_hits=1459499`, `misses=29`, `compiles=29`,
+  `rejects=0`, `code_bytes=42788`, `code_max=1868`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
