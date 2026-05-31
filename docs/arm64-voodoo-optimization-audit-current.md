@@ -392,3 +392,25 @@ Validation:
 - clean coverage included dual-TMU trilinear/fog modes with `tex0_tri=1` and `tex1_tri=1`
 
 Status: P5 texture intermediate register lifetime corrected and closed by 51200000-span strict state soak.
+
+### 2026-05-31: P6 ARM64 prologue and pinned-constant specialization corrected
+
+Implemented ARM64-local prologue specialization only:
+
+- added feature-bit predicates for pinned GPR lookup pointers `x19`, `x20`, `x21`, `x22`, `x23`, `x25`, and `x26`
+- skipped unused `logtable`, alpha/fog lookup, trilinear reverse-blend, bilinear, and `rgb565`/dither pointer materialization when the generated block cannot reach those paths
+- added feature-bit predicates for pinned NEON constants `v8`, `v9`, and `v10`
+- skipped `fogColor` load into `v11` for fog modes that do not consume the fog color
+- kept ABI save/restore exact and unchanged
+- did not attempt conditional NEON save/restore or gate `v12`/`v14`/`v15` delta loads
+- made no x86-64 or shared semantic changes
+
+Validation:
+
+- build/sign passed
+- first gated-GPR verify passed: `verify=10240000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- gated-`v10` verify passed: `verify=10240000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- final P6 strong soak passed: `verify=51200000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)` appeared and was ignored
+
+Status: P6 prologue and pinned-constant specialization corrected and closed by 51200000-span strong soak.

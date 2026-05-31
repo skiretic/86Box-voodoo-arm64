@@ -1888,6 +1888,18 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
     return block_pos;
 }
 
+static inline int
+arm64_alpha_afunc_uses_alookup(int afunc)
+{
+    return afunc == AFUNC_ASRC_ALPHA || afunc == AFUNC_ADST_ALPHA || afunc == AFUNC_ASATURATE;
+}
+
+static inline int
+arm64_alpha_afunc_uses_aminuslookup(int afunc)
+{
+    return afunc == AFUNC_AOMSRC_ALPHA || afunc == AFUNC_AOMDST_ALPHA;
+}
+
 /* ========================================================================
  * voodoo_generate() -- emit ARM64 JIT code for the pixel pipeline
  *
@@ -1948,6 +1960,46 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int depth_jump_pos2  = 0;
     int loop_jump_pos    = 0;
     int dither_base_in_x26 = dither && (params->fbzMode & FBZ_RGB_WMASK) && !(params->alphaMode & (1 << 4));
+    int texture_enabled  = params->fbzColorPath & FBZCP_TEXTURE_ENABLED;
+    int tmu0_local       = (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL;
+    int tmu0_passthrough = (params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH;
+    int fetch_tmu0       = texture_enabled && (tmu0_local || !voodoo->dual_tmus || !tmu0_passthrough);
+    int fetch_tmu1       = texture_enabled && voodoo->dual_tmus && !tmu0_local;
+    int dual_tmu_combine = fetch_tmu0 && fetch_tmu1;
+    int alpha_blend      = params->alphaMode & (1 << 4);
+    int need_x19         = (fetch_tmu0 && (params->textureMode[0] & 1)) ||
+                           (fetch_tmu1 && (params->textureMode[1] & 1));
+    int need_x20         = ((params->fogMode & FOG_ENABLE) && !(params->fogMode & FOG_CONSTANT)) ||
+                           (alpha_blend &&
+                            (arm64_alpha_afunc_uses_alookup(dest_afunc) ||
+                             arm64_alpha_afunc_uses_alookup(src_afunc)));
+    int need_x21         = alpha_blend &&
+                           (arm64_alpha_afunc_uses_aminuslookup(dest_afunc) ||
+                            arm64_alpha_afunc_uses_aminuslookup(src_afunc));
+    int need_x22         = dual_tmu_combine &&
+                           (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tc_sub_clocal_1) ||
+                            (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
+    int need_x23         = dual_tmu_combine &&
+                           (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tca_sub_clocal_1) ||
+                            (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
+    int need_x25         = (voodoo->bilinear_enabled &&
+                           ((fetch_tmu0 && (params->textureMode[0] & 6)) ||
+                            (fetch_tmu1 && (params->textureMode[1] & 6))));
+    int need_x26         = alpha_blend || dither_base_in_x26;
+    int color_factor     = !(cc_mselect == 0 && cc_reverse_blend == 0);
+    int need_v8          = dual_tmu_combine || color_factor || alpha_blend;
+    int need_v9          = (dual_tmu_combine &&
+                            (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) == 0 &&
+                              tc_sub_clocal_1 && !tc_reverse_blend_1) ||
+                             ((params->textureMode[0] & TEXTUREMODE_TRILINEAR) == 0 &&
+                              !tc_reverse_blend) ||
+                             tc_invert_output)) ||
+                           (color_factor && !cc_reverse_blend) ||
+                           (alpha_blend &&
+                            (dest_afunc == AFUNC_AOM_COLOR || src_afunc == AFUNC_AOM_COLOR));
+    int need_v10         = cc_invert_output;
+    int need_v11         = (params->fogMode & FOG_ENABLE) &&
+                           ((params->fogMode & FOG_CONSTANT) || !(params->fogMode & FOG_ADD));
 
     arm64_codegen_begin_emit();
 
@@ -2076,13 +2128,20 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_MOVK_X((d), _hw3, 3));                                 \
     } while (0)
 
-        EMIT_MOV_IMM64(19, &logtable);
-        EMIT_MOV_IMM64(20, &alookup);
-        EMIT_MOV_IMM64(21, &aminuslookup);
-        EMIT_MOV_IMM64(22, &neon_00_ff_w);
-        EMIT_MOV_IMM64(23, &i_00_ff_w);
-        EMIT_MOV_IMM64(25, &bilinear_lookup);
-        EMIT_MOV_IMM64(26, dither_base_in_x26 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &rgb565);
+        if (need_x19)
+            EMIT_MOV_IMM64(19, &logtable);
+        if (need_x20)
+            EMIT_MOV_IMM64(20, &alookup);
+        if (need_x21)
+            EMIT_MOV_IMM64(21, &aminuslookup);
+        if (need_x22)
+            EMIT_MOV_IMM64(22, &neon_00_ff_w);
+        if (need_x23)
+            EMIT_MOV_IMM64(23, &i_00_ff_w);
+        if (need_x25)
+            EMIT_MOV_IMM64(25, &bilinear_lookup);
+        if (need_x26)
+            EMIT_MOV_IMM64(26, dither_base_in_x26 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &rgb565);
 
 #undef EMIT_MOV_IMM64
     }
@@ -2125,9 +2184,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_LDR_Q((vreg), 16, 0));                                        \
     } while (0)
 
-        EMIT_LOAD_NEON_CONST(8, &neon_01_w);
-        EMIT_LOAD_NEON_CONST(9, &neon_ff_w);
-        EMIT_LOAD_NEON_CONST(10, &neon_ff_b);
+        if (need_v8)
+            EMIT_LOAD_NEON_CONST(8, &neon_01_w);
+        if (need_v9)
+            EMIT_LOAD_NEON_CONST(9, &neon_ff_w);
+        if (need_v10)
+            EMIT_LOAD_NEON_CONST(10, &neon_ff_b);
         /* v11 = fogColor, loaded below when fog is enabled */
 
 #undef EMIT_LOAD_NEON_CONST
@@ -2162,7 +2224,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* v11 = fogColor (packed bytes, triangle-invariant).
      * FOG_CONSTANT uses v11 as packed 8B.
      * Non-constant fog uses UXTL to widen to 8H per-pixel. */
-    if (params->fogMode & FOG_ENABLE) {
+    if (need_v11) {
         addlong(ARM64_LDR_W(16, 1, PARAMS_fogColor));
         addlong(ARM64_FMOV_S_W(11, 16));
     }
