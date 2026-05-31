@@ -654,3 +654,22 @@ state_mismatches=0
   `rejects=0`, `code_bytes=42436`, `code_max=1852`.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N1 ARM64 texture address emit refactor slice 3
+
+- Converted the point-sampled texture path to the same ARM64-local texture
+  emitter macros used by the bilinear path.
+- Kept the point-path instruction selection, live-register contract, and
+  texture state store placement unchanged.
+- Build/sign passed after source edits.
+- First short verify failed in a bilinear/trilinear fog bucket unrelated to the
+  point-path conversion, with `mismatch_spans=1`, `fb_mismatches=1`, and
+  `state_mismatches=1`; reran before changing code.
+- Rerun short verify with metrics passed:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted on the passing run:
+  `mru_hits=741294`, `scan_hits=1209631`, `misses=29`, `compiles=29`,
+  `rejects=0`, `code_bytes=42356`, `code_max=1848`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

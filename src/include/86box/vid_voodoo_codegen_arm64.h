@@ -1801,8 +1801,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* Interpreter uses tex_lod[tmu][lod] for coordinate scaling,
              * while state->lod still selects the mip pointer and masks. */
-            addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_lod_n(tmu)));
-            addlong(ARM64_LDR_W_REG_LSL2(16, 14, 6));
+            ARM64_EMIT_TEX_PARAM_LOD_LOAD(16, 14, 6, PARAMS_tex_lod_n(tmu));
             /* SUB w7, w7, w16  (tex_shift = 8 - tex_lod) */
             addlong(ARM64_SUB_REG(7, 7, 16));
             /* Save original LOD in w11.
@@ -1816,17 +1815,11 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
-                int mirror_s_skip = block_pos;
-                addlong(ARM64_TBZ_PLACEHOLDER(4, 12));
-                addlong(ARM64_MVN(4, 4));
-                PATCH_FORWARD_TBxZ(mirror_s_skip);
+                ARM64_EMIT_TEX_MIRROR(4);
             }
             /* Mirror T */
             if (params->tLOD[tmu] & LOD_TMIRROR_T) {
-                int mirror_t_skip = block_pos;
-                addlong(ARM64_TBZ_PLACEHOLDER(5, 12));
-                addlong(ARM64_MVN(5, 5));
-                PATCH_FORWARD_TBxZ(mirror_t_skip);
+                ARM64_EMIT_TEX_MIRROR(5);
             }
 
             /* Preserve interpreter-visible final tex_s/tex_t before sampling shifts. */
@@ -1844,37 +1837,25 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                  * x86-64 uses -0x10 hack with ECX*4. We compute cleanly.
                  * w11 = original LOD (saved before ADD w6, w6, #4)
                  */
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_w_mask_n(tmu));
 
                 /* If S < 0, S = 0 */
-                addlong(ARM64_CMP_IMM(4, 0));
-                addlong(ARM64_CSEL(4, 31, 4, COND_LT));
-                /* If S >= mask, S = mask */
-                addlong(ARM64_CMP_REG(4, 15));
-                addlong(ARM64_CSEL(4, 15, 4, COND_CS));
+                ARM64_EMIT_TEX_COORD_CLAMP(4, 15, COND_CS);
             } else {
                 /* AND S with tex_w_mask
                  * w11 = original LOD
                  */
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_w_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
-                addlong(ARM64_AND_REG(4, 4, 15));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_w_mask_n(tmu));
+                ARM64_EMIT_TEX_COORD_WRAP(4, 15);
             }
 
             /* Clamp or wrap T */
             if (state->clamp_t[tmu]) {
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
-
-                addlong(ARM64_CMP_IMM(5, 0));
-                addlong(ARM64_CSEL(5, 31, 5, COND_LT));
-                addlong(ARM64_CMP_REG(5, 15));
-                addlong(ARM64_CSEL(5, 15, 5, COND_CS));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_h_mask_n(tmu));
+                ARM64_EMIT_TEX_COORD_CLAMP(5, 15, COND_CS);
             } else {
-                addlong(ARM64_ADD_IMM_X(14, 1, PARAMS_tex_h_mask_n(tmu)));
-                addlong(ARM64_LDR_W_REG_LSL2(15, 14, 11));
-                addlong(ARM64_AND_REG(5, 5, 15));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_h_mask_n(tmu));
+                ARM64_EMIT_TEX_COORD_WRAP(5, 15);
             }
 
             /* Compute linear texel index: (T << tex_shift) + S
