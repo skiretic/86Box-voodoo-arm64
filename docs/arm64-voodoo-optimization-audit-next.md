@@ -1,7 +1,7 @@
 # ARM64 Voodoo Optimization Audit Next
 
 Status: 2026-05-31
-Source head: `3f5cbc8090934b8df484eaf0d004bca81a26dc32`
+Source head: `9b97143ca`
 
 This audit starts from current source after P1-P7 closure. It does not overwrite
 `docs/arm64-voodoo-optimization-audit-current.md`.
@@ -114,7 +114,30 @@ Known guest noise remains ignored by itself:
 - Validation state fields:
   `src/include/86box/vid_voodoo_common.h:760-782`.
 
-## Candidates
+## Active Queue Reset
+
+Current state:
+
+- P1-P7 are closed and committed.
+- N1/N2/N3/N4/N5 implementation slices are closed or explicitly deferred.
+- Worker D/E alpha+dither dither-base pinning is closed and committed in
+  `9b97143ca`.
+- N5 cold layout is closed. Keep S-wrap and S-clamp. Do not move T-edge or
+  dither pointer fallback to cold tails without a fresh metric gate.
+
+Next slices:
+
+1. Dither fallback-mode audit, report-only at first:
+   map the remaining `dither_ptr_true_fallback_pixels` modes and decide whether
+   a broader register-allocation redesign is worth a separate code slice.
+2. N6 shared mode decode struct, report-only at first:
+   map all `vid_voodoo_render.c` locals consumed by ARM64 and x86-64 codegen
+   include boundaries before any shared rename or struct extraction.
+3. Small ARM64 texture/TMU contract cleanup only:
+   no semantic changes unless backed by interpreter-truth validation and strict
+   short plus long VM proof.
+
+Closed slice summary:
 
 ## Worker D: ARM64 Dither Base Pinned-Reg Slice
 
@@ -197,8 +220,8 @@ Stop rules carried forward:
 - Leave true fallback when `x22`/`x23`/`x25`/`x19` liveness is not free.
 - No x86-64 edits.
 
-Next: commit the validated pinned dither-base slice, then decide whether any
-broader register-allocation redesign is worth a separate follow-up.
+Next: use a report-only fallback-mode audit before any broader register
+allocation redesign.
 
 ### N1: ARM64 Texture Address Emit Refactor
 
@@ -644,19 +667,24 @@ First safe implementation slice:
 
 ## Recommended First Implementation Slice
 
-N2/N1 are already done. Current next action is N5 S-wrap review.
+Current next action is report-only: audit the remaining alpha+dither true
+fallback modes after the `x19` pinned-base slice.
 
 Reason:
 
-- S-wrap has strict short verify plus strong-soak proof.
-- S-clamp should not be bundled into the same review because current S-wrap
-  changes already cover metrics, patch helpers, cold queue, and one moved block.
+- Long-run metrics show `dither_base_pinned_pixels=3635213944`, but
+  `dither_ptr_true_fallback_pixels=819741478` remain.
+- A mode map can prove whether remaining fallback is concentrated in a few
+  register-pressure shapes or too broad to justify more allocator work.
+- This avoids widening into frame/save redesign or shared mode-local changes.
 
 First slice:
 
-- Review the uncommitted N5 S-wrap cold-tail diff.
-- Keep S-clamp out of this slice.
-- Do not commit unless explicitly told.
+- Inspect validation mode buckets and ARM64 predicates for the remaining true
+  fallback shapes.
+- Do not edit code.
+- End with keep/stop recommendation and exact candidate predicates if a follow-up
+  code slice is justified.
 
 ## Validation Commands and Pass Target
 
