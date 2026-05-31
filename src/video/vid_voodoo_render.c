@@ -726,6 +726,22 @@ voodoo_validate_mode_accum(voodoo_t *voodoo, const voodoo_params_t *params, uint
 {
     voodoo_validate_mode_bucket_t *bucket  = NULL;
     voodoo_validate_mode_bucket_t *replace = &voodoo->validate_mode_buckets[0];
+    const int                      rgb_mselect[2] = {
+        (params->textureMode[0] >> 14) & 7,
+        (params->textureMode[1] >> 14) & 7
+    };
+    const int alpha_mselect[2] = {
+        (params->textureMode[0] >> 23) & 7,
+        (params->textureMode[1] >> 23) & 7
+    };
+    const int rgb_sub_clocal[2] = {
+        !!(params->textureMode[0] & (1 << 13)),
+        !!(params->textureMode[1] & (1 << 13))
+    };
+    const int alpha_sub_clocal[2] = {
+        !!(params->textureMode[0] & (1 << 22)),
+        !!(params->textureMode[1] & (1 << 22))
+    };
 
     for (int c = 0; c < VOODOO_VALIDATE_MODE_BUCKETS; c++) {
         voodoo_validate_mode_bucket_t *candidate = &voodoo->validate_mode_buckets[c];
@@ -773,6 +789,16 @@ voodoo_validate_mode_accum(voodoo_t *voodoo, const voodoo_params_t *params, uint
     bucket->fb_zero_nonzero_mismatches += fb_zero_nonzero_mismatches;
     bucket->aux_mismatches += aux_mismatches;
     bucket->state_mismatches += state_mismatches;
+    for (int tmu = 0; tmu < 2; tmu++) {
+        if (rgb_sub_clocal[tmu] && rgb_mselect[tmu] == TC_MSELECT_DETAIL)
+            bucket->tmu_rgb_detail_spans[tmu] += spans;
+        if (rgb_sub_clocal[tmu] && rgb_mselect[tmu] == TC_MSELECT_LOD_FRAC)
+            bucket->tmu_rgb_lod_frac_spans[tmu] += spans;
+        if (alpha_sub_clocal[tmu] && alpha_mselect[tmu] == TCA_MSELECT_DETAIL)
+            bucket->tmu_alpha_detail_spans[tmu] += spans;
+        if (alpha_sub_clocal[tmu] && alpha_mselect[tmu] == TCA_MSELECT_LOD_FRAC)
+            bucket->tmu_alpha_lod_frac_spans[tmu] += spans;
+    }
     if (fb_max_dr > bucket->fb_max_dr)
         bucket->fb_max_dr = fb_max_dr;
     if (fb_max_dg > bucket->fb_max_dg)

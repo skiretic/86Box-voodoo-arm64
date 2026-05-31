@@ -45,6 +45,10 @@ typedef struct voodoo_validate_mode_bucket_t {
     uint64_t fb_zero_nonzero_mismatches;
     uint64_t aux_mismatches;
     uint64_t state_mismatches;
+    uint64_t tmu_rgb_detail_spans[2];
+    uint64_t tmu_rgb_lod_frac_spans[2];
+    uint64_t tmu_alpha_detail_spans[2];
+    uint64_t tmu_alpha_lod_frac_spans[2];
     int      fb_max_dr;
     int      fb_max_dg;
     int      fb_max_db;

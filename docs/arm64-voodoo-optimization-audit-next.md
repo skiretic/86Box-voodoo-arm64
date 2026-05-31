@@ -743,3 +743,70 @@ state_mismatches=0
   `rejects=0`, `code_bytes=42116`, `code_max=1840`.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N4 TMU combine factor emitter slice 1
+
+- Added ARM64-local TMU combine factor emitter helpers for
+  `TC_MSELECT_DETAIL` and `TC_MSELECT_LOD_FRAC`.
+- Converted only the TMU1 RGB `tc_mselect_1` path.
+- Kept the emitted instruction order and live-register contract explicit:
+  detail uses `w4` for the factor, `w10` for `STATE_lod`, and `w11` for
+  `detail_max`; LOD-frac loads the factor into `w4`.
+- Did not move texture state stores for `STATE_tex_s`, `STATE_tex_t`,
+  `STATE_lod`, or `STATE_lod_frac_n(tmu)`.
+- Build/sign passed after source edits.
+- Short verify with metrics passed:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted:
+  `mru_hits=450940`, `scan_hits=583007`, `misses=29`, `compiles=29`,
+  `rejects=0`, `code_bytes=42196`, `code_max=1844`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+
+### 2026-05-31: N4 UT GOTY detail-texture exploratory run
+
+- Ran Unreal Tournament GOTY with Glide/detail textures to look for N4 target
+  coverage.
+- The run did not hit the factored TMU1 RGB detail/LOD-frac path:
+  `textureMode1=8c26151f` and `textureMode1=8c261a1f` both decode with
+  `tc_sub_clocal_1=0` and `tc_mselect_1=0`.
+- The workload did expose an existing texture-state mismatch in
+  `textureMode0=8c26151f`: JIT and interpreter RGB were initially identical,
+  but `tex_s`/`tex_t` state diverged around negative coordinates.
+- A trial change from signed `SDIV` to unsigned `UDIV` for the perspective
+  reciprocal was tested and reverted; it worsened the run into framebuffer and
+  aux mismatches and changed JIT LOD to `1` where interpreter state had LOD
+  `8`.
+- Rebuilt/signed after reverting the trial change, leaving the N4 helper-only
+  source slice intact.
+
+### 2026-05-31: N4 target coverage logging
+
+- Added passive per-mode validation counters for TMU combine target coverage:
+  RGB detail, RGB LOD-frac, alpha detail, and alpha LOD-frac for TMU0 and TMU1.
+- The counters only accumulate spans where the corresponding `*_sub_clocal`
+  predicate is active and the mselect value is `DETAIL` or `LOD_FRAC`.
+- Printed the counters on existing `Voodoo validate mode[...]` lines so future
+  game runs can prove whether the factored cases were emitted.
+- Build/sign passed after source edits.
+- No VM launched in this step.
+
+### 2026-05-31: N4 target coverage run with UT GOTY
+
+- Ran Unreal Tournament GOTY again with the new target coverage counters.
+- Long verify window reached `verify=51200000`.
+- The target counters stayed zero in all logged mode buckets:
+  `tmu0_rgb_detail=0`, `tmu0_rgb_lod_frac=0`, `tmu1_rgb_detail=0`,
+  `tmu1_rgb_lod_frac=0`, `tmu0_alpha_detail=0`,
+  `tmu0_alpha_lod_frac=0`, `tmu1_alpha_detail=0`, and
+  `tmu1_alpha_lod_frac=0`.
+- Seen texture modes remained limited to:
+  `textureMode0=80000a1f/84824a1f/8c26151f/8c261a1f/8c261c19` and
+  `textureMode1=8c26151f/8c261a1f`.
+- The run still exposed the known UT texture-state mismatch:
+  `mismatch_spans=5407`, `fb_mismatches=0`, `aux_mismatches=0`,
+  `state_mismatches=5407`.
+- Conclusion: UT GOTY is useful for the separate negative-coordinate
+  texture-state issue, but it does not cover the N4 detail/LOD-frac combine
+  target.

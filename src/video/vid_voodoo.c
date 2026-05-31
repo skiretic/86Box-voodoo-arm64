@@ -1661,7 +1661,11 @@ voodoo_card_close(voodoo_t *voodoo)
                   " fbzColorPath=%08x tex_en=%d cc_mselect=%d cc_add=%d cca_mselect=%d cca_add=%d"
                   " alphaMode=%08x alpha_test=%d alpha_blend=%d alpha_func=%d src_afunc=%d dest_afunc=%d"
                   " textureMode0=%08x tex0_kind=%08x tex0_local=%d tex0_tri=%d"
-                  " textureMode1=%08x tex1_kind=%08x tex1_local=%d tex1_tri=%d\n",
+                  " textureMode1=%08x tex1_kind=%08x tex1_local=%d tex1_tri=%d"
+                  " tmu0_rgb_detail=%" PRIu64 " tmu0_rgb_lod_frac=%" PRIu64
+                  " tmu1_rgb_detail=%" PRIu64 " tmu1_rgb_lod_frac=%" PRIu64
+                  " tmu0_alpha_detail=%" PRIu64 " tmu0_alpha_lod_frac=%" PRIu64
+                  " tmu1_alpha_detail=%" PRIu64 " tmu1_alpha_lod_frac=%" PRIu64 "\n",
                   c,
                   bucket->spans,
                   bucket->fb_mismatches,
@@ -1703,7 +1707,15 @@ voodoo_card_close(voodoo_t *voodoo)
                   bucket->textureMode[1],
                   bucket->textureMode[1] & TEXTUREMODE_MASK,
                   (bucket->textureMode[1] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL,
-                  !!(bucket->textureMode[1] & TEXTUREMODE_TRILINEAR));
+                  !!(bucket->textureMode[1] & TEXTUREMODE_TRILINEAR),
+                  bucket->tmu_rgb_detail_spans[0],
+                  bucket->tmu_rgb_lod_frac_spans[0],
+                  bucket->tmu_rgb_detail_spans[1],
+                  bucket->tmu_rgb_lod_frac_spans[1],
+                  bucket->tmu_alpha_detail_spans[0],
+                  bucket->tmu_alpha_lod_frac_spans[0],
+                  bucket->tmu_alpha_detail_spans[1],
+                  bucket->tmu_alpha_lod_frac_spans[1]);
         }
     }
 #if (defined __aarch64__ || defined _M_ARM64)
