@@ -907,12 +907,14 @@ arm64_codegen_patch_cbxz_to_target(uint8_t *code_block, int pos, int target_pos)
 }
 
 typedef enum arm64_codegen_cold_block_kind {
-    ARM64_COLD_BLOCK_S_WRAP
+    ARM64_COLD_BLOCK_S_WRAP,
+    ARM64_COLD_BLOCK_S_CLAMP_DUP
 } arm64_codegen_cold_block_kind_t;
 
 typedef struct arm64_codegen_cold_queue_entry {
     arm64_codegen_cold_block_kind_t kind;
     int                             branch_pos;
+    int                             branch_pos_2;
     int                             join_pos;
     int                             tmu;
 } arm64_codegen_cold_queue_entry_t;
@@ -942,10 +944,33 @@ arm64_codegen_cold_queue_add(arm64_codegen_cold_queue_t *queue,
     arm64_codegen_check_patch_pos(branch_pos);
     arm64_codegen_check_patch_target(join_pos);
 
-    queue->entries[queue->count].kind       = kind;
-    queue->entries[queue->count].branch_pos = branch_pos;
-    queue->entries[queue->count].join_pos   = join_pos;
-    queue->entries[queue->count].tmu        = tmu;
+    queue->entries[queue->count].kind         = kind;
+    queue->entries[queue->count].branch_pos   = branch_pos;
+    queue->entries[queue->count].branch_pos_2 = -1;
+    queue->entries[queue->count].join_pos     = join_pos;
+    queue->entries[queue->count].tmu          = tmu;
+    queue->count++;
+}
+
+static inline void
+arm64_codegen_cold_queue_add_two_branches(arm64_codegen_cold_queue_t *queue,
+                                          arm64_codegen_cold_block_kind_t kind,
+                                          int branch_pos, int branch_pos_2,
+                                          int join_pos, int tmu)
+{
+    if (queue->count >= ARM64_COLD_QUEUE_CAPACITY) {
+        fatal("ARM64 JIT: cold block queue overflow (capacity=%d)\n", ARM64_COLD_QUEUE_CAPACITY);
+    }
+
+    arm64_codegen_check_patch_pos(branch_pos);
+    arm64_codegen_check_patch_pos(branch_pos_2);
+    arm64_codegen_check_patch_target(join_pos);
+
+    queue->entries[queue->count].kind         = kind;
+    queue->entries[queue->count].branch_pos   = branch_pos;
+    queue->entries[queue->count].branch_pos_2 = branch_pos_2;
+    queue->entries[queue->count].join_pos     = join_pos;
+    queue->entries[queue->count].tmu          = tmu;
     queue->count++;
 }
 
@@ -1620,6 +1645,27 @@ arm64_codegen_drain_cold_queue(uint8_t *code_block, int block_pos,
                 arm64_codegen_patch_b_to_target(code_block, cold_done_pos, entry->join_pos);
                 break;
             }
+
+            case ARM64_COLD_BLOCK_S_CLAMP_DUP:
+            {
+                int cold_block_pos = block_pos;
+
+                arm64_codegen_patch_bcond_to_target(code_block, entry->branch_pos, cold_block_pos);
+                arm64_codegen_patch_bcond_to_target(code_block, entry->branch_pos_2, cold_block_pos);
+
+                /* Load single clamped texel from each row, duplicate to S/S+1. */
+                addlong(ARM64_LDR_W_REG_LSL2(11, 14, 4));
+                addlong(ARM64_FMOV_S_W(0, 11));
+                addlong(ARM64_DUP_V2S_LANE(0, 0, 0));
+                addlong(ARM64_LDR_W_REG_LSL2(11, 13, 4));
+                addlong(ARM64_FMOV_S_W(1, 11));
+                addlong(ARM64_DUP_V2S_LANE(1, 1, 0));
+
+                int cold_done_pos = block_pos;
+                addlong(ARM64_B_PLACEHOLDER);
+                arm64_codegen_patch_b_to_target(code_block, cold_done_pos, entry->join_pos);
+                break;
+            }
         }
     }
 
@@ -1989,23 +2035,11 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                         /* LDR d1, [x13, x4] -- row1[S] and row1[S+1] */
                         addlong(ARM64_LDR_D_REG(1, 13, 4));
 
-                        int normal_done = block_pos;
-                        addlong(ARM64_B_PLACEHOLDER);
-
-                        /* Clamped case: S and S+1 are the same texel (duplicate) */
-                        PATCH_FORWARD_BCOND(clamp_lo_pos);
-                        PATCH_FORWARD_BCOND(clamp_hi_pos);
-
-                        /* Load single texel, duplicate to both halves */
-                        /* LDR w11, [x14, x4, LSL #2] */
-                        addlong(ARM64_LDR_W_REG_LSL2(11, 14, 4));
-                        addlong(ARM64_FMOV_S_W(0, 11));
-                        addlong(ARM64_DUP_V2S_LANE(0, 0, 0));
-                        addlong(ARM64_LDR_W_REG_LSL2(11, 13, 4));
-                        addlong(ARM64_FMOV_S_W(1, 11));
-                        addlong(ARM64_DUP_V2S_LANE(1, 1, 0));
-
-                        PATCH_FORWARD_B(normal_done);
+                        int s_clamp_join_pos = block_pos;
+                        arm64_codegen_cold_queue_add_two_branches(cold_queue,
+                                                                  ARM64_COLD_BLOCK_S_CLAMP_DUP,
+                                                                  clamp_lo_pos, clamp_hi_pos,
+                                                                  s_clamp_join_pos, tmu);
                     }
                 }
             } else {

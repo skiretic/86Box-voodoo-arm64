@@ -372,8 +372,12 @@ Current status:
 - Slice 2 S-wrap cold-tail emission is implemented and strong-soaked:
   `verify=339160449`, `mismatch_spans=0`, `fb_mismatches=0`,
   `aux_mismatches=0`, `state_mismatches=0`.
-- S-clamp has long-run coverage and cold rates, but is deferred to a separate
-  slice after S-wrap review/commit.
+- Slice 3 S-clamp duplicate cold-tail emission is implemented and accepted:
+  `verify=173693841`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Slice 3 dynamic target coverage hit TMU0 S-clamp low/high after implementation;
+  TMU1 post-change coverage is a low residual risk because the emitted cold block
+  is shared by both TMUs.
 - T-edge and dither pointer fallback are rejected for N5 cold layout because
   long-run metrics show they are hot.
 
@@ -424,9 +428,10 @@ Larger refactor justified:
 
 First safe implementation slice:
 
-- Current safe slice is already implemented: S-wrap cold-tail layout only.
-- Next possible slice is S-clamp duplicate cold layout, but only after S-wrap is
-  reviewed/committed or explicitly deferred.
+- Current safe slices are already implemented and validated: S-wrap cold-tail
+  layout plus S-clamp duplicate cold-tail layout.
+- Next action is commit/reassess; do not start more N5 cold-layout targets in
+  the Slice 3 commit.
 
 ### N6: Shared Mode Decode Struct for Auditability
 

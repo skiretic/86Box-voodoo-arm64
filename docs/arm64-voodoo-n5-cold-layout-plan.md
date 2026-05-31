@@ -1,7 +1,7 @@
 # ARM64 Voodoo N5 Cold-Path Generated Block Layout Plan
 
-Status: implementation proof in progress
-Source head audited: `24a16ad74 Factor ARM64 Voodoo TMU helper emits`
+Status: Slice 3 S-clamp duplicate cold layout accepted
+Source head audited: `7d3714784 Move ARM64 Voodoo S-wrap edge cold`
 Scope: ARM64-local generated layout only
 
 Progress:
@@ -20,6 +20,11 @@ Progress:
 - Done: Slice 2 build/sign.
 - Done: Slice 2 short verify passed.
 - Done: Slice 2 strong soak passed with metrics enabled.
+- Done: Slice 3 S-clamp duplicate texel-load block moved to cold tail.
+- Done: Slice 3 build/sign.
+- Done: Slice 3 short verify passed with metrics enabled.
+- Done: Slice 3 long metrics verify passed with S-clamp low/high coverage on TMU0.
+- Accepted: TMU0 low/high dynamic coverage proves the shared S-clamp cold block; TMU1 post-change coverage is a low residual risk.
 
 ## Ground Rules
 
@@ -147,7 +152,7 @@ Second candidate only after S-wrap proof.
 
 Exact region:
 
-- `src/include/86box/vid_voodoo_codegen_arm64.h:1840-1882`
+- `src/include/86box/vid_voodoo_codegen_arm64.h:2005-2043`
 
 Current shape:
 
@@ -169,8 +174,26 @@ Cold-layout design:
 
 - Keep both `CSEL` operations exactly where they are.
 - `B.LT` and `B.CS` both target one `cold_s_clamp_dup` block.
-- `cold_s_clamp_dup` emits current `1873-1880`.
-- Return branch goes to join before `src/include/86box/vid_voodoo_codegen_arm64.h:1931`.
+- `cold_s_clamp_dup` emits current `src/include/86box/vid_voodoo_codegen_arm64.h:1656-1662`.
+- Return branch goes to join before `src/include/86box/vid_voodoo_codegen_arm64.h:2073`.
+
+Slice 3 implementation:
+
+- Added `ARM64_COLD_BLOCK_S_CLAMP_DUP` plus a two-source cold-queue entry helper.
+- `B.LT` and `B.CS` patch to one cold block with explicit target patch helpers.
+- Hot S-clamp interior path now falls through after adjacent `LDR d0` / `LDR d1`.
+- Cold block loads one clamped texel per row, duplicates into `v0` / `v1`, then branches back to the join immediately before `UXTL`.
+- `CMP` / `CSEL` / matching `B.cond` adjacency and flags remain unchanged.
+- Validation state: accepted after long metrics verify with S-clamp low/high coverage on TMU0.
+
+Metrics/defer:
+
+- Compare metrics against Slice 2 S-wrap proof after validation.
+- Defer optional compile/layout metric slice; proper proof needs shared metric struct/init/log plumbing beyond cheap N5 codegen-local scope.
+- Defer T-edge, dither fallback, mirror, W/div, common skip, alpha/depth/fog skip.
+- Defer any x86-64 or helper-backed dynarec work.
+
+Next: final review and commit decision; no more N5 cold-layout targets in this slice.
 
 Required patching:
 
@@ -684,7 +707,7 @@ Validation:
 
 Purpose:
 
-- Move only `src/include/86box/vid_voodoo_codegen_arm64.h:1873-1880` out of line.
+- Move only S-clamp duplicate load/dup sequence (`src/include/86box/vid_voodoo_codegen_arm64.h:1656-1662`) out of hot S-clamp region (`src/include/86box/vid_voodoo_codegen_arm64.h:2005-2043`).
 - Branch low/high clamp to same cold block.
 
 Current proof status:
@@ -703,6 +726,37 @@ Validation:
 
 - Same as Slice 2.
 - Add explicit coverage that both low and high clamp cases were exercised, or do not claim those cases proved.
+- Short verify with metrics enabled passed after implementation:
+  - `verify=10240000`
+  - `skipped=0`
+  - `mismatch_spans=0`
+  - `fb_mismatches=0`
+  - `aux_mismatches=0`
+  - `state_mismatches=0`
+  - `code_bytes=42644`
+  - `code_max=1864`
+- Target coverage was absent in that short run:
+  - `tmu0_s_clamp_low=0`
+  - `tmu0_s_clamp_high=0`
+  - `tmu1_s_clamp_low=0`
+  - `tmu1_s_clamp_high=0`
+- Result: general validator pass only; S-clamp cold block still needs a targeted or broader workload with nonzero clamp-low/high counters.
+- Long metrics verify passed after relaunch:
+  - `verify=173693841`
+  - `skipped=0`
+  - `mismatch_spans=0`
+  - `fb_mismatches=0`
+  - `aux_mismatches=0`
+  - `state_mismatches=0`
+  - `rejects=0`
+  - `code_bytes=923392`
+  - `code_max=1868`
+- Target coverage in that run:
+  - `tmu0_s_clamp_low=2501358`
+  - `tmu0_s_clamp_high=2810423`
+  - `tmu1_s_clamp_low=0`
+  - `tmu1_s_clamp_high=0`
+- Result: S-clamp cold block accepted. TMU0 low/high dynamic coverage proves the shared emitted cold block with strict zero-mismatch proof; TMU1-specific post-change coverage did not occur and is tracked as low residual risk.
 
 ### Slice 4: Reassess
 
@@ -793,6 +847,6 @@ Defer until after S-wrap/S-clamp proof:
 
 Next concrete action:
 
-- Review current uncommitted Slice 0/1/1b/2 diff for commit readiness.
-- Do not start S-clamp until S-wrap is committed or explicitly deferred.
-- After S-wrap is closed, consider S-clamp as a standalone Slice 3 because long-run coverage exists and rate is cold.
+- Review current uncommitted Slice 3 diff for commit readiness.
+- Do not start more N5 cold-layout targets in this slice.
+- After Slice 3 is committed, reassess N5 metrics before any further layout work.
