@@ -1299,6 +1299,25 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
         addlong(ARM64_CSEL(coord_reg, mask_reg, coord_reg, high_cond)); \
     } while (0)
 
+#define ARM64_EMIT_TEX_BILINEAR_SHIFT_SETUP(tex_shift_reg, tex_lod_reg, texel_bias_reg, base_reg, lod_reg, param_offset) \
+    do {                                                                                                                \
+        addlong(ARM64_MOVZ_W(tex_shift_reg, 8));                                                                        \
+        ARM64_EMIT_TEX_PARAM_LOD_LOAD(tex_lod_reg, base_reg, lod_reg, param_offset);                                    \
+        addlong(ARM64_MOVZ_W(texel_bias_reg, 1));                                                                       \
+        addlong(ARM64_SUB_REG(tex_shift_reg, tex_shift_reg, tex_lod_reg));                                              \
+        addlong(ARM64_LSL_REG(texel_bias_reg, texel_bias_reg, tex_lod_reg));                                            \
+        addlong(ARM64_LSL_IMM(texel_bias_reg, texel_bias_reg, 3));                                                      \
+    } while (0)
+
+#define ARM64_EMIT_TEX_POINT_SHIFT_SETUP(tex_shift_reg, tex_lod_reg, saved_lod_reg, base_reg, lod_reg, param_offset) \
+    do {                                                                                                             \
+        addlong(ARM64_MOVZ_W(tex_shift_reg, 8));                                                                     \
+        ARM64_EMIT_TEX_PARAM_LOD_LOAD(tex_lod_reg, base_reg, lod_reg, param_offset);                                 \
+        addlong(ARM64_SUB_REG(tex_shift_reg, tex_shift_reg, tex_lod_reg));                                           \
+        addlong(ARM64_MOV_REG(saved_lod_reg, lod_reg));                                                              \
+        addlong(ARM64_ADD_IMM(tex_lod_reg, tex_lod_reg, 4));                                                         \
+    } while (0)
+
 static inline int
 codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int block_pos, int tmu)
 {
@@ -1503,19 +1522,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
              *   x12 = tex_base pointer, x13/x14 = row pointers
              * ============================================================ */
 
-            /* MOV w7, #8  (initial tex_shift) */
-            addlong(ARM64_MOVZ_W(7, 8));
             /* Interpreter uses tex_lod[tmu][lod] for coordinate scaling,
              * while state->lod still selects the mip pointer and masks. */
-            ARM64_EMIT_TEX_PARAM_LOD_LOAD(16, 14, 6, PARAMS_tex_lod_n(tmu));
-            /* MOV w10, #1 */
-            addlong(ARM64_MOVZ_W(10, 1));
-            /* SUB w7, w7, w16  (tex_shift = 8 - tex_lod) */
-            addlong(ARM64_SUB_REG(7, 7, 16));
-            /* LSL w10, w10, w16  (1 << tex_lod) */
-            addlong(ARM64_LSL_REG(10, 10, 16));
-            /* LSL w10, w10, #3  ((1 << lod) << 3 = 1 << (lod+3)) */
-            addlong(ARM64_LSL_IMM(10, 10, 3));
+            ARM64_EMIT_TEX_BILINEAR_SHIFT_SETUP(7, 16, 10, 14, 6, PARAMS_tex_lod_n(tmu));
 
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
@@ -1791,8 +1800,6 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
              * Simple nearest-neighbor: compute S,T indices, load single texel.
              * ============================================================ */
 
-            /* MOV w7, #8 */
-            addlong(ARM64_MOVZ_W(7, 8));
             /* w6 = LOD (cached, no reload needed) */
 
             /* Load texture base pointer: tex[tmu][lod] */
@@ -1801,17 +1808,13 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* Interpreter uses tex_lod[tmu][lod] for coordinate scaling,
              * while state->lod still selects the mip pointer and masks. */
-            ARM64_EMIT_TEX_PARAM_LOD_LOAD(16, 14, 6, PARAMS_tex_lod_n(tmu));
-            /* SUB w7, w7, w16  (tex_shift = 8 - tex_lod) */
-            addlong(ARM64_SUB_REG(7, 7, 16));
             /* Save original LOD in w11.
              * The clamp/wrap sections need the original LOD for array indexing
              * into tex_w_mask/tex_h_mask. */
-            addlong(ARM64_MOV_REG(11, 6));
             /* ADD w16, w16, #4  -- point-sample uses a larger shift than bilinear:
              * bilinear shifts by 'lod' (integer texel step), but point-sample
              * needs to strip the 4-bit sub-texel fraction too, hence lod+4. */
-            addlong(ARM64_ADD_IMM(16, 16, 4));
+            ARM64_EMIT_TEX_POINT_SHIFT_SETUP(7, 16, 11, 14, 6, PARAMS_tex_lod_n(tmu));
 
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
