@@ -354,3 +354,20 @@ Validation:
 - 5x 3DMark soak passed: `verify=51200000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
 
 Status: P3 counter batching corrected and closed by 5x 3DMark soak.
+
+### 2026-05-30: P4 alpha blend multiply-round lowering cleanup corrected
+
+Implemented ARM64-local source factoring only:
+
+- added `ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H` for the existing alpha-blend `MUL`, `USHR`, `ADD 1`, `ADD high`, `USHR` sequence
+- replaced repeated dest/src alpha blend multiply-round tails with the macro
+- changed no arithmetic, blend factors, lookup table use, x86-64 code, or shared semantic contract
+- made validation mode buckets accumulate clean verified spans too, so clean runs can prove `alpha_blend=1` coverage instead of only mismatch modes
+
+Validation:
+
+- build/sign passed
+- Quake 3 verify passed: `verify=51200000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- clean coverage buckets included multiple `alpha_blend=1` modes, including `src_afunc=1 dest_afunc=5`, `src_afunc=4 dest_afunc=0`, `src_afunc=4 dest_afunc=4`, `src_afunc=2 dest_afunc=2`, and `src_afunc=2 dest_afunc=4`
+
+Status: P4 alpha blend multiply-round factoring corrected and closed by 51200000-span Quake 3 alpha-blend coverage.

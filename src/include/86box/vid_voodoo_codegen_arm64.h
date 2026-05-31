@@ -882,6 +882,15 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
 #define ARM64_URSHR_V4H(d, n, imm) (0x2F002400 | SHIFT_IMM_V4H(16 - (imm)) | Rn(n) | Rd(d))
 #define ARM64_URSHR_V8H(d, n, imm) (0x6F002400 | SHIFT_IMM_V4H(16 - (imm)) | Rn(n) | Rd(d))
 
+#define ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(dst_v, factor_v, scratch_v) \
+    do {                                                                 \
+        addlong(ARM64_MUL_V4H((dst_v), (dst_v), (factor_v)));            \
+        addlong(ARM64_USHR_V4H((scratch_v), (dst_v), 8));                \
+        addlong(ARM64_ADD_V4H((dst_v), (dst_v), 8));                     \
+        addlong(ARM64_ADD_V4H((dst_v), (dst_v), (scratch_v)));           \
+        addlong(ARM64_USHR_V4H((dst_v), (dst_v), 8));                    \
+    } while (0)
+
 /* ========================================================================
  * Section 24: NEON Narrow / Widen
  * ======================================================================== */
@@ -3805,30 +3814,17 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* v4 = dst * alookup[src_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));  /* x7 = alookup + src_alpha*2*8 */
                 addlong(ARM64_LDR_D(5, 7, 0));               /* v5 = alookup[src_alpha] */
-                addlong(ARM64_MUL_V4H(4, 4, 5));
-                /* Round: add v8 (alookup[1] pinned), add (result>>8), shift >>8 */
-                addlong(ARM64_USHR_V4H(17, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 17));
-                addlong(ARM64_USHR_V4H(4, 4, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(4, 5, 17);
                 break;
             case AFUNC_A_COLOR:
                 /* v4 = dst * src_color >> 8 */
-                addlong(ARM64_MUL_V4H(4, 4, 0));
-                addlong(ARM64_USHR_V4H(17, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 17));
-                addlong(ARM64_USHR_V4H(4, 4, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(4, 0, 17);
                 break;
             case AFUNC_ADST_ALPHA:
                 /* v4 = dst * alookup[dst_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_USHR_V4H(17, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 17));
-                addlong(ARM64_USHR_V4H(4, 4, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(4, 16, 17);
                 break;
             case AFUNC_AONE:
                 /* v4 = dst * 1 = dst (no-op) */
@@ -3837,41 +3833,25 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* v4 = dst * aminuslookup[src_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));  /* x7 = aminuslookup + src_alpha*2*8 */
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_USHR_V4H(17, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 17));
-                addlong(ARM64_USHR_V4H(4, 4, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(4, 16, 17);
                 break;
             case AFUNC_AOM_COLOR:
                 /* v4 = dst * (0xFF - src_color) >> 8 */
                 addlong(ARM64_MOV_V(16, 9));         /* v16 = 0xFF */
                 addlong(ARM64_SUB_V4H(16, 16, 0));   /* v16 = 0xFF - src */
-                addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_USHR_V4H(17, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 17));
-                addlong(ARM64_USHR_V4H(4, 4, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(4, 16, 17);
                 break;
             case AFUNC_AOMDST_ALPHA:
                 /* v4 = dst * aminuslookup[dst_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_USHR_V4H(17, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 17));
-                addlong(ARM64_USHR_V4H(4, 4, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(4, 16, 17);
                 break;
             case AFUNC_ACOLORBEFOREFOG:
                 /* v4 = dst * color-before-fog (v13) >> 8 */
                 /* Unpack v13 to 4x16 in v16 */
                 addlong(ARM64_UXTL_8H_8B(16, 13));
-                addlong(ARM64_MUL_V4H(4, 4, 16));
-                addlong(ARM64_USHR_V4H(17, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 8));
-                addlong(ARM64_ADD_V4H(4, 4, 17));
-                addlong(ARM64_USHR_V4H(4, 4, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(4, 16, 17);
                 break;
         }
 
@@ -3884,29 +3864,17 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* v0 = src * alookup[src_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_USHR_V4H(17, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 17));
-                addlong(ARM64_USHR_V4H(0, 0, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_A_COLOR:
                 /* v0 = src * dst_color (v6) >> 8 */
-                addlong(ARM64_MUL_V4H(0, 0, 6));
-                addlong(ARM64_USHR_V4H(17, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 17));
-                addlong(ARM64_USHR_V4H(0, 0, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 6, 17);
                 break;
             case AFUNC_ADST_ALPHA:
                 /* v0 = src * alookup[dst_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_USHR_V4H(17, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 17));
-                addlong(ARM64_USHR_V4H(0, 0, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_AONE:
                 /* v0 = src * 1 = src (no-op) */
@@ -3915,31 +3883,19 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* v0 = src * aminuslookup[src_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_USHR_V4H(17, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 17));
-                addlong(ARM64_USHR_V4H(0, 0, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_AOM_COLOR:
                 /* v0 = src * (0xFF - dst_color) >> 8 */
                 addlong(ARM64_MOV_V(16, 9));          /* v16 = 0xFF */
                 addlong(ARM64_SUB_V4H(16, 16, 6));    /* v16 = 0xFF - dst */
-                addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_USHR_V4H(17, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 17));
-                addlong(ARM64_USHR_V4H(0, 0, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_AOMDST_ALPHA:
                 /* v0 = src * aminuslookup[dst_alpha] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_USHR_V4H(17, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 17));
-                addlong(ARM64_USHR_V4H(0, 0, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_ASATURATE: {
                 /* sat = min(src_alpha, 0xFF - dst_alpha)
@@ -3952,11 +3908,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 /* v0 = src * alookup[sat] >> 8 */
                 addlong(ARM64_ADD_REG_X_LSL(7, 20, 6, 3));
                 addlong(ARM64_LDR_D(16, 7, 0));
-                addlong(ARM64_MUL_V4H(0, 0, 16));
-                addlong(ARM64_USHR_V4H(17, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 8));
-                addlong(ARM64_ADD_V4H(0, 0, 17));
-                addlong(ARM64_USHR_V4H(0, 0, 8));
+                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             }
         }
