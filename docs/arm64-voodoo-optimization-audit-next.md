@@ -614,6 +614,38 @@ state_mismatches=0
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
 
+### 2026-05-31: N4 target-workload coverage probe
+
+- Paused further N4 optimization because the latest workloads only proved
+  TMU0 RGB/alpha `LOD_FRAC`; `DETAIL` and all TMU1 target counters stayed
+  zero.
+- Added passive global validation coverage counters independent of the
+  16-entry per-mode mismatch buckets.
+- New `Voodoo validate TMU coverage` summary records texture-disabled spans,
+  TMU0 local/passthrough spans, actual dual-TMU combine spans, and sub-clocal
+  mselect distributions for TMU0/TMU1 RGB and alpha.
+- The target fields are derived from the global sub-clocal mselect histograms:
+  `target_tmu*_rgb_detail`, `target_tmu*_rgb_lod_frac`,
+  `target_tmu*_alpha_detail`, and `target_tmu*_alpha_lod_frac`.
+- This is logging only; it does not change generated ARM64 code, x86-64 code,
+  interpreter semantics, or any helper-backed dynarec path.
+- Rebuilt with `scripts/setup-and-build.sh build` per local macOS app/icon
+  requirement.
+- Unreal Gold `Vortex2` with Glide detail textures enabled did not hit the N4
+  target factor paths:
+  `target_tmu0_rgb_detail=0`, `target_tmu0_rgb_lod_frac=0`,
+  `target_tmu0_alpha_detail=0`, `target_tmu0_alpha_lod_frac=0`,
+  `target_tmu1_rgb_detail=0`, `target_tmu1_rgb_lod_frac=0`,
+  `target_tmu1_alpha_detail=0`, and `target_tmu1_alpha_lod_frac=0`.
+- The run did exercise texture work, including `dual_tmu_combine=25239103`,
+  but the sub-clocal mselect histograms were all zero, so it did not cover
+  `GR_COMBINE_FACTOR_DETAIL_FACTOR`/`LOD_FRACTION` blend-factor state.
+- Validation stayed clean:
+  `verify=42832460`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`; the `409600000` cap was not hit.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+
 ### 2026-05-31: N1 ARM64 texture address emit refactor slice 1
 
 - Added ARM64-local macro emitter helpers for texture parameter indexed loads,
@@ -868,3 +900,94 @@ state_mismatches=0
   `compiles=15942`, `rejects=0`, `code_bytes=20412416`, `code_max=1868`.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N4 TMU combine reverse-blend helper slice 3
+
+- Added ARM64-local helper macros for repeated TMU combine reverse-blend
+  emission:
+  RGB vector factors use `ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND`, scalar
+  alpha factors use `ARM64_EMIT_TMU_COMBINE_ALPHA_REVERSE_BLEND`.
+- Converted TMU1 RGB, TMU1 alpha, TMU0 RGB, and TMU0 alpha reverse-blend
+  emission sites.
+- Preserved existing trilinear and non-trilinear behavior:
+  RGB paths still use `neon_00_ff_w` for trilinear or `neon_ff_w` for
+  non-trilinear inversion; alpha paths still use `i_00_ff_w` for trilinear or
+  `EOR #0xff` for non-trilinear inversion.
+- Kept the existing TMU1 alpha note that ARM64 intentionally uses
+  `tca_reverse_blend_1`, not the x86-64 RGB reverse-blend flag.
+- Build/sign passed after source edits.
+- VM verify passed:
+  `verify=51200000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- The run hit the configured verify cap:
+  `spans=248327323`, `verify=51200000`.
+- Coverage again exercised TMU0 `LOD_FRAC` helper paths, with representative
+  buckets showing `tmu0_rgb_lod_frac=4312302` and
+  `tmu0_alpha_lod_frac=4312302`.
+- `DETAIL` and TMU1 target counters remained zero, so those target modes still
+  need a different workload or directed coverage probe.
+- Metrics line emitted:
+  `mru_hits=12672010`, `scan_hits=8767387`, `misses=8902`,
+  `compiles=8902`, `rejects=0`, `code_bytes=11112364`, `code_max=1868`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+
+### 2026-05-31: N4 directed Glide coverage probe prep
+
+- Added `tools/voodoo_n4_probe/voodoo_n4_probe.c`, a minimal Win32 Glide2
+  console probe for the Windows 98 Gaming PC VM.
+- The probe dynamically loads `glide2x.dll`, configures dual-TMU
+  `GR_COMBINE_FUNCTION_BLEND` with `GR_COMBINE_FACTOR_DETAIL_FACTOR` and
+  `GR_COMBINE_FACTOR_LOD_FRACTION`, and draws bilinear textured triangles to
+  force target TMU combine states under validator coverage.
+- Built `tools/voodoo_n4_probe/N4PROBE.EXE` as a K6-class PE32 console binary
+  with no CRT dependency; import table contains only `KERNEL32.dll`.
+- Created `/tmp/86box-voodoo-n4/n4probe.iso` for Windows 98 CD transfer.
+- No emulator semantic change in this prep step; the next VM run should mount
+  the probe ISO and inspect whether target TMU detail/LOD-frac counters rise
+  while keeping framebuffer/aux/state validation clean.
+
+### 2026-05-31: N4 directed Glide coverage probe result
+
+- Updated the probe to create a real Win32 window for `grSstWinOpen`, write
+  `C:\N4PROBE.TXT`, and show a completion message box.
+- The updated Win98/K6-class probe imports only `KERNEL32.dll` and `USER32.dll`
+  and still has no CRT dependency.
+- Rebuilt with `scripts/setup-and-build.sh build` before VM validation.
+- Windows 98 Gaming PC VM was run with `VOODOO_VALIDATE_LIMIT=409600000` and
+  the probe ISO mounted.
+- Directed probe hit every remaining N4 target coverage counter:
+  `target_tmu0_rgb_detail=383280`,
+  `target_tmu0_rgb_lod_frac=383280`,
+  `target_tmu0_alpha_detail=383280`,
+  `target_tmu0_alpha_lod_frac=383280`,
+  `target_tmu1_rgb_detail=383280`,
+  `target_tmu1_rgb_lod_frac=383280`,
+  `target_tmu1_alpha_detail=383280`, and
+  `target_tmu1_alpha_lod_frac=383280`.
+- Coverage summary:
+  `texture_disabled=57600`, `tmu0_local=1355347`,
+  `tmu0_passthrough=0`, `dual_tmu_combine=766560`,
+  `tmu0_rgb_mselect=[0,0,0,0,383280,383280,0,0]`,
+  `tmu0_alpha_mselect=[0,0,0,0,383280,383280,0,0]`,
+  `tmu1_rgb_mselect=[0,0,0,0,383280,383280,0,0]`,
+  `tmu1_alpha_mselect=[0,0,0,0,383280,383280,0,0]`.
+- Validation stayed strict-clean:
+  `verify=2179507`, `skipped=0`, `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`.
+- The run did not hit the configured cap: `verify=2179507` out of
+  `409600000`.
+- Metrics line emitted:
+  `mru_hits=69004`, `scan_hits=124404`, `misses=6`, `compiles=6`,
+  `rejects=0`, `code_bytes=8292`, `code_max=1864`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+
+### 2026-05-31: N4 directed coverage cleanup
+
+- Removed the temporary global TMU coverage counters and
+  `Voodoo validate TMU coverage` runtime log from the emulator before commit.
+- Kept the directed Win32 Glide probe source as the reproducible workload for
+  N4 `DETAIL`/`LOD_FRAC` coverage.
+- Kept the existing per-mode validation buckets and strict mismatch validator
+  behavior unchanged.

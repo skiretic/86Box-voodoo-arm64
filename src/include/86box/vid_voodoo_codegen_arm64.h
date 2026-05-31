@@ -1438,6 +1438,26 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
         addlong(ARM64_LDR_W(dst_reg, 0, STATE_lod_frac_n(tmu))); \
     } while (0)
 
+#define ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND(factor_v, mask_offset_reg, reverse_blend, tmu) \
+    do {                                                                                        \
+        if (params->textureMode[tmu] & TEXTUREMODE_TRILINEAR) {                                 \
+            addlong(ARM64_LDR_Q_REG(16, 22, mask_offset_reg));                                  \
+            addlong(ARM64_EOR_V(factor_v, factor_v, 16));                                       \
+        } else if (!(reverse_blend)) {                                                          \
+            addlong(ARM64_EOR_V(factor_v, factor_v, 9));                                        \
+        }                                                                                       \
+    } while (0)
+
+#define ARM64_EMIT_TMU_COMBINE_ALPHA_REVERSE_BLEND(factor_reg, mask_index_reg, scratch_reg, reverse_blend, tmu) \
+    do {                                                                                                       \
+        if (params->textureMode[tmu] & TEXTUREMODE_TRILINEAR) {                                                \
+            addlong(ARM64_LDR_W_REG_LSL2(scratch_reg, 23, mask_index_reg));                                    \
+            addlong(ARM64_EOR_REG(factor_reg, factor_reg, scratch_reg));                                       \
+        } else if (!(reverse_blend)) {                                                                         \
+            addlong(ARM64_EOR_MASK(factor_reg, factor_reg, 8));                                                \
+        }                                                                                                      \
+    } while (0)
+
 static inline int
 codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int block_pos, int tmu)
 {
@@ -2874,15 +2894,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 }
 
                 /* Apply reverse blend: XOR with 0xFF mask, then add 1 */
-                if (params->textureMode[1] & TEXTUREMODE_TRILINEAR) {
-                    /* XOR v0 with neon_00_ff_w[w5] (trilinear) */
-                    /* w5 has offset (0 or 16) into neon_00_ff_w table */
-                    addlong(ARM64_LDR_Q_REG(16, 22, 5));  /* x22 = neon_00_ff_w pointer */
-                    addlong(ARM64_EOR_V(0, 0, 16));
-                } else if (!tc_reverse_blend_1) {
-                    /* XOR with 0xFF (invert) */
-                    addlong(ARM64_EOR_V(0, 0, 9));  /* v9 = neon_ff_w */
-                }
+                ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND(0, 5, tc_reverse_blend_1, 1);
                 /* ADD v0, v0, v8  (v8 = neon_01_w = {1,1,1,1}) */
                 addlong(ARM64_ADD_V4H(0, 0, 8));
 
@@ -2961,16 +2973,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 }
 
                 /* Apply reverse blend for alpha */
-                if (params->textureMode[1] & TEXTUREMODE_TRILINEAR) {
-                    /* XOR w4 with i_00_ff_w[w6] (w6 = tca_reverse_blend index) */
-                    addlong(ARM64_LDR_W_REG_LSL2(10, 23, 6));  /* x23 = i_00_ff_w */
-                    addlong(ARM64_EOR_REG(4, 4, 10));
-                } else if (!tca_reverse_blend_1) {
-                    /* NOTE: x86-64 line ~1303 incorrectly uses tc_reverse_blend_1 (the RGB flag)
-                     * in this TCA (alpha) path. The correct flag is tca_reverse_blend_1, which
-                     * is what we use here, matching the interpreter. */
-                    addlong(ARM64_EOR_MASK(4, 4, 8)); /* XOR with 0xFF */
-                }
+                /* NOTE: x86-64 line ~1303 incorrectly uses tc_reverse_blend_1 (the RGB flag)
+                 * in this TCA (alpha) path. The correct flag is tca_reverse_blend_1, which
+                 * is what we use here, matching the interpreter. */
+                ARM64_EMIT_TMU_COMBINE_ALPHA_REVERSE_BLEND(4, 6, 10, tca_reverse_blend_1, 1);
 
                 /* ADD w4, w4, #1 */
                 addlong(ARM64_ADD_IMM(4, 4, 1));
@@ -3065,12 +3071,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             }
 
             /* Apply reverse blend */
-            if (params->textureMode[0] & TEXTUREMODE_TRILINEAR) {
-                addlong(ARM64_LDR_Q_REG(16, 22, 5));
-                addlong(ARM64_EOR_V(4, 4, 16));
-            } else if (!tc_reverse_blend) {
-                addlong(ARM64_EOR_V(4, 4, 9));
-            }
+            ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND(4, 5, tc_reverse_blend, 0);
             /* ADD v4.4H, v4.4H, v8.4H */
             addlong(ARM64_ADD_V4H(4, 4, 8));
 
@@ -3148,12 +3149,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             }
 
             /* Apply tca reverse blend */
-            if (params->textureMode[0] & TEXTUREMODE_TRILINEAR) {
-                addlong(ARM64_LDR_W_REG_LSL2(10, 23, 6));
-                addlong(ARM64_EOR_REG(5, 5, 10));
-            } else if (!tca_reverse_blend) {
-                addlong(ARM64_EOR_MASK(5, 5, 8));  /* XOR with 0xFF */
-            }
+            ARM64_EMIT_TMU_COMBINE_ALPHA_REVERSE_BLEND(5, 6, 10, tca_reverse_blend, 0);
 
             /* ADD w5, w5, #1 */
             addlong(ARM64_ADD_IMM(5, 5, 1));
