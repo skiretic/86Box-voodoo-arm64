@@ -4268,7 +4268,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   - tmu0 s, t, w: texture unit 0 coordinates and perspective divisor
      *   - tmu1 s, t, w: texture unit 1 coordinates (if dual-TMU)
      *   - w: global W (for W-buffer and fog)
-     *   - pixel_count, texel_count: performance counters
+     *   - pixel_count, texel_count: performance counters (batched after loop)
      *
      * After incrementing, X is advanced by +1 (or -1 for right-to-left spans)
      * and the loop branches back to the top if pixels remain.
@@ -4355,28 +4355,6 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_STR_X(10, 0, STATE_tmu1_w));
     }
 
-    /* Pixel and texel count increments */
-    if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
-        /* ADD x7, x0, #STATE_pixel_count -- base for LDP/STP (offset exceeds imm7 range) */
-        addlong(ARM64_ADD_IMM_X(7, 0, STATE_pixel_count));
-        /* LDP w4, w5, [x7] -- load pixel_count and texel_count */
-        addlong(ARM64_LDP_OFF_W(4, 5, 7, 0));
-        addlong(ARM64_ADD_IMM(4, 4, 1));
-        if ((params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH
-            || (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL) {
-            addlong(ARM64_ADD_IMM(5, 5, 1));
-        } else {
-            addlong(ARM64_ADD_IMM(5, 5, 2));
-        }
-        /* STP w4, w5, [x7] -- store pixel_count and texel_count */
-        addlong(ARM64_STP_OFF_W(4, 5, 7, 0));
-    } else {
-        /* Pixel count only (no textures) */
-        addlong(ARM64_LDR_W(4, 0, STATE_pixel_count));
-        addlong(ARM64_ADD_IMM(4, 4, 1));
-        addlong(ARM64_STR_W(4, 0, STATE_pixel_count));
-    }
-
     /* ================================================================
      * X coordinate increment and loop back
      * ================================================================
@@ -4403,6 +4381,31 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     {
         int32_t loop_offset = loop_jump_pos - block_pos;
         addlong(ARM64_BCOND(loop_offset, COND_NE));
+    }
+
+    /* Pixel and texel counts are span totals. x2 still holds the original
+     * start X argument; w28 holds the one-past-end X after loop exit. */
+    if (state->xdir > 0) {
+        addlong(ARM64_SUB_REG(4, 28, 2));  /* span_count = final_x - start_x */
+    } else {
+        addlong(ARM64_SUB_REG(4, 2, 28));  /* span_count = start_x - final_x */
+    }
+
+    if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
+        addlong(ARM64_ADD_IMM_X(7, 0, STATE_pixel_count));
+        addlong(ARM64_LDP_OFF_W(5, 6, 7, 0));
+        addlong(ARM64_ADD_REG(5, 5, 4));
+        if ((params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH
+            || (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL) {
+            addlong(ARM64_ADD_REG(6, 6, 4));
+        } else {
+            addlong(ARM64_ADD_REG_LSL(6, 6, 4, 1));
+        }
+        addlong(ARM64_STP_OFF_W(5, 6, 7, 0));
+    } else {
+        addlong(ARM64_LDR_W(5, 0, STATE_pixel_count));
+        addlong(ARM64_ADD_REG(5, 5, 4));
+        addlong(ARM64_STR_W(5, 0, STATE_pixel_count));
     }
 
     /* ================================================================

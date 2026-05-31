@@ -335,3 +335,22 @@ Validation:
 - 5x 3DMark exact-fb soak passed: `verify=51200000`, `fb_tol=0`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
 
 Status: P2 dither hoist corrected and closed by 5x exact-fb 3DMark soak.
+
+### 2026-05-30: P3 pixel/texel counter accumulation corrected
+
+Implemented ARM64-local counter batching only:
+
+- removed per-pixel `pixel_count`/`texel_count` memory update from the loop body
+- computes span count after loop exit from original start X and final one-past-end X
+- adds `pixel_count += span_count` once per generated span
+- adds `texel_count += span_count` for pass-through/local single-fetch modes, or `span_count * 2` for dual-fetch modes
+- preserves existing JIT handoff where `vid_voodoo_render.c` adds `state->pixel_count` to both `voodoo->pixel_count[odd_even]` and `voodoo->fbiPixelsIn`
+- made no x86-64 or shared semantic changes
+
+Validation:
+
+- build/sign passed
+- 3DMark verify rerun passed: `verify=10240000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- 5x 3DMark soak passed: `verify=51200000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+
+Status: P3 counter batching corrected and closed by 5x 3DMark soak.
