@@ -810,3 +810,34 @@ state_mismatches=0
 - Conclusion: UT GOTY is useful for the separate negative-coordinate
   texture-state issue, but it does not cover the N4 detail/LOD-frac combine
   target.
+
+### 2026-05-31: UT GOTY negative-W texture-state fix
+
+- Fixed the ARM64 perspective texture-coordinate path for negative `tmu_w`.
+- Interpreter truth uses `(1ULL << 48) / tmu_w` for coordinate recovery, so a
+  negative `tmu_w` produces a zero S/T reciprocal. ARM64 had reused the signed
+  `SDIV` quotient for S/T and left bilinear `STATE_tex_s`/`STATE_tex_t` at
+  negative post-bias coordinates such as `fffffc88`/`fffffaf5` instead of the
+  interpreter's `fffff800`/`fffff800`.
+- Kept the existing signed quotient for LOD, avoiding the earlier blind
+  `UDIV` regression where framebuffer/aux mismatches appeared and LOD changed
+  from `8` to `1`.
+- Added a 64-bit ARM64 `CSEL` encoding helper and selected a zero coordinate
+  reciprocal only when `tmu_w <= 0`; no helper-backed dynarec path was added.
+- Clean build/sign passed after source edits.
+- UT GOTY Glide/detail-textures verify run:
+  `verify=47386125`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted:
+  `mru_hits=560647`, `scan_hits=1256527`, `misses=804`, `compiles=804`,
+  `rejects=0`, `code_bytes=944384`, `code_max=1820`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+- Follow-up broader game sweep used `VOODOO_VALIDATE_LIMIT=204800000` and hit
+  the cap within a longer run:
+  `spans=277620239`, `verify=204800000`, `skipped=0`,
+  `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`,
+  `state_mismatches=0`.
+- Follow-up metrics line emitted:
+  `mru_hits=6626350`, `scan_hits=9819941`, `misses=4604`,
+  `compiles=4604`, `rejects=0`, `code_bytes=5886664`, `code_max=1868`.

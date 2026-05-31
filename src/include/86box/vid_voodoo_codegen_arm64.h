@@ -653,6 +653,8 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 
 /* CSEL Wd, Wn, Wm, cond */
 #define ARM64_CSEL(d, n, m, cond) (0x1A800000 | CSEL_COND(cond) | Rm(m) | Rn(n) | Rd(d))
+/* CSEL Xd, Xn, Xm, cond */
+#define ARM64_CSEL_X(d, n, m, cond) (0x9A800000 | CSEL_COND(cond) | Rm(m) | Rn(n) | Rd(d))
 
 /* CSINC Wd, Wn, Wm, cond */
 #define ARM64_CSINC(d, n, m, cond) (0x1A800400 | CSEL_COND(cond) | Rm(m) | Rn(n) | Rd(d))
@@ -1486,6 +1488,13 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             PATCH_FORWARD_CBxZ(div_skip_pos);
         }
 
+        /* Interpreter uses unsigned division for S/T perspective recovery:
+         * (1ULL << 48) / tmu_w. Negative W therefore yields a zero coordinate
+         * reciprocal, while the existing signed quotient is kept for LOD. */
+        addlong(ARM64_MOV_REG_X(11, 4));
+        addlong(ARM64_CMP_IMM_X(7, 0));
+        addlong(ARM64_CSEL_X(11, 31, 11, COND_LE));
+
         /* Interpreter: ((tmu_s/t + (1 << 13)) >> 14) */
         addlong(ARM64_MOVZ_X_HW(10, 0x2000, 0));
         addlong(ARM64_ADD_REG_X(5, 5, 10));
@@ -1496,10 +1505,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
         /* ASR x6, x6, #14 -- T >>= 14 */
         addlong(ARM64_ASR_IMM_X(6, 6, 14));
 
-        /* MUL x5, x5, x4 -- S *= quotient */
-        addlong(ARM64_MUL_X(5, 5, 4));
-        /* MUL x6, x6, x4 -- T *= quotient */
-        addlong(ARM64_MUL_X(6, 6, 4));
+        /* MUL x5, x5, x11 -- S *= coordinate quotient */
+        addlong(ARM64_MUL_X(5, 5, 11));
+        /* MUL x6, x6, x11 -- T *= coordinate quotient */
+        addlong(ARM64_MUL_X(6, 6, 11));
 
         /* Interpreter: ((s/t * quotient) + (1 << 29)) >> 30 */
         addlong(ARM64_MOVZ_X_HW(10, 0x2000, 1));
