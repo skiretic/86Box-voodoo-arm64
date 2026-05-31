@@ -991,3 +991,32 @@ state_mismatches=0
   N4 `DETAIL`/`LOD_FRAC` coverage.
 - Kept the existing per-mode validation buckets and strict mismatch validator
   behavior unchanged.
+
+### 2026-05-31: N4 ARM64 TMU helper factoring
+
+- Subagent A proposed and checked a mechanical trilinear reverse-blend setup
+  helper for the duplicated TMU1/TMU0 `STATE_lod`, `lod & 1`,
+  `tc_reverse_blend`, and `tca_reverse_blend` setup.
+- Subagent B proposed and checked a mechanical RGB multiply helper for the
+  repeated `SMULL` -> `SSHR #8` -> `SQXTN` TMU combine sequence, preserving the
+  TMU1 pre-multiply clocal negation.
+- Subagent C proposed and checked a two-shape alpha clamp helper, preserving
+  the current TMU1 upper-clamp `CSEL` shape and the TMU0 negative-zero plus
+  upper-clamp shape.
+- Applied the three accepted ARM64-local mechanical helpers in
+  `src/include/86box/vid_voodoo_codegen_arm64.h`.
+- No x86-64 codegen changes; interpreter remains semantic truth.
+- Build/sign passed with `./scripts/setup-and-build.sh build`.
+- Added `scripts/launch-voodoo-validate-vm.sh` so future validation launches use
+  `-L` logfile capture, LaunchServices-compatible validator env, duplicate
+  process refusal, and default `VOODOO_VALIDATE_LIMIT=409600000`.
+- VM verify passed:
+  `verify=409600000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- The run exceeded the configured verify cap:
+  `spans=546016911`, `verify=409600000`.
+- Metrics line emitted:
+  `mru_hits=11330491`, `scan_hits=18191366`, `misses=9510`,
+  `compiles=9510`, `rejects=0`, `code_bytes=12062128`, `code_max=1868`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

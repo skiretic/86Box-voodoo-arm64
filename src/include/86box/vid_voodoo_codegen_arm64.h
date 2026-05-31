@@ -1414,9 +1414,10 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
         addlong(ARM64_ADD_IMM(tex_lod_reg, tex_lod_reg, 4));                                                         \
     } while (0)
 
-/* TMU combine factor helpers preserve emitted instruction order.
+/* TMU combine helpers preserve emitted instruction order.
  * DETAIL contract: dst_reg=factor, lod_reg=STATE_lod scratch, max_reg=detail_max scratch.
- * LOD_FRAC contract: dst_reg=factor loaded from STATE_lod_frac_n(tmu). */
+ * LOD_FRAC contract: dst_reg=factor loaded from STATE_lod_frac_n(tmu).
+ * RGB_MUL_SHIFT contract: SMULL -> SSHR #8 -> SQXTN; TMU1 passes pre-negated clocal. */
 #define ARM64_EMIT_TMU_COMBINE_DETAIL_FACTOR(dst_reg, lod_reg, max_reg, tmu) \
     do {                                                                     \
         addlong(ARM64_MOVZ_W(dst_reg, params->detail_bias[tmu] & 0xFFFF));   \
@@ -1438,6 +1439,35 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
         addlong(ARM64_LDR_W(dst_reg, 0, STATE_lod_frac_n(tmu))); \
     } while (0)
 
+/* Trilinear reverse-blend setup contract: lod_reg=STATE_lod scratch,
+ * rgb_offset_reg=neon_00_ff_w byte offset, alpha_index_reg=i_00_ff_w index. */
+#define ARM64_EMIT_TMU_TRILINEAR_REVERSE_BLEND_SETUP(lod_reg, rgb_offset_reg, alpha_index_reg, \
+                                                     reverse_blend, alpha_reverse_blend)       \
+    do {                                                                                       \
+        addlong(ARM64_LDR_W(lod_reg, 0, STATE_lod));                                           \
+        if (!(reverse_blend)) {                                                                 \
+            addlong(ARM64_MOVZ_W(rgb_offset_reg, 1));                                           \
+        } else {                                                                                \
+            addlong(ARM64_MOV_ZERO(rgb_offset_reg));                                            \
+        }                                                                                       \
+        addlong(ARM64_AND_MASK(lod_reg, lod_reg, 1));                                           \
+        if (!(alpha_reverse_blend)) {                                                           \
+            addlong(ARM64_MOVZ_W(alpha_index_reg, 1));                                          \
+        } else {                                                                                \
+            addlong(ARM64_MOV_ZERO(alpha_index_reg));                                           \
+        }                                                                                       \
+        addlong(ARM64_EOR_REG(rgb_offset_reg, rgb_offset_reg, lod_reg));                        \
+        addlong(ARM64_EOR_REG(alpha_index_reg, alpha_index_reg, lod_reg));                      \
+        addlong(ARM64_LSL_IMM(rgb_offset_reg, rgb_offset_reg, 4));                              \
+    } while (0)
+
+#define ARM64_EMIT_TMU_COMBINE_RGB_MUL_SHIFT(dst_v, lhs_v, factor_v, scratch_v) \
+    do {                                                                        \
+        addlong(ARM64_SMULL_4S_4H((scratch_v), (lhs_v), (factor_v)));           \
+        addlong(ARM64_SSHR_V4S((scratch_v), (scratch_v), 8));                   \
+        addlong(ARM64_SQXTN_4H_4S((dst_v), (scratch_v)));                       \
+    } while (0)
+
 #define ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND(factor_v, mask_offset_reg, reverse_blend, tmu) \
     do {                                                                                        \
         if (params->textureMode[tmu] & TEXTUREMODE_TRILINEAR) {                                 \
@@ -1456,6 +1486,19 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
         } else if (!(reverse_blend)) {                                                                         \
             addlong(ARM64_EOR_MASK(factor_reg, factor_reg, 8));                                                \
         }                                                                                                      \
+    } while (0)
+
+#define ARM64_EMIT_TMU_COMBINE_ALPHA_CLAMP(dst_reg, value_reg, max_reg, zero_negative) \
+    do {                                                                               \
+        addlong(ARM64_MOVZ_W(max_reg, 0xFF));                                          \
+        if (zero_negative) {                                                           \
+            addlong(ARM64_BIC_REG_ASR(dst_reg, value_reg, value_reg, 31));             \
+            addlong(ARM64_CMP_IMM(dst_reg, 0xFF));                                     \
+            addlong(ARM64_CSEL(dst_reg, max_reg, dst_reg, COND_HI));                   \
+        } else {                                                                       \
+            addlong(ARM64_CMP_REG(max_reg, value_reg));                                \
+            addlong(ARM64_CSEL(dst_reg, value_reg, max_reg, COND_HI));                 \
+        }                                                                              \
     } while (0)
 
 static inline int
@@ -2845,21 +2888,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             /* ---- TMU1 texture combine (tc_*_1 / tca_*_1 vars) ---- */
             if ((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tc_sub_clocal_1) {
                 /* Trilinear LOD blend for TMU1 */
-                addlong(ARM64_LDR_W(4, 0, STATE_lod));
-                if (!tc_reverse_blend_1) {
-                    addlong(ARM64_MOVZ_W(5, 1));
-                } else {
-                    addlong(ARM64_MOV_ZERO(5));
-                }
-                addlong(ARM64_AND_MASK(4, 4, 1));  /* lod & 1 */
-                if (!tca_reverse_blend_1) {
-                    addlong(ARM64_MOVZ_W(6, 1));
-                } else {
-                    addlong(ARM64_MOV_ZERO(6));
-                }
-                addlong(ARM64_EOR_REG(5, 5, 4));  /* tc_reverse_blend ^= (lod & 1) */
-                addlong(ARM64_EOR_REG(6, 6, 4));  /* tca_reverse_blend ^= (lod & 1) */
-                addlong(ARM64_LSL_IMM(5, 5, 4));  /* w5 = tc_reverse_blend << 4 (byte offset into neon_00_ff_w) */
+                ARM64_EMIT_TMU_TRILINEAR_REVERSE_BLEND_SETUP(4, 5, 6, tc_reverse_blend_1,
+                                                             tca_reverse_blend_1);
                 /* w5 = tc_reverse_blend index, w6 = tca_reverse_blend */
             }
 
@@ -2921,9 +2951,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                  * v1 = 0 (from MOVI above), v3 = clocal, v0 = factor
                  */
                 addlong(ARM64_SUB_V4H(16, 1, 3));        /* v16.4H = 0 - clocal (negate first) */
-                addlong(ARM64_SMULL_4S_4H(16, 16, 0));   /* v16.4S = (-clocal).4H * factor.4H */
-                addlong(ARM64_SSHR_V4S(16, 16, 8));       /* v16.4S >>= 8 (arithmetic) */
-                addlong(ARM64_SQXTN_4H_4S(1, 16));        /* v1.4H = saturate_narrow(v16.4S) */
+                ARM64_EMIT_TMU_COMBINE_RGB_MUL_SHIFT(1, 16, 0, 16);
 
                 /* tc_add_clocal_1: add clocal (TMU1) back */
                 if (tc_add_clocal_1) {
@@ -2992,10 +3020,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_ADD_REG(4, 4, 5));
                 }
 
-                /* Clamp alpha to [0, 0xFF] */
-                addlong(ARM64_MOVZ_W(10, 0xFF));
-                addlong(ARM64_CMP_REG(10, 4));
-                addlong(ARM64_CSEL(10, 4, 10, COND_HI));  /* min(0xFF, alpha) */
+                /* Preserve current TMU1 alpha upper-clamp CSEL shape. */
+                ARM64_EMIT_TMU_COMBINE_ALPHA_CLAMP(10, 4, 10, 0);
 
                 /* Insert alpha into v3 lane 3 */
                 addlong(ARM64_INS_H(3, 3, 10));
@@ -3011,21 +3037,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
             /* ---- TMU0 trilinear setup ---- */
             if (params->textureMode[0] & TEXTUREMODE_TRILINEAR) {
-                addlong(ARM64_LDR_W(4, 0, STATE_lod));
-                if (!tc_reverse_blend) {
-                    addlong(ARM64_MOVZ_W(5, 1));
-                } else {
-                    addlong(ARM64_MOV_ZERO(5));
-                }
-                addlong(ARM64_AND_MASK(4, 4, 1));
-                if (!tca_reverse_blend) {
-                    addlong(ARM64_MOVZ_W(6, 1));
-                } else {
-                    addlong(ARM64_MOV_ZERO(6));
-                }
-                addlong(ARM64_EOR_REG(5, 5, 4));
-                addlong(ARM64_EOR_REG(6, 6, 4));
-                addlong(ARM64_LSL_IMM(5, 5, 4));
+                ARM64_EMIT_TMU_TRILINEAR_REVERSE_BLEND_SETUP(4, 5, 6, tc_reverse_blend, tca_reverse_blend);
                 /* w5 = tc_reverse_blend (scaled), w6 = tca_reverse_blend */
             }
 
@@ -3081,10 +3093,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_FMOV_W_S(13, 7));
             addlong(ARM64_LSR_IMM(13, 13, 24));
 
-            /* Multiply: signed 16x16 -> 32 -> >>8 -> narrow */
-            addlong(ARM64_SMULL_4S_4H(16, 1, 4));
-            addlong(ARM64_SSHR_V4S(16, 16, 8));
-            addlong(ARM64_SQXTN_4H_4S(1, 16));
+            ARM64_EMIT_TMU_COMBINE_RGB_MUL_SHIFT(1, 1, 4, 16);
 
             if (tca_sub_clocal) {
                 /* w5 = TMU0 alpha (from w13) */
@@ -3164,10 +3173,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             }
 
             /* Clamp: if negative, 0; if > 0xFF, 0xFF */
-            addlong(ARM64_MOVZ_W(10, 0xFF));
-            addlong(ARM64_BIC_REG_ASR(4, 4, 4, 31));   /* zero if negative */
-            addlong(ARM64_CMP_IMM(4, 0xFF));
-            addlong(ARM64_CSEL(4, 10, 4, COND_HI));    /* cap at 0xFF */
+            ARM64_EMIT_TMU_COMBINE_ALPHA_CLAMP(4, 4, 10, 1);
 
             if (tca_invert_output) {
                 addlong(ARM64_EOR_MASK(4, 4, 8));  /* XOR with 0xFF */
