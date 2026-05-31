@@ -692,3 +692,54 @@ state_mismatches=0
   `rejects=0`, `code_bytes=42436`, `code_max=1852`.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N3 conditional callee-saved proof groundwork
+
+- Added an ARM64-local callee-saved register-use bitmap for generated blocks.
+- Added passive assertions tying the bitmap to existing feature predicates for
+  `x19-x23`, `x25-x26`, `d8-d11`, and `d14`.
+- Documented the current generated-block use of fixed callee-saved registers:
+  `x24`, `x27-x28`, `d12-d13`, and `d15`.
+- Explicitly kept the 176-byte frame, save/restore layout, prologue, and
+  epilogue behavior unchanged.
+- Build/sign passed after source edits.
+- Short verify with metrics passed:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted:
+  `mru_hits=452309`, `scan_hits=586480`, `misses=29`, `compiles=29`,
+  `rejects=0`, `code_bytes=42436`, `code_max=1852`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+
+### 2026-05-31: N3 conditional d10/d11 save/restore slice
+
+- Used the callee-saved bitmap to gate the `d10,d11` save/restore pair.
+- Kept the 176-byte frame size and fixed slot offsets unchanged.
+- `d10` remains tied to `cc_invert_output`; `d11` remains tied to fogColor use.
+- Left all other callee-saved GPR/NEON save/restore behavior unchanged.
+- Build/sign passed after source edits.
+- Short verify with metrics passed:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted:
+  `mru_hits=469365`, `scan_hits=607370`, `misses=29`, `compiles=29`,
+  `rejects=0`, `code_bytes=42140`, `code_max=1840`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+
+### 2026-05-31: N3 conditional d8/d9 save/restore slice
+
+- Used the callee-saved bitmap to gate the `d8,d9` save/restore pair.
+- Kept the 176-byte frame size and fixed slot offsets unchanged.
+- `d8` remains tied to `neon_01_w` use; `d9` remains tied to `neon_ff_w` use.
+- Left all GPR save/restore and other NEON save/restore behavior unchanged.
+- Build/sign passed after source edits.
+- Short verify with metrics passed:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted:
+  `mru_hits=474658`, `scan_hits=617799`, `misses=29`, `compiles=29`,
+  `rejects=0`, `code_bytes=42116`, `code_max=1840`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

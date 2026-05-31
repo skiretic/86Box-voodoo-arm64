@@ -117,6 +117,100 @@
  * that emit BL or BLR instructions.
  */
 
+enum {
+    ARM64_CALLEE_USE_X19 = 1u << 0,
+    ARM64_CALLEE_USE_X20 = 1u << 1,
+    ARM64_CALLEE_USE_X21 = 1u << 2,
+    ARM64_CALLEE_USE_X22 = 1u << 3,
+    ARM64_CALLEE_USE_X23 = 1u << 4,
+    ARM64_CALLEE_USE_X24 = 1u << 5,
+    ARM64_CALLEE_USE_X25 = 1u << 6,
+    ARM64_CALLEE_USE_X26 = 1u << 7,
+    ARM64_CALLEE_USE_X27 = 1u << 8,
+    ARM64_CALLEE_USE_X28 = 1u << 9,
+    ARM64_CALLEE_USE_D8  = 1u << 10,
+    ARM64_CALLEE_USE_D9  = 1u << 11,
+    ARM64_CALLEE_USE_D10 = 1u << 12,
+    ARM64_CALLEE_USE_D11 = 1u << 13,
+    ARM64_CALLEE_USE_D12 = 1u << 14,
+    ARM64_CALLEE_USE_D13 = 1u << 15,
+    ARM64_CALLEE_USE_D14 = 1u << 16,
+    ARM64_CALLEE_USE_D15 = 1u << 17
+};
+
+static inline uint32_t
+arm64_codegen_callee_saved_use(int need_x19, int need_x20, int need_x21,
+                               int need_x22, int need_x23, int need_x25,
+                               int need_x26, int need_v8, int need_v9,
+                               int need_v10, int need_v11, int dual_tmus)
+{
+    uint32_t use = ARM64_CALLEE_USE_X24 | ARM64_CALLEE_USE_X27 |
+                   ARM64_CALLEE_USE_X28 | ARM64_CALLEE_USE_D12 |
+                   ARM64_CALLEE_USE_D13 | ARM64_CALLEE_USE_D15;
+
+    if (need_x19)
+        use |= ARM64_CALLEE_USE_X19;
+    if (need_x20)
+        use |= ARM64_CALLEE_USE_X20;
+    if (need_x21)
+        use |= ARM64_CALLEE_USE_X21;
+    if (need_x22)
+        use |= ARM64_CALLEE_USE_X22;
+    if (need_x23)
+        use |= ARM64_CALLEE_USE_X23;
+    if (need_x25)
+        use |= ARM64_CALLEE_USE_X25;
+    if (need_x26)
+        use |= ARM64_CALLEE_USE_X26;
+    if (need_v8)
+        use |= ARM64_CALLEE_USE_D8;
+    if (need_v9)
+        use |= ARM64_CALLEE_USE_D9;
+    if (need_v10)
+        use |= ARM64_CALLEE_USE_D10;
+    if (need_v11)
+        use |= ARM64_CALLEE_USE_D11;
+    if (dual_tmus)
+        use |= ARM64_CALLEE_USE_D14;
+
+    return use;
+}
+
+static inline void
+arm64_codegen_assert_callee_saved_use(uint32_t use, int need_x19, int need_x20,
+                                      int need_x21, int need_x22, int need_x23,
+                                      int need_x25, int need_x26, int need_v8,
+                                      int need_v9, int need_v10, int need_v11,
+                                      int dual_tmus)
+{
+#define ARM64_ASSERT_USE(bit, pred, name)                                  \
+    do {                                                                   \
+        if (((use) & (bit)) != ((pred) ? (bit) : 0))                       \
+            fatal("ARM64 JIT: callee-saved use mismatch for %s\n", name); \
+    } while (0)
+
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_X19, need_x19, "x19");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_X20, need_x20, "x20");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_X21, need_x21, "x21");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_X22, need_x22, "x22");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_X23, need_x23, "x23");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_X25, need_x25, "x25");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_X26, need_x26, "x26");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_D8, need_v8, "d8");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_D9, need_v9, "d9");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_D10, need_v10, "d10");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_D11, need_v11, "d11");
+    ARM64_ASSERT_USE(ARM64_CALLEE_USE_D14, dual_tmus, "d14");
+
+    if (!(use & ARM64_CALLEE_USE_X24) || !(use & ARM64_CALLEE_USE_X27) ||
+        !(use & ARM64_CALLEE_USE_X28) || !(use & ARM64_CALLEE_USE_D12) ||
+        !(use & ARM64_CALLEE_USE_D13) || !(use & ARM64_CALLEE_USE_D15)) {
+        fatal("ARM64 JIT: missing fixed callee-saved register use\n");
+    }
+
+#undef ARM64_ASSERT_USE
+}
+
 /*
  * voodoo_arm64_data_t -- cache slot for one compiled pixel pipeline block.
  *
@@ -1989,7 +2083,6 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int need_v10         = cc_invert_output;
     int need_v11         = (params->fogMode & FOG_ENABLE) &&
                            ((params->fogMode & FOG_CONSTANT) || !(params->fogMode & FOG_ADD));
-
     arm64_codegen_begin_emit();
 
     /* Early-return checks: if DEPTHOP_NEVER or AFUNC_NEVER, every pixel
@@ -2006,6 +2099,45 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_RET);
         return block_pos;
     }
+
+    /*
+     * Current callee-saved write proof for the fixed 176-byte frame:
+     *
+     *   x19: logtable pointer for perspective texture LOD.
+     *   x20: alookup pointer for non-constant fog or alpha blend factors.
+     *   x21: aminuslookup pointer for alpha blend inverse factors.
+     *   x22: neon_00_ff_w pointer for trilinear RGB reverse-blend masks.
+     *   x23: i_00_ff_w pointer for trilinear alpha reverse-blend masks.
+     *   x24: real_y copy, written by the prologue.
+     *   x25: bilinear_lookup pointer for bilinear texture fetch.
+     *   x26: rgb565 table pointer for alpha blend, or dither_rb base.
+     *   x27: cached STATE_x2 loop bound, written by the prologue.
+     *   x28: cached STATE_x loop coordinate, written by the prologue.
+     *
+     *   d8:  neon_01_w, used by TMU/color/alpha factor +1 paths.
+     *   d9:  neon_ff_w, used by TMU/color/alpha 0xff masks.
+     *   d10: neon_ff_b, used by cc_invert_output.
+     *   d11: fogColor, used by fog.
+     *   d12: RGBA deltas, written by the prologue for per-pixel increments.
+     *   d13: color-before-fog copy, written before fog.
+     *   d14: TMU1 ST deltas, written only for dual TMU blocks.
+     *   d15: TMU0 ST deltas, written by the prologue.
+     *
+     * N3 keeps the frame size and slot layout fixed. The first conditional
+     * save/restore slices only gate a pair when neither register in that pair
+     * is written by the generated block.
+     */
+    uint32_t callee_saved_use =
+        arm64_codegen_callee_saved_use(need_x19, need_x20, need_x21,
+                                       need_x22, need_x23, need_x25,
+                                       need_x26, need_v8, need_v9,
+                                       need_v10, need_v11,
+                                       voodoo->dual_tmus);
+    arm64_codegen_assert_callee_saved_use(callee_saved_use, need_x19,
+                                          need_x20, need_x21, need_x22,
+                                          need_x23, need_x25, need_x26,
+                                          need_v8, need_v9, need_v10,
+                                          need_v11, voodoo->dual_tmus);
 
     /* Re-initialize NEON constants before every emit. These constants are
      * read by the PROLOGUE's LDR Q instructions that load them into pinned
@@ -2057,10 +2189,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     addlong(ARM64_STP_OFF_X(25, 26, 31, 64));
     /* STP x27, x28, [SP, #80] */
     addlong(ARM64_STP_OFF_X(27, 28, 31, 80));
-    /* STP d8, d9, [SP, #96] */
-    addlong(ARM64_STP_D(8, 9, 31, 96));
-    /* STP d10, d11, [SP, #112] */
-    addlong(ARM64_STP_D(10, 11, 31, 112));
+    /* STP d8, d9, [SP, #96] -- only if neon_01_w or neon_ff_w is written */
+    if (callee_saved_use & (ARM64_CALLEE_USE_D8 | ARM64_CALLEE_USE_D9))
+        addlong(ARM64_STP_D(8, 9, 31, 96));
+    /* STP d10, d11, [SP, #112] -- only if neon_ff_b or fogColor is written */
+    if (callee_saved_use & (ARM64_CALLEE_USE_D10 | ARM64_CALLEE_USE_D11))
+        addlong(ARM64_STP_D(10, 11, 31, 112));
     /* STP d12, d13, [SP, #128] */
     addlong(ARM64_STP_D(12, 13, 31, 128));
     /* STP d14, d15, [SP, #144] -- hoisted TMU delta registers */
@@ -4422,10 +4556,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     addlong(ARM64_LDP_D(14, 15, 31, 144));
     /* LDP d12, d13, [SP, #128] */
     addlong(ARM64_LDP_D(12, 13, 31, 128));
-    /* LDP d10, d11, [SP, #112] */
-    addlong(ARM64_LDP_D(10, 11, 31, 112));
-    /* LDP d8, d9, [SP, #96] */
-    addlong(ARM64_LDP_D(8, 9, 31, 96));
+    /* LDP d10, d11, [SP, #112] -- paired with conditional save above */
+    if (callee_saved_use & (ARM64_CALLEE_USE_D10 | ARM64_CALLEE_USE_D11))
+        addlong(ARM64_LDP_D(10, 11, 31, 112));
+    /* LDP d8, d9, [SP, #96] -- paired with conditional save above */
+    if (callee_saved_use & (ARM64_CALLEE_USE_D8 | ARM64_CALLEE_USE_D9))
+        addlong(ARM64_LDP_D(8, 9, 31, 96));
     /* LDP x27, x28, [SP, #80] */
     addlong(ARM64_LDP_OFF_X(27, 28, 31, 80));
     /* LDP x25, x26, [SP, #64] */
