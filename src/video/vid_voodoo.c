@@ -1750,6 +1750,46 @@ voodoo_card_close(voodoo_t *voodoo)
               rejects,
               code_bytes,
               code_max_bytes);
+        pclog("Voodoo ARM64 JIT N5 metrics (type=%d): spans=%" PRIu64 " pixels=%" PRIu64
+              " dither_spans=%" PRIu64 " dither_pixels=%" PRIu64
+              " dither2x2_spans=%" PRIu64 " dither2x2_pixels=%" PRIu64
+              " rgb_wmask_spans=%" PRIu64 " rgb_wmask_pixels=%" PRIu64
+              " alpha_blend_spans=%" PRIu64 " alpha_blend_pixels=%" PRIu64
+              " dither_base_x26_spans=%" PRIu64 " dither_base_x26_pixels=%" PRIu64
+              " dither_ptr_fallback_spans=%" PRIu64 " dither_ptr_fallback_pixels=%" PRIu64
+              " tmu0_bilinear_pixels=%" PRIu64 " tmu0_s_wrap_edge=%" PRIu64
+              " tmu0_s_clamp_low=%" PRIu64 " tmu0_s_clamp_high=%" PRIu64
+              " tmu0_t_edge=%" PRIu64 " tmu0_st_edge=%" PRIu64
+              " tmu1_bilinear_pixels=%" PRIu64 " tmu1_s_wrap_edge=%" PRIu64
+              " tmu1_s_clamp_low=%" PRIu64 " tmu1_s_clamp_high=%" PRIu64
+              " tmu1_t_edge=%" PRIu64 " tmu1_st_edge=%" PRIu64 "\n",
+              voodoo->type,
+              voodoo->arm64_jit_n5_spans,
+              voodoo->arm64_jit_n5_pixels,
+              voodoo->arm64_jit_n5_dither_spans,
+              voodoo->arm64_jit_n5_dither_pixels,
+              voodoo->arm64_jit_n5_dither2x2_spans,
+              voodoo->arm64_jit_n5_dither2x2_pixels,
+              voodoo->arm64_jit_n5_rgb_wmask_spans,
+              voodoo->arm64_jit_n5_rgb_wmask_pixels,
+              voodoo->arm64_jit_n5_alpha_blend_spans,
+              voodoo->arm64_jit_n5_alpha_blend_pixels,
+              voodoo->arm64_jit_n5_dither_base_x26_spans,
+              voodoo->arm64_jit_n5_dither_base_x26_pixels,
+              voodoo->arm64_jit_n5_dither_ptr_fallback_spans,
+              voodoo->arm64_jit_n5_dither_ptr_fallback_pixels,
+              voodoo->arm64_jit_n5_bilinear_pixels[0],
+              voodoo->arm64_jit_n5_s_wrap_edge_pixels[0],
+              voodoo->arm64_jit_n5_s_clamp_low_pixels[0],
+              voodoo->arm64_jit_n5_s_clamp_high_pixels[0],
+              voodoo->arm64_jit_n5_t_edge_pixels[0],
+              voodoo->arm64_jit_n5_st_edge_pixels[0],
+              voodoo->arm64_jit_n5_bilinear_pixels[1],
+              voodoo->arm64_jit_n5_s_wrap_edge_pixels[1],
+              voodoo->arm64_jit_n5_s_clamp_low_pixels[1],
+              voodoo->arm64_jit_n5_s_clamp_high_pixels[1],
+              voodoo->arm64_jit_n5_t_edge_pixels[1],
+              voodoo->arm64_jit_n5_st_edge_pixels[1]);
     }
 #endif
 

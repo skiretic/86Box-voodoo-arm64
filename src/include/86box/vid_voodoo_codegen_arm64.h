@@ -836,6 +836,14 @@ arm64_codegen_check_patch_pos(int pos)
 }
 
 static inline void
+arm64_codegen_check_patch_target(int target_pos)
+{
+    if (target_pos < 0 || target_pos > BLOCK_SIZE || (target_pos & 3)) {
+        fatal("ARM64 JIT: invalid patch target (target=%d limit=%d)\n", target_pos, BLOCK_SIZE);
+    }
+}
+
+static inline void
 arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
 {
     int64_t min_off = -((int64_t) 1 << (imm_bits - 1)) * 4;
@@ -850,6 +858,97 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
     }
 }
 
+static inline int32_t
+arm64_codegen_patch_offset(const char *kind, int pos, int target_pos, int imm_bits)
+{
+    int32_t off = target_pos - pos;
+
+    arm64_codegen_check_patch_pos(pos);
+    arm64_codegen_check_patch_target(target_pos);
+    arm64_codegen_check_branch_offset(kind, off, imm_bits);
+
+    return off;
+}
+
+static inline void
+arm64_codegen_patch_bcond_to_target(uint8_t *code_block, int pos, int target_pos)
+{
+    int32_t   off  = arm64_codegen_patch_offset("B.cond", pos, target_pos, 19);
+    uint32_t *insn = (uint32_t *) &code_block[pos];
+
+    *insn = (*insn & ~0x00ffffe0u) | OFFSET19(off);
+}
+
+static inline void
+arm64_codegen_patch_b_to_target(uint8_t *code_block, int pos, int target_pos)
+{
+    int32_t   off  = arm64_codegen_patch_offset("B", pos, target_pos, 26);
+    uint32_t *insn = (uint32_t *) &code_block[pos];
+
+    *insn = (*insn & ~0x03ffffffu) | OFFSET26(off);
+}
+
+static inline void
+arm64_codegen_patch_tbxz_to_target(uint8_t *code_block, int pos, int target_pos)
+{
+    int32_t   off  = arm64_codegen_patch_offset("TBxZ", pos, target_pos, 14);
+    uint32_t *insn = (uint32_t *) &code_block[pos];
+
+    *insn = (*insn & ~0x0007ffe0u) | OFFSET14(off);
+}
+
+static inline void
+arm64_codegen_patch_cbxz_to_target(uint8_t *code_block, int pos, int target_pos)
+{
+    int32_t   off  = arm64_codegen_patch_offset("CBxZ", pos, target_pos, 19);
+    uint32_t *insn = (uint32_t *) &code_block[pos];
+
+    *insn = (*insn & ~0x00ffffe0u) | OFFSET19(off);
+}
+
+typedef enum arm64_codegen_cold_block_kind {
+    ARM64_COLD_BLOCK_S_WRAP
+} arm64_codegen_cold_block_kind_t;
+
+typedef struct arm64_codegen_cold_queue_entry {
+    arm64_codegen_cold_block_kind_t kind;
+    int                             branch_pos;
+    int                             join_pos;
+    int                             tmu;
+} arm64_codegen_cold_queue_entry_t;
+
+#define ARM64_COLD_QUEUE_CAPACITY 16
+
+typedef struct arm64_codegen_cold_queue {
+    arm64_codegen_cold_queue_entry_t entries[ARM64_COLD_QUEUE_CAPACITY];
+    int                              count;
+} arm64_codegen_cold_queue_t;
+
+static inline void
+arm64_codegen_cold_queue_init(arm64_codegen_cold_queue_t *queue)
+{
+    queue->count = 0;
+}
+
+static inline void
+arm64_codegen_cold_queue_add(arm64_codegen_cold_queue_t *queue,
+                             arm64_codegen_cold_block_kind_t kind,
+                             int branch_pos, int join_pos, int tmu)
+{
+    if (queue->count >= ARM64_COLD_QUEUE_CAPACITY) {
+        fatal("ARM64 JIT: cold block queue overflow (capacity=%d)\n", ARM64_COLD_QUEUE_CAPACITY);
+    }
+
+    arm64_codegen_check_patch_pos(branch_pos);
+    arm64_codegen_check_patch_target(join_pos);
+
+    queue->entries[queue->count].kind       = kind;
+    queue->entries[queue->count].branch_pos = branch_pos;
+    queue->entries[queue->count].join_pos   = join_pos;
+    queue->entries[queue->count].tmu        = tmu;
+    queue->count++;
+}
+
 /*
  * PATCH_FORWARD_BCOND(pos) -- patch a B.cond placeholder at 'pos' to
  * branch to 'block_pos'. pos is the byte offset within code_block where
@@ -859,10 +958,7 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
  */
 #define PATCH_FORWARD_BCOND(pos)                                             \
     do {                                                                     \
-        int32_t _off = block_pos - (pos);                                    \
-        arm64_codegen_check_patch_pos(pos);                                  \
-        arm64_codegen_check_branch_offset("B.cond", _off, 19);               \
-        *(uint32_t *) &code_block[(pos)] |= OFFSET19(_off);                 \
+        arm64_codegen_patch_bcond_to_target(code_block, (pos), block_pos);   \
     } while (0)
 
 /*
@@ -871,10 +967,7 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
  */
 #define PATCH_FORWARD_B(pos)                                                 \
     do {                                                                     \
-        int32_t _off = block_pos - (pos);                                    \
-        arm64_codegen_check_patch_pos(pos);                                  \
-        arm64_codegen_check_branch_offset("B", _off, 26);                    \
-        *(uint32_t *) &code_block[(pos)] |= OFFSET26(_off);                 \
+        arm64_codegen_patch_b_to_target(code_block, (pos), block_pos);       \
     } while (0)
 
 /*
@@ -883,10 +976,7 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
  */
 #define PATCH_FORWARD_TBxZ(pos)                                              \
     do {                                                                     \
-        int32_t _off = block_pos - (pos);                                    \
-        arm64_codegen_check_patch_pos(pos);                                  \
-        arm64_codegen_check_branch_offset("TBxZ", _off, 14);                 \
-        *(uint32_t *) &code_block[(pos)] |= OFFSET14(_off);                 \
+        arm64_codegen_patch_tbxz_to_target(code_block, (pos), block_pos);    \
     } while (0)
 
 /*
@@ -895,10 +985,7 @@ arm64_codegen_check_branch_offset(const char *kind, int32_t off, int imm_bits)
  */
 #define PATCH_FORWARD_CBxZ(pos)                                              \
     do {                                                                     \
-        int32_t _off = block_pos - (pos);                                    \
-        arm64_codegen_check_patch_pos(pos);                                  \
-        arm64_codegen_check_branch_offset("CBxZ", _off, 19);                 \
-        *(uint32_t *) &code_block[(pos)] |= OFFSET19(_off);                 \
+        arm64_codegen_patch_cbxz_to_target(code_block, (pos), block_pos);    \
     } while (0)
 
 /* ========================================================================
@@ -1502,7 +1589,46 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
     } while (0)
 
 static inline int
-codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int block_pos, int tmu)
+arm64_codegen_drain_cold_queue(uint8_t *code_block, int block_pos,
+                               const arm64_codegen_cold_queue_t *queue)
+{
+    for (int i = 0; i < queue->count; i++) {
+        const arm64_codegen_cold_queue_entry_t *entry = &queue->entries[i];
+
+        switch (entry->kind) {
+            case ARM64_COLD_BLOCK_S_WRAP:
+            {
+                int cold_block_pos = block_pos;
+
+                arm64_codegen_patch_bcond_to_target(code_block, entry->branch_pos, cold_block_pos);
+
+                /* row0[S] */
+                addlong(ARM64_LDR_W_REG_LSL2(11, 14, 4));
+                addlong(ARM64_FMOV_S_W(0, 11));
+                /* row0[0] -- wrapped S+1 */
+                addlong(ARM64_LDR_W(11, 14, 0));
+                addlong(ARM64_INS_S(0, 1, 11));
+                /* row1[S] */
+                addlong(ARM64_LDR_W_REG_LSL2(11, 13, 4));
+                addlong(ARM64_FMOV_S_W(1, 11));
+                /* row1[0] */
+                addlong(ARM64_LDR_W(11, 13, 0));
+                addlong(ARM64_INS_S(1, 1, 11));
+
+                int cold_done_pos = block_pos;
+                addlong(ARM64_B_PLACEHOLDER);
+                arm64_codegen_patch_b_to_target(code_block, cold_done_pos, entry->join_pos);
+                break;
+            }
+        }
+    }
+
+    return block_pos;
+}
+
+static inline int
+codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state,
+                      int block_pos, int tmu, arm64_codegen_cold_queue_t *cold_queue)
 {
     (void) voodoo;
 
@@ -1898,27 +2024,9 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                     addlong(ARM64_LDR_D_REG(0, 14, 4));
                     addlong(ARM64_LDR_D_REG(1, 13, 4));
 
-                    int normal_done = block_pos;
-                    addlong(ARM64_B_PLACEHOLDER);
-
-                    /* Wrap case: S is at edge, S+1 wraps to 0 */
-                    PATCH_FORWARD_BCOND(wrap_skip);
-
-                    /* Load S texel, then load texel at S=0 (wrap), combine */
-                    /* row0[S] */
-                    addlong(ARM64_LDR_W_REG_LSL2(11, 14, 4));
-                    addlong(ARM64_FMOV_S_W(0, 11));
-                    /* row0[0] -- wrapped S+1 */
-                    addlong(ARM64_LDR_W(11, 14, 0));
-                    addlong(ARM64_INS_S(0, 1, 11));  /* v0.S[1] = row0[0] */
-                    /* row1[S] */
-                    addlong(ARM64_LDR_W_REG_LSL2(11, 13, 4));
-                    addlong(ARM64_FMOV_S_W(1, 11));
-                    /* row1[0] */
-                    addlong(ARM64_LDR_W(11, 13, 0));
-                    addlong(ARM64_INS_S(1, 1, 11));
-
-                    PATCH_FORWARD_B(normal_done);
+                    int s_wrap_join_pos = block_pos;
+                    arm64_codegen_cold_queue_add(cold_queue, ARM64_COLD_BLOCK_S_WRAP,
+                                                 wrap_skip, s_wrap_join_pos, tmu);
                 }
             }
 
@@ -2179,7 +2287,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int need_v10         = cc_invert_output;
     int need_v11         = (params->fogMode & FOG_ENABLE) &&
                            ((params->fogMode & FOG_CONSTANT) || !(params->fogMode & FOG_ADD));
+    arm64_codegen_cold_queue_t cold_queue;
     arm64_codegen_begin_emit();
+    arm64_codegen_cold_queue_init(&cold_queue);
 
     /* Early-return checks: if DEPTHOP_NEVER or AFUNC_NEVER, every pixel
      * is unconditionally rejected, so we emit a bare RET and return from
@@ -2844,7 +2954,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->fbzColorPath & FBZCP_TEXTURE_ENABLED) {
         if ((params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL || !voodoo->dual_tmus) {
             /* TMU0 only sampling local colour, or only one TMU */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0, &cold_queue);
 
             /* FMOV s0, w4 -- move texel to NEON v0 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -2854,7 +2964,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_STR_W(4, 0, STATE_tex_a));
         } else if ((params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH) {
             /* TMU0 in pass-through mode, only sample TMU1 */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, &cold_queue);
 
             /* FMOV s0, w4 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -2880,7 +2990,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
              * tc_reverse_blend, tc_add, tc_invert for RGB channels.
              * And tca_* equivalents for alpha channel.
              * ============================================================ */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 1, &cold_queue);
 
             /* FMOV s3, w4 -- TMU1 result in v3 */
             addlong(ARM64_FMOV_S_W(3, 4));
@@ -3028,7 +3138,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             }
 
             /* ---- Now fetch TMU0 ---- */
-            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0);
+            block_pos = codegen_texture_fetch(code_block, voodoo, params, state, block_pos, 0, &cold_queue);
 
             /* FMOV s0, w4 -- TMU0 result in v0 */
             addlong(ARM64_FMOV_S_W(0, 4));
@@ -4568,6 +4678,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
     /* RET */
     addlong(ARM64_RET);
+
+    block_pos = arm64_codegen_drain_cold_queue(code_block, block_pos, &cold_queue);
 
     return block_pos;
 }

@@ -804,6 +804,26 @@ typedef struct voodoo_t {
     uint64_t arm64_jit_rejects[4];
     uint64_t arm64_jit_code_bytes[4];
     uint64_t arm64_jit_code_max_bytes[4];
+    uint64_t arm64_jit_n5_spans;
+    uint64_t arm64_jit_n5_pixels;
+    uint64_t arm64_jit_n5_dither_spans;
+    uint64_t arm64_jit_n5_dither_pixels;
+    uint64_t arm64_jit_n5_dither2x2_spans;
+    uint64_t arm64_jit_n5_dither2x2_pixels;
+    uint64_t arm64_jit_n5_rgb_wmask_spans;
+    uint64_t arm64_jit_n5_rgb_wmask_pixels;
+    uint64_t arm64_jit_n5_alpha_blend_spans;
+    uint64_t arm64_jit_n5_alpha_blend_pixels;
+    uint64_t arm64_jit_n5_dither_base_x26_spans;
+    uint64_t arm64_jit_n5_dither_base_x26_pixels;
+    uint64_t arm64_jit_n5_dither_ptr_fallback_spans;
+    uint64_t arm64_jit_n5_dither_ptr_fallback_pixels;
+    uint64_t arm64_jit_n5_bilinear_pixels[2];
+    uint64_t arm64_jit_n5_s_wrap_edge_pixels[2];
+    uint64_t arm64_jit_n5_s_clamp_low_pixels[2];
+    uint64_t arm64_jit_n5_s_clamp_high_pixels[2];
+    uint64_t arm64_jit_n5_t_edge_pixels[2];
+    uint64_t arm64_jit_n5_st_edge_pixels[2];
 #endif
     struct voodoo_set_t *set;
 

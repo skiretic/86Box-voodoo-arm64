@@ -361,6 +361,22 @@ Priority: 5
 
 Scope: ARM64-local.
 
+Current status:
+
+- Superseded by active plan:
+  `docs/arm64-voodoo-n5-cold-layout-plan.md`.
+- N2/N1 prerequisites are already satisfied in current history.
+- Slice 0 N5 metrics are implemented and validated.
+- Slice 1 patch-to-target helpers are implemented and short-verified.
+- Slice 1b cold-tail queue plumbing is implemented.
+- Slice 2 S-wrap cold-tail emission is implemented and strong-soaked:
+  `verify=339160449`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- S-clamp has long-run coverage and cold rates, but is deferred to a separate
+  slice after S-wrap review/commit.
+- T-edge and dither pointer fallback are rejected for N5 cold layout because
+  long-run metrics show they are hot.
+
 Exact files/functions/line areas:
 
 - Bilinear clamp/wrap cold cases:
@@ -382,8 +398,9 @@ Opportunity:
 
 Expected impact:
 
-- Medium I-cache and branch-predictability improvement if games mostly sample
-  interior texels and use common dither table offsets.
+- Medium I-cache and branch-predictability improvement for S-wrap/S-clamp only
+  where metrics show rare edge sampling.
+- No N5 cold-layout work for dither pointer fallback or T-edge.
 
 Risk:
 
@@ -392,10 +409,10 @@ Risk:
 
 Validation needed:
 
-- N2 metrics first: code size, branch/cold block count, and coverage of edge
-  cases.
-- Strong soak after any layout change.
-- A targeted texture-edge workload if available.
+- Keep strict validator proof after any layout change.
+- Use the active N5 plan for current metrics and slice status.
+- A targeted texture-edge workload is optional only if broader workload mix is
+  needed before commit.
 
 x86-64:
 
@@ -403,12 +420,13 @@ x86-64:
 
 Larger refactor justified:
 
-- Not yet. Needs N2 metrics and N1 helper structure first.
+- Not for the current S-wrap slice. Keep it reviewable and bisectable.
 
 First safe implementation slice:
 
-- None yet. Track as design-only until metrics prove hot interior sampling
-  dominates.
+- Current safe slice is already implemented: S-wrap cold-tail layout only.
+- Next possible slice is S-clamp duplicate cold layout, but only after S-wrap is
+  reviewed/committed or explicitly deferred.
 
 ### N6: Shared Mode Decode Struct for Auditability
 
@@ -528,31 +546,26 @@ First safe implementation slice:
 - Do not change alpha blend arithmetic beyond already-proven
   `ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H` factoring without directed exhaustive
   proof.
-- Do not implement cold-path block layout before N2 metrics prove code-size or
-  hot-path density benefit.
+- Do not add further cold-path block layout before reviewing the S-wrap slice
+  and keeping proof bisectable.
 - Do not conditionally skip ABI saves/restores before a register-use bitmap is
   reviewed.
 
 ## Recommended First Implementation Slice
 
-Start with N2, then N1.
+N2/N1 are already done. Current next action is N5 S-wrap review.
 
 Reason:
 
-- N2 gives proof signal for all larger refactors: code size, cache behavior,
-  coverage buckets, and clean-span mode mix.
-- N1 is the best first code-quality refactor after that because texture fetch is
-  still the dominant ARM64 hot path, P5 made its state contract strict, and the
-  existing validator can prove helper-only factoring.
+- S-wrap has strict short verify plus strong-soak proof.
+- S-clamp should not be bundled into the same review because current S-wrap
+  changes already cover metrics, patch helpers, cold queue, and one moved block.
 
 First slice:
 
-- Add ARM64-only opt-in metrics for cache MRU hit, scan hit, miss, reject, and
-  generated code size.
-- Keep pass/fail semantics unchanged.
-- Build/sign.
-- Launch VM for validation only after build/sign.
-- Hand off VM run and inspect results only after guest run is reported done.
+- Review the uncommitted N5 S-wrap cold-tail diff.
+- Keep S-clamp out of this slice.
+- Do not commit unless explicitly told.
 
 ## Validation Commands and Pass Target
 

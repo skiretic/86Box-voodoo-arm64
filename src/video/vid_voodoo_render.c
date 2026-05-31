@@ -212,6 +212,85 @@ typedef struct voodoo_texture_state_t {
     int tex_shift;
 } voodoo_texture_state_t;
 
+#if (defined __aarch64__ || defined _M_ARM64)
+static inline void
+voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, int pixels)
+{
+    int dither_enabled;
+    int rgb_wmask;
+    int alpha_blend;
+    int dither_base_in_x26;
+    int dither_ptr_fallback;
+
+    if (!voodoo->arm64_jit_metrics_enabled || !voodoo->validate_enabled)
+        return;
+
+    dither_enabled      = !!(params->fbzMode & FBZ_DITHER);
+    rgb_wmask           = !!(params->fbzMode & FBZ_RGB_WMASK);
+    alpha_blend         = !!(params->alphaMode & (1 << 4));
+    dither_base_in_x26  = dither_enabled && rgb_wmask && !alpha_blend;
+    dither_ptr_fallback = dither_enabled && rgb_wmask && alpha_blend;
+
+    voodoo->arm64_jit_n5_spans++;
+    voodoo->arm64_jit_n5_pixels += (uint64_t) pixels;
+    if (dither_enabled) {
+        voodoo->arm64_jit_n5_dither_spans++;
+        voodoo->arm64_jit_n5_dither_pixels += (uint64_t) pixels;
+    }
+    if (params->fbzMode & FBZ_DITHER_2x2) {
+        voodoo->arm64_jit_n5_dither2x2_spans++;
+        voodoo->arm64_jit_n5_dither2x2_pixels += (uint64_t) pixels;
+    }
+    if (rgb_wmask) {
+        voodoo->arm64_jit_n5_rgb_wmask_spans++;
+        voodoo->arm64_jit_n5_rgb_wmask_pixels += (uint64_t) pixels;
+    }
+    if (alpha_blend) {
+        voodoo->arm64_jit_n5_alpha_blend_spans++;
+        voodoo->arm64_jit_n5_alpha_blend_pixels += (uint64_t) pixels;
+    }
+    if (dither_base_in_x26) {
+        voodoo->arm64_jit_n5_dither_base_x26_spans++;
+        voodoo->arm64_jit_n5_dither_base_x26_pixels += (uint64_t) pixels;
+    }
+    if (dither_ptr_fallback) {
+        voodoo->arm64_jit_n5_dither_ptr_fallback_spans++;
+        voodoo->arm64_jit_n5_dither_ptr_fallback_pixels += (uint64_t) pixels;
+    }
+}
+
+static inline void
+voodoo_arm64_jit_n5_count_bilinear(voodoo_t *voodoo, const voodoo_state_t *state,
+                                   const voodoo_texture_state_t *texture_state, int tmu, int s, int t)
+{
+    int s_edge = 0;
+    int t_edge;
+
+    if (!voodoo->arm64_jit_metrics_enabled || !voodoo->validate_enabled)
+        return;
+
+    voodoo->arm64_jit_n5_bilinear_pixels[tmu]++;
+    if (state->clamp_s[tmu]) {
+        if (s < 0) {
+            voodoo->arm64_jit_n5_s_clamp_low_pixels[tmu]++;
+            s_edge = 1;
+        } else if (s >= texture_state->w_mask) {
+            voodoo->arm64_jit_n5_s_clamp_high_pixels[tmu]++;
+            s_edge = 1;
+        }
+    } else if ((s & texture_state->w_mask) == texture_state->w_mask) {
+        voodoo->arm64_jit_n5_s_wrap_edge_pixels[tmu]++;
+        s_edge = 1;
+    }
+
+    t_edge = !!(((t | (t + 1)) & ~texture_state->h_mask));
+    if (t_edge)
+        voodoo->arm64_jit_n5_t_edge_pixels[tmu]++;
+    if (s_edge && t_edge)
+        voodoo->arm64_jit_n5_st_edge_pixels[tmu]++;
+}
+#endif
+
 static inline void
 tex_read(voodoo_state_t *state, voodoo_texture_state_t *texture_state, int tmu)
 {
@@ -340,6 +419,9 @@ voodoo_get_texture(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *st
 #if 0
         texture_state.s = s;
         texture_state.t = t;
+#endif
+#if (defined __aarch64__ || defined _M_ARM64)
+        voodoo_arm64_jit_n5_count_bilinear(voodoo, state, &texture_state, tmu, s, t);
 #endif
         tex_read_4(state, &texture_state, s, t, d, tmu, x);
 
@@ -1079,6 +1161,9 @@ voodoo_half_triangle(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *
         state->texel_count = 0;
         state->x           = x;
         state->x2          = x2;
+#if (defined __aarch64__ || defined _M_ARM64)
+        voodoo_arm64_jit_n5_count_span(voodoo, params, ((x < x2) ? (x2 - x) : (x - x2)) + 1);
+#endif
 
 #ifndef NO_CODEGEN
         {
