@@ -88,7 +88,8 @@
  *   x23     = i_00_ff_w pointer    (callee-saved, pinned)
  *   x24     = real_y               (callee-saved copy)
  *   x25     = bilinear_lookup ptr  (callee-saved, pinned)
- *   x26     = rgb565 table pointer  (callee-saved, pinned)
+ *   x26     = rgb565 table pointer, or dither_rb base when alpha blend is off
+ *             and dither is enabled (callee-saved, pinned)
  *   x27     = STATE_x2 (loop bound, callee-saved)
  *   x28     = STATE_x  (pixel x coord, callee-saved)
  *   x29     = frame pointer        (saved/restored)
@@ -381,6 +382,9 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 
 /* ADD Xd, Xn, #imm12 (64-bit immediate) */
 #define ARM64_ADD_IMM_X(d, n, imm) (0x91000000 | IMM12(imm) | Rn(n) | Rd(d))
+
+/* ADD Xd, Xn, #imm12, LSL #12 (64-bit immediate) */
+#define ARM64_ADD_IMM_X_SH12(d, n, imm) (0x91400000 | IMM12(imm) | Rn(n) | Rd(d))
 
 /* SUB Wd, Wn, #imm12 (32-bit immediate) */
 #define ARM64_SUB_IMM(d, n, imm) (0x51000000 | IMM12(imm) | Rn(n) | Rd(d))
@@ -1931,6 +1935,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int depth_jump_pos   = 0;
     int depth_jump_pos2  = 0;
     int loop_jump_pos    = 0;
+    int dither_base_in_x26 = dither && (params->fbzMode & FBZ_RGB_WMASK) && !(params->alphaMode & (1 << 4));
 
     arm64_codegen_begin_emit();
 
@@ -2065,7 +2070,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         EMIT_MOV_IMM64(22, &neon_00_ff_w);
         EMIT_MOV_IMM64(23, &i_00_ff_w);
         EMIT_MOV_IMM64(25, &bilinear_lookup);
-        EMIT_MOV_IMM64(26, &rgb565);
+        EMIT_MOV_IMM64(26, dither_base_in_x26 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &rgb565);
 
 #undef EMIT_MOV_IMM64
     }
@@ -4057,8 +4062,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     if (params->fbzMode & FBZ_RGB_WMASK) {
         if (dither) {
             /* ---- Dither path ---- */
-            /* Load dither table base pointer into x7 (skip zero halfwords) */
-            {
+            /* Load dither table base pointer into x7. For non-alpha-blend
+             * dither blocks, x26 already holds the base for the whole block. */
+            if (dither_base_in_x26) {
+                addlong(ARM64_MOV_REG_X(7, 26));
+            } else {
                 uintptr_t dither_rb_addr = dither2x2 ? (uintptr_t) dither_rb2x2 : (uintptr_t) dither_rb;
                 uint16_t _dh0 = dither_rb_addr & 0xFFFF;
                 uint16_t _dh1 = (dither_rb_addr >> 16) & 0xFFFF;
@@ -4138,16 +4146,22 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                                                    ((uintptr_t) dither_g - (uintptr_t) dither_rb);
                 /* w11 = G value offset, add g_offset to get dither_g entry */
                 addlong(ARM64_ADD_REG_X(11, 7, 11));
-                /* x16 = g_offset */
-                addlong(ARM64_MOVZ_X(16, g_offset & 0xFFFF));
-                if ((g_offset >> 16) & 0xFFFF)
-                    addlong(ARM64_MOVK_X(16, (g_offset >> 16) & 0xFFFF, 1));
-                if ((g_offset >> 32) & 0xFFFF)
-                    addlong(ARM64_MOVK_X(16, (g_offset >> 32) & 0xFFFF, 2));
-                if ((g_offset >> 48) & 0xFFFF)
-                    addlong(ARM64_MOVK_X(16, (g_offset >> 48) & 0xFFFF, 3));
-                /* LDRB w11, [x11, x16] -- dithered G */
-                addlong(ARM64_LDRB_REG(11, 11, 16));
+                if (g_offset <= 4095) {
+                    addlong(ARM64_LDRB_IMM(11, 11, g_offset));
+                } else if ((g_offset & 0xFFF) == 0 && (g_offset >> 12) <= 4095) {
+                    addlong(ARM64_ADD_IMM_X_SH12(11, 11, g_offset >> 12));
+                    addlong(ARM64_LDRB_IMM(11, 11, 0));
+                } else {
+                    /* x16 = g_offset */
+                    addlong(ARM64_MOVZ_X(16, g_offset & 0xFFFF));
+                    if ((g_offset >> 16) & 0xFFFF)
+                        addlong(ARM64_MOVK_X(16, (g_offset >> 16) & 0xFFFF, 1));
+                    if ((g_offset >> 32) & 0xFFFF)
+                        addlong(ARM64_MOVK_X(16, (g_offset >> 32) & 0xFFFF, 2));
+                    if ((g_offset >> 48) & 0xFFFF)
+                        addlong(ARM64_MOVK_X(16, (g_offset >> 48) & 0xFFFF, 3));
+                    addlong(ARM64_LDRB_REG(11, 11, 16));
+                }
             }
             /* LDRB w13, [x7, x13] -- dithered R */
             addlong(ARM64_LDRB_REG(13, 7, 13));

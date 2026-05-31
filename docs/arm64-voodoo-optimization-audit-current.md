@@ -317,3 +317,21 @@ Validation:
 - 5x 3DMark soak passed: `verify=51200000`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
 
 Status: P1 constant-load peepholes corrected and closed by 5x 3DMark soak. Quake 3 is not required for P1 closure.
+
+### 2026-05-30: P2 dither table pointer/offset hoist corrected
+
+Implemented ARM64-local dither hoist only:
+
+- x26 holds `dither_rb`/`dither_rb2x2` base for dithered RGB-write blocks when alpha blend is off
+- alpha-blend blocks keep x26 as `rgb565`, preserving the destination decode path
+- `dither_g`/`dither_g2x2` relative offset uses immediate addressing when encodable, with the prior materialized-offset fallback retained
+- made no x86-64 or shared semantic changes
+
+Validation:
+
+- build/sign passed
+- 3DMark verify passed: `verify=10240000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- 3DMark exact-fb classification passed: `verify=10240000`, `fb_tol=0`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- 5x 3DMark exact-fb soak passed: `verify=51200000`, `fb_tol=0`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+
+Status: P2 dither hoist corrected and closed by 5x exact-fb 3DMark soak.
