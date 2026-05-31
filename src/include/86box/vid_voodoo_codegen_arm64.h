@@ -4521,6 +4521,23 @@ arm64_codegen_store_cache_key(voodoo_arm64_data_t *data, voodoo_t *voodoo, voodo
     data->rejected       = rejected;
 }
 
+static inline int
+arm64_codegen_cache_key_matches(const voodoo_arm64_data_t *data, const voodoo_t *voodoo, const voodoo_params_t *params, const voodoo_state_t *state)
+{
+    return (data->valid || data->rejected)
+           && state->xdir == data->xdir
+           && params->alphaMode == data->alphaMode
+           && params->fbzMode == data->fbzMode
+           && params->fogMode == data->fogMode
+           && params->fbzColorPath == data->fbzColorPath
+           && (voodoo->trexInit1[0] & (1 << 18)) == data->trexInit1
+           && params->textureMode[0] == data->textureMode[0]
+           && params->textureMode[1] == data->textureMode[1]
+           && (params->tLOD[0] & LOD_MASK) == data->tLOD[0]
+           && (params->tLOD[1] & LOD_MASK) == data->tLOD[1]
+           && ((params->col_tiled || params->aux_tiled) ? 1 : 0) == data->is_tiled;
+}
+
 /*
  * ========================================================================
  * JIT BLOCK CACHE + COMPILATION
@@ -4558,18 +4575,19 @@ arm64_codegen_store_cache_key(voodoo_arm64_data_t *data, voodoo_t *voodoo, voodo
  * voodoo_get_block() -- find or JIT-compile a pixel pipeline block.
  *
  * Algorithm:
- *   1. Probe starting at jit_last_block[odd_even] (MRU hint), scanning all
- *      32 slots for a cached block whose key matches the current state.
- *   2. On hit: update LRU timestamp, update MRU hint, return code_block.
- *   3. On miss: scan all 32 slots for the one with the smallest last_used
+ *   1. Probe jit_last_block[odd_even] directly as the MRU slot.
+ *   2. On MRU miss, scan the remaining 31 slots for a cached block whose
+ *      key matches the current state.
+ *   3. On hit: update LRU timestamp, update MRU hint, return code_block.
+ *   4. On miss: scan all 32 slots for the one with the smallest last_used
  *      (LRU eviction), then JIT-compile into that slot:
  *      a. Make code page writable (W^X toggle).
  *      b. Call voodoo_generate() to emit ARM64 into data->code_block.
  *      c. Check for emit overflow (block exceeded BLOCK_SIZE).
  *      d. Make code page executable and flush I-cache (narrow range).
- *   4. On reject (W^X fail or emit overflow): set last_used = 0 so the
+ *   5. On reject (W^X fail or emit overflow): set last_used = 0 so the
  *      slot is evicted first on the next miss.
- *   5. Return the compiled code_block pointer, or NULL for interpreter fallback.
+ *   6. Return the compiled code_block pointer, or NULL for interpreter fallback.
  *
  * odd_even selects the partition (0-3). Array layout is contiguous:
  * slot index = odd_even * BLOCK_NUM + probe.
@@ -4577,28 +4595,27 @@ arm64_codegen_store_cache_key(voodoo_arm64_data_t *data, voodoo_t *voodoo, voodo
 static inline void *
 voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *state, int odd_even)
 {
-    int                  b                 = voodoo->jit_last_block[odd_even];
+    int                  b                 = voodoo->jit_last_block[odd_even] & BLOCK_MASK;
     int                  base              = odd_even * BLOCK_NUM;
     voodoo_arm64_data_t *voodoo_arm64_data = voodoo->codegen_data;
     voodoo_arm64_data_t *data;
 
-    /* --- Cache lookup: linear scan from MRU hint --- */
-    for (uint8_t c = 0; c < BLOCK_NUM; c++) {
+    /* --- Cache lookup: direct MRU probe, then remaining slots --- */
+    data = &voodoo_arm64_data[base + b];
+    if (arm64_codegen_cache_key_matches(data, voodoo, params, state)) {
+        if (data->rejected)
+            return NULL;
+
+        data->last_used                  = ++voodoo->jit_generation[odd_even];
+        voodoo->jit_last_block[odd_even] = b;
+        return data->code_block;
+    }
+
+    for (uint8_t c = 1; c < BLOCK_NUM; c++) {
         int probe = (b + c) & BLOCK_MASK;
         data      = &voodoo_arm64_data[base + probe];
 
-        if ((data->valid || data->rejected)
-            && state->xdir == data->xdir
-            && params->alphaMode == data->alphaMode
-            && params->fbzMode == data->fbzMode
-            && params->fogMode == data->fogMode
-            && params->fbzColorPath == data->fbzColorPath
-            && (voodoo->trexInit1[0] & (1 << 18)) == data->trexInit1
-            && params->textureMode[0] == data->textureMode[0]
-            && params->textureMode[1] == data->textureMode[1]
-            && (params->tLOD[0] & LOD_MASK) == data->tLOD[0]
-            && (params->tLOD[1] & LOD_MASK) == data->tLOD[1]
-            && ((params->col_tiled || params->aux_tiled) ? 1 : 0) == data->is_tiled) {
+        if (arm64_codegen_cache_key_matches(data, voodoo, params, state)) {
             if (data->rejected)
                 return NULL;
 

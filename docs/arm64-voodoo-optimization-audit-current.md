@@ -414,3 +414,25 @@ Validation:
 - known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)` appeared and was ignored
 
 Status: P6 prologue and pinned-constant specialization corrected and closed by 51200000-span strong soak.
+
+### 2026-05-31: P7 ARM64 JIT block cache lookup shaping corrected
+
+Implemented ARM64-local cache lookup shaping only:
+
+- added `arm64_codegen_cache_key_matches()` for the existing ARM64 cache-key match predicate
+- probes `jit_last_block[odd_even]` directly as the MRU slot before scanning the remaining 31 slots
+- normalizes the MRU slot with `BLOCK_MASK` before direct indexing
+- preserves rejected-slot fast return behavior
+- preserves valid-hit LRU stamping and miss-side LRU eviction behavior
+- made no x86-64 or shared semantic changes
+
+Validation:
+
+- build/sign passed
+- first strict verify passed: `verify=10240000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- first strong soak exposed one non-repeating state-only mismatch with `fb_mismatches=0` and `aux_mismatches=0`
+- repeated strong soak passed: `verify=51200000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- different-game strong soak passed: `verify=51200000`, `fb_tol=5`, `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`
+- known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)` appeared and was ignored
+
+Status: P7 JIT block cache lookup shaping corrected and closed by repeated 51200000-span strong soaks, including different-game coverage.
