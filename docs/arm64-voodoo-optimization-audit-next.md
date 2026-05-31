@@ -378,6 +378,8 @@ Current status:
 - Slice 3 dynamic target coverage hit TMU0 S-clamp low/high after implementation;
   TMU1 post-change coverage is a low residual risk because the emitted cold block
   is shared by both TMUs.
+- N5 cold-layout reassessment is closed: keep S-wrap and S-clamp, stop further
+  N5 cold-tail moves unless a fresh metric gate exists.
 - T-edge and dither pointer fallback are rejected for N5 cold layout because
   long-run metrics show they are hot.
 
@@ -430,8 +432,8 @@ First safe implementation slice:
 
 - Current safe slices are already implemented and validated: S-wrap cold-tail
   layout plus S-clamp duplicate cold-tail layout.
-- Next action is commit/reassess; do not start more N5 cold-layout targets in
-  the Slice 3 commit.
+- Next action is outside N5 cold layout. T-edge and dither pointer fallback stay
+  rejected/deferred for cold-tail layout.
 
 ### N6: Shared Mode Decode Struct for Auditability
 

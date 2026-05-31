@@ -772,8 +772,25 @@ Purpose:
 
 Decision:
 
-- Continue only if benefit is visible and correctness proof stays strict.
-- Otherwise stop N5 after S-wrap/S-clamp or revert before commit.
+- Stop N5 cold-layout work after S-wrap and S-clamp.
+- Keep S-wrap and S-clamp cold-tail layout:
+  - strict validator proof stayed clean after both slices.
+  - `rejects=0`.
+  - `code_max=1868`, unchanged from the Slice 2 long run.
+  - average compiled block bytes in the Slice 3 long run were `1160.0`, versus `1276.8` in the Slice 2 long run. This is not a controlled performance comparison because the workloads differed, but it does not show code-size pressure.
+- Do not move T-edge cold:
+  - Slice 3 long run still had hot T-edge rates: TMU0 `25.492%`, TMU1 `26.309%`.
+  - Slice 2 long run had TMU1 T-edge at `57.434%`.
+- Do not move dither pointer fallback cold:
+  - Slice 3 long run fallback pixels were `58.846%` of counted pixels.
+  - This remains a prologue/register-allocation issue, not a cold-layout candidate.
+- Do not add more cold-tail kinds in N5 without a fresh metric gate.
+
+Reassess result:
+
+- N5 accepted scope: S-wrap edge cold tail and S-clamp duplicate cold tail.
+- N5 rejected/deferred scope: T-edge, dither pointer fallback, mirror, W/div, common skip, alpha/depth/fog skip, and TBZ/TBNZ-heavy cold splitting.
+- Next optimization direction should be outside N5 cold layout: likely dither register/prologue redesign or a separate measured code-size/pass cleanup.
 
 ## Validation Plan
 
@@ -847,6 +864,6 @@ Defer until after S-wrap/S-clamp proof:
 
 Next concrete action:
 
-- Review current uncommitted Slice 3 diff for commit readiness.
-- Do not start more N5 cold-layout targets in this slice.
-- After Slice 3 is committed, reassess N5 metrics before any further layout work.
+- N5 cold-layout scope is closed at S-wrap plus S-clamp.
+- Do not start more N5 cold-tail movement without a fresh metric gate.
+- Next optimization work should move outside N5 cold layout, with dither register/prologue redesign as the leading measured candidate.
