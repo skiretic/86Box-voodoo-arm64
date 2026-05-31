@@ -1589,8 +1589,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* Clamp or wrap S and T coordinates */
             if (!state->clamp_s[tmu]) {
                 /* AND w4, w4, params->tex_w_mask[tmu][lod] */
-                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_w_mask_n(tmu));
-                ARM64_EMIT_TEX_COORD_WRAP(4, 15);
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(16, 14, 6, PARAMS_tex_w_mask_n(tmu));
+                ARM64_EMIT_TEX_COORD_WRAP(4, 16);
             }
 
             /* T1 = T + 1 */
@@ -1684,12 +1684,10 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                     }
                 }
             } else {
-                /* Non-clamped: check if S wraps at texture edge */
-                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 15, 6, PARAMS_tex_w_mask_n(tmu));
+                /* Non-clamped: check if S wraps at texture edge.
+                 * w16 still holds tex_w_mask from the earlier S wrap. */
 
-                /* bilinear_shift is in w17 */
-
-                addlong(ARM64_CMP_REG(4, 15));
+                addlong(ARM64_CMP_REG(4, 16));
                 {
                     int wrap_skip = block_pos;
                     addlong(ARM64_BCOND_PLACEHOLDER(COND_EQ)); /* if at edge, wrap */

@@ -636,3 +636,21 @@ state_mismatches=0
   `rejects=0`, `code_bytes=42788`, `code_max=1868`.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N1 ARM64 texture address emit refactor slice 2
+
+- Reused the bilinear `tex_w_mask[tmu][lod]` load in the non-clamped S path.
+- Kept the mask in `w16` after the initial S wrap and reused it for the later
+  S-edge compare before the wrap case.
+- Removed one later `PARAMS_tex_w_mask_n(tmu)` base setup plus indexed load in
+  that path.
+- Kept the live-register contract and texture state store placement unchanged.
+- Build/sign passed after source edits.
+- Short verify with metrics passed:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Metrics line emitted:
+  `mru_hits=466146`, `scan_hits=603065`, `misses=29`, `compiles=29`,
+  `rejects=0`, `code_bytes=42436`, `code_max=1852`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
