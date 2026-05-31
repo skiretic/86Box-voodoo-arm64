@@ -841,3 +841,30 @@ state_mismatches=0
 - Follow-up metrics line emitted:
   `mru_hits=6626350`, `scan_hits=9819941`, `misses=4604`,
   `compiles=4604`, `rejects=0`, `code_bytes=5886664`, `code_max=1868`.
+
+### 2026-05-31: N4 TMU combine factor emitter slice 2
+
+- Converted the remaining ARM64 `DETAIL` and `LOD_FRAC` factor emission sites
+  to the existing helper macros:
+  TMU1 alpha `tca_mselect_1`, TMU0 RGB `tc_mselect`, and TMU0 alpha
+  `tca_mselect`.
+- Kept helper use limited to ARM64-local codegen emission; no helper-backed
+  dynarec path was added.
+- Preserved the existing live-register contracts:
+  RGB factors still land in `w4` before vector duplication, TMU1 alpha uses
+  `w4`, and TMU0 alpha uses `w5`; `w10` remains the `STATE_lod` scratch and
+  `w11` remains the `detail_max` scratch.
+- Build/sign passed after source edits.
+- No VM launched in this step per user direction to continue only up to launch.
+- Follow-up VM verify passed:
+  `verify=51200000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`.
+- Coverage showed the TMU0 `LOD_FRAC` helper paths were exercised:
+  representative buckets had `tmu0_rgb_lod_frac=4369106` and
+  `tmu0_alpha_lod_frac=4369106`; `DETAIL` and TMU1 target counters remained
+  zero in this run.
+- Metrics line emitted:
+  `mru_hits=13365309`, `scan_hits=8681811`, `misses=15942`,
+  `compiles=15942`, `rejects=0`, `code_bytes=20412416`, `code_max=1868`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

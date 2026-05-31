@@ -2953,21 +2953,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                         addlong(ARM64_MOV_REG(4, 5));
                         break;
                     case TCA_MSELECT_DETAIL:
-                        addlong(ARM64_MOVZ_W(4, params->detail_bias[1] & 0xFFFF));
-                        if (params->detail_bias[1] >> 16)
-                            addlong(ARM64_MOVK_W_16(4, params->detail_bias[1] >> 16));
-                        addlong(ARM64_LDR_W(10, 0, STATE_lod));
-                        addlong(ARM64_SUB_REG(4, 4, 10));
-                        addlong(ARM64_MOVZ_W(11, params->detail_max[1] & 0xFFFF));
-                        if (params->detail_max[1] >> 16)
-                            addlong(ARM64_MOVK_W_16(11, params->detail_max[1] >> 16));
-                        if (params->detail_scale[1])
-                            addlong(ARM64_LSL_IMM(4, 4, params->detail_scale[1]));
-                        addlong(ARM64_CMP_REG(4, 11));
-                        addlong(ARM64_CSEL(4, 11, 4, COND_GE));
+                        ARM64_EMIT_TMU_COMBINE_DETAIL_FACTOR(4, 10, 11, 1);
                         break;
                     case TCA_MSELECT_LOD_FRAC:
-                        addlong(ARM64_LDR_W(4, 0, STATE_lod_frac_n(1)));
+                        ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(4, 1);
                         break;
                 }
 
@@ -3066,22 +3055,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_DUP_V4H_LANE(4, 0, 3));
                     break;
                 case TC_MSELECT_DETAIL:
-                    addlong(ARM64_MOVZ_W(4, params->detail_bias[0] & 0xFFFF));
-                    if (params->detail_bias[0] >> 16)
-                        addlong(ARM64_MOVK_W_16(4, params->detail_bias[0] >> 16));
-                    addlong(ARM64_LDR_W(10, 0, STATE_lod));
-                    addlong(ARM64_SUB_REG(4, 4, 10));
-                    addlong(ARM64_MOVZ_W(11, params->detail_max[0] & 0xFFFF));
-                    if (params->detail_max[0] >> 16)
-                        addlong(ARM64_MOVK_W_16(11, params->detail_max[0] >> 16));
-                    if (params->detail_scale[0])
-                        addlong(ARM64_LSL_IMM(4, 4, params->detail_scale[0]));
-                    addlong(ARM64_CMP_REG(4, 11));
-                    addlong(ARM64_CSEL(4, 11, 4, COND_GE));
+                    ARM64_EMIT_TMU_COMBINE_DETAIL_FACTOR(4, 10, 11, 0);
                     addlong(ARM64_DUP_V4H_GPR(4, 4));
                     break;
                 case TC_MSELECT_LOD_FRAC:
-                    addlong(ARM64_LDR_W(4, 0, STATE_lod_frac_n(0)));
+                    ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(4, 0);
                     addlong(ARM64_DUP_V4H_GPR(4, 4));
                     break;
             }
@@ -3162,21 +3140,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_MOV_REG(5, 13));
                     break;
                 case TCA_MSELECT_DETAIL:
-                    addlong(ARM64_MOVZ_W(5, params->detail_bias[0] & 0xFFFF));
-                    if (params->detail_bias[0] >> 16)
-                        addlong(ARM64_MOVK_W_16(5, params->detail_bias[0] >> 16));
-                    addlong(ARM64_LDR_W(10, 0, STATE_lod));
-                    addlong(ARM64_SUB_REG(5, 5, 10));
-                    addlong(ARM64_MOVZ_W(11, params->detail_max[0] & 0xFFFF));
-                    if (params->detail_max[0] >> 16)
-                        addlong(ARM64_MOVK_W_16(11, params->detail_max[0] >> 16));
-                    if (params->detail_scale[0])
-                        addlong(ARM64_LSL_IMM(5, 5, params->detail_scale[0]));
-                    addlong(ARM64_CMP_REG(5, 11));
-                    addlong(ARM64_CSEL(5, 11, 5, COND_GE));
+                    ARM64_EMIT_TMU_COMBINE_DETAIL_FACTOR(5, 10, 11, 0);
                     break;
                 case TCA_MSELECT_LOD_FRAC:
-                    addlong(ARM64_LDR_W(5, 0, STATE_lod_frac_n(0)));
+                    ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(5, 0);
                     break;
             }
 
