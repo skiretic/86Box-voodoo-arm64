@@ -116,6 +116,90 @@ Known guest noise remains ignored by itself:
 
 ## Candidates
 
+## Worker D: ARM64 Dither Base Pinned-Reg Slice
+
+Status: implemented; short and long VM validation passed.
+
+Changed:
+
+- Alpha+dither RGB-write path now tries to pin the dither base in spare
+  callee-saved GPRs: `x22`, else `x23`, else `x25`, else `x19` when
+  perspective logtable is unused.
+- `x18`, `x20`, `x21`, and `x26` are not stolen. Alpha blend keeps `x26` for
+  `rgb565`.
+- If all candidate regs are live for existing table pointers, codegen keeps the
+  old per-pixel `MOVZ`/`MOVK` materialization into `x7`.
+- Dither2x2 vs 4x4 base selection and green-table offset logic are unchanged.
+- Metrics now split alpha+dither dither-base coverage into pinned-base and true
+  per-pixel fallback counters while preserving existing fallback counters as the
+  total candidate count.
+
+Validation:
+
+- `git diff --check` passed.
+- Build/sign passed with `./scripts/build-and-sign.sh`.
+- Short VM validation passed with metrics enabled:
+  - `verify=10240000`
+  - `skipped=0`
+  - `mismatch_spans=0`
+  - `fb_mismatches=0`
+  - `aux_mismatches=0`
+  - `state_mismatches=0`
+  - `rejects=0`
+  - `code_bytes=42676`
+  - `code_max=1864`
+- Metric split from the short run:
+  - `dither_ptr_fallback_pixels=270543915`
+  - `dither_base_pinned_pixels=28840315`
+  - `dither_ptr_true_fallback_pixels=241703600`
+- Follow-up Worker E audit added `x19` as a final candidate when `need_x19` is
+  false. Expected effect: reduce true fallback in alpha+dither modes that do not
+  use perspective texture LOD.
+- Worker E validation:
+  - `./scripts/setup-and-build.sh build` passed.
+  - Short VM validation with metrics passed:
+    - `verify=10240000`
+    - `skipped=0`
+    - `mismatch_spans=0`
+    - `fb_mismatches=0`
+    - `aux_mismatches=0`
+    - `state_mismatches=0`
+    - `rejects=0`
+    - `code_bytes=42756`
+    - `code_max=1868`
+  - Metric split:
+    - `dither_ptr_fallback_pixels=500254361`
+    - `dither_base_pinned_pixels=36009612`
+    - `dither_ptr_true_fallback_pixels=464244749`
+  - Long VM validation with metrics passed:
+    - `verify=240782144`
+    - `skipped=0`
+    - `mismatch_spans=0`
+    - `fb_mismatches=0`
+    - `aux_mismatches=0`
+    - `state_mismatches=0`
+    - `rejects=0`
+    - `code_bytes=11743276`
+    - `code_max=1864`
+  - Long-run metric split:
+    - `dither_ptr_fallback_pixels=4454955422`
+    - `dither_base_pinned_pixels=3635213944`
+    - `dither_ptr_true_fallback_pixels=819741478`
+- Result: pinned path remains live and correct in the Worker E short and long
+  runs, with `x19` available only for alpha+dither modes that do not need
+  perspective logtable.
+
+Stop rules carried forward:
+
+- Stop before any broad frame/save redesign.
+- Stop before any `x18` use.
+- Stop before any helper-backed dynarec path.
+- Leave true fallback when `x22`/`x23`/`x25`/`x19` liveness is not free.
+- No x86-64 edits.
+
+Next: commit the validated pinned dither-base slice, then decide whether any
+broader register-allocation redesign is worth a separate follow-up.
+
 ### N1: ARM64 Texture Address Emit Refactor
 
 Priority: 1

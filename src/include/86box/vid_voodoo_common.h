@@ -818,6 +818,10 @@ typedef struct voodoo_t {
     uint64_t arm64_jit_n5_dither_base_x26_pixels;
     uint64_t arm64_jit_n5_dither_ptr_fallback_spans;
     uint64_t arm64_jit_n5_dither_ptr_fallback_pixels;
+    uint64_t arm64_jit_n5_dither_base_pinned_spans;
+    uint64_t arm64_jit_n5_dither_base_pinned_pixels;
+    uint64_t arm64_jit_n5_dither_ptr_true_fallback_spans;
+    uint64_t arm64_jit_n5_dither_ptr_true_fallback_pixels;
     uint64_t arm64_jit_n5_bilinear_pixels[2];
     uint64_t arm64_jit_n5_s_wrap_edge_pixels[2];
     uint64_t arm64_jit_n5_s_clamp_low_pixels[2];

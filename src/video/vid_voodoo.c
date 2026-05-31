@@ -1757,6 +1757,8 @@ voodoo_card_close(voodoo_t *voodoo)
               " alpha_blend_spans=%" PRIu64 " alpha_blend_pixels=%" PRIu64
               " dither_base_x26_spans=%" PRIu64 " dither_base_x26_pixels=%" PRIu64
               " dither_ptr_fallback_spans=%" PRIu64 " dither_ptr_fallback_pixels=%" PRIu64
+              " dither_base_pinned_spans=%" PRIu64 " dither_base_pinned_pixels=%" PRIu64
+              " dither_ptr_true_fallback_spans=%" PRIu64 " dither_ptr_true_fallback_pixels=%" PRIu64
               " tmu0_bilinear_pixels=%" PRIu64 " tmu0_s_wrap_edge=%" PRIu64
               " tmu0_s_clamp_low=%" PRIu64 " tmu0_s_clamp_high=%" PRIu64
               " tmu0_t_edge=%" PRIu64 " tmu0_st_edge=%" PRIu64
@@ -1778,6 +1780,10 @@ voodoo_card_close(voodoo_t *voodoo)
               voodoo->arm64_jit_n5_dither_base_x26_pixels,
               voodoo->arm64_jit_n5_dither_ptr_fallback_spans,
               voodoo->arm64_jit_n5_dither_ptr_fallback_pixels,
+              voodoo->arm64_jit_n5_dither_base_pinned_spans,
+              voodoo->arm64_jit_n5_dither_base_pinned_pixels,
+              voodoo->arm64_jit_n5_dither_ptr_true_fallback_spans,
+              voodoo->arm64_jit_n5_dither_ptr_true_fallback_pixels,
               voodoo->arm64_jit_n5_bilinear_pixels[0],
               voodoo->arm64_jit_n5_s_wrap_edge_pixels[0],
               voodoo->arm64_jit_n5_s_clamp_low_pixels[0],

@@ -81,13 +81,17 @@
  *   x9      = aux_mem pointer      (pinned)
  *   x10-x15 = scratch (caller-saved)
  *   x16-x17 = intra-procedure scratch (IP0/IP1)
- *   x19     = logtable pointer     (callee-saved, pinned)
+ *   x19     = logtable pointer, or alpha+dither base if logtable unused
+ *             (callee-saved, pinned)
  *   x20     = alookup pointer      (callee-saved, pinned)
  *   x21     = aminuslookup pointer (callee-saved, pinned)
- *   x22     = neon_00_ff_w pointer  (callee-saved, pinned)
- *   x23     = i_00_ff_w pointer    (callee-saved, pinned)
+ *   x22     = neon_00_ff_w pointer, or alpha+dither base if otherwise unused
+ *             (callee-saved, pinned)
+ *   x23     = i_00_ff_w pointer, or alpha+dither base if otherwise unused
+ *             (callee-saved, pinned)
  *   x24     = real_y               (callee-saved copy)
- *   x25     = bilinear_lookup ptr  (callee-saved, pinned)
+ *   x25     = bilinear_lookup ptr, or alpha+dither base if otherwise unused
+ *             (callee-saved, pinned)
  *   x26     = rgb565 table pointer, or dither_rb base when alpha blend is off
  *             and dither is enabled (callee-saved, pinned)
  *   x27     = STATE_x2 (loop bound, callee-saved)
@@ -2280,7 +2284,6 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int depth_jump_pos   = 0;
     int depth_jump_pos2  = 0;
     int loop_jump_pos    = 0;
-    int dither_base_in_x26 = dither && (params->fbzMode & FBZ_RGB_WMASK) && !(params->alphaMode & (1 << 4));
     int texture_enabled  = params->fbzColorPath & FBZCP_TEXTURE_ENABLED;
     int tmu0_local       = (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL;
     int tmu0_passthrough = (params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH;
@@ -2288,6 +2291,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int fetch_tmu1       = texture_enabled && voodoo->dual_tmus && !tmu0_local;
     int dual_tmu_combine = fetch_tmu0 && fetch_tmu1;
     int alpha_blend      = params->alphaMode & (1 << 4);
+    int dither_base_in_x26 = dither && (params->fbzMode & FBZ_RGB_WMASK) && !alpha_blend;
+    int dither_base_reg  = -1;
     int need_x19         = (fetch_tmu0 && (params->textureMode[0] & 1)) ||
                            (fetch_tmu1 && (params->textureMode[1] & 1));
     int need_x20         = ((params->fogMode & FOG_ENABLE) && !(params->fogMode & FOG_CONSTANT)) ||
@@ -2321,6 +2326,24 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int need_v10         = cc_invert_output;
     int need_v11         = (params->fogMode & FOG_ENABLE) &&
                            ((params->fogMode & FOG_CONSTANT) || !(params->fogMode & FOG_ADD));
+    if (dither && (params->fbzMode & FBZ_RGB_WMASK) && alpha_blend) {
+        if (!need_x22)
+            dither_base_reg = 22;
+        else if (!need_x23)
+            dither_base_reg = 23;
+        else if (!need_x25)
+            dither_base_reg = 25;
+        else if (!need_x19)
+            dither_base_reg = 19;
+    }
+    if (dither_base_reg == 19)
+        need_x19 = 1;
+    else if (dither_base_reg == 22)
+        need_x22 = 1;
+    else if (dither_base_reg == 23)
+        need_x23 = 1;
+    else if (dither_base_reg == 25)
+        need_x25 = 1;
     arm64_codegen_cold_queue_t cold_queue;
     arm64_codegen_begin_emit();
     arm64_codegen_cold_queue_init(&cold_queue);
@@ -2343,13 +2366,17 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /*
      * Current callee-saved write proof for the fixed 176-byte frame:
      *
-     *   x19: logtable pointer for perspective texture LOD.
+     *   x19: logtable pointer for perspective texture LOD, or alpha+dither
+     *        base when perspective texture LOD is unused.
      *   x20: alookup pointer for non-constant fog or alpha blend factors.
      *   x21: aminuslookup pointer for alpha blend inverse factors.
-     *   x22: neon_00_ff_w pointer for trilinear RGB reverse-blend masks.
-     *   x23: i_00_ff_w pointer for trilinear alpha reverse-blend masks.
+     *   x22: neon_00_ff_w pointer for trilinear RGB reverse-blend masks,
+     *        or alpha+dither base when the mask pointer is unused.
+     *   x23: i_00_ff_w pointer for trilinear alpha reverse-blend masks,
+     *        or alpha+dither base when the mask pointer is unused.
      *   x24: real_y copy, written by the prologue.
-     *   x25: bilinear_lookup pointer for bilinear texture fetch.
+     *   x25: bilinear_lookup pointer for bilinear texture fetch, or
+     *        alpha+dither base when the bilinear pointer is unused.
      *   x26: rgb565 table pointer for alpha blend, or dither_rb base.
      *   x27: cached STATE_x2 loop bound, written by the prologue.
      *   x28: cached STATE_x loop coordinate, written by the prologue.
@@ -2492,17 +2519,17 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     } while (0)
 
         if (need_x19)
-            EMIT_MOV_IMM64(19, &logtable);
+            EMIT_MOV_IMM64(19, dither_base_reg == 19 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &logtable);
         if (need_x20)
             EMIT_MOV_IMM64(20, &alookup);
         if (need_x21)
             EMIT_MOV_IMM64(21, &aminuslookup);
         if (need_x22)
-            EMIT_MOV_IMM64(22, &neon_00_ff_w);
+            EMIT_MOV_IMM64(22, dither_base_reg == 22 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &neon_00_ff_w);
         if (need_x23)
-            EMIT_MOV_IMM64(23, &i_00_ff_w);
+            EMIT_MOV_IMM64(23, dither_base_reg == 23 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &i_00_ff_w);
         if (need_x25)
-            EMIT_MOV_IMM64(25, &bilinear_lookup);
+            EMIT_MOV_IMM64(25, dither_base_reg == 25 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &bilinear_lookup);
         if (need_x26)
             EMIT_MOV_IMM64(26, dither_base_in_x26 ? (dither2x2 ? (const void *) dither_rb2x2 : (const void *) dither_rb) : (const void *) &rgb565);
 
@@ -4338,9 +4365,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         if (dither) {
             /* ---- Dither path ---- */
             /* Load dither table base pointer into x7. For non-alpha-blend
-             * dither blocks, x26 already holds the base for the whole block. */
+             * dither blocks, x26 or a spare callee-saved register already
+             * holds the base for the whole block. */
             if (dither_base_in_x26) {
                 addlong(ARM64_MOV_REG_X(7, 26));
+            } else if (dither_base_reg >= 0) {
+                addlong(ARM64_MOV_REG_X(7, dither_base_reg));
             } else {
                 uintptr_t dither_rb_addr = dither2x2 ? (uintptr_t) dither_rb2x2 : (uintptr_t) dither_rb;
                 uint16_t _dh0 = dither_rb_addr & 0xFFFF;

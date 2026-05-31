@@ -221,6 +221,8 @@ voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, 
     int alpha_blend;
     int dither_base_in_x26;
     int dither_ptr_fallback;
+    int dither_base_pinned;
+    int dither_ptr_true_fallback;
 
     if (!voodoo->arm64_jit_metrics_enabled || !voodoo->validate_enabled)
         return;
@@ -230,6 +232,30 @@ voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, 
     alpha_blend         = !!(params->alphaMode & (1 << 4));
     dither_base_in_x26  = dither_enabled && rgb_wmask && !alpha_blend;
     dither_ptr_fallback = dither_enabled && rgb_wmask && alpha_blend;
+    dither_base_pinned  = 0;
+    dither_ptr_true_fallback = dither_ptr_fallback;
+    if (dither_ptr_fallback) {
+        int texture_enabled  = !!(params->fbzColorPath & FBZCP_TEXTURE_ENABLED);
+        int tmu0_local       = (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL;
+        int tmu0_passthrough = (params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH;
+        int fetch_tmu0       = texture_enabled && (tmu0_local || !voodoo->dual_tmus || !tmu0_passthrough);
+        int fetch_tmu1       = texture_enabled && voodoo->dual_tmus && !tmu0_local;
+        int dual_tmu_combine = fetch_tmu0 && fetch_tmu1;
+        int need_x19         = (fetch_tmu0 && (params->textureMode[0] & 1)) ||
+                               (fetch_tmu1 && (params->textureMode[1] & 1));
+        int need_x22         = dual_tmu_combine &&
+                               (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tc_sub_clocal_1) ||
+                                (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
+        int need_x23         = dual_tmu_combine &&
+                               (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tca_sub_clocal_1) ||
+                                (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
+        int need_x25         = (voodoo->bilinear_enabled &&
+                               ((fetch_tmu0 && (params->textureMode[0] & 6)) ||
+                                (fetch_tmu1 && (params->textureMode[1] & 6))));
+
+        dither_base_pinned = !need_x22 || !need_x23 || !need_x25 || !need_x19;
+        dither_ptr_true_fallback = !dither_base_pinned;
+    }
 
     voodoo->arm64_jit_n5_spans++;
     voodoo->arm64_jit_n5_pixels += (uint64_t) pixels;
@@ -256,6 +282,14 @@ voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, 
     if (dither_ptr_fallback) {
         voodoo->arm64_jit_n5_dither_ptr_fallback_spans++;
         voodoo->arm64_jit_n5_dither_ptr_fallback_pixels += (uint64_t) pixels;
+    }
+    if (dither_base_pinned) {
+        voodoo->arm64_jit_n5_dither_base_pinned_spans++;
+        voodoo->arm64_jit_n5_dither_base_pinned_pixels += (uint64_t) pixels;
+    }
+    if (dither_ptr_true_fallback) {
+        voodoo->arm64_jit_n5_dither_ptr_true_fallback_spans++;
+        voodoo->arm64_jit_n5_dither_ptr_true_fallback_pixels += (uint64_t) pixels;
     }
 }
 
