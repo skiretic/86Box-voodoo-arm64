@@ -4606,6 +4606,8 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
         if (data->rejected)
             return NULL;
 
+        if (voodoo->arm64_jit_metrics_enabled)
+            voodoo->arm64_jit_mru_hits[odd_even]++;
         data->last_used                  = ++voodoo->jit_generation[odd_even];
         voodoo->jit_last_block[odd_even] = b;
         return data->code_block;
@@ -4619,12 +4621,17 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
             if (data->rejected)
                 return NULL;
 
+            if (voodoo->arm64_jit_metrics_enabled)
+                voodoo->arm64_jit_scan_hits[odd_even]++;
             /* LRU: stamp this slot as most-recently-used */
             data->last_used                  = ++voodoo->jit_generation[odd_even];
             voodoo->jit_last_block[odd_even] = probe;
             return data->code_block;
         }
     }
+
+    if (voodoo->arm64_jit_metrics_enabled)
+        voodoo->arm64_jit_misses[odd_even]++;
 
     /* --- Cache miss: find LRU victim --- */
     {
@@ -4643,6 +4650,8 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     if (!arm64_codegen_set_writable(data->code_block)) {
         arm64_codegen_store_cache_key(data, voodoo, params, state, 0, 1);
         data->last_used = 0;
+        if (voodoo->arm64_jit_metrics_enabled)
+            voodoo->arm64_jit_rejects[odd_even]++;
         return NULL;
     }
 
@@ -4652,6 +4661,8 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
         arm64_codegen_store_cache_key(data, voodoo, params, state, 0, 1);
         data->last_used = 0;
         arm64_codegen_set_executable(data->code_block);
+        if (voodoo->arm64_jit_metrics_enabled)
+            voodoo->arm64_jit_rejects[odd_even]++;
         return NULL;
     }
 
@@ -4663,6 +4674,8 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     if (!arm64_codegen_set_executable(data->code_block)) {
         arm64_codegen_store_cache_key(data, voodoo, params, state, 0, 1);
         data->last_used = 0;
+        if (voodoo->arm64_jit_metrics_enabled)
+            voodoo->arm64_jit_rejects[odd_even]++;
         return NULL;
     }
 #if defined(__aarch64__) || defined(_M_ARM64)
@@ -4672,6 +4685,13 @@ voodoo_get_block(voodoo_t *voodoo, voodoo_params_t *params, voodoo_state_t *stat
     __clear_cache((char *) data->code_block, (char *) data->code_block + code_size);
 #    endif
 #endif
+
+    if (voodoo->arm64_jit_metrics_enabled) {
+        voodoo->arm64_jit_compiles[odd_even]++;
+        voodoo->arm64_jit_code_bytes[odd_even] += (uint64_t) code_size;
+        if ((uint64_t) code_size > voodoo->arm64_jit_code_max_bytes[odd_even])
+            voodoo->arm64_jit_code_max_bytes[odd_even] = (uint64_t) code_size;
+    }
 
     return data->code_block;
 }

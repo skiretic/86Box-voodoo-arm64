@@ -139,6 +139,16 @@ voodoo_init_validation_settings(voodoo_t *voodoo)
     voodoo->validate_fb_tolerance = voodoo_env_u64("VOODOO_VALIDATE_FB_TOL", 5);
 }
 
+#if (defined __aarch64__ || defined _M_ARM64)
+static void
+voodoo_init_arm64_jit_metrics(voodoo_t *voodoo)
+{
+    const char *metrics_env = getenv("VOODOO_ARM64_JIT_METRICS");
+
+    voodoo->arm64_jit_metrics_enabled = metrics_env && *metrics_env && !voodoo_env_is_disabled(metrics_env);
+}
+#endif
+
 static void
 voodoo_update_queued_buffers(voodoo_t *voodoo)
 {
@@ -1191,6 +1201,9 @@ voodoo_card_init(void)
 
     voodoo_init_relax_settings(voodoo);
     voodoo_init_validation_settings(voodoo);
+#if (defined __aarch64__ || defined _M_ARM64)
+    voodoo_init_arm64_jit_metrics(voodoo);
+#endif
     voodoo->bilinear_enabled  = device_get_config_int("bilinear");
     voodoo->dithersub_enabled = device_get_config_int("dithersub");
     voodoo->scrfilter         = device_get_config_int("dacfilter");
@@ -1355,6 +1368,9 @@ voodoo_2d3d_card_init(int type)
 
     voodoo_init_relax_settings(voodoo);
     voodoo_init_validation_settings(voodoo);
+#if (defined __aarch64__ || defined _M_ARM64)
+    voodoo_init_arm64_jit_metrics(voodoo);
+#endif
     voodoo->bilinear_enabled  = device_get_config_int("bilinear");
     voodoo->dithersub_enabled = device_get_config_int("dithersub");
     voodoo->scrfilter         = device_get_config_int("dacfilter");
@@ -1690,6 +1706,40 @@ voodoo_card_close(voodoo_t *voodoo)
                   !!(bucket->textureMode[1] & TEXTUREMODE_TRILINEAR));
         }
     }
+#if (defined __aarch64__ || defined _M_ARM64)
+    if (voodoo->arm64_jit_metrics_enabled) {
+        uint64_t mru_hits       = 0;
+        uint64_t scan_hits      = 0;
+        uint64_t misses         = 0;
+        uint64_t compiles       = 0;
+        uint64_t rejects        = 0;
+        uint64_t code_bytes     = 0;
+        uint64_t code_max_bytes = 0;
+
+        for (int c = 0; c < 4; c++) {
+            mru_hits += voodoo->arm64_jit_mru_hits[c];
+            scan_hits += voodoo->arm64_jit_scan_hits[c];
+            misses += voodoo->arm64_jit_misses[c];
+            compiles += voodoo->arm64_jit_compiles[c];
+            rejects += voodoo->arm64_jit_rejects[c];
+            code_bytes += voodoo->arm64_jit_code_bytes[c];
+            if (voodoo->arm64_jit_code_max_bytes[c] > code_max_bytes)
+                code_max_bytes = voodoo->arm64_jit_code_max_bytes[c];
+        }
+
+        pclog("Voodoo ARM64 JIT metrics (type=%d): mru_hits=%" PRIu64 " scan_hits=%" PRIu64
+              " misses=%" PRIu64 " compiles=%" PRIu64 " rejects=%" PRIu64
+              " code_bytes=%" PRIu64 " code_max=%" PRIu64 "\n",
+              voodoo->type,
+              mru_hits,
+              scan_hits,
+              misses,
+              compiles,
+              rejects,
+              code_bytes,
+              code_max_bytes);
+    }
+#endif
 
     for (uint8_t c = 0; c < TEX_CACHE_MAX; c++) {
         if (voodoo->dual_tmus)

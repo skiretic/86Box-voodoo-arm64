@@ -791,6 +791,16 @@ typedef struct voodoo_t {
     /* JIT cache state -- per-instance to avoid races between render threads */
     int jit_last_block[4];
     uint64_t jit_generation[4];
+#if (defined __aarch64__ || defined _M_ARM64)
+    int      arm64_jit_metrics_enabled;
+    uint64_t arm64_jit_mru_hits[4];
+    uint64_t arm64_jit_scan_hits[4];
+    uint64_t arm64_jit_misses[4];
+    uint64_t arm64_jit_compiles[4];
+    uint64_t arm64_jit_rejects[4];
+    uint64_t arm64_jit_code_bytes[4];
+    uint64_t arm64_jit_code_max_bytes[4];
+#endif
     struct voodoo_set_t *set;
 
     uint32_t launch_pending;
