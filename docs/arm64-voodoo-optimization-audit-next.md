@@ -1325,3 +1325,36 @@ state_mismatches=0
   reduction with clean framebuffer, aux, state, and reject gates.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-06-01: B4 bilinear T1 setup cleanup
+
+- Optimized the ARM64 bilinear T1 setup in `codegen_texture_fetch()` in
+  `src/include/86box/vid_voodoo_codegen_arm64.h`.
+- Scope was limited to forming the next-row coordinate before T clamp/wrap.
+  The old sequence emitted `MOV w13,w5`, then later `ADD w13,w13,#1`; the new
+  sequence emits `ADD w13,w5,#1` directly.
+- Local instruction map changed by one emitted instruction per bilinear fetch
+  site. The T1 value remains exactly `T + 1`.
+- Interpreter truth in `src/video/vid_voodoo_render.c` samples `t` and `t + 1`
+  for bilinear fetches; no state store, sample address, clamp/wrap edge, weight,
+  or blend arithmetic changed.
+- No T-edge cold tails changed. No x86 or x86-64 codegen files changed.
+- Worker validation passed: `git diff --check` and `./scripts/build-and-sign.sh`
+  both succeeded; build/sign ended with `BUILD + SIGN OK`.
+- Short VM validation passed:
+  `verify=10240000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=41548`, `code_max=1812`.
+- Compared with the B3 accepted short-run result `code_bytes=41724`,
+  `code_max=1820`, B4 reduced `code_bytes` by 176 and `code_max` by 8.
+- Extended near-unbounded-cap VM validation passed:
+  `verify=245110407`, `spans=245110407`, `skipped=0`, `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=9424360`, `code_max=1812`.
+- Long-run bilinear coverage was substantial:
+  `tmu0_bilinear_pixels=2618420397` and
+  `tmu1_bilinear_pixels=3134785144`.
+- Result: B4 is accepted. It is a metric-backed ARM64-local generated-code
+  reduction with clean framebuffer, aux, state, and reject gates.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

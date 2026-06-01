@@ -1946,7 +1946,7 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* w7 holds tex_shift, used directly in LSL below */
 
             /* w13 = T+1 (next row) */
-            addlong(ARM64_MOV_REG(13, 5));
+            addlong(ARM64_ADD_IMM(13, 5, 1));
 
             /* Clamp or wrap S and T coordinates */
             if (!state->clamp_s[tmu]) {
@@ -1954,9 +1954,6 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
                 ARM64_EMIT_TEX_PARAM_LOD_LOAD(16, 14, 6, PARAMS_tex_w_mask_n(tmu));
                 ARM64_EMIT_TEX_COORD_WRAP(4, 16);
             }
-
-            /* T1 = T + 1 */
-            addlong(ARM64_ADD_IMM(13, 13, 1));
 
             if (state->clamp_t[tmu]) {
                 /* Clamp T1 to [0, tex_h_mask] and T0 to [0, tex_h_mask] */
