@@ -1576,3 +1576,21 @@ state_mismatches=0
   gates. No x86 or x86-64 codegen files changed.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-06-01: Post-B13 queue handoff and closure language
+
+- This audit is no longer the active optimization queue. Continue from
+  `docs/arm64-voodoo-remaining-opportunities-2026-06-01.md`.
+- That follow-on document now contains a `Rank Closure Ledger` and `Active
+  Queue` to prevent raw candidate ranks from being treated as completed work.
+- Closure wording rule for future updates:
+  - call a rank `closed` only when the candidate as written is implemented,
+    rejected with evidence, or explicitly deferred;
+  - call a rank `partial` when only a sub-slice landed;
+  - name future sub-slices explicitly, for example `Rank 7b` or `Rank 9b`,
+    before implementation.
+- Current follow-on status after `7440c55ed`:
+  - closed: ranks 1-6, 8, 12;
+  - partial: rank 7 (only alpha-out no-write guard landed), rank 9 (fog table
+    `UBFX` and W-fog byte load landed);
+  - open/deferred: rank 11 open, rank 10 deferred.

@@ -1,9 +1,12 @@
 # ARM64 Voodoo Remaining Optimization Opportunities
 
 Status: 2026-06-01
-Source head: `7d49f1fa1`
+Source head when opened: `7d49f1fa1`
+Current accepted head: `7440c55ed`
 
-Scope: report-only discovery. No source edits, no VM launch, no commit.
+Scope: discovery plus append-only execution log. The original ranked table is a
+discovery queue; rank numbers are not closure claims. A rank is closed only when
+the ledger below says `closed`.
 
 Semantic source of truth remains the interpreter in
 `src/video/vid_voodoo_render.c` and `src/include/86box/vid_voodoo_render.h`.
@@ -16,6 +19,15 @@ Current accepted stack:
   `textureMode0=4ec76a07` / `4ec76c07`.
 - B13: alpha blend copies destination color to `v6` only when
   `src_afunc` needs destination color.
+- Rank 1: bilinear shift setup const reuse.
+- Ranks 2-4: guarded TMU0 LOD-frac alpha lane/dead-pack, shared reverse index,
+  and `STATE_lod_frac[0]` scalar reuse.
+- Rank 5: `AFUNC_AZERO` destination skip.
+- Rank 6: perspective LOD shift temp kill.
+- Rank 8: `src_afunc=4 dest_afunc=4` packed add.
+- Rank 9a: fog table `UBFX` and W-fog byte load.
+- Rank 12: alpha-test immediate compare.
+- Rank 7a: alpha-out scalar no-write guard.
 
 Current proof baseline:
 
@@ -37,6 +49,44 @@ Metric-era short delta:
 code_bytes 42788 -> 40884
 code_max   1868  -> 1780
 ```
+
+## Rank Closure Ledger
+
+Status terms:
+
+- `closed`: the candidate as written is implemented or explicitly rejected.
+- `partial`: a safe sub-slice landed, but the rank still has live work.
+- `deferred`: no current code work without stronger coverage or perf reason.
+
+| Rank | Status | Notes |
+| ---- | ------ | ----- |
+| 1 | closed | Implemented and validated: bilinear shift setup const reuse. |
+| 2 | closed | Implemented within guarded TMU0 LOD-frac bucket. |
+| 3 | closed | Implemented with shared trilinear reverse index in the same guarded bucket. |
+| 4 | closed | Implemented as scalar LOD-frac reuse stacked with rank 3. |
+| 5 | closed | Implemented and validated: `dest_afunc == AFUNC_AZERO` skips dead destination add. |
+| 6 | closed | Implemented and validated: perspective LOD shift uses BSR value directly. |
+| 7 | partial | Only alpha-out no-write guard landed. Remaining Rank 7 work must be named as separate sub-slices before implementation. |
+| 8 | closed | Implemented and validated: `src_afunc=4 dest_afunc=4` packed unsigned saturating add. |
+| 9 | partial | Fog table `UBFX` and W-fog byte load landed. Do not call full fog cleanup closed without auditing remaining fog masks/shifts. |
+| 10 | deferred | Requires stronger perf reason for `x24`/dither true-fallback work. |
+| 11 | open | Candidate remains: `v13` / color-before-fog gating and save/restore narrowing. |
+| 12 | closed | Implemented and validated: alpha-test immediate compare from codegen key. |
+
+## Active Queue
+
+Next code work should not start from the raw rank table. Start from this queue:
+
+1. Rank 7b audit-only: identify whether `w5` destination alpha load/double can
+   be skipped in buckets where RGB factors and alpha-out do not consume it.
+2. Rank 7c audit-only: direct alpha-out forms for alpha-buffer-write buckets
+   where one/both/neither `src_aafunc` / `dest_aafunc` are `AONE`.
+3. Rank 11 audit-only: prove whether `v13` color-before-fog and related
+   save/restore work can be gated by `dest_afunc == AFUNC_ACOLORBEFOREFOG`.
+4. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
+
+Do not mark any future rank closed unless all sub-slices in the candidate are
+implemented, rejected with evidence, or explicitly deferred in this ledger.
 
 ## Ranked Opportunities
 
