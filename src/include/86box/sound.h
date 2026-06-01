@@ -52,6 +52,9 @@ extern int gated;
 extern int speakval;
 extern int speakon;
 
+extern int midi_freq;
+extern int midi_buf_size;
+
 extern int sound_pos_global;
 
 extern int music_pos_global;
@@ -77,9 +80,15 @@ extern void sound_set_cd_audio_filter(void (*filter)(int     channel,
 extern void sound_set_pc_speaker_filter(void (*filter)(int     channel,
                                                        double *buffer, void *priv),
                                         void *priv);
+extern void sound_set_midi_filter(void (*filter)(int     channel,
+                                                 double *buffer, void *priv),
+                                  void *priv);
 
 extern void (*filter_pc_speaker)(int channel, double *buffer, void *priv);
 extern void *filter_pc_speaker_p;
+
+extern void (*filter_midi)(int channel, double *buffer, void *priv);
+extern void *filter_midi_p;
 
 extern int sound_card_available(int card);
 #ifdef EMU_DEVICE_H
@@ -97,6 +106,7 @@ extern void sound_init(void);
 extern void sound_reset(void);
 
 extern void sound_card_reset(void);
+extern void sound_close(void);
 
 extern void sound_cd_thread_end(void);
 extern void sound_cd_thread_reset(void);
@@ -108,6 +118,9 @@ extern void sound_hdd_thread_init(void);
 extern void sound_hdd_thread_end(void);
 
 extern const char *sound_get_output_devices(void); /* returns double-null-terminated list, or NULL */
+extern int         sound_get_device_sample_rate(const char *device_name);   /* probe native rate, 0 = unknown */
+extern int         sound_get_device_supported_rates(const char *device_name, /* probe supported rates into rates_out; returns count */
+                                                    int *rates_out, int max_rates);
 extern void        closeal(void);
 extern void        inital(void);
 extern void givealbuffer(const void *buf);

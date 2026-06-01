@@ -180,6 +180,7 @@ int      isartc_type                            = 0;              /* (C) enable 
 int      gfxcard[GFXCARD_MAX]                   = { 0, 0 };       /* (C) graphics/video card */
 int      show_second_monitors                   = 1;              /* (C) show non-primary monitors */
 int      sound_is_float                         = 1;              /* (C) sound uses FP values */
+int      sound_sample_rate                      = FREQ_48000;     /* (C) sound output sample rate */
 int      voodoo_enabled                         = 0;              /* (C) video option */
 int      ibm8514_standalone_enabled             = 0;              /* (C) video option */
 int      xga_standalone_enabled                 = 0;              /* (C) video option */
@@ -296,7 +297,7 @@ struct accelKey def_acc_keys[NUM_ACCELS] = {
     {
         .name="pause",
         .desc="Toggle pause",
-        .seq="Ctrl+Alt+F1"
+        .seq="Ctrl+Alt+P"
     },
     {
         .name="mute",
@@ -351,8 +352,6 @@ int efscrnsz_y = SCREEN_RES_Y;
 #endif
 
 __thread int is_cpu_thread = 0;
-
-static char mouse_msg[3][200];
 
 static ATOMIC_INT do_pause_ack = 0;
 static ATOMIC_INT pause_ack = 0;
@@ -1670,6 +1669,8 @@ pc_reset_hard_close(void)
     nvr_close();
 
     mouse_close();
+    
+    sound_close();
 
     device_close_all();
 
@@ -1870,44 +1871,10 @@ pc_reset_hard_init(void)
     cycles_main = 0;
 #endif
 
-    update_mouse_msg();
-
     if (test_mode)
         pc_test_mode_entry_point();
 
     ui_hard_reset_completed();
-}
-
-void
-update_mouse_msg(void)
-{
-#ifdef USE_SDL_UI
-    char  cpufamily[128];
-    char *cp;
-
-    if (!cpu_override)
-        strncpy(cpufamily, cpu_f->name, sizeof(cpufamily) - 1);
-    else
-        snprintf(cpufamily, sizeof(cpufamily), "[U] %s", cpu_f->name);
-
-    cp = strchr(cpufamily, '(');
-    if (cp) /* remove parentheses */
-        *(cp - 1) = '\0';
-    snprintf(mouse_msg[0], sizeof(mouse_msg[0]), "%s v%s - %%i%%%% - %s - %s/%s - %s",
-             EMU_NAME, EMU_VERSION_FULL, machine_getname(machine), cpufamily, cpu_s->name,
-             plat_get_string(STRING_MOUSE_CAPTURE));
-    snprintf(mouse_msg[1], sizeof(mouse_msg[1]), "%s v%s - %%i%%%% - %s - %s/%s - %s",
-             EMU_NAME, EMU_VERSION_FULL, machine_getname(machine), cpufamily, cpu_s->name,
-             (mouse_get_buttons() > 2) ? plat_get_string(STRING_MOUSE_RELEASE) : plat_get_string(STRING_MOUSE_RELEASE_MMB));
-    snprintf(mouse_msg[2], sizeof(mouse_msg[2]), "%s v%s - %%i%%%% - %s - %s/%s",
-             EMU_NAME, EMU_VERSION_FULL, machine_getname(machine), cpufamily, cpu_s->name);
-#else
-    snprintf(mouse_msg[0], sizeof(mouse_msg[0]), "%%i%%%% - %s",
-             plat_get_string(STRING_MOUSE_CAPTURE));
-    snprintf(mouse_msg[1], sizeof(mouse_msg[1]), "%%i%%%% - %s",
-             (mouse_get_buttons() > 2) ? plat_get_string(STRING_MOUSE_RELEASE) : plat_get_string(STRING_MOUSE_RELEASE_MMB));
-    strncpy(mouse_msg[2], "%i%%", sizeof(mouse_msg[2]));
-#endif
 }
 
 void
@@ -1951,6 +1918,8 @@ pc_close(UNUSED(thread_t *ptr))
 
     video_close();
 
+    sound_close();
+
     device_close_all();
 
     scsi_device_close_all();
@@ -1979,10 +1948,9 @@ pc_close(UNUSED(thread_t *ptr))
 
 #ifdef __APPLE__
 static void
-_ui_window_title(void *s)
+_ui_emu_status(void *s)
 {
-    ui_window_title((char *) s);
-    free(s);
+    ui_emu_status(*((int *) s));
 }
 #endif
 
@@ -1998,9 +1966,6 @@ ack_pause(void)
 void
 pc_run(void)
 {
-    int  mouse_msg_idx;
-    char temp[200];
-
     /* Trigger a hard reset if one is pending. */
     if (hard_reset_pending) {
         hard_reset_pending = 0;
@@ -2039,7 +2004,6 @@ pc_run(void)
         uint32_t elapsed_ms;
         int64_t  numerator;
 
-        mouse_msg_idx = ((mouse_type == MOUSE_TYPE_NONE) || (mouse_input_mode >= 1)) ? 2 : !!mouse_capture;
         target_fps    = force_10ms ? 100 : 1000;
         elapsed_ms    = fps_sample_elapsed_ms ? fps_sample_elapsed_ms : 1;
 
@@ -2057,12 +2021,11 @@ pc_run(void)
         speed_percent = (int) ((numerator + ((int64_t) elapsed_ms * target_fps / 2)) /
                                ((int64_t) elapsed_ms * target_fps));
 
-        snprintf(temp, sizeof(temp), mouse_msg[mouse_msg_idx], speed_percent);
 #ifdef __APPLE__
         /* Needed due to modifying the UI on the non-main thread is a big no-no. */
-        dispatch_async_f(dispatch_get_main_queue(), strdup((const char *) temp), _ui_window_title);
+        dispatch_async_f(dispatch_get_main_queue(), &speed_percent, _ui_emu_status);
 #else
-        ui_window_title(temp);
+        ui_emu_status(speed_percent);
 #endif
         title_update = 0;
     }

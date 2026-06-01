@@ -46,7 +46,7 @@
 
 #define FIFO_SIZE        65536
 #define FIFO_MASK        (FIFO_SIZE - 1)
-#define FIFO_ENTRY_SIZE  (1 << 31)
+#define FIFO_ENTRY_SIZE  (UINT32_C(1) << 31)
 #define FIFO_THRESHOLD   0xe000
 
 #define WAKE_DELAY       (100 * TIMER_USEC) /* 100us */
@@ -336,7 +336,7 @@
 #define MACCESS_FOGEN                 (1 << 26)
 #define MACCESS_TLUTLOAD              (1 << 29)
 #define MACCESS_NODITHER              (1 << 30)
-#define MACCESS_DIT555                (1 << 31)
+#define MACCESS_DIT555                (UINT32_C(1) << 31)
 
 #define PITCH_MASK                    0xfe0
 #define PITCH_YLIN                    (1 << 15)
@@ -385,7 +385,7 @@
 #define TEXCTL_CLAMPU                 (1 << 28)
 #define TEXCTL_TMODULATE              (1 << 29)
 #define TEXCTL_STRANS                 (1 << 30)
-#define TEXCTL_ITRANS                 (1 << 31)
+#define TEXCTL_ITRANS                 (UINT32_C(1) << 31)
 
 #define TEXHEIGHT_TH_MASK             (0x3f << 0)
 #define TEXHEIGHT_THMASK_SHIFT        (18)
@@ -3138,7 +3138,7 @@ run_dma(mystique_t *mystique)
 }
 
 static void
-fifo_thread(void *priv)
+mach64_fifo_thread(void *priv)
 {
     mystique_t *mystique = (mystique_t *) priv;
 
@@ -3804,7 +3804,7 @@ blit_iload_iload(mystique_t *mystique, uint32_t data, int size)
 
                 case DWGCTRL_BLTMOD_BMONOWF:
                     data      = (data >> 24) | ((data & 0x00ff0000) >> 8) | ((data & 0x0000ff00) << 8) | (data << 24);
-                    data_mask = (1 << 31);
+                    data_mask = (UINT32_C(1) << 31);
                 case DWGCTRL_BLTMOD_BMONOLEF:
                     while (size) {
                         if (mystique->dwgreg.xdst >= mystique->dwgreg.cxleft && mystique->dwgreg.xdst <= mystique->dwgreg.cxright && mystique->dwgreg.ydst_lin >= mystique->dwgreg.ytop && mystique->dwgreg.ydst_lin <= mystique->dwgreg.ybot && ((data & data_mask) || !(mystique->dwgreg.dwgctrl_running & DWGCTRL_TRANSC)) && trans[mystique->dwgreg.xdst & 3]) {
@@ -6902,7 +6902,7 @@ mystique_init(const device_t *info)
     mystique->wake_fifo_thread    = thread_create_event();
     mystique->fifo_not_full_event = thread_create_event();
     mystique->thread_run          = 1;
-    mystique->fifo_thread         = thread_create(fifo_thread, mystique);
+    mystique->fifo_thread         = thread_create(mach64_fifo_thread, mystique);
     mystique->dma.lock            = thread_create_mutex();
 
     timer_add(&mystique->wake_timer, mystique_wake_timer, (void *) mystique, 0);

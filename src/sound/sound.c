@@ -50,10 +50,14 @@ typedef struct {
 
 int  sound_card_current[SOUND_CARD_MAX] = { 0, 0, 0, 0 };
 int  sound_pos_global                   = 0;
+static int sound_buf_len                = SOUNDBUFLEN;
 int  music_pos_global                   = 0;
 int  wavetable_pos_global               = 0;
 int  sound_gain                         = 0;
 char sound_output_device[512]           = { 0 };
+
+int  midi_freq                          = 44100;
+int  midi_buf_size                      = 4410;
 
 #define NUM_SOUND_HANDLERS 16
 #define NUM_MUSIC_HANDLERS 16
@@ -113,6 +117,9 @@ static void *filter_cd_audio_p                                          = NULL;
 
 void (*filter_pc_speaker)(int channel, double *buffer, void *priv) = NULL;
 void *filter_pc_speaker_p                                          = NULL;
+
+void (*filter_midi)(int channel, double *buffer, void *priv) = NULL;
+void *filter_midi_p                                          = NULL;
 
 static const SOUND_CARD sound_cards[] = {
     // clang-format off
@@ -433,12 +440,14 @@ sound_realloc_buffers(void)
         outbuffer_ex_int16 = NULL;
     }
 
+    const int buf_len = sound_sample_rate / 50;
+
     if (sound_is_float) {
-        outbuffer_ex = calloc(SOUNDBUFLEN * 2, sizeof(float));
-        memset(outbuffer_ex, 0x00, SOUNDBUFLEN * 2 * sizeof(float));
+        outbuffer_ex = calloc(buf_len * 2, sizeof(float));
+        memset(outbuffer_ex, 0x00, buf_len * 2 * sizeof(float));
     } else {
-        outbuffer_ex_int16 = calloc(SOUNDBUFLEN * 2, sizeof(int16_t));
-        memset(outbuffer_ex_int16, 0x00, SOUNDBUFLEN * 2 * sizeof(int16_t));
+        outbuffer_ex_int16 = calloc(buf_len * 2, sizeof(int16_t));
+        memset(outbuffer_ex_int16, 0x00, buf_len * 2 * sizeof(int16_t));
     }
 }
 
@@ -500,9 +509,11 @@ sound_init(void)
     outbuffer_w_ex       = NULL;
     outbuffer_w_ex_int16 = NULL;
 
+    const int init_buf_len = sound_sample_rate / 50;
+
     outbuffer = NULL;
-    outbuffer = calloc(SOUNDBUFLEN * 2, sizeof(int32_t));
-    memset(outbuffer, 0x00, SOUNDBUFLEN * 2 * sizeof(int32_t));
+    outbuffer = calloc(init_buf_len * 2, sizeof(int32_t));
+    memset(outbuffer, 0x00, init_buf_len * 2 * sizeof(int32_t));
 
     outbuffer_m = NULL;
     outbuffer_m = calloc(MUSICBUFLEN * 2, sizeof(int32_t));
@@ -606,6 +617,15 @@ sound_set_pc_speaker_filter(void (*filter)(int channel, double *buffer, void *pr
 }
 
 void
+sound_set_midi_filter(void (*filter)(int channel, double *buffer, void *priv), void *priv)
+{
+    if ((filter_midi == NULL) || (filter == NULL)) {
+        filter_midi   = filter;
+        filter_midi_p = priv;
+    }
+}
+
+void
 sound_poll(UNUSED(void *priv))
 {
     const uint8_t handler_count = (sound_handlers_num < NUM_SOUND_HANDLERS) ? sound_handlers_num : NUM_SOUND_HANDLERS;
@@ -615,14 +635,14 @@ sound_poll(UNUSED(void *priv))
     midi_poll();
 
     sound_pos_global++;
-    if (sound_pos_global == SOUNDBUFLEN) {
-        memset(outbuffer, 0x00, SOUNDBUFLEN * 2 * sizeof(int32_t));
+    if (sound_pos_global == sound_buf_len) {
+        memset(outbuffer, 0x00, sound_buf_len * 2 * sizeof(int32_t));
 
         for (uint8_t c = 0; c < handler_count; c++)
             if (sound_handlers[c].get_buffer != NULL)
-                sound_handlers[c].get_buffer(outbuffer, SOUNDBUFLEN, sound_handlers[c].priv);
+                sound_handlers[c].get_buffer(outbuffer, sound_buf_len, sound_handlers[c].priv);
 
-        for (uint32_t c = 0; c < SOUNDBUFLEN * 2; c++) {
+        for (uint32_t c = 0; c < (uint32_t) (sound_buf_len * 2); c++) {
             if (sound_is_float)
                 outbuffer_ex[c] = ((float) outbuffer[c]) / (float) 32768.0;
             else {
@@ -643,7 +663,7 @@ sound_poll(UNUSED(void *priv))
         if (cd_thread_enable) {
             cd_buf_update--;
             if (!cd_buf_update) {
-                cd_buf_update = (SOUND_FREQ / SOUNDBUFLEN) / (CD_FREQ / CD_BUFLEN);
+                cd_buf_update = 50 / (CD_FREQ / CD_BUFLEN);
                 thread_set_event(sound_cd_event);
             }
         }
@@ -736,7 +756,9 @@ wavetable_poll(UNUSED(void *priv))
 void
 sound_speed_changed(void)
 {
-    sound_poll_latch = (uint64_t) ((double) TIMER_USEC * (1000000.0 / (double) SOUND_FREQ));
+    sound_buf_len = sound_sample_rate / 50;
+
+    sound_poll_latch = (uint64_t) ((double) TIMER_USEC * (1000000.0 / (double) sound_sample_rate));
 
     music_poll_latch = (uint64_t) ((double) TIMER_USEC * (1000000.0 / (double) MUSIC_FREQ));
 
@@ -774,6 +796,9 @@ sound_reset(void)
 
     filter_pc_speaker   = NULL;
     filter_pc_speaker_p = NULL;
+
+    filter_midi   = NULL;
+    filter_midi_p = NULL;
 
     sound_set_cd_volume(65535, 65535);
 
@@ -956,3 +981,15 @@ sound_hdd_thread_end(void)
     }
 }
 
+void
+sound_close(void)
+{
+    filter_cd_audio   = NULL;
+    filter_cd_audio_p = NULL;
+
+    filter_pc_speaker   = NULL;
+    filter_pc_speaker_p = NULL;
+
+    filter_midi   = NULL;
+    filter_midi_p = NULL;
+}

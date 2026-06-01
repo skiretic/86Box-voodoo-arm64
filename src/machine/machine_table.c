@@ -2229,8 +2229,8 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_8088,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
+            .min_bus     = 4772728,
+            .max_bus     = 4772728,
             .min_voltage = 0,
             .max_voltage = 0,
             .min_multi   = 0,
@@ -2323,8 +2323,8 @@ const machine_t machines[] = {
         .cpu               = {
             .package     = CPU_PKG_8088,
             .block       = CPU_BLOCK_NONE,
-            .min_bus     = 0,
-            .max_bus     = 0,
+            .min_bus     = 4772728,
+            .max_bus     = 4772728,
             .min_voltage = 0,
             .max_voltage = 0,
             .min_multi   = 0,
@@ -21946,13 +21946,13 @@ const machine_t machines[] = {
         .kbc_p1                   = 0x00000cf0,
         .gpio                     = 0xffffffff,
         .gpio_acpi                = 0xffffffff,
-        .device                   = NULL,
+        .device                   = &p3v133_device,
         .kbd_device               = NULL,
         .fdc_device               = NULL,
         .vid_device               = NULL,
         .snd_device               = NULL,
         .net_device               = NULL,
-        .aliases                  = { "" }
+        .aliases                  = { "HP NetServer E200", "HP Eagle 2", "" }
     },
     /* Has a Winbond W83977EF Super I/O chip with on-chip KBC with AMIKey-2 KBC
        firmware. */
