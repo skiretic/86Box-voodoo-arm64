@@ -48,6 +48,10 @@ typedef uint8_t  GrAlpha_t;
 #define GR_BLEND_ONE 0x4
 #define GR_BLEND_ONE_MINUS_SRC_ALPHA 0x5
 #define GR_BLEND_ONE_MINUS_DST_ALPHA 0x7
+#define GR_BLEND_COLORBEFOREFOG 0xf
+
+#define GR_FOG_DISABLE 0x0
+#define GR_FOG_WITH_ITERATED_ALPHA 0x3
 
 #define GR_CMP_ALWAYS 7
 
@@ -102,6 +106,8 @@ typedef void   (WINAPI *PFN_grColorCombine)(FxI32, FxI32, FxI32, FxI32, FxBool);
 typedef void   (WINAPI *PFN_grAlphaCombine)(FxI32, FxI32, FxI32, FxI32, FxBool);
 typedef void   (WINAPI *PFN_grAlphaBlendFunction)(FxI32, FxI32, FxI32, FxI32);
 typedef void   (WINAPI *PFN_grColorMask)(FxBool, FxBool);
+typedef void   (WINAPI *PFN_grFogColorValue)(GrColor_t);
+typedef void   (WINAPI *PFN_grFogMode)(FxI32);
 typedef void   (WINAPI *PFN_grDepthBufferFunction)(FxI32);
 typedef void   (WINAPI *PFN_grDepthBufferMode)(FxI32);
 typedef void   (WINAPI *PFN_grDepthMask)(FxBool);
@@ -129,6 +135,8 @@ static PFN_grColorCombine grColorCombine;
 static PFN_grAlphaCombine grAlphaCombine;
 static PFN_grAlphaBlendFunction grAlphaBlendFunction;
 static PFN_grColorMask grColorMask;
+static PFN_grFogColorValue grFogColorValue;
+static PFN_grFogMode grFogMode;
 static PFN_grDepthBufferFunction grDepthBufferFunction;
 static PFN_grDepthBufferMode grDepthBufferMode;
 static PFN_grDepthMask grDepthMask;
@@ -255,6 +263,8 @@ load_glide(void)
     RESOLVE(grAlphaCombine, 20);
     RESOLVE(grAlphaBlendFunction, 16);
     RESOLVE(grColorMask, 8);
+    RESOLVE(grFogColorValue, 4);
+    RESOLVE(grFogMode, 4);
     RESOLVE(grDepthBufferFunction, 4);
     RESOLVE(grDepthBufferMode, 4);
     RESOLVE(grDepthMask, 4);
@@ -449,6 +459,29 @@ draw_alpha_case(FxI32 factor, const char *name, AuxAlphaMode aux_alpha_mode)
 }
 
 static void
+draw_color_before_fog_case(void)
+{
+    GrVertex v[3];
+
+    out_text("case COLORBEFOREFOG_DEST aux_alpha_write=0\r\n");
+    set_alpha_pair_state();
+    set_aux_alpha_write(AUX_ALPHA_NONE);
+    grFogColorValue(0x000020c0);
+    grFogMode(GR_FOG_WITH_ITERATED_ALPHA);
+    grAlphaBlendFunction(GR_BLEND_ONE, GR_BLEND_COLORBEFOREFOG, GR_BLEND_ONE, GR_BLEND_ZERO);
+
+    for (int frame = 0; frame < 80; frame++) {
+        grBufferClear(0x00202020, 0, 0);
+        for (int i = 0; i < 12; i++) {
+            make_tri(v, (float) ((i % 4) * 8));
+            grDrawTriangle(&v[0], &v[1], &v[2]);
+        }
+        grBufferSwap(0);
+    }
+    grFogMode(GR_FOG_DISABLE);
+}
+
+static void
 draw_tmu_factor_case(FxI32 factor, const char *name)
 {
     GrVertex v[3];
@@ -545,6 +578,7 @@ app_main(void)
     draw_alpha_case(GR_BLEND_DST_ALPHA, "DST_ALPHA/DST_ALPHA", AUX_ALPHA_NONE);
     draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_NONE);
     draw_alpha_case(GR_BLEND_ONE_MINUS_DST_ALPHA, "ONE_MINUS_DST_ALPHA/ONE_MINUS_DST_ALPHA", AUX_ALPHA_NONE);
+    draw_color_before_fog_case();
     draw_alpha_case(GR_BLEND_SRC_ALPHA, "SRC_ALPHA/SRC_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);
     draw_alpha_case(GR_BLEND_DST_ALPHA, "DST_ALPHA/DST_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);
     draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);

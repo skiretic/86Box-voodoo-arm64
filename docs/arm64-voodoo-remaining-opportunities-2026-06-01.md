@@ -66,21 +66,21 @@ Status terms:
 | 4 | closed | Implemented as scalar LOD-frac reuse stacked with rank 3. |
 | 5 | closed | Implemented and validated: `dest_afunc == AFUNC_AZERO` skips dead destination add. |
 | 6 | closed | Implemented and validated: perspective LOD shift uses BSR value directly. |
-| 7 | partial | Rank 7a and 7b landed. Rank 7c blocker fixed; direct alpha-out forms are still not implemented. |
+| 7 | partial | Rank 7a, 7b, and 7c landed. Do not call full Rank 7 closed without auditing any remaining source-alpha prep work. |
 | 8 | closed | Implemented and validated: `src_afunc=4 dest_afunc=4` packed unsigned saturating add. |
 | 9 | partial | Fog table `UBFX` and W-fog byte load landed. Do not call full fog cleanup closed without auditing remaining fog masks/shifts. |
 | 10 | deferred | Requires stronger perf reason for `x24`/dither true-fallback work. |
-| 11 | open | Candidate remains: `v13` / color-before-fog gating and save/restore narrowing. |
+| 11 | closed | Implemented and validated: `v13` / color-before-fog gating and `d13` save/restore narrowing. |
 | 12 | closed | Implemented and validated: alpha-test immediate compare from codegen key. |
 
 ## Active Queue
 
 Next code work should not start from the raw rank table. Start from this queue:
 
-1. Rank 7c audit-only: reconsider direct alpha-out forms for
-   alpha-buffer-write buckets now that `alphaMode=00441110` is clean.
-2. Rank 11 audit-only: prove whether `v13` color-before-fog and related
-   save/restore work can be gated by `dest_afunc == AFUNC_ACOLORBEFOREFOG`.
+1. Rank 7 follow-up audit-only: determine whether any source-alpha prep work
+   remains live after Rank 7a/7b/7c.
+2. Rank 9 follow-up audit-only: remaining fog mask/shift cleanup, if hot
+   coverage still supports it.
 3. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
 
 Do not mark any future rank closed unless all sub-slices in the candidate are
@@ -100,7 +100,7 @@ implemented, rejected with evidence, or explicitly deferred in this ledger.
 | 8 | Alpha blend | Specialize `src_afunc=4 dest_afunc=4`: packed saturating byte add instead of unpack, 16-bit add, saturating pack. | `-3` instr / `-12` bytes on known `4/4`. | High for `src_afunc=4 dest_afunc=4`. | Medium-low. Alpha byte becomes packed saturated value; scalar `w12` must remain truth for alpha write. | Candidate after rank 7 audit, or as its own small slice. |
 | 9 | Fog | Replace fog mask/shift sequences with `UBFX`; W-fog byte can use `LDRB` from `STATE_w+4`. | Table fog `-3` instr; Z/W fog `-1` instr. | Medium: need existing fog bucket coverage in current workload. | Low. Matches interpreter masks. | Only if normal logs prove hot fog coverage. |
 | 10 | Prologue/register pressure | Free `x24` from real_y pin, keep real_y in `x3`, then use `x24` as final dither base candidate for remaining shape63 fallback. | Dynamic win may be meaningful: shape63 true fallback can become `MOV x7,x24` instead of per-pixel address materialization; static `code_bytes` may be neutral or slightly up. | Medium: old true fallback was hot; current shape63 needs confirmation. | Medium. Must audit every `x3` emitter and future scratch assumptions. | Perf-motivated, not code-size-first. Do only after perf plan or if dither fallback dominates. |
-| 11 | Prologue/fog-alpha | Gate `v13 = color-before-fog` and save only `d12` when `dest_afunc != AFUNC_ACOLORBEFOREFOG`. | `-1` loop instr and less save/restore memory for most non-ACOLORBEFOREFOG alpha/fog blocks. | Medium: need alpha/fog bucket coverage and `dest_afunc` visibility. | Low-medium. Must ensure no invalid blend factor path consumes `v13`. | Safe-ish but smaller; defer. |
+| 11 | Prologue/fog-alpha | Gate `v13 = color-before-fog` and save only `d12` when `dest_afunc != AFUNC_ACOLORBEFOREFOG`. | `-1` loop instr and less save/restore memory for most non-ACOLORBEFOREFOG alpha/fog blocks. | Proven with consolidated probe, including `dest_afunc=15 fog_en=1`. | Low. Interpreter uses `colbfog_*` only in `dest_afunc == AFUNC_ACOLORBEFOREFOG`; no `src_afunc` consumes color-before-fog. | Closed. |
 | 12 | Alpha test | Compare against immediate alpha reference instead of `LDRB` from `params->alphaMode+3`. | `-1` instr per active alpha test block. | Medium: needs active alpha-test buckets. | Low. `alphaMode` is codegen key. | Tiny; batch with other alpha work only. |
 
 ## Reject / Do Not Do
@@ -1178,3 +1178,67 @@ Risks:
 - Relies on the prior `UXTB w5, w5` fix for aux destination alpha.
 - Any future alpha-blend register reuse must preserve `w12`/`w5` through the
   alpha-out block.
+
+## Rank 11 Color-Before-Fog Gating
+
+Status: accepted and closed.
+
+Audit result:
+
+- Interpreter stores `colbfog_r/g/b` before fog.
+- `ALPHA_BLEND` consumes `colbfog_*` only in
+  `dest_afunc == AFUNC_ACOLORBEFOREFOG`.
+- No `src_afunc` consumes color-before-fog.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Added `need_v13 = (dest_afunc == AFUNC_ACOLORBEFOREFOG)`.
+- Emit `MOV v13, v0` only when `need_v13`.
+- Preserve `d13` only when `need_v13`; otherwise save/restore only `d12` in
+  the existing stack slot.
+- Kept frame size and slot layout unchanged.
+
+Implemented in `tools/voodoo_alpha_probe/`:
+
+- Added a `COLORBEFOREFOG_DEST` case using `GR_BLEND_COLORBEFOREFOG`.
+- Added `grFogColorValue` / `grFogMode` dynamic resolves.
+- Enabled iterated-alpha fog for that case, then disabled fog after the draw.
+
+Validation:
+
+```text
+Voodoo validate (type=4 verify=1): spans=7928707 jit=7928707 interp=0 verify=7928707 skipped=0 mismatch_spans=0 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=0 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=83389 scan_hits=124404 misses=21 compiles=21 rejects=0 code_bytes=24708 code_max=1764
+```
+
+Target coverage:
+
+```text
+alphaMode=0004f410
+alpha_blend=1
+src_afunc=4
+dest_afunc=15
+fogMode=000000d1
+fog_en=1
+fog_src=10
+spans=383280
+fb=0
+aux=0
+state=0
+```
+
+Non-`ACOLORBEFOREFOG` fog and alpha buckets were also clean in the same run,
+including `fog_en=1 dest_afunc=5` and the expanded Rank 7c alpha-out buckets.
+
+Code-size delta from the Rank 7c baseline with the expanded probe:
+
+```text
+code_bytes 24712 -> 24708 (-4)
+code_max   1764  -> 1764  (+0)
+```
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```

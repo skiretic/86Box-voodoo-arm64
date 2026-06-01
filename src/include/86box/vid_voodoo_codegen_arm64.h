@@ -152,7 +152,7 @@ arm64_codegen_callee_saved_use(int need_x19, int need_x20, int need_x21,
 {
     uint32_t use = ARM64_CALLEE_USE_X24 | ARM64_CALLEE_USE_X27 |
                    ARM64_CALLEE_USE_X28 | ARM64_CALLEE_USE_D12 |
-                   ARM64_CALLEE_USE_D13 | ARM64_CALLEE_USE_D15;
+                   ARM64_CALLEE_USE_D15;
 
     if (need_x19)
         use |= ARM64_CALLEE_USE_X19;
@@ -210,7 +210,7 @@ arm64_codegen_assert_callee_saved_use(uint32_t use, int need_x19, int need_x20,
 
     if (!(use & ARM64_CALLEE_USE_X24) || !(use & ARM64_CALLEE_USE_X27) ||
         !(use & ARM64_CALLEE_USE_X28) || !(use & ARM64_CALLEE_USE_D12) ||
-        !(use & ARM64_CALLEE_USE_D13) || !(use & ARM64_CALLEE_USE_D15)) {
+        !(use & ARM64_CALLEE_USE_D15)) {
         fatal("ARM64 JIT: missing fixed callee-saved register use\n");
     }
 
@@ -2376,20 +2376,24 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   d10: neon_ff_b, used by cc_invert_output.
      *   d11: fogColor, used by fog.
      *   d12: RGBA deltas, written by the prologue for per-pixel increments.
-     *   d13: color-before-fog copy, written before fog.
+     *   d13: color-before-fog copy, written before fog only for
+     *        dest_afunc == AFUNC_ACOLORBEFOREFOG.
      *   d14: TMU1 ST deltas, written only for dual TMU blocks.
      *   d15: TMU0 ST deltas, written by the prologue.
      *
-     * N3 keeps the frame size and slot layout fixed. The first conditional
-     * save/restore slices only gate a pair when neither register in that pair
-     * is written by the generated block.
+     * N3 keeps the frame size and slot layout fixed. Conditional save/restore
+     * slices keep the existing slots and skip only registers that are not
+     * written by the generated block.
      */
-    uint32_t callee_saved_use =
+    const int need_v13 = (dest_afunc == AFUNC_ACOLORBEFOREFOG);
+    uint32_t  callee_saved_use =
         arm64_codegen_callee_saved_use(need_x19, need_x20, need_x21,
                                        need_x22, need_x23, need_x25,
                                        need_x26, need_v8, need_v9,
                                        need_v10, need_v11,
                                        voodoo->dual_tmus);
+    if (need_v13)
+        callee_saved_use |= ARM64_CALLEE_USE_D13;
     arm64_codegen_assert_callee_saved_use(callee_saved_use, need_x19,
                                           need_x20, need_x21, need_x22,
                                           need_x23, need_x25, need_x26,
@@ -2452,8 +2456,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     /* STP d10, d11, [SP, #112] -- only if neon_ff_b or fogColor is written */
     if (callee_saved_use & (ARM64_CALLEE_USE_D10 | ARM64_CALLEE_USE_D11))
         addlong(ARM64_STP_D(10, 11, 31, 112));
-    /* STP d12, d13, [SP, #128] */
-    addlong(ARM64_STP_D(12, 13, 31, 128));
+    /* d13 is written only when ACOLORBEFOREFOG needs color-before-fog. */
+    if (callee_saved_use & ARM64_CALLEE_USE_D13)
+        addlong(ARM64_STP_D(12, 13, 31, 128));
+    else
+        addlong(ARM64_STR_D(12, 31, 128));
     /* STP d14, d15, [SP, #144] -- hoisted TMU delta registers */
     addlong(ARM64_STP_D(14, 15, 31, 144));
 
@@ -3865,10 +3872,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   v0 = final combined color (packed BGRA in low 32 bits)
      *   w12 = final combined alpha (if alphaMode enabled)
      *
-     * Save to v13 (callee-saved) for fog stage, same as x86-64
-     * saving to XMM15.
+     * Save to v13 only when ACOLORBEFOREFOG needs a pre-fog color copy.
      * ================================================================ */
-    addlong(ARM64_MOV_V(13, 0));
+    if (need_v13)
+        addlong(ARM64_MOV_V(13, 0));
 
     /* ====================================================================
      * FOG
@@ -3898,7 +3905,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   v13 = color-before-fog copy (for ACOLORBEFOREFOG dest blend)
      *   w12 = final combined alpha (EDX in x86-64)
      *
-     * Fog modifies v0. The XMM15/v13 copy preserves pre-fog color.
+     * Fog modifies v0. The v13 copy preserves pre-fog color.
      *
      * After fog:
      *   v0 = fogged color (packed BGRA bytes)
@@ -4762,8 +4769,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
     /* LDP d14, d15, [SP, #144] */
     addlong(ARM64_LDP_D(14, 15, 31, 144));
-    /* LDP d12, d13, [SP, #128] */
-    addlong(ARM64_LDP_D(12, 13, 31, 128));
+    /* d13 is paired with the conditional save above. */
+    if (callee_saved_use & ARM64_CALLEE_USE_D13)
+        addlong(ARM64_LDP_D(12, 13, 31, 128));
+    else
+        addlong(ARM64_LDR_D(12, 31, 128));
     /* LDP d10, d11, [SP, #112] -- paired with conditional save above */
     if (callee_saved_use & (ARM64_CALLEE_USE_D10 | ARM64_CALLEE_USE_D11))
         addlong(ARM64_LDP_D(10, 11, 31, 112));
