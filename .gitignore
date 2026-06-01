@@ -84,3 +84,5 @@ tools/win98-*
 docs/archive/2026-04-26-legacy/*
 
 docs/archive/arm64-voodoo-optimization-investigation.md
+tools/voodoo_alpha_probe/ALPHAPRB.EXE
+tools/voodoo_alpha_probe/alphaprb.iso

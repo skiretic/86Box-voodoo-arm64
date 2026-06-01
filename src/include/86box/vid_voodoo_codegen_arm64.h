@@ -4135,9 +4135,18 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             src_afunc == AFUNC_ADST_ALPHA ||
             src_afunc == AFUNC_AOMDST_ALPHA ||
             src_afunc == AFUNC_ASATURATE;
+        int rgb_blend_needs_src_alpha =
+            dest_afunc == AFUNC_ASRC_ALPHA ||
+            dest_afunc == AFUNC_AOMSRC_ALPHA ||
+            src_afunc == AFUNC_ASRC_ALPHA ||
+            src_afunc == AFUNC_AOMSRC_ALPHA ||
+            src_afunc == AFUNC_ASATURATE;
         int alpha_out_needs_dst_alpha =
             need_blended_alpha_write && dest_aafunc == AFUNC_AONE;
+        int alpha_out_needs_src_alpha =
+            need_blended_alpha_write && src_aafunc == AFUNC_AONE;
         int need_dst_alpha = rgb_blend_needs_dst_alpha || alpha_out_needs_dst_alpha;
+        int need_src_alpha_doubled = rgb_blend_needs_src_alpha || alpha_out_needs_src_alpha;
 
         /* Load dest alpha from aux buffer if alpha-buffer enabled */
         if (need_dst_alpha) {
@@ -4165,7 +4174,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             addlong(ARM64_MOV_REG(4, 28));  /* cached STATE_x */
 
         /* w12 *= 2, w5 *= 2 -- for table indexing (each entry is 16 bytes) */
-        addlong(ARM64_ADD_REG(12, 12, 12));  /* w12 = src_alpha * 2 */
+        if (need_src_alpha_doubled)
+            addlong(ARM64_ADD_REG(12, 12, 12));  /* w12 = src_alpha * 2 */
         if (need_dst_alpha)
             addlong(ARM64_ADD_REG(5, 5, 5)); /* w5 = dst_alpha * 2 */
 

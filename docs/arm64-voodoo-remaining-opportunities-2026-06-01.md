@@ -66,7 +66,7 @@ Status terms:
 | 4 | closed | Implemented as scalar LOD-frac reuse stacked with rank 3. |
 | 5 | closed | Implemented and validated: `dest_afunc == AFUNC_AZERO` skips dead destination add. |
 | 6 | closed | Implemented and validated: perspective LOD shift uses BSR value directly. |
-| 7 | partial | Rank 7a, 7b, and 7c landed. Do not call full Rank 7 closed without auditing any remaining source-alpha prep work. |
+| 7 | closed | Rank 7a, 7b, 7c, and 7d landed; remaining source/destination alpha prep consumers audited against interpreter semantics and covered by probe validation. |
 | 8 | closed | Implemented and validated: `src_afunc=4 dest_afunc=4` packed unsigned saturating add. |
 | 9 | partial | Fog table `UBFX` and W-fog byte load landed. Do not call full fog cleanup closed without auditing remaining fog masks/shifts. |
 | 10 | deferred | Requires stronger perf reason for `x24`/dither true-fallback work. |
@@ -77,11 +77,9 @@ Status terms:
 
 Next code work should not start from the raw rank table. Start from this queue:
 
-1. Rank 7 follow-up audit-only: determine whether any source-alpha prep work
-   remains live after Rank 7a/7b/7c.
-2. Rank 9 follow-up audit-only: remaining fog mask/shift cleanup, if hot
+1. Rank 9 follow-up audit-only: remaining fog mask/shift cleanup, if hot
    coverage still supports it.
-3. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
+2. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
 
 Do not mark any future rank closed unless all sub-slices in the candidate are
 implemented, rejected with evidence, or explicitly deferred in this ledger.
@@ -96,7 +94,7 @@ implemented, rejected with evidence, or explicitly deferred in this ledger.
 | 4 | TMU combine | Reuse TMU0 `STATE_lod_frac[0]` scalar for RGB and alpha after rank 3 frees the scalar register. | `-1` instr / `-4` bytes, stacked after rank 3. | High when `tmu0_rgb_lod_frac` and `tmu0_alpha_lod_frac` are nonzero in same bucket. | Low if coupled to rank 3; medium standalone. | Piggyback only after rank 3. |
 | 5 | Alpha blend | Skip `AFUNC_AZERO` destination zero vector and final add for `src_afunc=2 dest_afunc=0`. | `-2` instr / `-8` bytes for known `2/0` pair. | High: normal proof hit `src_afunc=2 dest_afunc=0`. | Low. Interpreter has `newdest_* = 0`; adding zero is dead. | Good small alpha slice after texture/TMU. |
 | 6 | Texture fetch / perspective | Remove perspective LOD shift temp: use `w11` directly for `LSR x4,x4,x11`, then compute `w11 = bsr - 19`. | `-1` instr per perspective texture fetch site. | Medium-high: normal buckets are perspective textured. | Medium-low. LOD/state-sensitive path. | Defer until rank 1 lands cleanly. |
-| 7 | Alpha blend | Gate src/dst alpha preparation and alpha-out scalar work by actual consumers; direct alpha-out forms for one/both/neither `AONE`. | Common pairs save at least `-2..-3` instr; aux-alpha no-write can save more. | Medium: common alpha pairs covered, but `src_aafunc` / `dest_aafunc` and aux-write coverage must be audited. | Medium. Consumer audit required. | Do not do before simpler alpha/TMU wins. |
+| 7 | Alpha blend | Gate src/dst alpha preparation and alpha-out scalar work by actual consumers; direct alpha-out forms for one/both/neither `AONE`. | Common pairs save at least `-2..-3` instr; aux-alpha no-write can save more. | Covered by consolidated alpha probe after Rank 7d source-alpha audit. | Low after sub-slice validation. | Closed. |
 | 8 | Alpha blend | Specialize `src_afunc=4 dest_afunc=4`: packed saturating byte add instead of unpack, 16-bit add, saturating pack. | `-3` instr / `-12` bytes on known `4/4`. | High for `src_afunc=4 dest_afunc=4`. | Medium-low. Alpha byte becomes packed saturated value; scalar `w12` must remain truth for alpha write. | Candidate after rank 7 audit, or as its own small slice. |
 | 9 | Fog | Replace fog mask/shift sequences with `UBFX`; W-fog byte can use `LDRB` from `STATE_w+4`. | Table fog `-3` instr; Z/W fog `-1` instr. | Medium: need existing fog bucket coverage in current workload. | Low. Matches interpreter masks. | Only if normal logs prove hot fog coverage. |
 | 10 | Prologue/register pressure | Free `x24` from real_y pin, keep real_y in `x3`, then use `x24` as final dither base candidate for remaining shape63 fallback. | Dynamic win may be meaningful: shape63 true fallback can become `MOV x7,x24` instead of per-pixel address materialization; static `code_bytes` may be neutral or slightly up. | Medium: old true fallback was hot; current shape63 needs confirmation. | Medium. Must audit every `x3` emitter and future scratch assumptions. | Perf-motivated, not code-size-first. Do only after perf plan or if dither fallback dominates. |
@@ -1178,6 +1176,76 @@ Risks:
 - Relies on the prior `UXTB w5, w5` fix for aux destination alpha.
 - Any future alpha-blend register reuse must preserve `w12`/`w5` through the
   alpha-out block.
+
+## Rank 7d Source Alpha Prep Guard
+
+Status: accepted as the final Rank 7 sub-slice. Rank 7 is closed.
+
+Audit result:
+
+- Interpreter RGB blend consumes `src_a` only for:
+  - destination factor `AFUNC_ASRC_ALPHA`
+  - destination factor `AFUNC_AOMSRC_ALPHA`
+  - source factor `AFUNC_ASRC_ALPHA`
+  - source factor `AFUNC_AOMSRC_ALPHA`
+  - source factor `AFUNC_ASATURATE`
+- Interpreter alpha-out consumes `src_a` only when alpha-buffer write is live
+  and `src_aafunc == AFUNC_AONE`.
+- Therefore `w12 = src_alpha * 2` is dead when neither RGB blend nor alpha-out
+  consumes source alpha.
+- No broader raw/doubled split was taken; source-only alpha-out still uses the
+  existing direct form when `src_aafunc == AFUNC_AONE`.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Added `rgb_blend_needs_src_alpha`.
+- Added `alpha_out_needs_src_alpha`.
+- Added `need_src_alpha_doubled`.
+- Guarded only `w12 = src_alpha * 2`.
+
+Implemented in `tools/voodoo_alpha_probe/`:
+
+- Added `GR_BLEND_SATURATE`.
+- Added a `SATURATE/ZERO` probe case to cover the source-side
+  `AFUNC_ASATURATE` consumer.
+
+Validation:
+
+```text
+./scripts/build-and-sign.sh
+BUILD + SIGN OK
+```
+
+```text
+Voodoo validate (type=4 verify=1): spans=8311987 jit=8311987 interp=0 verify=8311987 skipped=0 mismatch_spans=0 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=0 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=84348 scan_hits=124404 misses=22 compiles=22 rejects=0 code_bytes=25804 code_max=1764
+```
+
+Rank 7d target coverage:
+
+```text
+alphaMode=00401110 alpha_blend=1 depth_w=1 alpha_en=1 src_afunc=1 dest_afunc=1 spans=383280 fb=0 aux=0 state=0
+alphaMode=00043310 alpha_blend=1 depth_w=0 alpha_en=0 src_afunc=3 dest_afunc=3 spans=383280 fb=0 aux=0 state=0
+alphaMode=00047710 alpha_blend=1 depth_w=0 alpha_en=0 src_afunc=7 dest_afunc=7 spans=383280 fb=0 aux=0 state=0
+alphaMode=0004ff10 alpha_blend=1 depth_w=0 alpha_en=0 src_afunc=15 dest_afunc=15 spans=383280 fb=0 aux=0 state=0
+```
+
+Closure evidence:
+
+- Rank 7a: alpha-out no-write guard, validated with live and dead alpha-buffer
+  write paths.
+- Rank 7b: destination alpha prep guard, validated with RGB destination-alpha
+  consumers and alpha-out destination-alpha consumer.
+- Rank 7c: alpha-out direct forms, validated for neither/source/destination/both
+  `AONE` forms.
+- Rank 7d: source alpha prep guard, validated for no-source-alpha consumer and
+  source-alpha RGB consumers including `AFUNC_ASATURATE`.
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
 
 ## Rank 11 Color-Before-Fog Gating
 
