@@ -494,3 +494,189 @@ Notes:
 - `code_max` improved slightly; `code_bytes` increased in this validation-off
   run because the compile mix differed (`compiles` also increased).
 - Treat this as a baseline-vs-stacked smoke comparison, not a final perf claim.
+
+## Ranks 5, 6, and 8 Validation
+
+Status: accepted by max-window VM validation.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Rank 5: `AFUNC_AZERO` destination color is not zeroed and the final
+  destination add is skipped when `dest_afunc == AFUNC_AZERO`.
+- Rank 6: perspective texture LOD shift uses the BSR value in `w11` directly,
+  then computes `w11 = bsr - 19`.
+- Rank 8: `src_afunc=4 dest_afunc=4` uses packed unsigned saturating byte add
+  and skips the 16-bit unpack/add/pack sequence; scalar `w12` remains the alpha
+  output source of truth.
+
+Build/sign:
+
+```text
+./scripts/build-and-sign.sh
+ninja: no work to do.
+build/src/86Box.app: replacing existing signature
+BUILD + SIGN OK
+```
+
+Validation launch:
+
+```sh
+./scripts/launch-voodoo-validate-vm.sh --limit 51200000 --log-limit 8 --metrics 1
+```
+
+Validation result:
+
+```text
+verify=51200000
+skipped=0
+mismatch_spans=0
+fb_mismatches=0
+aux_mismatches=0
+state_mismatches=0
+rejects=0
+```
+
+Target coverage:
+
+```text
+src_afunc=2 dest_afunc=0
+spans=1261978
+textureMode0=4ec76a07
+tmu0_rgb_lod_frac=1261978
+tmu0_alpha_lod_frac=1261978
+
+src_afunc=2 dest_afunc=0
+spans=4748726
+textureMode0=4ec76a07
+tmu0_rgb_lod_frac=4748726
+tmu0_alpha_lod_frac=4748726
+
+src_afunc=4 dest_afunc=4
+spans=3942912
+textureMode0=4ec76a07
+tmu0_rgb_lod_frac=3942912
+tmu0_alpha_lod_frac=3942912
+
+src_afunc=4 dest_afunc=4
+spans=104681
+textureMode0=00000a07
+
+src_afunc=4 dest_afunc=4
+spans=24804
+textureMode0=00000a07
+```
+
+Additional coverage:
+
+```text
+tmu0_bilinear_pixels=547014735
+tmu1_bilinear_pixels=853034118
+```
+
+JIT metrics:
+
+```text
+mru_hits=1530176
+scan_hits=2050174
+misses=5458
+compiles=5458
+rejects=0
+code_bytes=6668644
+code_max=1716
+```
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
+
+Notes:
+
+- This run proves clean semantics and target coverage for the batched small
+  slice.
+- There is no same-window prepatch baseline for this 51.2M validation run, so
+  the JIT metrics above are validation evidence, not a standalone perf claim.
+- Static generated-code effects are `-8` bytes for covered rank 5 blocks, `-4`
+  bytes per perspective texture fetch site for rank 6, and `-12` bytes for
+  covered rank 8 blocks.
+
+Next: run a same-workload host-efficiency sample only after deciding whether to
+keep this three-rank batch together or split it for stricter metric attribution.
+
+## Q3 Demo Four Ranks 5, 6, and 8 Host-Efficiency Sample
+
+Stack sampled: rank 1 + TMU ranks 2-4 + ranks 5, 6, and 8.
+Mode: validation off, ARM64 JIT metrics on.
+
+Launch:
+
+```sh
+./scripts/launch-voodoo-validate-vm.sh --mode off --metrics 1
+```
+
+Sampling:
+
+```sh
+sample 18649 90 10 -file /tmp/86box-q3-demo-four-r5-r6-r8-retry.sample.txt
+```
+
+JIT metrics:
+
+```text
+mru_hits=3145415
+scan_hits=3280433
+misses=20666
+compiles=20666
+rejects=0
+code_bytes=25277888
+code_max=1652
+```
+
+Top host sample symbols from the run. `exec386_dynarec` is listed only as
+workload/context noise; it is CPU dynarec time and is not part of the Voodoo
+host-efficiency comparison for this slice.
+
+| Symbol | Baseline samples | R1+TMU234 samples | R5/R6/R8 samples |
+| ------ | ---------------- | ----------------- | ---------------- |
+| `exec386_dynarec` | 1619 | 1726 | 1691, excluded |
+| `voodoo_half_triangle` | 306 | 281 | 280 |
+| `voodoo_use_texture` | 268 | 289 | 247 |
+| `voodoo_fifo_thread` | 254 | 228 | 211 |
+| `voodoo_reg_writel` | 65 | 57 | 46 |
+| `voodoo_fastfill` | 35 | 26 | 29 |
+| `voodoo_queue_triangle` | 13 | 11 | 22 |
+| `voodoo_triangle_setup` | 11 | 12 | 15 |
+
+Voodoo-only listed-symbol sum:
+
+```text
+baseline=952
+r1_tmu234=904
+r5_r6_r8=850
+delta_vs_baseline=-102 samples
+delta_vs_r1_tmu234=-54 samples
+```
+
+JIT metric comparison:
+
+| Metric | Baseline | R1+TMU234 | R5/R6/R8 | Delta vs baseline | Delta vs R1+TMU234 |
+| ------ | -------- | --------- | -------- | ----------------- | ------------------ |
+| `mru_hits` | 3395237 | 3004072 | 3145415 | -249822 | +141343 |
+| `scan_hits` | 3427051 | 3262438 | 3280433 | -146618 | +17995 |
+| `misses` | 20385 | 20527 | 20666 | +281 | +139 |
+| `compiles` | 20385 | 20527 | 20666 | +281 | +139 |
+| `rejects` | 0 | 0 | 0 | 0 | 0 |
+| `code_bytes` | 25123524 | 25285828 | 25277888 | +154364 | -7940 |
+| `code_max` | 1672 | 1668 | 1652 | -20 | -16 |
+
+Notes:
+
+- This is one host sample, so it is directional, not final perf proof.
+- Validation-off N5 counters were zero again, so coverage interpretation uses
+  the earlier max-window validation run plus host sample/JIT cache metrics here.
+- Listed Voodoo sample share improved versus both the original baseline and the
+  rank 1 + TMU ranks 2-4 stack.
+- `code_max` improved versus both comparison points; `code_bytes` improved
+  versus the previous stack but remains higher than original baseline because
+  the compile mix differs.

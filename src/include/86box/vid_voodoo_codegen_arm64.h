@@ -1796,14 +1796,11 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
         /* Keep tex_t live in w6 until sampling. */
 
-        /* MOV w12, w11 -- save BSR result for shift */
-        addlong(ARM64_MOV_REG(12, 11));
+        /* LSR x4, x4, x11 -- shift quotient by BSR amount (64-bit) */
+        addlong(ARM64_LSR_REG_X(4, 4, 11));
 
         /* SUB w11, w11, #19 -- exp = BSR - 19 */
         addlong(ARM64_SUB_IMM(11, 11, 19));
-
-        /* LSR x4, x4, x12 -- shift quotient by BSR amount (64-bit) */
-        addlong(ARM64_LSR_REG_X(4, 4, 12));
 
         /* LSL w11, w11, #8 -- exp <<= 8 */
         addlong(ARM64_LSL_IMM(11, 11, 8));
@@ -4127,6 +4124,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *   x8  = fb_mem, x9 = aux_mem (pinned from prologue)
      * ================================================================== */
     if (params->alphaMode & (1 << 4)) {
+        int packed_alpha_add = (src_afunc == AFUNC_AONE && dest_afunc == AFUNC_AONE);
+
         /* Load dest alpha from aux buffer if alpha-buffer enabled */
         if (params->fbzMode & FBZ_ALPHA_ENABLE) {
             /* Load x coordinate for aux buffer (tiled or linear) */
@@ -4157,7 +4156,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_LDRH_REG_LSL1(6, 8, 4));
 
         /* Unpack src color from bytes to 16-bit lanes */
-        addlong(ARM64_UXTL_8H_8B(0, 0));
+        if (!packed_alpha_add)
+            addlong(ARM64_UXTL_8H_8B(0, 0));
 
         /* Decode dest RGB565 via rgb565[] lookup table.
          * rgb565 is an array of rgba8_t (4 bytes each).
@@ -4166,7 +4166,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         /* LDR w6, [x26, w6, UXTW #2] -- rgb565[pixel] */
         addlong(ARM64_LDR_W_UXTW2(6, 26, 6));
         addlong(ARM64_FMOV_S_W(4, 6));
-        addlong(ARM64_UXTL_8H_8B(4, 4));
+        if (!packed_alpha_add)
+            addlong(ARM64_UXTL_8H_8B(4, 4));
 
         if (src_afunc == AFUNC_A_COLOR || src_afunc == AFUNC_AOM_COLOR) {
             /* Save dest color in v6 for src_afunc A_COLOR/AOM_COLOR */
@@ -4183,7 +4184,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
          * ---- */
         switch (dest_afunc) {
             case AFUNC_AZERO:
-                addlong(ARM64_MOVI_V2D_ZERO(4));
+                /* v4 is not consumed when destination factor is zero. */
                 break;
             case AFUNC_ASRC_ALPHA:
                 /* v4 = dst * alookup[src_alpha] >> 8 */
@@ -4299,10 +4300,15 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         }
 
         /* Combine: v0 = src_blended + dst_blended */
-        addlong(ARM64_ADD_V4H(0, 0, 4));
+        if (packed_alpha_add) {
+            addlong(ARM64_UQADD_V8B(0, 0, 4));
+        } else if (dest_afunc != AFUNC_AZERO) {
+            addlong(ARM64_ADD_V4H(0, 0, 4));
+        }
 
         /* Pack to unsigned bytes with saturation */
-        addlong(ARM64_SQXTUN_8B_8H(0, 0));
+        if (!packed_alpha_add)
+            addlong(ARM64_SQXTUN_8B_8H(0, 0));
 
         /* Alpha blend for alpha channel:
          * dest_aafunc and src_aafunc compute the final alpha.
