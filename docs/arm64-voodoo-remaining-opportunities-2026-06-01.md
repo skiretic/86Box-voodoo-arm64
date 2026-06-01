@@ -680,3 +680,92 @@ Notes:
 - `code_max` improved versus both comparison points; `code_bytes` improved
   versus the previous stack but remains higher than original baseline because
   the compile mix differs.
+
+## Rank 9 and Rank 12 Validation
+
+Status: accepted as a clean, coverage-backed micro-peep. Aggregate JIT byte
+metrics from this user-driven validation window are not treated as directly
+comparable because the exact scene/compile mix was not identical.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Rank 9: fog table index/fraction extraction uses `UBFX` instead of
+  `LSR` + `AND`.
+- Rank 9: W-fog byte extraction uses `LDRB` from `STATE_w + 4` instead of
+  `LDR_W` plus `AND 0xff`.
+- Rank 12: alpha-test compares against the constant alpha reference byte from
+  `params->alphaMode` with `CMP_IMM` instead of loading the ref byte and using
+  `CMP_REG`.
+
+Build/sign:
+
+```text
+./scripts/build-and-sign.sh
+ninja: no work to do.
+build/src/86Box.app: replacing existing signature
+BUILD + SIGN OK
+```
+
+Validation launch:
+
+```sh
+./scripts/launch-voodoo-validate-vm.sh --limit 51200000 --log-limit 8 --metrics 1
+```
+
+Validation result:
+
+```text
+verify=51200000
+skipped=0
+mismatch_spans=0
+fb_mismatches=0
+aux_mismatches=0
+state_mismatches=0
+rejects=0
+```
+
+Target coverage:
+
+```text
+fogMode=00000059
+fog_en=1
+fog_src=18
+spans=4463449
+textureMode0=4ec76a07
+tmu0_rgb_lod_frac=4463449
+tmu0_alpha_lod_frac=4463449
+
+alphaMode=00005119
+alpha_test=1
+alpha_func=4
+spans=117066
+textureMode0=00000016
+```
+
+JIT metrics:
+
+```text
+mru_hits=1605775
+scan_hits=2083969
+misses=5461
+compiles=5461
+rejects=0
+code_bytes=6686820
+code_max=1720
+```
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
+
+Notes:
+
+- Static emitted-code effects are `-2` instructions for covered fog-table
+  blocks and `-1` instruction for covered alpha-test blocks.
+- W-fog was not separately proven hot in the top printed mode buckets, but the
+  byte load matches the interpreter expression `(w >> 32) & 0xff`.
+- The aggregate metrics are recorded for audit only. They should not be used as
+  a rejection signal for this slice without same-block attribution because this
+  51.2M-span guest-driven window did not prove an identical compile mix.

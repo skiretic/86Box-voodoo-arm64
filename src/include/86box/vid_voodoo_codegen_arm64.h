@@ -3937,11 +3937,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     /* w5 = w4 (copy for second use) */
                     addlong(ARM64_MOV_REG(5, 4));
                     /* w4 = (w_depth >> 10) & 0x3f -- fog table index */
-                    addlong(ARM64_LSR_IMM(4, 4, 10));
-                    addlong(ARM64_AND_MASK(4, 4, 6));    /* AND with 0x3F */
+                    addlong(ARM64_UBFX(4, 4, 10, 6));
                     /* w5 = (w_depth >> 2) & 0xff -- interpolation fraction */
-                    addlong(ARM64_LSR_IMM(5, 5, 2));
-                    addlong(ARM64_AND_MASK(5, 5, 8));    /* AND with 0xFF */
+                    addlong(ARM64_UBFX(5, 5, 2, 8));
 
                     /* Load dfog = fogTable[fog_idx].dfog (byte at offset +1) */
                     /* x6 = &params->fogTable */
@@ -3985,8 +3983,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                      * The interpreter masks BEFORE clamping, so values > 0xFF
                      * wrap to their low byte rather than saturating to 0xFF.
                      * The AND alone is sufficient (result always in [0,255]). */
-                    addlong(ARM64_LDR_W(4, 0, STATE_w + 4));  /* high word of w */
-                    addlong(ARM64_AND_MASK(4, 4, 8));          /* & 0xFF */
+                    addlong(ARM64_LDRB_IMM(4, 0, STATE_w + 4));  /* (w >> 32) & 0xFF */
                     break;
             }
 
@@ -4044,10 +4041,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * Skip pixel if test fails (branch to skip position).
      * ================================================================== */
     if ((params->alphaMode & 1) && (alpha_func != AFUNC_NEVER) && (alpha_func != AFUNC_ALWAYS)) {
-        /* Load alpha reference: LDRB w4, [x1, #PARAMS_alphaMode + 3] */
-        addlong(ARM64_LDRB_IMM(4, 1, PARAMS_alphaMode + 3));
-        /* CMP w12, w4 */
-        addlong(ARM64_CMP_REG(12, 4));
+        /* Compare against constant alpha ref byte from the codegen key. */
+        addlong(ARM64_CMP_IMM(12, params->alphaMode >> 24));
 
         /* Branch to skip if test fails. The condition is INVERTED:
          * we skip when the test is NOT met. */
