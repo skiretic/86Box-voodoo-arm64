@@ -3970,8 +3970,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 case FOG_Z:
                     /* fog_a = (z >> 20) & 0xff -- match interpreter */
                     addlong(ARM64_LDR_W(4, 0, STATE_z));
-                    addlong(ARM64_LSR_IMM(4, 4, 20));
-                    addlong(ARM64_AND_MASK(4, 4, 8));
+                    addlong(ARM64_UBFX(4, 4, 20, 8));
                     break;
 
                 case FOG_ALPHA:

@@ -68,7 +68,7 @@ Status terms:
 | 6 | closed | Implemented and validated: perspective LOD shift uses BSR value directly. |
 | 7 | closed | Rank 7a, 7b, 7c, and 7d landed; remaining source/destination alpha prep consumers audited against interpreter semantics and covered by probe validation. |
 | 8 | closed | Implemented and validated: `src_afunc=4 dest_afunc=4` packed unsigned saturating add. |
-| 9 | partial | Fog table `UBFX` and W-fog byte load landed. Do not call full fog cleanup closed without auditing remaining fog masks/shifts. |
+| 9 | closed | Fog table `UBFX`, W-fog byte load, and FOG_Z `UBFX` implemented and validated; FOG_ALPHA preserved because it requires signed shift plus clamp. |
 | 10 | deferred | Requires stronger perf reason for `x24`/dither true-fallback work. |
 | 11 | closed | Implemented and validated: `v13` / color-before-fog gating and `d13` save/restore narrowing. |
 | 12 | closed | Implemented and validated: alpha-test immediate compare from codegen key. |
@@ -77,9 +77,7 @@ Status terms:
 
 Next code work should not start from the raw rank table. Start from this queue:
 
-1. Rank 9 follow-up audit-only: remaining fog mask/shift cleanup, if hot
-   coverage still supports it.
-2. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
+1. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
 
 Do not mark any future rank closed unless all sub-slices in the candidate are
 implemented, rejected with evidence, or explicitly deferred in this ledger.
@@ -815,6 +813,72 @@ Notes:
 - The aggregate metrics are recorded for audit only. They should not be used as
   a rejection signal for this slice without same-block attribution because this
   51.2M-span guest-driven window did not prove an identical compile mix.
+
+## Rank 9b FOG_Z UBFX
+
+Status: accepted and closed. Rank 9 is closed.
+
+Audit result:
+
+- Prior Rank 9 work already replaced fog-table index/fraction masks with
+  `UBFX` and W-fog byte extraction with `LDRB`.
+- Remaining safe mask/shift cleanup is only `FOG_Z`.
+- Interpreter semantics are `fog_a = (z >> 20) & 0xff`.
+- `FOG_ALPHA` remains signed shift plus clamp, so there is no applicable
+  `UBFX` cleanup there; the existing code is preserved unchanged.
+- Fog-table post-multiply `LSR #10` remains live and matches
+  `(dfog * frac) >> 10`.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- In `case FOG_Z`, replaced `LSR #20` plus `AND 0xff` with
+  `UBFX w4, w4, #20, #8`.
+
+Validation:
+
+```text
+./scripts/build-and-sign.sh
+build/src/86Box.app: replacing existing signature
+BUILD + SIGN OK
+```
+
+```text
+Voodoo validate (type=4 verify=1): spans=8311987 jit=8311987 interp=0 verify=8311987 skipped=0 mismatch_spans=0 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=0 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=84348 scan_hits=124404 misses=22 compiles=22 rejects=0 code_bytes=25880 code_max=1764
+```
+
+Target coverage:
+
+```text
+fogMode=000000d1
+fog_en=1
+fog_src=10
+spans=383280
+fb=0
+aux=0
+state=0
+```
+
+Expected static effect:
+
+```text
+-1 instruction per covered FOG_Z block
+```
+
+Closure evidence:
+
+- Fog-table index/fraction: implemented and validated in the Rank 9/12 slice.
+- W-fog byte extraction: implemented in the Rank 9/12 slice; no broader mask
+  cleanup remains.
+- FOG_Z: implemented and validated here with `fog_src=10`.
+- FOG_ALPHA: audited and preserved unchanged because interpreter semantics
+  require signed shift plus clamp, not unsigned extraction.
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
 
 ## Rank 7 Alpha-Out Guard and Consolidated Probe
 
