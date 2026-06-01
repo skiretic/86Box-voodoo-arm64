@@ -243,8 +243,7 @@ voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, 
                                ((pred.fetch_tmu0 && (params->textureMode[0] & 6)) ||
                                 (pred.fetch_tmu1 && (params->textureMode[1] & 6))));
 
-        dither_base_pinned = !need_x22 || !need_x23 || !need_x25 ||
-                             !need_x19 || !need_x21 || !need_x20;
+        dither_base_pinned = 1;
         dither_ptr_true_fallback = !dither_base_pinned;
         if (dither_ptr_true_fallback) {
             int shape = (need_x19 ? 1 : 0) |

@@ -91,7 +91,7 @@
  *             (callee-saved, pinned)
  *   x23     = i_00_ff_w pointer, or alpha+dither base if otherwise unused
  *             (callee-saved, pinned)
- *   x24     = real_y               (callee-saved copy)
+ *   x24     = alpha+dither base if every earlier dither base candidate is live
  *   x25     = bilinear_lookup ptr, or alpha+dither base if otherwise unused
  *             (callee-saved, pinned)
  *   x26     = rgb565 table pointer, or dither_rb base when alpha blend is off
@@ -2319,6 +2319,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             dither_base_reg = 21;
         else if (!need_x20)
             dither_base_reg = 20;
+        else
+            dither_base_reg = 24;
     }
     if (dither_base_reg == 19)
         need_x19 = 1;
@@ -2364,7 +2366,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      *        or alpha+dither base when the mask pointer is unused.
      *   x23: i_00_ff_w pointer for trilinear alpha reverse-blend masks,
      *        or alpha+dither base when the mask pointer is unused.
-     *   x24: real_y copy, written by the prologue.
+     *   x24: alpha+dither base when dither needs a pinned base and every
+     *        earlier GPR candidate is live.
      *   x25: bilinear_lookup pointer for bilinear texture fetch, or
      *        alpha+dither base when the bilinear pointer is unused.
      *   x26: rgb565 table pointer for alpha blend, or dither_rb base.
@@ -2473,12 +2476,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ================================================================
      *
      * AAPCS64: x0=state, x1=params already in place.
-     * x2=x (pixel X), x3=real_y
-     * Save real_y into callee-saved register for persistence across loop.
+     * x2=x (pixel X), x3=real_y. x3 is not used as a GPR scratch by the
+     * generated loop, so real_y can remain in the incoming argument register.
      */
-
-    /* MOV x24, x3 -- save real_y */
-    addlong(ARM64_MOV_REG_X(24, 3));
 
     /* ================================================================
      * Load pointer constants into callee-saved GPRs
@@ -2529,6 +2529,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             EMIT_MOV_IMM64(23, dither_base_reg == 23 ? dither_base_ptr : (const void *) &i_00_ff_w);
         if (need_x25)
             EMIT_MOV_IMM64(25, dither_base_reg == 25 ? dither_base_ptr : (const void *) &bilinear_lookup);
+        if (dither_base_reg == 24)
+            EMIT_MOV_IMM64(24, dither_base_ptr);
         if (need_x26)
             EMIT_MOV_IMM64(26, dither_base_in_x26 ? dither_base_ptr : (const void *) &rgb565);
 
@@ -2670,8 +2672,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
              * TST state->stipple, w6
              * BEQ -> skip pixel
              */
-            /* AND w4, w24, #3  (real_y & 3) */
-            addlong(ARM64_AND_MASK(4, 24, 2));
+            /* AND w4, w3, #3  (real_y & 3) */
+            addlong(ARM64_AND_MASK(4, 3, 2));
             /* LSL w4, w4, #3 */
             addlong(ARM64_LSL_IMM(4, 4, 3));
             /* MVN w5, w28 -- NOT(cached STATE_x) directly */
@@ -4448,8 +4450,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_MOVK_X(7, _dh3, 3));
             }
 
-            /* w5 = real_y (saved in x24 by prologue) */
-            addlong(ARM64_MOV_REG(5, 24));
+            /* w5 = real_y */
+            addlong(ARM64_MOV_REG(5, 3));
 
             /* Extract R, G, B bytes from w4 (packed BGRA: B=byte0, G=byte1, R=byte2, A=byte3) */
             /* w6 = G = (w4 >> 8) & 0xFF */

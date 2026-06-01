@@ -69,7 +69,7 @@ Status terms:
 | 7 | closed | Rank 7a, 7b, 7c, and 7d landed; remaining source/destination alpha prep consumers audited against interpreter semantics and covered by probe validation. |
 | 8 | closed | Implemented and validated: `src_afunc=4 dest_afunc=4` packed unsigned saturating add. |
 | 9 | closed | Fog table `UBFX`, W-fog byte load, and FOG_Z `UBFX` implemented and validated; FOG_ALPHA preserved because it requires signed shift plus clamp. |
-| 10 | deferred | Requires stronger perf reason for `x24`/dither true-fallback work. |
+| 10 | closed | Implemented and validated: `x24` is now the final dither-base candidate after `x19`/`x20`/`x21`/`x22`/`x23`/`x25`; `real_y` stays in incoming `x3`; N5 true fallback eliminated. |
 | 11 | closed | Implemented and validated: `v13` / color-before-fog gating and `d13` save/restore narrowing. |
 | 12 | closed | Implemented and validated: alpha-test immediate compare from codegen key. |
 
@@ -77,7 +77,8 @@ Status terms:
 
 Next code work should not start from the raw rank table. Start from this queue:
 
-1. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
+1. No active code ranks. Ranks 1-12 are closed except previously deferred work
+   only if new proof reopens it.
 
 Do not mark any future rank closed unless all sub-slices in the candidate are
 implemented, rejected with evidence, or explicitly deferred in this ledger.
@@ -95,7 +96,7 @@ implemented, rejected with evidence, or explicitly deferred in this ledger.
 | 7 | Alpha blend | Gate src/dst alpha preparation and alpha-out scalar work by actual consumers; direct alpha-out forms for one/both/neither `AONE`. | Common pairs save at least `-2..-3` instr; aux-alpha no-write can save more. | Covered by consolidated alpha probe after Rank 7d source-alpha audit. | Low after sub-slice validation. | Closed. |
 | 8 | Alpha blend | Specialize `src_afunc=4 dest_afunc=4`: packed saturating byte add instead of unpack, 16-bit add, saturating pack. | `-3` instr / `-12` bytes on known `4/4`. | High for `src_afunc=4 dest_afunc=4`. | Medium-low. Alpha byte becomes packed saturated value; scalar `w12` must remain truth for alpha write. | Candidate after rank 7 audit, or as its own small slice. |
 | 9 | Fog | Replace fog mask/shift sequences with `UBFX`; W-fog byte can use `LDRB` from `STATE_w+4`. | Table fog `-3` instr; Z/W fog `-1` instr. | Medium: need existing fog bucket coverage in current workload. | Low. Matches interpreter masks. | Only if normal logs prove hot fog coverage. |
-| 10 | Prologue/register pressure | Free `x24` from real_y pin, keep real_y in `x3`, then use `x24` as final dither base candidate for remaining shape63 fallback. | Dynamic win may be meaningful: shape63 true fallback can become `MOV x7,x24` instead of per-pixel address materialization; static `code_bytes` may be neutral or slightly up. | Medium: old true fallback was hot; current shape63 needs confirmation. | Medium. Must audit every `x3` emitter and future scratch assumptions. | Perf-motivated, not code-size-first. Do only after perf plan or if dither fallback dominates. |
+| 10 | Prologue/register pressure | Implemented: freed `x24` from real_y pin, kept `real_y` in `x3`, and used `x24` as the final dither base candidate for remaining shape63 fallback; N5 metrics mirror now treats all dither fallback-candidate spans as pinned. | Dynamic win converts shape63 dither true fallback from per-pixel address materialization to `MOV x7,x24`; static `code_bytes` may be neutral or slightly up because the prologue now loads one more pointer but drops `MOV x24,x3`. | High after pre-patch run showed shape63 true fallback at 686098 spans / 12749101 pixels and post-patch run eliminated true fallback with 74040554 fallback-candidate spans covered. | Low after VM validation proved no `x3` scratch collision and N5 showed true fallback eliminated. Source audit found generated GPR `x3` unused after entry except real_y consumers; vector `v3` uses are separate. | Closed. |
 | 11 | Prologue/fog-alpha | Gate `v13 = color-before-fog` and save only `d12` when `dest_afunc != AFUNC_ACOLORBEFOREFOG`. | `-1` loop instr and less save/restore memory for most non-ACOLORBEFOREFOG alpha/fog blocks. | Proven with consolidated probe, including `dest_afunc=15 fog_en=1`. | Low. Interpreter uses `colbfog_*` only in `dest_afunc == AFUNC_ACOLORBEFOREFOG`; no `src_afunc` consumes color-before-fog. | Closed. |
 | 12 | Alpha test | Compare against immediate alpha reference instead of `LDRB` from `params->alphaMode+3`. | `-1` instr per active alpha test block. | Medium: needs active alpha-test buckets. | Low. `alphaMode` is codegen key. | Tiny; batch with other alpha work only. |
 
@@ -110,7 +111,8 @@ implemented, rejected with evidence, or explicitly deferred in this ledger.
 - No redo of B9 rare same-factor alpha table-pair work.
 - No broad frame shrink or slot repack; risk is not worth current wins.
 - No dropping `MOV x29, SP`; debug/unwind loss is not worth `-4` bytes.
-- No more dither candidate register shuffling without freeing a real register.
+- No more dither candidate register shuffling after Rank 10 unless new proof shows
+  another real register can be freed.
 - No TMU combine rewrites copied from x86-64.
 - No `ASR` -> `LSR` changes in TMU combine math.
 - No claim from clean counters alone; target coverage and `code_bytes` /
@@ -1304,6 +1306,71 @@ Closure evidence:
   `AONE` forms.
 - Rank 7d: source alpha prep guard, validated for no-source-alpha consumer and
   source-alpha RGB consumers including `AFUNC_ASATURATE`.
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
+
+## Rank 10 Dither True-Fallback Elimination
+
+Status: accepted and closed.
+
+Audit result:
+
+- The remaining dither pointer true fallback came from the all-candidates-live
+  shape: `need_x19=1 need_x20=1 need_x21=1 need_x22=1 need_x23=1 need_x25=1`.
+- `x24` no longer needs to pin `real_y`; generated scalar GPR `x3` is not used
+  as scratch after entry, and existing `v3` vector uses are separate.
+- `real_y` consumers can read incoming `w3` directly for stipple and dither.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Removed the prologue `MOV x24, x3`.
+- Kept stipple and dither `real_y` consumers on `w3`.
+- Added `x24` as the final dither-base candidate after
+  `x22`/`x23`/`x25`/`x19`/`x21`/`x20`.
+- Load the dither base into `x24` only when that final candidate is selected.
+
+Implemented in `src/video/vid_voodoo_render.c`:
+
+- Updated N5 dither metrics so fallback-candidate spans are counted as pinned
+  after the `x24` catch-all; true fallback is no longer expected.
+
+Validation:
+
+```text
+git diff --check
+./scripts/build-and-sign.sh
+BUILD + SIGN OK
+```
+
+Pre-patch target coverage:
+
+```text
+Voodoo ARM64 JIT N5 metrics (type=4): ... dither_ptr_true_fallback_spans=686098 dither_ptr_true_fallback_pixels=12749101 ...
+Voodoo ARM64 JIT true fallback shape[63]: spans=686098 pixels=12749101 need_x19=1 need_x20=1 need_x21=1 need_x22=1 need_x23=1 need_x25=1
+```
+
+Post-patch validation:
+
+```text
+Voodoo validate (type=4 verify=1): spans=169147313 jit=169147313 interp=0 verify=169147313 skipped=0 mismatch_spans=0 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=0 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=9905698 scan_hits=6290947 misses=7583 compiles=7583 rejects=0 code_bytes=9038728 code_max=1696
+Voodoo ARM64 JIT N5 metrics (type=4): spans=169147313 pixels=3229108647 dither_spans=169147313 dither_pixels=3229108647 dither2x2_spans=169147313 dither2x2_pixels=3229108647 rgb_wmask_spans=169147313 rgb_wmask_pixels=3229108647 alpha_blend_spans=74040554 alpha_blend_pixels=1878776736 dither_base_x26_spans=95106759 dither_base_x26_pixels=1350331911 dither_ptr_fallback_spans=74040554 dither_ptr_fallback_pixels=1878776736 dither_base_pinned_spans=74040554 dither_base_pinned_pixels=1878776736 dither_ptr_true_fallback_spans=0 dither_ptr_true_fallback_pixels=0
+```
+
+Closure evidence:
+
+- Correctness: post-patch verify run had `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`, and
+  `rejects=0`.
+- Coverage: the same workload kept the fallback-candidate path hot with
+  `dither_ptr_fallback_spans=74040554` and
+  `dither_ptr_fallback_pixels=1878776736`.
+- Target elimination: `dither_ptr_true_fallback_spans=0` and
+  `dither_ptr_true_fallback_pixels=0`.
 
 Known guest noise appeared and was ignored by itself:
 
