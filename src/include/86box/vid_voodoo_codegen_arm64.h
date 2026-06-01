@@ -1522,9 +1522,8 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
     do {                                                                                                                \
         addlong(ARM64_MOVZ_W(tex_shift_reg, 8));                                                                        \
         ARM64_EMIT_TEX_PARAM_LOD_LOAD(tex_lod_reg, base_reg, lod_reg, param_offset);                                    \
-        addlong(ARM64_MOVZ_W(texel_bias_reg, 8));                                                                       \
+        addlong(ARM64_LSL_REG(texel_bias_reg, tex_shift_reg, tex_lod_reg));                                             \
         addlong(ARM64_SUB_REG(tex_shift_reg, tex_shift_reg, tex_lod_reg));                                              \
-        addlong(ARM64_LSL_REG(texel_bias_reg, texel_bias_reg, tex_lod_reg));                                            \
     } while (0)
 
 #define ARM64_EMIT_TEX_POINT_SHIFT_SETUP(tex_shift_reg, tex_lod_reg, base_reg, lod_reg, param_offset) \
@@ -1582,6 +1581,13 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
         addlong(ARM64_LSL_IMM(rgb_offset_reg, rgb_offset_reg, 4));                              \
     } while (0)
 
+/* Both reverse flags true: RGB and alpha use lod&1 directly as the reverse-mask index. */
+#define ARM64_EMIT_TMU_TRILINEAR_REVERSE_BLEND_SETUP_SHARED_INDEX(lod_reg, index_reg) \
+    do {                                                                              \
+        addlong(ARM64_LDR_W(lod_reg, 0, STATE_lod));                                  \
+        addlong(ARM64_AND_MASK(index_reg, lod_reg, 1));                                \
+    } while (0)
+
 #define ARM64_EMIT_TMU_COMBINE_RGB_MUL_SHIFT(dst_v, lhs_v, factor_v, scratch_v) \
     do {                                                                        \
         addlong(ARM64_SMULL_4S_4H((scratch_v), (lhs_v), (factor_v)));           \
@@ -1597,6 +1603,12 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
         } else if (!(reverse_blend)) {                                                          \
             addlong(ARM64_EOR_V(factor_v, factor_v, 9));                                        \
         }                                                                                       \
+    } while (0)
+
+#define ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND_INDEX(factor_v, mask_index_reg) \
+    do {                                                                         \
+        addlong(ARM64_LDR_Q_REG_LSL4(16, 22, mask_index_reg));                   \
+        addlong(ARM64_EOR_V(factor_v, factor_v, 16));                            \
     } while (0)
 
 #define ARM64_EMIT_TMU_COMBINE_ALPHA_REVERSE_BLEND(factor_reg, mask_index_reg, scratch_reg, reverse_blend, tmu) \
@@ -2276,6 +2288,14 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                             (fetch_tmu1 && (params->textureMode[1] & 6))));
     int need_x26         = alpha_blend || dither_base_in_x26;
     int color_factor     = !(cc_mselect == 0 && cc_reverse_blend == 0);
+    int tmu0_lod_frac_known_bucket =
+        dual_tmu_combine &&
+        (params->textureMode[0] == 0x4ec76a07 || params->textureMode[0] == 0x4ec76c07) &&
+        (params->textureMode[0] & TEXTUREMODE_TRILINEAR) &&
+        !tc_zero_other && tc_sub_clocal && tc_mselect == TC_MSELECT_LOD_FRAC &&
+        tc_reverse_blend && tc_add_clocal && !tc_add_alocal && !tc_invert_output &&
+        !tca_zero_other && tca_sub_clocal && tca_mselect == TCA_MSELECT_LOD_FRAC &&
+        tca_reverse_blend && tca_add_clocal && !tca_add_alocal && !tca_invert_output;
     int need_v8          = dual_tmu_combine || color_factor || alpha_blend;
     int need_v9          = (dual_tmu_combine &&
                             (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) == 0 &&
@@ -3178,13 +3198,20 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
             /* FMOV s0, w4 -- TMU0 result in v0 */
             addlong(ARM64_FMOV_S_W(0, 4));
-            /* Also save raw TMU0 result in v7 for later tca processing */
-            addlong(ARM64_FMOV_S_W(7, 4));
+            if (!tmu0_lod_frac_known_bucket) {
+                /* Also save raw TMU0 result in v7 for later tca processing */
+                addlong(ARM64_FMOV_S_W(7, 4));
+            }
 
             /* ---- TMU0 trilinear setup ---- */
             if (params->textureMode[0] & TEXTUREMODE_TRILINEAR) {
-                ARM64_EMIT_TMU_TRILINEAR_REVERSE_BLEND_SETUP(4, 5, 6, tc_reverse_blend, tca_reverse_blend);
-                /* w5 = tc_reverse_blend (scaled), w6 = tca_reverse_blend */
+                if (tmu0_lod_frac_known_bucket) {
+                    ARM64_EMIT_TMU_TRILINEAR_REVERSE_BLEND_SETUP_SHARED_INDEX(4, 6);
+                    /* w6 = shared RGB/alpha reverse-blend index */
+                } else {
+                    ARM64_EMIT_TMU_TRILINEAR_REVERSE_BLEND_SETUP(4, 5, 6, tc_reverse_blend, tca_reverse_blend);
+                    /* w5 = tc_reverse_blend (scaled), w6 = tca_reverse_blend */
+                }
             }
 
             /* Unpack TMU0: UXTL v0.8H, v0.8B */
@@ -3223,21 +3250,34 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_DUP_V4H_GPR(4, 4));
                     break;
                 case TC_MSELECT_LOD_FRAC:
-                    ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(4, 0);
-                    addlong(ARM64_DUP_V4H_GPR(4, 4));
+                    if (tmu0_lod_frac_known_bucket) {
+                        ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(5, 0);
+                        addlong(ARM64_DUP_V4H_GPR(4, 5));
+                    } else {
+                        ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(4, 0);
+                        addlong(ARM64_DUP_V4H_GPR(4, 4));
+                    }
                     break;
             }
 
             /* Apply reverse blend */
-            ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND(4, 5, tc_reverse_blend, 0);
+            if (tmu0_lod_frac_known_bucket) {
+                ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND_INDEX(4, 6);
+            } else {
+                ARM64_EMIT_TMU_COMBINE_RGB_REVERSE_BLEND(4, 5, tc_reverse_blend, 0);
+            }
             /* ADD v4.4H, v4.4H, v8.4H */
             addlong(ARM64_ADD_V4H(4, 4, 8));
 
-            /* Extract TMU0 alpha from v7 into w13 for reuse.
-             * v7 holds raw TMU0 packed BGRA; alpha is byte 3 (bits [31:24]).
-             * Must happen before tca_sub_clocal reads w13 below. */
-            addlong(ARM64_FMOV_W_S(13, 7));
-            addlong(ARM64_LSR_IMM(13, 13, 24));
+            if (tmu0_lod_frac_known_bucket) {
+                addlong(ARM64_UMOV_W_H(13, 0, 3));  /* w13 = TMU0 alpha */
+            } else {
+                /* Extract TMU0 alpha from v7 into w13 for reuse.
+                 * v7 holds raw TMU0 packed BGRA; alpha is byte 3 (bits [31:24]).
+                 * Must happen before tca_sub_clocal reads w13 below. */
+                addlong(ARM64_FMOV_W_S(13, 7));
+                addlong(ARM64_LSR_IMM(13, 13, 24));
+            }
 
             ARM64_EMIT_TMU_COMBINE_RGB_MUL_SHIFT(1, 1, 4, 16);
 
@@ -3259,9 +3299,11 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_EOR_V(1, 1, 9));  /* XOR with 0xFF */
             }
 
-            /* Narrow v0, v3, v1 from 8H to 8B in-place for alpha processing */
-            addlong(ARM64_SQXTUN_8B_8H(0, 0));   /* v0 = packed TMU0 */
-            addlong(ARM64_SQXTUN_8B_8H(3, 3));   /* v3 = packed TMU1 */
+            /* Narrow TMU inputs from 8H to 8B only when alpha processing needs packed sources. */
+            if (!tmu0_lod_frac_known_bucket) {
+                addlong(ARM64_SQXTUN_8B_8H(0, 0));   /* v0 = packed TMU0 */
+                addlong(ARM64_SQXTUN_8B_8H(3, 3));   /* v3 = packed TMU1 */
+            }
             addlong(ARM64_SQXTUN_8B_8H(1, 1));   /* v1 = packed combined RGB */
 
             /* ---- TCA (alpha combine for TMU0) ----
@@ -3271,8 +3313,12 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 addlong(ARM64_MOV_ZERO(4));
             } else {
                 /* Other alpha = TMU1 alpha */
-                addlong(ARM64_FMOV_W_S(4, 3));
-                addlong(ARM64_LSR_IMM(4, 4, 24));
+                if (tmu0_lod_frac_known_bucket) {
+                    addlong(ARM64_UMOV_W_H(4, 3, 3));
+                } else {
+                    addlong(ARM64_FMOV_W_S(4, 3));
+                    addlong(ARM64_LSR_IMM(4, 4, 24));
+                }
             }
 
             if (tca_sub_clocal) {
@@ -3299,7 +3345,9 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     ARM64_EMIT_TMU_COMBINE_DETAIL_FACTOR(5, 10, 11, 0);
                     break;
                 case TCA_MSELECT_LOD_FRAC:
-                    ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(5, 0);
+                    if (!tmu0_lod_frac_known_bucket) {
+                        ARM64_EMIT_TMU_COMBINE_LOD_FRAC_FACTOR(5, 0);
+                    }
                     break;
             }
 
