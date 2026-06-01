@@ -4186,9 +4186,13 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 break;
             case AFUNC_ASRC_ALPHA:
                 /* v0 = src * alookup[src_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
-                ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
+                if (dest_afunc == AFUNC_ASRC_ALPHA) {
+                    ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 5, 17);
+                } else {
+                    addlong(ARM64_ADD_REG_X_LSL(7, 20, 12, 3));
+                    addlong(ARM64_LDR_D(16, 7, 0));
+                    ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
+                }
                 break;
             case AFUNC_A_COLOR:
                 /* v0 = src * dst_color (v6) >> 8 */
@@ -4196,8 +4200,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 break;
             case AFUNC_ADST_ALPHA:
                 /* v0 = src * alookup[dst_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                if (dest_afunc != AFUNC_ADST_ALPHA) {
+                    addlong(ARM64_ADD_REG_X_LSL(7, 20, 5, 3));
+                    addlong(ARM64_LDR_D(16, 7, 0));
+                }
                 ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_AONE:
@@ -4205,8 +4211,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 break;
             case AFUNC_AOMSRC_ALPHA:
                 /* v0 = src * aminuslookup[src_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                if (dest_afunc != AFUNC_AOMSRC_ALPHA) {
+                    addlong(ARM64_ADD_REG_X_LSL(7, 21, 12, 3));
+                    addlong(ARM64_LDR_D(16, 7, 0));
+                }
                 ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_AOM_COLOR:
@@ -4217,8 +4225,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                 break;
             case AFUNC_AOMDST_ALPHA:
                 /* v0 = src * aminuslookup[dst_alpha] >> 8 */
-                addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
-                addlong(ARM64_LDR_D(16, 7, 0));
+                if (dest_afunc != AFUNC_AOMDST_ALPHA) {
+                    addlong(ARM64_ADD_REG_X_LSL(7, 21, 5, 3));
+                    addlong(ARM64_LDR_D(16, 7, 0));
+                }
                 ARM64_EMIT_ALPHA_BLEND_MUL_ROUND_V4H(0, 16, 17);
                 break;
             case AFUNC_ASATURATE: {

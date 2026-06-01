@@ -1429,3 +1429,40 @@ state_mismatches=0
   reduction with clean framebuffer, aux, state, and reject gates.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-06-01: B9 alpha blend table-factor reload reuse
+
+- Optimized ARM64 alpha blend factor setup in `voodoo_generate()` in
+  `src/include/86box/vid_voodoo_codegen_arm64.h`.
+- Scope was limited to table-backed factor pairs where
+  `src_afunc == dest_afunc`: `1/1` (`ASRC_ALPHA`), `3/3` (`ADST_ALPHA`),
+  `5/5` (`AOMSRC_ALPHA`), and `7/7` (`AOMDST_ALPHA`).
+- The dest factor path already loads the matching alpha table factor for these
+  pairs. The src factor path now reuses that loaded factor instead of emitting
+  a second table address calculation and `LDR_D`.
+- Interpreter truth and blend arithmetic were unchanged. The emitted multiply
+  and round sequence still uses the same factor value; only redundant reloads
+  were removed for same-factor table-backed pairs.
+- No helper-backed dynarec path was added. No x86 or x86-64 codegen files
+  changed.
+- Normal short validation before the probe passed but did not hit the target
+  pairs:
+  `verify=10240000`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=59428`, `code_max=1796`.
+- A targeted guest probe was added under `tools/voodoo_alpha_probe/` and run
+  from `ALPHAPRB.EXE`. It calls
+  `grAlphaBlendFunction(factor, factor, GR_BLEND_ONE, GR_BLEND_ZERO)` for
+  factors `1`, `3`, `5`, and `7`.
+- Probe VM validation passed:
+  `verify=2946067`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=9108`, `code_max=1288`.
+- Probe coverage hit all target buckets cleanly:
+  `src_afunc=1 dest_afunc=1`, `src_afunc=3 dest_afunc=3`,
+  `src_afunc=5 dest_afunc=5`, and `src_afunc=7 dest_afunc=7`.
+- Result: B9 is accepted. It is an ARM64-local generated-code reduction with
+  targeted same-factor alpha coverage and clean framebuffer, aux, state, and
+  reject gates.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
