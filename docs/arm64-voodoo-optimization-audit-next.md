@@ -1394,3 +1394,38 @@ state_mismatches=0
   reduction with clean framebuffer, aux, state, and reject gates.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-06-01: B8 texture-shift setup cleanup
+
+- Optimized ARM64 texture-fetch shift setup shared by bilinear and point paths
+  in `src/include/86box/vid_voodoo_codegen_arm64.h`.
+- Bilinear setup now forms `texel_bias` as `8 << tex_lod` directly instead of
+  `(1 << tex_lod) << 3`, removing one emitted shift while preserving the exact
+  bias used before bilinear sampling.
+- Point setup now keeps original LOD in `w6` for `tex_w_mask`/`tex_h_mask`
+  indexing instead of copying it to `w11`; `w16` still receives
+  `tex_lod + 4` for the point-sample coordinate shift.
+- Interpreter-visible `STATE_tex_s`, `STATE_tex_t`, `STATE_lod`, and
+  `STATE_lod_frac_n(tmu)` behavior was unchanged. Point and bilinear sample
+  addresses, clamp/wrap masks, bilinear weights, and edge behavior were
+  unchanged.
+- No x86 or x86-64 codegen files changed.
+- Worker validation passed: `git diff --check` and `./scripts/build-and-sign.sh`
+  both succeeded; build/sign ended with `BUILD + SIGN OK`.
+- Short VM validation passed:
+  `verify=10240000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=41116`, `code_max=1792`.
+- Compared with the B7 accepted short-run result `code_bytes=41292`,
+  `code_max=1800`, B8 reduced `code_bytes` by 176 and `code_max` by 8.
+- Extended near-unbounded-cap VM validation passed:
+  `verify=536878518`, `spans=536878518`, `skipped=0`, `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=10774544`, `code_max=1796`.
+- Long-run bilinear coverage was substantial:
+  `tmu0_bilinear_pixels=4858845066` and
+  `tmu1_bilinear_pixels=6931172537`.
+- Result: B8 is accepted. It is a metric-backed ARM64-local generated-code
+  reduction with clean framebuffer, aux, state, and reject gates.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

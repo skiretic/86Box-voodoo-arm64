@@ -1519,18 +1519,16 @@ static uint32_t          i_00_ff_w[2] = { 0, 0xff };
     do {                                                                                                                \
         addlong(ARM64_MOVZ_W(tex_shift_reg, 8));                                                                        \
         ARM64_EMIT_TEX_PARAM_LOD_LOAD(tex_lod_reg, base_reg, lod_reg, param_offset);                                    \
-        addlong(ARM64_MOVZ_W(texel_bias_reg, 1));                                                                       \
+        addlong(ARM64_MOVZ_W(texel_bias_reg, 8));                                                                       \
         addlong(ARM64_SUB_REG(tex_shift_reg, tex_shift_reg, tex_lod_reg));                                              \
         addlong(ARM64_LSL_REG(texel_bias_reg, texel_bias_reg, tex_lod_reg));                                            \
-        addlong(ARM64_LSL_IMM(texel_bias_reg, texel_bias_reg, 3));                                                      \
     } while (0)
 
-#define ARM64_EMIT_TEX_POINT_SHIFT_SETUP(tex_shift_reg, tex_lod_reg, saved_lod_reg, base_reg, lod_reg, param_offset) \
+#define ARM64_EMIT_TEX_POINT_SHIFT_SETUP(tex_shift_reg, tex_lod_reg, base_reg, lod_reg, param_offset) \
     do {                                                                                                             \
         addlong(ARM64_MOVZ_W(tex_shift_reg, 8));                                                                     \
         ARM64_EMIT_TEX_PARAM_LOD_LOAD(tex_lod_reg, base_reg, lod_reg, param_offset);                                 \
         addlong(ARM64_SUB_REG(tex_shift_reg, tex_shift_reg, tex_lod_reg));                                           \
-        addlong(ARM64_MOV_REG(saved_lod_reg, lod_reg));                                                              \
         addlong(ARM64_ADD_IMM(tex_lod_reg, tex_lod_reg, 4));                                                         \
     } while (0)
 
@@ -2125,13 +2123,11 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* Interpreter uses tex_lod[tmu][lod] for coordinate scaling,
              * while state->lod still selects the mip pointer and masks. */
-            /* Save original LOD in w11.
-             * The clamp/wrap sections need the original LOD for array indexing
-             * into tex_w_mask/tex_h_mask. */
+            /* Keep original LOD in w6 for array indexing into tex_w_mask/tex_h_mask. */
             /* ADD w16, w16, #4  -- point-sample uses a larger shift than bilinear:
              * bilinear shifts by 'lod' (integer texel step), but point-sample
              * needs to strip the 4-bit sub-texel fraction too, hence lod+4. */
-            ARM64_EMIT_TEX_POINT_SHIFT_SETUP(7, 16, 11, 14, 6, PARAMS_tex_lod_n(tmu));
+            ARM64_EMIT_TEX_POINT_SHIFT_SETUP(7, 16, 14, 6, PARAMS_tex_lod_n(tmu));
 
             /* Mirror S */
             if (params->tLOD[tmu] & LOD_TMIRROR_S) {
@@ -2155,26 +2151,26 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             if (state->clamp_s[tmu]) {
                 /* Clamp S to [0, tex_w_mask[tmu][lod]]
                  * x86-64 uses -0x10 hack with ECX*4. We compute cleanly.
-                 * w11 = original LOD (saved before ADD w6, w6, #4)
+                 * w6 = original LOD.
                  */
-                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_w_mask_n(tmu));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_w_mask_n(tmu));
 
                 /* If S < 0, S = 0 */
                 ARM64_EMIT_TEX_COORD_CLAMP(4, 15, COND_CS);
             } else {
                 /* AND S with tex_w_mask
-                 * w11 = original LOD
+                 * w6 = original LOD.
                  */
-                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_w_mask_n(tmu));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_w_mask_n(tmu));
                 ARM64_EMIT_TEX_COORD_WRAP(4, 15);
             }
 
             /* Clamp or wrap T */
             if (state->clamp_t[tmu]) {
-                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_h_mask_n(tmu));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_h_mask_n(tmu));
                 ARM64_EMIT_TEX_COORD_CLAMP(5, 15, COND_CS);
             } else {
-                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 11, PARAMS_tex_h_mask_n(tmu));
+                ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 14, 6, PARAMS_tex_h_mask_n(tmu));
                 ARM64_EMIT_TEX_COORD_WRAP(5, 15);
             }
 
