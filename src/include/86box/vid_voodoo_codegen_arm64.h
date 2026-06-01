@@ -4142,6 +4142,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
                     addlong(ARM64_MOV_REG(5, 28));  /* cached STATE_x */
                 /* LDRH w5, [x9, x5, LSL #1] -- load 16-bit aux value */
                 addlong(ARM64_LDRH_REG_LSL1(5, 9, 5));
+                /* Interpreter stores aux in uint8_t dest_a before alpha blend. */
+                addlong(ARM64_UXTB(5, 5));
             } else {
                 /* No alpha buffer: dest_alpha = 0xFF */
                 addlong(ARM64_MOVZ_W(5, 0xFF));

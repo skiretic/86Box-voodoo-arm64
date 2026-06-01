@@ -66,7 +66,7 @@ Status terms:
 | 4 | closed | Implemented as scalar LOD-frac reuse stacked with rank 3. |
 | 5 | closed | Implemented and validated: `dest_afunc == AFUNC_AZERO` skips dead destination add. |
 | 6 | closed | Implemented and validated: perspective LOD shift uses BSR value directly. |
-| 7 | partial | Only alpha-out no-write guard landed. Remaining Rank 7 work must be named as separate sub-slices before implementation. |
+| 7 | partial | Rank 7a and 7b landed. Rank 7c blocker fixed; direct alpha-out forms are still not implemented. |
 | 8 | closed | Implemented and validated: `src_afunc=4 dest_afunc=4` packed unsigned saturating add. |
 | 9 | partial | Fog table `UBFX` and W-fog byte load landed. Do not call full fog cleanup closed without auditing remaining fog masks/shifts. |
 | 10 | deferred | Requires stronger perf reason for `x24`/dither true-fallback work. |
@@ -77,8 +77,8 @@ Status terms:
 
 Next code work should not start from the raw rank table. Start from this queue:
 
-1. Rank 7c audit-only: direct alpha-out forms for alpha-buffer-write buckets
-   where one/both/neither `src_aafunc` / `dest_aafunc` are `AONE`.
+1. Rank 7c audit-only: reconsider direct alpha-out forms for
+   alpha-buffer-write buckets now that `alphaMode=00441110` is clean.
 2. Rank 11 audit-only: prove whether `v13` color-before-fog and related
    save/restore work can be gated by `dest_afunc == AFUNC_ACOLORBEFOREFOG`.
 3. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
@@ -1023,3 +1023,99 @@ Known guest noise appeared and was ignored by itself:
 Notes:
 
 - Rank 7 remains partial; Rank 7c is still open.
+
+## Rank 7c Alpha-Out Direct Forms Blocker Fix
+
+Status: accepted as a correctness fix that unblocks later Rank 7c optimization
+work. No Rank 7c direct-form optimization is accepted yet.
+
+Audit result:
+
+- Interpreter alpha-out semantics are:
+  `src_a = (((dest_aafunc == 4) ? dest_a * 256 : 0) + ((src_aafunc == 4) ? src_a * 256 : 0)) >> 8`.
+- Direct forms appeared valid for three expanded probe cases:
+  - neither alpha-out factor consumes `AONE`: `alphaMode=00001110`
+  - only destination alpha-out consumes `AONE`: `alphaMode=00401110`
+  - only source alpha-out consumes `AONE`: `alphaMode=00041110`
+- The both-`AONE` case is not currently safe:
+  `alphaMode=00441110` produces aux-buffer mismatches with the existing
+  pre-Rank-7c ARM64 codegen.
+- Root cause: the interpreter stores `dest_a` as `uint8_t`, but ARM64 loaded
+  the alpha-buffer value with `LDRH` and kept the full 16-bit aux value for
+  destination-alpha consumers.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Added `UXTB w5, w5` after the aux-buffer destination-alpha `LDRH`.
+- Left depth reads/writes unchanged.
+
+Implemented in `src/include/86box/vid_voodoo_common.h`:
+
+- Raised `VOODOO_VALIDATE_MODE_BUCKETS` from 16 to 24 so the expanded alpha
+  probe prints the fourth alpha-out bucket explicitly.
+
+Expanded probe source coverage in `tools/voodoo_alpha_probe/`:
+
+```text
+alphaMode=00001110
+alphaMode=00401110
+alphaMode=00041110
+alphaMode=00441110
+```
+
+All four cases use:
+
+```text
+alpha_blend=1
+depth_w=1
+alpha_en=1
+```
+
+Isolation validation after reverting the Rank 7c codegen attempt back to the
+pre-Rank-7c alpha-out block:
+
+```text
+Voodoo validate (type=4 verify=1): spans=7545427 jit=7545427 interp=0 verify=7545427 skipped=0 mismatch_spans=309360 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=54549040 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=82430 scan_hits=124404 misses=20 compiles=20 rejects=0 code_bytes=23780 code_max=1768
+```
+
+Failing mode:
+
+```text
+alphaMode=00441110
+fbzMode=00044fe1
+alpha_blend=1
+depth_w=1
+alpha_en=1
+fb=0
+state=0
+aux_mismatches=54549040
+```
+
+Validation after the fix:
+
+```text
+Voodoo validate (type=4 verify=1): spans=7545427 jit=7545427 interp=0 verify=7545427 skipped=0 mismatch_spans=0 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=0 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=82430 scan_hits=124404 misses=20 compiles=20 rejects=0 code_bytes=23788 code_max=1768
+```
+
+Expanded Rank 7c target coverage:
+
+```text
+alphaMode=00001110 spans=383280 fb=0 aux=0 state=0
+alphaMode=00401110 spans=383280 fb=0 aux=0 state=0
+alphaMode=00041110 spans=383280 fb=0 aux=0 state=0
+alphaMode=00441110 spans=383280 fb=0 aux=0 state=0
+```
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
+
+Notes:
+
+- Do not call Rank 7c optimization closed. The direct alpha-out forms still
+  need a separate implementation and validation slice.
+- Rank 7 remains partial.

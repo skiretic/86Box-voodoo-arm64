@@ -29,7 +29,7 @@
 
 #define TEX_CACHE_MAX   64
 
-#define VOODOO_VALIDATE_MODE_BUCKETS 16
+#define VOODOO_VALIDATE_MODE_BUCKETS 24
 
 typedef struct voodoo_validate_mode_bucket_t {
     int      valid;
