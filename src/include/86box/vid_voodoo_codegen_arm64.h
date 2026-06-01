@@ -4120,6 +4120,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
      * ================================================================== */
     if (params->alphaMode & (1 << 4)) {
         int packed_alpha_add = (src_afunc == AFUNC_AONE && dest_afunc == AFUNC_AONE);
+        int need_blended_alpha_write =
+            ((params->fbzMode & (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE)) == (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE));
 
         /* Load dest alpha from aux buffer if alpha-buffer enabled */
         if (params->fbzMode & FBZ_ALPHA_ENABLE) {
@@ -4305,32 +4307,34 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         if (!packed_alpha_add)
             addlong(ARM64_SQXTUN_8B_8H(0, 0));
 
-        /* Alpha blend for alpha channel:
-         * dest_aafunc and src_aafunc compute the final alpha.
-         * x86-64 ref: lines 3034-3057
-         * w4 = 0, accumulate dest_aa and src_aa contributions. */
-        addlong(ARM64_MOV_ZERO(4));  /* w4 = 0 (accumulator for blended alpha) */
+        if (need_blended_alpha_write) {
+            /* Alpha blend for alpha channel:
+             * dest_aafunc and src_aafunc compute the final alpha.
+             * x86-64 ref: lines 3034-3057
+             * w4 = 0, accumulate dest_aa and src_aa contributions. */
+            addlong(ARM64_MOV_ZERO(4));  /* w4 = 0 (accumulator for blended alpha) */
 
-        if (dest_aafunc == 4) {
-            /* dest_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
-             * destination alpha passes through to the blended output alpha.
-             * w5 holds dst_alpha * 2 (doubled for table indexing), so
-             * (w5 << 7) >> 8 = dst_alpha exactly. Matches x86-64 lines 3037-3042. */
-            addlong(ARM64_LSL_IMM(6, 5, 7));   /* w6 = (dst_alpha*2) << 7; >>8 later gives correct alpha */
-            addlong(ARM64_ADD_REG(4, 4, 6));
+            if (dest_aafunc == 4) {
+                /* dest_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
+                 * destination alpha passes through to the blended output alpha.
+                 * w5 holds dst_alpha * 2 (doubled for table indexing), so
+                 * (w5 << 7) >> 8 = dst_alpha exactly. Matches x86-64 lines 3037-3042. */
+                addlong(ARM64_LSL_IMM(6, 5, 7));   /* w6 = (dst_alpha*2) << 7; >>8 later gives correct alpha */
+                addlong(ARM64_ADD_REG(4, 4, 6));
+            }
+
+            if (src_aafunc == 4) {
+                /* src_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
+                 * source alpha passes through. w12 = src_alpha * 2, so (w12 << 7) >> 8 = src_alpha exactly. */
+                addlong(ARM64_LSL_IMM(6, 12, 7));  /* w6 = (src_alpha*2) << 7; >>8 later gives correct alpha */
+                addlong(ARM64_ADD_REG(4, 4, 6));
+            }
+
+            /* LSR w4, w4, #8 */
+            addlong(ARM64_LSR_IMM(4, 4, 8));
+            /* w12 = final blended alpha */
+            addlong(ARM64_MOV_REG(12, 4));
         }
-
-        if (src_aafunc == 4) {
-            /* src_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
-             * source alpha passes through. w12 = src_alpha * 2, so (w12 << 7) >> 8 = src_alpha exactly. */
-            addlong(ARM64_LSL_IMM(6, 12, 7));  /* w6 = (src_alpha*2) << 7; >>8 later gives correct alpha */
-            addlong(ARM64_ADD_REG(4, 4, 6));
-        }
-
-        /* LSR w4, w4, #8 */
-        addlong(ARM64_LSR_IMM(4, 4, 8));
-        /* w12 = final blended alpha */
-        addlong(ARM64_MOV_REG(12, 4));
     }
 
     /* ================================================================

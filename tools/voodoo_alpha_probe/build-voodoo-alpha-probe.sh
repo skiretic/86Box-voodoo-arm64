@@ -18,3 +18,19 @@ i686-w64-mingw32-gcc \
   -o ALPHAPRB.EXE
 
 file ALPHAPRB.EXE
+
+iso_tool=
+if command -v xorrisofs >/dev/null 2>&1; then
+  iso_tool=xorrisofs
+elif command -v genisoimage >/dev/null 2>&1; then
+  iso_tool=genisoimage
+elif command -v mkisofs >/dev/null 2>&1; then
+  iso_tool=mkisofs
+fi
+
+if [[ -n "$iso_tool" ]]; then
+  "$iso_tool" -quiet -o alphaprb.iso -V ALPHAPRB ALPHAPRB.EXE
+  file alphaprb.iso
+else
+  echo "ISO not built: xorrisofs/genisoimage/mkisofs not found"
+fi

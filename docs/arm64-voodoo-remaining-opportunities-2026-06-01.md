@@ -769,3 +769,139 @@ Notes:
 - The aggregate metrics are recorded for audit only. They should not be used as
   a rejection signal for this slice without same-block attribution because this
   51.2M-span guest-driven window did not prove an identical compile mix.
+
+## Rank 7 Alpha-Out Guard and Consolidated Probe
+
+Status: accepted as a Rank 7 partial slice. This covers only the alpha-out
+no-write guard, not the full Rank 7 candidate family.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Skip the alpha-out scalar blend block when the blended alpha value cannot be
+  consumed by an alpha-buffer write.
+- Guard:
+
+```c
+((params->fbzMode & (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE)) ==
+ (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE))
+```
+
+Implemented in `tools/voodoo_alpha_probe/`:
+
+- Consolidated the alpha blend coverage probe into one repo-owned guest tool.
+- Preserved alpha blend factor pairs `1/1`, `3/3`, `5/5`, and `7/7`.
+- Added aux-alpha write attempts and confirmed the `NODEPTH_COLOR_ALPHA` route
+  produces `FBZ_ALPHA_ENABLE` coverage.
+- Added TMU detail and LOD-frac coverage cases so prior one-off probe intent is
+  covered from the same tool.
+- `build-voodoo-alpha-probe.sh` now builds both `ALPHAPRB.EXE` and a local
+  `alphaprb.iso`.
+
+Build/sign:
+
+```text
+./scripts/build-and-sign.sh
+build/src/86Box.app: replacing existing signature
+BUILD + SIGN OK
+```
+
+First validation launch:
+
+```sh
+./scripts/launch-voodoo-validate-vm.sh --limit 51200000 --log-limit 8 --metrics 1
+```
+
+First validation result:
+
+```text
+verify=51200000
+skipped=0
+mismatch_spans=0
+fb_mismatches=0
+aux_mismatches=0
+state_mismatches=0
+rejects=0
+```
+
+Natural workload coverage for the false guard path:
+
+```text
+alpha_blend=1
+depth_w=0
+alpha_en=0
+src_afunc=4 dest_afunc=4
+spans=3908513
+
+alpha_blend=1
+depth_w=0
+alpha_en=0
+src_afunc=2 dest_afunc=0
+spans=1248739
+```
+
+Consolidated probe validation launch:
+
+```sh
+./scripts/launch-voodoo-validate-vm.sh --limit 51200000 --log-limit 64 --metrics 1
+```
+
+Consolidated probe validation result:
+
+```text
+verify=6778867
+skipped=0
+mismatch_spans=0
+fb_mismatches=0
+aux_mismatches=0
+state_mismatches=0
+rejects=0
+```
+
+Consolidated probe true/false guard coverage:
+
+```text
+alpha_blend=1
+depth_w=0
+alpha_en=0
+src_afunc=1 dest_afunc=1
+spans=383280
+
+alpha_blend=1
+depth_w=1
+alpha_en=1
+src_afunc=1 dest_afunc=1
+spans=383280
+
+alpha_blend=1
+depth_w=1
+alpha_en=1
+src_afunc=5 dest_afunc=5
+spans=383280
+```
+
+Additional consolidated probe coverage:
+
+```text
+tmu0_rgb_detail=383280
+tmu0_alpha_detail=383280
+tmu1_rgb_detail=383280
+tmu1_alpha_detail=383280
+
+tmu0_rgb_lod_frac=383280
+tmu0_alpha_lod_frac=383280
+tmu1_rgb_lod_frac=383280
+tmu1_alpha_lod_frac=383280
+```
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
+
+Notes:
+
+- The Rank 7 alpha-out no-write guard is proven on both sides: skipped when
+  `alpha_en=0`, preserved when `depth_w=1 alpha_en=1`.
+- This does not close all Rank 7 opportunities. Remaining Rank 7 work still
+  needs explicit sub-slice names and coverage requirements.

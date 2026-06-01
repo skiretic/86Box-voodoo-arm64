@@ -1,10 +1,11 @@
 /*
- * Minimal Win32 Glide2 alpha blend coverage probe.
+ * Minimal Win32 Glide2 Voodoo coverage probe.
  *
  * Builds with i686-w64-mingw32-gcc and runs on Windows 98/K6-class CPUs.
  * It loads glide2x.dll at runtime, configures table-backed source/destination
- * alpha blend factor pairs, and draws enough triangles for the validator mode
- * buckets to see the target alphaMode values.
+ * alpha blend factor pairs, aux-alpha write attempts, and detail/LOD-frac
+ * texture combine modes. It draws enough triangles for the validator mode
+ * buckets to see the target state values.
  */
 #include <stdint.h>
 #include <windows.h>
@@ -47,6 +48,12 @@ typedef uint8_t  GrAlpha_t;
 #define GR_BLEND_ONE 0x4
 #define GR_BLEND_ONE_MINUS_SRC_ALPHA 0x5
 #define GR_BLEND_ONE_MINUS_DST_ALPHA 0x7
+
+#define GR_CMP_ALWAYS 7
+
+#define GR_DEPTHBUFFER_DISABLE 0
+#define GR_DEPTHBUFFER_ZBUFFER 1
+#define GR_DEPTHBUFFER_WBUFFER 2
 
 #define GR_RESOLUTION_640x480 7
 #define GR_REFRESH_60Hz 0
@@ -94,6 +101,10 @@ typedef void   (WINAPI *PFN_grCullMode)(FxI32);
 typedef void   (WINAPI *PFN_grColorCombine)(FxI32, FxI32, FxI32, FxI32, FxBool);
 typedef void   (WINAPI *PFN_grAlphaCombine)(FxI32, FxI32, FxI32, FxI32, FxBool);
 typedef void   (WINAPI *PFN_grAlphaBlendFunction)(FxI32, FxI32, FxI32, FxI32);
+typedef void   (WINAPI *PFN_grColorMask)(FxBool, FxBool);
+typedef void   (WINAPI *PFN_grDepthBufferFunction)(FxI32);
+typedef void   (WINAPI *PFN_grDepthBufferMode)(FxI32);
+typedef void   (WINAPI *PFN_grDepthMask)(FxBool);
 typedef FxU32  (WINAPI *PFN_grTexMinAddress)(FxI32);
 typedef FxU32  (WINAPI *PFN_grTexTextureMemRequired)(FxU32, GrTexInfo *);
 typedef void   (WINAPI *PFN_grTexDownloadMipMap)(FxI32, FxU32, FxU32, GrTexInfo *);
@@ -117,6 +128,10 @@ static PFN_grCullMode grCullMode;
 static PFN_grColorCombine grColorCombine;
 static PFN_grAlphaCombine grAlphaCombine;
 static PFN_grAlphaBlendFunction grAlphaBlendFunction;
+static PFN_grColorMask grColorMask;
+static PFN_grDepthBufferFunction grDepthBufferFunction;
+static PFN_grDepthBufferMode grDepthBufferMode;
+static PFN_grDepthMask grDepthMask;
 static PFN_grTexMinAddress grTexMinAddress;
 static PFN_grTexTextureMemRequired grTexTextureMemRequired;
 static PFN_grTexDownloadMipMap grTexDownloadMipMap;
@@ -239,6 +254,10 @@ load_glide(void)
     RESOLVE(grColorCombine, 20);
     RESOLVE(grAlphaCombine, 20);
     RESOLVE(grAlphaBlendFunction, 16);
+    RESOLVE(grColorMask, 8);
+    RESOLVE(grDepthBufferFunction, 4);
+    RESOLVE(grDepthBufferMode, 4);
+    RESOLVE(grDepthMask, 4);
     RESOLVE(grTexMinAddress, 4);
     RESOLVE(grTexTextureMemRequired, 8);
     RESOLVE(grTexDownloadMipMap, 16);
@@ -324,14 +343,115 @@ make_tri(GrVertex v[3], float xoff)
 }
 
 static void
-draw_case(FxI32 factor, const char *name)
+set_alpha_pair_state(void)
+{
+    grColorCombine(GR_COMBINE_FUNCTION_SCALE_OTHER, GR_COMBINE_FACTOR_ONE,
+                   GR_COMBINE_LOCAL_NONE, GR_COMBINE_OTHER_TEXTURE, FXFALSE);
+    grAlphaCombine(GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE,
+                   GR_COMBINE_LOCAL_ITERATED, GR_COMBINE_OTHER_NONE, FXFALSE);
+    grTexCombine(GR_TMU1, GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE,
+                 GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE, FXFALSE, FXFALSE);
+    grTexCombine(GR_TMU0, GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE,
+                 GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE, FXFALSE, FXFALSE);
+}
+
+static void
+set_tmu_factor_state(FxI32 factor)
+{
+    grColorCombine(GR_COMBINE_FUNCTION_SCALE_OTHER, GR_COMBINE_FACTOR_ONE,
+                   GR_COMBINE_LOCAL_NONE, GR_COMBINE_OTHER_TEXTURE, FXFALSE);
+    grAlphaCombine(GR_COMBINE_FUNCTION_SCALE_OTHER, GR_COMBINE_FACTOR_ONE,
+                   GR_COMBINE_LOCAL_NONE, GR_COMBINE_OTHER_TEXTURE, FXFALSE);
+    grTexCombine(GR_TMU1, GR_COMBINE_FUNCTION_BLEND, factor,
+                 GR_COMBINE_FUNCTION_BLEND, factor, FXFALSE, FXFALSE);
+    grTexCombine(GR_TMU0, GR_COMBINE_FUNCTION_BLEND, factor,
+                 GR_COMBINE_FUNCTION_BLEND, factor, FXFALSE, FXFALSE);
+}
+
+typedef enum {
+    AUX_ALPHA_NONE,
+    AUX_ALPHA_WBUFFER_COLOR_ALPHA,
+    AUX_ALPHA_ZBUFFER_COLOR_ALPHA,
+    AUX_ALPHA_NODEPTH_COLOR_ALPHA
+} AuxAlphaMode;
+
+static const char *
+aux_alpha_mode_name(AuxAlphaMode mode)
+{
+    switch (mode) {
+        case AUX_ALPHA_WBUFFER_COLOR_ALPHA:
+            return " aux_alpha_attempt=WBUFFER_COLOR_ALPHA";
+        case AUX_ALPHA_ZBUFFER_COLOR_ALPHA:
+            return " aux_alpha_attempt=ZBUFFER_COLOR_ALPHA";
+        case AUX_ALPHA_NODEPTH_COLOR_ALPHA:
+            return " aux_alpha_attempt=NODEPTH_COLOR_ALPHA";
+        default:
+            return " aux_alpha_write=0";
+    }
+}
+
+static void
+set_aux_alpha_write(AuxAlphaMode mode)
+{
+    grDepthBufferFunction(GR_CMP_ALWAYS);
+    switch (mode) {
+        case AUX_ALPHA_WBUFFER_COLOR_ALPHA:
+            grDepthBufferMode(GR_DEPTHBUFFER_WBUFFER);
+            grDepthMask(FXTRUE);
+            grColorMask(FXTRUE, FXTRUE);
+            break;
+        case AUX_ALPHA_ZBUFFER_COLOR_ALPHA:
+            grDepthBufferMode(GR_DEPTHBUFFER_ZBUFFER);
+            grDepthMask(FXTRUE);
+            grColorMask(FXTRUE, FXTRUE);
+            break;
+        case AUX_ALPHA_NODEPTH_COLOR_ALPHA:
+            grDepthBufferMode(GR_DEPTHBUFFER_DISABLE);
+            grDepthMask(FXTRUE);
+            grColorMask(FXTRUE, FXTRUE);
+            break;
+        default:
+            grDepthMask(FXFALSE);
+            grDepthBufferMode(GR_DEPTHBUFFER_DISABLE);
+            grColorMask(FXTRUE, FXFALSE);
+            break;
+    }
+}
+
+static void
+draw_alpha_case(FxI32 factor, const char *name, AuxAlphaMode aux_alpha_mode)
+{
+    GrVertex v[3];
+
+    out_text("case ");
+    out_text(name);
+    out_text(aux_alpha_mode_name(aux_alpha_mode));
+    out_text("\r\n");
+    set_alpha_pair_state();
+    set_aux_alpha_write(aux_alpha_mode);
+    grAlphaBlendFunction(factor, factor, GR_BLEND_ONE, GR_BLEND_ZERO);
+
+    for (int frame = 0; frame < 80; frame++) {
+        grBufferClear(0x00202020, 0, 0);
+        for (int i = 0; i < 12; i++) {
+            make_tri(v, (float) ((i % 4) * 8));
+            grDrawTriangle(&v[0], &v[1], &v[2]);
+        }
+        grBufferSwap(0);
+    }
+}
+
+static void
+draw_tmu_factor_case(FxI32 factor, const char *name)
 {
     GrVertex v[3];
 
     out_text("case ");
     out_text(name);
     out_text("\r\n");
-    grAlphaBlendFunction(factor, factor, GR_BLEND_ONE, GR_BLEND_ZERO);
+    set_aux_alpha_write(AUX_ALPHA_NONE);
+    grAlphaBlendFunction(GR_BLEND_ONE, GR_BLEND_ZERO, GR_BLEND_ONE, GR_BLEND_ZERO);
+    set_tmu_factor_state(factor);
 
     for (int frame = 0; frame < 80; frame++) {
         grBufferClear(0x00202020, 0, 0);
@@ -377,7 +497,7 @@ app_main(void)
     info1 = info0;
     info1.data = tex1;
 
-    out_text("Alpha blend pair probe start\r\n");
+    out_text("Voodoo consolidated probe start\r\n");
     grGlideInit();
     grSstSelect(0);
     if (!grSstWinOpen((FxU32) (uintptr_t) win, GR_RESOLUTION_640x480, GR_REFRESH_60Hz,
@@ -391,11 +511,6 @@ app_main(void)
 
     grRenderBuffer(GR_BUFFER_BACKBUFFER);
     grCullMode(GR_CULL_DISABLE);
-    grColorCombine(GR_COMBINE_FUNCTION_SCALE_OTHER, GR_COMBINE_FACTOR_ONE,
-                   GR_COMBINE_LOCAL_NONE, GR_COMBINE_OTHER_TEXTURE, FXFALSE);
-    grAlphaCombine(GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE,
-                   GR_COMBINE_LOCAL_ITERATED, GR_COMBINE_OTHER_NONE, FXFALSE);
-
     addr0 = grTexMinAddress(GR_TMU0);
     addr1 = grTexMinAddress(GR_TMU1);
     out_text("tmu0 addr=");
@@ -419,20 +534,25 @@ app_main(void)
     grTexMipMapMode(GR_TMU1, GR_MIPMAP_NEAREST, FXTRUE);
     grTexDetailControl(GR_TMU0, 0, 7, 1.0f);
     grTexDetailControl(GR_TMU1, 0, 7, 1.0f);
-    grTexCombine(GR_TMU1, GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE,
-                 GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE, FXFALSE, FXFALSE);
-    grTexCombine(GR_TMU0, GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE,
-                 GR_COMBINE_FUNCTION_LOCAL, GR_COMBINE_FACTOR_NONE, FXFALSE, FXFALSE);
-
-    draw_case(GR_BLEND_SRC_ALPHA, "SRC_ALPHA/SRC_ALPHA");
-    draw_case(GR_BLEND_DST_ALPHA, "DST_ALPHA/DST_ALPHA");
-    draw_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA");
-    draw_case(GR_BLEND_ONE_MINUS_DST_ALPHA, "ONE_MINUS_DST_ALPHA/ONE_MINUS_DST_ALPHA");
+    draw_alpha_case(GR_BLEND_SRC_ALPHA, "SRC_ALPHA/SRC_ALPHA", AUX_ALPHA_NONE);
+    draw_alpha_case(GR_BLEND_DST_ALPHA, "DST_ALPHA/DST_ALPHA", AUX_ALPHA_NONE);
+    draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_NONE);
+    draw_alpha_case(GR_BLEND_ONE_MINUS_DST_ALPHA, "ONE_MINUS_DST_ALPHA/ONE_MINUS_DST_ALPHA", AUX_ALPHA_NONE);
+    draw_alpha_case(GR_BLEND_SRC_ALPHA, "SRC_ALPHA/SRC_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);
+    draw_alpha_case(GR_BLEND_DST_ALPHA, "DST_ALPHA/DST_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);
+    draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);
+    draw_alpha_case(GR_BLEND_ONE_MINUS_DST_ALPHA, "ONE_MINUS_DST_ALPHA/ONE_MINUS_DST_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);
+    draw_alpha_case(GR_BLEND_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_Z_SRC_ALPHA/SRC_ALPHA", AUX_ALPHA_ZBUFFER_COLOR_ALPHA);
+    draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_Z_ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_ZBUFFER_COLOR_ALPHA);
+    draw_alpha_case(GR_BLEND_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_NODEPTH_SRC_ALPHA/SRC_ALPHA", AUX_ALPHA_NODEPTH_COLOR_ALPHA);
+    draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_NODEPTH_ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_NODEPTH_COLOR_ALPHA);
+    draw_tmu_factor_case(GR_COMBINE_FACTOR_DETAIL_FACTOR, "TMU_DETAIL");
+    draw_tmu_factor_case(GR_COMBINE_FACTOR_LOD_FRACTION, "TMU_LOD_FRAC");
 
     grSstWinClose();
     grGlideShutdown();
-    out_text("Alpha probe done\r\n");
-    MessageBoxA(win, "Alpha probe done. Close VM or report done now.", "Alpha Probe", MB_OK);
+    out_text("Voodoo consolidated probe done\r\n");
+    MessageBoxA(win, "Voodoo probe done. Close VM or report done now.", "Alpha Probe", MB_OK);
     if (log_file != INVALID_HANDLE_VALUE)
         CloseHandle(log_file);
     return 0;
