@@ -515,6 +515,9 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 /* ORR Wd, Wn, Wm */
 #define ARM64_ORR_REG(d, n, m) (0x2A000000 | Rm(m) | Rn(n) | Rd(d))
 
+/* ORR Wd, Wn, Wm, LSL #sh */
+#define ARM64_ORR_REG_LSL(d, n, m, sh) (0x2A000000 | Rm(m) | shift_imm6(sh) | Rn(n) | Rd(d))
+
 /* EOR Wd, Wn, Wm */
 #define ARM64_EOR_REG(d, n, m) (0x4A000000 | Rm(m) | Rn(n) | Rd(d))
 
@@ -4536,8 +4539,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
             /* Pack RGB565: R(5) << 11 | G(6) << 5 | B(5) */
             addlong(ARM64_LSL_IMM(13, 13, 11));
-            addlong(ARM64_LSL_IMM(11, 11, 5));
-            addlong(ARM64_ORR_REG(4, 13, 11));
+            addlong(ARM64_ORR_REG_LSL(4, 13, 11, 5));
             addlong(ARM64_ORR_REG(4, 4, 6));
         } else {
             /* ---- No-dither path ---- */
