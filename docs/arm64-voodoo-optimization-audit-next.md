@@ -1211,3 +1211,37 @@ state_mismatches=0
   redesign or should stay as the per-pixel fallback.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N6 ARM64 predicate decode first slice
+
+- Added an ARM64 generator predicate decode helper in
+  `src/include/86box/vid_voodoo_regs.h` and consumed it from
+  `src/include/86box/vid_voodoo_codegen_arm64.h`.
+- The helper names the mode predicates that previously sat as repeated local
+  setup in `voodoo_generate()`: TMU fetch shape, alpha blend functions,
+  `x20`/`x21` lookup liveness, dither/RGB-write state, `x26` dither-base
+  eligibility, and alpha+dither dither-pointer fallback eligibility.
+- This slice is an audit/guardrail refactor, not a runtime speed win. The point
+  is to make later register/layout decisions consume one decoded ARM64 mode
+  shape instead of retyping fragile predicate logic around the generator.
+- No `src/video/vid_voodoo_render.c` changes were made in this first slice, so
+  the shared render path and x86-64 JIT-visible render behavior were left
+  untouched.
+- No x86 or x86-64 codegen files changed. No emitted arithmetic or TMU
+  detail/LOD-frac arithmetic changed.
+- `git diff --check` passed.
+- `./scripts/build-and-sign.sh` passed with `BUILD + SIGN OK`.
+- Short VM validation passed:
+  `verify=10240000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=61804`, `code_max=1868`.
+- Soak VM validation hit the configured verify cap and passed:
+  `verify=51200000`, `spans=374562938`, `skipped=0`, `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=12039596`, `code_max=1868`.
+- Shape `63` remains the only true fallback shape:
+  `dither_ptr_true_fallback_pixels=36527831`, with
+  `need_x19=1`, `need_x20=1`, `need_x21=1`, `need_x22=1`, `need_x23=1`, and
+  `need_x25=1`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

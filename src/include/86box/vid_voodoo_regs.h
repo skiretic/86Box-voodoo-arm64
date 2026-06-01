@@ -612,6 +612,69 @@ enum {
 #define TEXTUREMODE_LOCAL_MASK  0x00643000
 #define TEXTUREMODE_LOCAL       0x00241000
 
+typedef struct voodoo_arm64_generator_predicates_t {
+    int texture_enabled;
+    int tmu0_local;
+    int tmu0_passthrough;
+    int fetch_tmu0;
+    int fetch_tmu1;
+    int dual_tmu_combine;
+    int alpha_blend;
+    int src_afunc;
+    int dest_afunc;
+    int x20_lookup_live;
+    int x21_lookup_live;
+    int dither;
+    int dither2x2;
+    int rgb_wmask;
+    int dither_base_in_x26;
+    int dither_ptr_fallback_candidate;
+} voodoo_arm64_generator_predicates_t;
+
+static inline int
+voodoo_arm64_afunc_uses_alookup(int afunc)
+{
+    return afunc == AFUNC_ASRC_ALPHA || afunc == AFUNC_ADST_ALPHA || afunc == AFUNC_ASATURATE;
+}
+
+static inline int
+voodoo_arm64_afunc_uses_aminuslookup(int afunc)
+{
+    return afunc == AFUNC_AOMSRC_ALPHA || afunc == AFUNC_AOMDST_ALPHA;
+}
+
+static inline voodoo_arm64_generator_predicates_t
+voodoo_arm64_generator_decode_predicates(unsigned int fbzMode, unsigned int fbzColorPath,
+                                         unsigned int alphaMode, unsigned int fogMode,
+                                         unsigned int textureMode0, int dual_tmus)
+{
+    voodoo_arm64_generator_predicates_t pred;
+
+    pred.texture_enabled  = fbzColorPath & FBZCP_TEXTURE_ENABLED;
+    pred.tmu0_local       = (textureMode0 & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL;
+    pred.tmu0_passthrough = (textureMode0 & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH;
+    pred.fetch_tmu0       = pred.texture_enabled && (pred.tmu0_local || !dual_tmus || !pred.tmu0_passthrough);
+    pred.fetch_tmu1       = pred.texture_enabled && dual_tmus && !pred.tmu0_local;
+    pred.dual_tmu_combine = pred.fetch_tmu0 && pred.fetch_tmu1;
+    pred.alpha_blend      = alphaMode & (1 << 4);
+    pred.src_afunc        = (alphaMode >> 8) & 0xf;
+    pred.dest_afunc       = (alphaMode >> 12) & 0xf;
+    pred.x20_lookup_live  = ((fogMode & FOG_ENABLE) && !(fogMode & FOG_CONSTANT)) ||
+                            (pred.alpha_blend &&
+                             (voodoo_arm64_afunc_uses_alookup(pred.dest_afunc) ||
+                              voodoo_arm64_afunc_uses_alookup(pred.src_afunc)));
+    pred.x21_lookup_live  = pred.alpha_blend &&
+                            (voodoo_arm64_afunc_uses_aminuslookup(pred.dest_afunc) ||
+                             voodoo_arm64_afunc_uses_aminuslookup(pred.src_afunc));
+    pred.dither           = fbzMode & FBZ_DITHER;
+    pred.dither2x2        = fbzMode & FBZ_DITHER_2x2;
+    pred.rgb_wmask        = fbzMode & FBZ_RGB_WMASK;
+    pred.dither_base_in_x26 = pred.dither && pred.rgb_wmask && !pred.alpha_blend;
+    pred.dither_ptr_fallback_candidate = pred.dither && pred.rgb_wmask && pred.alpha_blend;
+
+    return pred;
+}
+
 #define SLI_ENABLED             (voodoo->fbiInit1 & FBIINIT1_SLI_ENABLE)
 #define TRIPLE_BUFFER           ((voodoo->fbiInit2 & 0x10) || (voodoo->fbiInit5 & 0x600) == 0x400)
 

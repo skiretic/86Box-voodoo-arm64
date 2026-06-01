@@ -2215,18 +2215,6 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
     return block_pos;
 }
 
-static inline int
-arm64_alpha_afunc_uses_alookup(int afunc)
-{
-    return afunc == AFUNC_ASRC_ALPHA || afunc == AFUNC_ADST_ALPHA || afunc == AFUNC_ASATURATE;
-}
-
-static inline int
-arm64_alpha_afunc_uses_aminuslookup(int afunc)
-{
-    return afunc == AFUNC_AOMSRC_ALPHA || afunc == AFUNC_AOMDST_ALPHA;
-}
-
 /* ========================================================================
  * voodoo_generate() -- emit ARM64 JIT code for the pixel pipeline
  *
@@ -2286,24 +2274,21 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int depth_jump_pos   = 0;
     int depth_jump_pos2  = 0;
     int loop_jump_pos    = 0;
-    int texture_enabled  = params->fbzColorPath & FBZCP_TEXTURE_ENABLED;
-    int tmu0_local       = (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL;
-    int tmu0_passthrough = (params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH;
-    int fetch_tmu0       = texture_enabled && (tmu0_local || !voodoo->dual_tmus || !tmu0_passthrough);
-    int fetch_tmu1       = texture_enabled && voodoo->dual_tmus && !tmu0_local;
-    int dual_tmu_combine = fetch_tmu0 && fetch_tmu1;
-    int alpha_blend      = params->alphaMode & (1 << 4);
-    int dither_base_in_x26 = dither && (params->fbzMode & FBZ_RGB_WMASK) && !alpha_blend;
+    voodoo_arm64_generator_predicates_t pred =
+        voodoo_arm64_generator_decode_predicates(params->fbzMode, params->fbzColorPath,
+                                                 params->alphaMode, params->fogMode,
+                                                 params->textureMode[0], voodoo->dual_tmus);
+    int fetch_tmu0       = pred.fetch_tmu0;
+    int fetch_tmu1       = pred.fetch_tmu1;
+    int dual_tmu_combine = pred.dual_tmu_combine;
+    int alpha_blend      = pred.alpha_blend;
+    int dither_base_in_x26 = pred.dither_base_in_x26;
+    int dither_ptr_fallback_candidate = pred.dither_ptr_fallback_candidate;
     int dither_base_reg  = -1;
     int need_x19         = (fetch_tmu0 && (params->textureMode[0] & 1)) ||
                            (fetch_tmu1 && (params->textureMode[1] & 1));
-    int need_x20         = ((params->fogMode & FOG_ENABLE) && !(params->fogMode & FOG_CONSTANT)) ||
-                           (alpha_blend &&
-                            (arm64_alpha_afunc_uses_alookup(dest_afunc) ||
-                             arm64_alpha_afunc_uses_alookup(src_afunc)));
-    int need_x21         = alpha_blend &&
-                           (arm64_alpha_afunc_uses_aminuslookup(dest_afunc) ||
-                            arm64_alpha_afunc_uses_aminuslookup(src_afunc));
+    int need_x20         = pred.x20_lookup_live;
+    int need_x21         = pred.x21_lookup_live;
     int need_x22         = dual_tmu_combine &&
                            (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tc_sub_clocal_1) ||
                             (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
@@ -2328,7 +2313,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
     int need_v10         = cc_invert_output;
     int need_v11         = (params->fogMode & FOG_ENABLE) &&
                            ((params->fogMode & FOG_CONSTANT) || !(params->fogMode & FOG_ADD));
-    if (dither && (params->fbzMode & FBZ_RGB_WMASK) && alpha_blend) {
+    if (dither_ptr_fallback_candidate) {
         if (!need_x22)
             dither_base_reg = 22;
         else if (!need_x23)
