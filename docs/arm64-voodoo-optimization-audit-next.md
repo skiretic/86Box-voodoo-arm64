@@ -1466,3 +1466,113 @@ state_mismatches=0
   reject gates.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-06-01: B10 no-perspective texture shuffle attempt rejected
+
+- A tiny no-perspective texture LOD register shuffle was attempted in
+  `codegen_texture_fetch()` but reverted before commit.
+- The source change was semantically straightforward and `./scripts/build-and-sign.sh`
+  passed, but normal VM validation did not hit the target path. The run was
+  clean but only proved perspective-texture modes:
+  `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`,
+  `state_mismatches=0`, `rejects=0`, `code_bytes=41196`, `code_max=1796`.
+- A follow-up no-perspective guest probe also failed to force bit-0-clear
+  textured coverage; the observed textured buckets still had `textureMode0`
+  bit 0 set.
+- Result: B10 is rejected and reverted. Do not spend more time on rare
+  no-perspective texture coverage for this audit phase.
+
+### 2026-06-01: Known-hit-only next queue
+
+- Next work must target paths already hit hard by normal VM workloads, with no
+  new game/probe hunt required.
+- Priority 1: bilinear texture fetch in `codegen_texture_fetch()`. Existing
+  long-run coverage repeatedly proves this path, including
+  `tmu0_bilinear_pixels=4858845066` and
+  `tmu1_bilinear_pixels=6931172537`.
+- Priority 2: TMU0 LOD-frac texture combine. Existing mode buckets show
+  multi-million-span coverage with `tmu0_rgb_lod_frac` and
+  `tmu0_alpha_lod_frac` nonzero.
+- Priority 3: common alpha-blend pairs from normal workloads, especially
+  `src_afunc=1 dest_afunc=5`, `src_afunc=4 dest_afunc=4`, and
+  `src_afunc=2 dest_afunc=0`.
+- Validation requirement for the next accepted slice: clean counters
+  (`mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`,
+  `state_mismatches=0`, `rejects=0`) plus direct coverage of the edited
+  known-hit path. Prefer the bilinear path first because existing metrics
+  already provide simple coverage proof through `tmu0_bilinear_pixels` and
+  `tmu1_bilinear_pixels`.
+
+### 2026-06-01: B11 bilinear weight pair-load cleanup accepted
+
+- Implemented an ARM64-local bilinear hot-path generated-code reduction in
+  `codegen_texture_fetch()`.
+- The bilinear weight fetch used two 128-bit loads:
+  `LDR q16, [x11, #0]` and `LDR q17, [x11, #16]`.
+- It now emits one 128-bit pair load:
+  `LDP q16, q17, [x11]`.
+- Interpreter semantics are unchanged. `x11` still points at the same
+  32-byte `bilinear_lookup` weight pair, and `v16`/`v17` receive the same
+  row0/row1 weights before the existing multiply and blend sequence.
+- Short and full VM proof passed as part of the B11-B13 closure below.
+
+### 2026-06-01: B12 TMU0 LOD-frac alpha direct-sub cleanup accepted
+
+- Reworked the unaccepted zero-sub B12 attempt. The previous `NEG w4, w5`
+  subcase required `tca_zero_other=1`, but the normal workload hit
+  `textureMode0=4ec76a07` and `textureMode0=4ec76c07`, which decode as
+  `tca_zero_other=0`, `tca_sub_clocal=1`, and
+  `tca_mselect=TCA_MSELECT_LOD_FRAC`.
+- The covered path used to stage TMU0 alpha before subtracting it:
+  `MOV w5, w13` followed later by `SUB w4, w4, w5`.
+- It now keeps TMU0 alpha in `w13` and emits the subtract as
+  `SUB w4, w4, w13`; `w5` remains free for the following
+  `STATE_lod_frac[0]` factor load.
+- Interpreter semantics are unchanged. The interpreter does
+  `a = state->tex_a[1]` when `tca_zero_other=0`, then
+  `a -= state->tex_a[0]` for `tca_sub_clocal`, before applying
+  `factor_a = state->lod_frac[0]`.
+- Short and full VM proof passed as part of the B11-B13 closure below, with
+  nonzero `tmu0_alpha_lod_frac` coverage in buckets for `textureMode0=4ec76a07`
+  and/or `textureMode0=4ec76c07`.
+
+### 2026-06-01: B13 alpha blend dst-color copy guard accepted
+
+- Implemented an ARM64-local generated-code reduction in the alpha blend block
+  of `voodoo_generate()`.
+- The old path always emitted `MOV v6, v4` after unpacking destination RGB565,
+  even though `v6` is only used by `src_afunc=AFUNC_A_COLOR` and
+  `src_afunc=AFUNC_AOM_COLOR`.
+- The new path emits that copy only for those two source blend factors.
+- Interpreter semantics are unchanged. The common observed alpha pairs
+  `src_afunc=1 dest_afunc=5` and `src_afunc=4 dest_afunc=4` do not read
+  destination color as the source blend factor, so skipping the copy cannot
+  affect their blend math. The observed `src_afunc=2 dest_afunc=0` pair still
+  emits the copy because `AFUNC_A_COLOR` needs `v6`.
+- Short and full VM proof passed as part of the B11-B13 closure below, with
+  mode buckets for `src_afunc=1 dest_afunc=5` and `src_afunc=4 dest_afunc=4`.
+
+### 2026-06-01: B11-B13 full validation closure
+
+- Full near-unbounded VM validation passed with B11, B12, and B13 stacked:
+  `verify=769405607`, `spans=769405607`, `skipped=0`,
+  `mismatch_spans=0`, `fb_mismatches=0`, `aux_mismatches=0`,
+  `state_mismatches=0`, `rejects=0`.
+- Full-run metrics:
+  `code_bytes=10861912`, `code_max=1776`.
+- Target coverage was present for all three accepted slices:
+  `tmu0_bilinear_pixels=4826924358`,
+  `tmu1_bilinear_pixels=9166548188`,
+  `textureMode0=4ec76a07` / `4ec76c07` buckets with nonzero
+  `tmu0_alpha_lod_frac`, and alpha buckets including
+  `src_afunc=1 dest_afunc=5`, `src_afunc=4 dest_afunc=4`, and
+  `src_afunc=2 dest_afunc=0`.
+- Compared with the earliest metric-era short baseline in this audit
+  (`code_bytes=42788`, `code_max=1868`), the current short result after B13
+  was `code_bytes=40884`, `code_max=1780`, a reduction of `1904` bytes and
+  `88` bytes in max generated block size.
+- Result: B11, B12, and B13 are accepted. They are ARM64-local generated-code
+  reductions with clean framebuffer, aux, state, reject, and target-coverage
+  gates. No x86 or x86-64 codegen files changed.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

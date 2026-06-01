@@ -1231,6 +1231,9 @@ arm64_codegen_cold_queue_add_two_branches(arm64_codegen_cold_queue_t *queue,
 /* LDR Qt, [Xn, Xm, LSL #4] */
 #define ARM64_LDR_Q_REG_LSL4(t, n, m) (0x3CE07800 | Rm(m) | Rn(n) | Rt(t))
 
+/* LDP Qt1, Qt2, [Xn, #imm] -- 128-bit SIMD pair load, signed scaled imm */
+#define ARM64_LDP_Q(t1, t2, n, imm) (0xAD400000 | ((((imm) >> 4) & 0x7F) << 15) | Rt2(t2) | Rn(n) | Rt(t1))
+
 /* LD1 {Vt.H}[lane], [Xn] */
 #define ARM64_LD1_H_LANE(t, lane, n) (0x0D404000 | (((lane) & 3) << 11) | ((((lane) & 4) >> 2) << 30) | Rn(n) | Rt(t))
 
@@ -2073,10 +2076,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             /* ADD x11, x25, x10, LSL #5 -- base of weight pair */
             addlong(ARM64_ADD_REG_X_LSL(11, 25, 10, 5));
 
-            /* LDR q16, [x11, #0]  -- weights for row0: d0|d1 */
-            addlong(ARM64_LDR_Q(16, 11, 0));
-            /* LDR q17, [x11, #16] -- weights for row1: d2|d3 */
-            addlong(ARM64_LDR_Q(17, 11, 16));
+            /* LDP q16, q17, [x11] -- weights for row0/row1: d0|d1 and d2|d3 */
+            addlong(ARM64_LDP_Q(16, 17, 11, 0));
 
             /* MUL v0.8H, v0.8H, v16.8H -- row0 * weights */
             addlong(ARM64_MUL_V8H(0, 0, 16));
@@ -3240,7 +3241,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
             ARM64_EMIT_TMU_COMBINE_RGB_MUL_SHIFT(1, 1, 4, 16);
 
-            if (tca_sub_clocal) {
+            if (tca_sub_clocal && tca_mselect != TCA_MSELECT_LOD_FRAC) {
                 /* w5 = TMU0 alpha (from w13) */
                 addlong(ARM64_MOV_REG(5, 13));
             }
@@ -3275,7 +3276,7 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
             }
 
             if (tca_sub_clocal) {
-                addlong(ARM64_SUB_REG(4, 4, 5));  /* w5 = TMU0 alpha */
+                addlong(ARM64_SUB_REG(4, 4, tca_mselect == TCA_MSELECT_LOD_FRAC ? 13 : 5));
             }
 
             switch (tca_mselect) {
@@ -4119,8 +4120,10 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         addlong(ARM64_FMOV_S_W(4, 6));
         addlong(ARM64_UXTL_8H_8B(4, 4));
 
-        /* Save dest color in v6 for src_afunc A_COLOR/AOM_COLOR */
-        addlong(ARM64_MOV_V(6, 4));
+        if (src_afunc == AFUNC_A_COLOR || src_afunc == AFUNC_AOM_COLOR) {
+            /* Save dest color in v6 for src_afunc A_COLOR/AOM_COLOR */
+            addlong(ARM64_MOV_V(6, 4));
+        }
 
         /* ---- dest_afunc: compute dest blend factor and apply to v4 ----
          *
