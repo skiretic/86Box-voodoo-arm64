@@ -124,18 +124,18 @@ Current state:
   `9b97143ca`.
 - N5 cold layout is closed. Keep S-wrap and S-clamp. Do not move T-edge or
   dither pointer fallback to cold tails without a fresh metric gate.
+- N6 predicate-decode and metrics/coverage hardening are closed through the
+  ARM64 generator plus ARM64 metrics/validation-counter slices. Do not continue
+  into a broad shared-render struct rewrite without a fresh x86-64 compile plan.
 
 Next slices:
 
-1. Dither fallback-mode audit, report-only at first:
-   map the remaining `dither_ptr_true_fallback_pixels` modes and decide whether
-   a broader register-allocation redesign is worth a separate code slice.
-2. N6 shared mode decode struct, report-only at first:
-   map all `vid_voodoo_render.c` locals consumed by ARM64 and x86-64 codegen
-   include boundaries before any shared rename or struct extraction.
-3. Small ARM64 texture/TMU contract cleanup only:
+1. Small ARM64 texture/TMU contract cleanup only:
    no semantic changes unless backed by interpreter-truth validation and strict
    short plus long VM proof.
+2. Optional N7 state-validator counter extension, report-only at first.
+3. Do not continue N5 register work unless a new workload proves shape `63` is
+   material enough to justify broad register/frame redesign.
 
 Closed slice summary:
 
@@ -558,11 +558,19 @@ Exact files/functions/line areas:
 - x86-64 include boundary:
   `src/video/vid_voodoo_render.c:662-665`.
 
+Status:
+
+- Closed for the safe ARM64-local scope. The ARM64 generator now consumes a
+  decoded predicate helper, and ARM64 metrics/validation counters consume the
+  same helper where relevant.
+- Broad shared-render struct conversion remains deliberately unimplemented.
+
 Opportunity:
 
-- Convert scattered mode-bit locals into a named decoded-mode struct used by
-  interpreter and codegen include boundaries.
-- This would make ARM64 feature predicates and validation buckets less fragile.
+- A future broader refactor could convert scattered mode-bit locals into a
+  named decoded-mode struct used by interpreter and codegen include boundaries.
+- The safe N6 scope already made ARM64 feature predicates and validation
+  buckets less fragile without renaming shared render locals.
 
 Expected impact:
 
@@ -593,8 +601,9 @@ Larger refactor justified:
 
 First safe implementation slice:
 
-- Add a read-only decoded-mode struct while retaining existing local names.
-  Populate and log/validate selected fields. Do not switch codegen users yet.
+- Done. The implemented version kept the helper in `vid_voodoo_regs.h`, switched
+  ARM64 `voodoo_generate()` predicate setup, then aligned ARM64 N5 metrics and
+  TMU detail/LOD-frac coverage accounting.
 
 ### N7: State Validator Extension for Counters and Optional Fields
 
@@ -665,14 +674,18 @@ First safe implementation slice:
 - Do not conditionally skip ABI saves/restores before a register-use bitmap is
   reviewed.
 
-## Recommended First Implementation Slice
+## Recommended Next Slice
 
-Current next action is report-only: audit the remaining alpha+dither true
-fallback modes after the `x19` pinned-base slice.
+Current next action is outside N5/N6: small ARM64 texture/TMU contract cleanup
+or N7 validator counter-extension audit, both report-only first.
 
 Reason:
 
-- Long-run metrics show `dither_base_pinned_pixels=3635213944`, but
+- N5's remaining dither fallback is only shape `63` with all candidate regs
+  live, so it is not a small spare-register slice.
+- N6 now gives one decoded predicate source for ARM64 generator and ARM64
+  metrics/coverage decisions. Further shared-render conversion would raise
+  x86-64/shared-path risk without a current performance target.
   `dither_ptr_true_fallback_pixels=819741478` remain.
 - A mode map can prove whether remaining fallback is concentrated in a few
   register-pressure shapes or too broad to justify more allocator work.
@@ -1243,5 +1256,35 @@ state_mismatches=0
   `dither_ptr_true_fallback_pixels=36527831`, with
   `need_x19=1`, `need_x20=1`, `need_x21=1`, `need_x22=1`, `need_x23=1`, and
   `need_x25=1`.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
+
+### 2026-05-31: N6 metrics decode and coverage hardening
+
+- Updated `voodoo_arm64_jit_n5_count_span()` in
+  `src/video/vid_voodoo_render.c` to consume the shared ARM64 predicate decode
+  helper from `src/include/86box/vid_voodoo_regs.h`.
+- Removed the local duplicate ARM64 alpha lookup predicate helpers from the
+  render metrics path. The N5 dither-base pinned/fallback and true-fallback
+  shape counters now use the same decoded TMU fetch, alpha, lookup-liveness,
+  and dither predicates as the ARM64 generator.
+- Hardened TMU detail/LOD-frac coverage accounting in
+  `voodoo_validate_mode_accum()`: TMU0 RGB/alpha detail and LOD-frac counters
+  now count actual dual-TMU factor switch use, while TMU1 remains gated by the
+  TMU1 sub-clocal path that guards the interpreter switch.
+- No new coverage fields or log format changes were needed.
+- No x86 or x86-64 codegen files changed. No ARM64 emitted arithmetic changed.
+  Render pixel math and interpreter semantics were unchanged.
+- `git diff --check` passed.
+- `./scripts/build-and-sign.sh` passed with `BUILD + SIGN OK`.
+- VM validation hit the configured cap and passed:
+  `verify=51200000`, `spans=116660354`, `skipped=0`, `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=4814308`, `code_max=1868`.
+- The top coverage buckets include TMU0 LOD-frac proof, for example
+  `tmu0_rgb_lod_frac=4319892` and `tmu0_alpha_lod_frac=4319892`.
+- Shape `63` remains the only true fallback shape:
+  `dither_ptr_true_fallback_pixels=12037650`, with all candidate registers
+  live.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.

@@ -624,8 +624,8 @@ typedef struct voodoo_arm64_generator_predicates_t {
     int dest_afunc;
     int x20_lookup_live;
     int x21_lookup_live;
-    int dither;
-    int dither2x2;
+    int dither_enabled;
+    int dither2x2_enabled;
     int rgb_wmask;
     int dither_base_in_x26;
     int dither_ptr_fallback_candidate;
@@ -666,11 +666,11 @@ voodoo_arm64_generator_decode_predicates(unsigned int fbzMode, unsigned int fbzC
     pred.x21_lookup_live  = pred.alpha_blend &&
                             (voodoo_arm64_afunc_uses_aminuslookup(pred.dest_afunc) ||
                              voodoo_arm64_afunc_uses_aminuslookup(pred.src_afunc));
-    pred.dither           = fbzMode & FBZ_DITHER;
-    pred.dither2x2        = fbzMode & FBZ_DITHER_2x2;
-    pred.rgb_wmask        = fbzMode & FBZ_RGB_WMASK;
-    pred.dither_base_in_x26 = pred.dither && pred.rgb_wmask && !pred.alpha_blend;
-    pred.dither_ptr_fallback_candidate = pred.dither && pred.rgb_wmask && pred.alpha_blend;
+    pred.dither_enabled                 = fbzMode & FBZ_DITHER;
+    pred.dither2x2_enabled              = fbzMode & FBZ_DITHER_2x2;
+    pred.rgb_wmask                      = fbzMode & FBZ_RGB_WMASK;
+    pred.dither_base_in_x26             = pred.dither_enabled && pred.rgb_wmask && !pred.alpha_blend;
+    pred.dither_ptr_fallback_candidate = pred.dither_enabled && pred.rgb_wmask && pred.alpha_blend;
 
     return pred;
 }

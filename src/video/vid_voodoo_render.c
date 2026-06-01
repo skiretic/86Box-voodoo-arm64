@@ -213,66 +213,35 @@ typedef struct voodoo_texture_state_t {
 } voodoo_texture_state_t;
 
 #if (defined __aarch64__ || defined _M_ARM64)
-static inline int
-voodoo_arm64_jit_alpha_uses_alookup(int afunc)
-{
-    return afunc == AFUNC_ASRC_ALPHA || afunc == AFUNC_ADST_ALPHA || afunc == AFUNC_ASATURATE;
-}
-
-static inline int
-voodoo_arm64_jit_alpha_uses_aminuslookup(int afunc)
-{
-    return afunc == AFUNC_AOMSRC_ALPHA || afunc == AFUNC_AOMDST_ALPHA;
-}
-
 static inline void
 voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, int pixels)
 {
-    int dither_enabled;
-    int rgb_wmask;
-    int alpha_blend;
-    int dither_base_in_x26;
-    int dither_ptr_fallback;
+    voodoo_arm64_generator_predicates_t pred;
     int dither_base_pinned;
     int dither_ptr_true_fallback;
 
     if (!voodoo->arm64_jit_metrics_enabled || !voodoo->validate_enabled)
         return;
 
-    dither_enabled      = !!(params->fbzMode & FBZ_DITHER);
-    rgb_wmask           = !!(params->fbzMode & FBZ_RGB_WMASK);
-    alpha_blend         = !!(params->alphaMode & (1 << 4));
-    dither_base_in_x26  = dither_enabled && rgb_wmask && !alpha_blend;
-    dither_ptr_fallback = dither_enabled && rgb_wmask && alpha_blend;
+    pred = voodoo_arm64_generator_decode_predicates(params->fbzMode, params->fbzColorPath,
+                                                    params->alphaMode, params->fogMode,
+                                                    params->textureMode[0], voodoo->dual_tmus);
     dither_base_pinned  = 0;
-    dither_ptr_true_fallback = dither_ptr_fallback;
-    if (dither_ptr_fallback) {
-        int texture_enabled  = !!(params->fbzColorPath & FBZCP_TEXTURE_ENABLED);
-        int tmu0_local       = (params->textureMode[0] & TEXTUREMODE_LOCAL_MASK) == TEXTUREMODE_LOCAL;
-        int tmu0_passthrough = (params->textureMode[0] & TEXTUREMODE_MASK) == TEXTUREMODE_PASSTHROUGH;
-        int fetch_tmu0       = texture_enabled && (tmu0_local || !voodoo->dual_tmus || !tmu0_passthrough);
-        int fetch_tmu1       = texture_enabled && voodoo->dual_tmus && !tmu0_local;
-        int dual_tmu_combine = fetch_tmu0 && fetch_tmu1;
-        int src_alpha_afunc  = (params->alphaMode >> 8) & 0xf;
-        int dest_alpha_afunc = (params->alphaMode >> 12) & 0xf;
-        int need_x19         = (fetch_tmu0 && (params->textureMode[0] & 1)) ||
-                               (fetch_tmu1 && (params->textureMode[1] & 1));
-        int need_x20         = ((params->fogMode & FOG_ENABLE) && !(params->fogMode & FOG_CONSTANT)) ||
-                               (alpha_blend &&
-                                (voodoo_arm64_jit_alpha_uses_alookup(dest_alpha_afunc) ||
-                                 voodoo_arm64_jit_alpha_uses_alookup(src_alpha_afunc)));
-        int need_x21         = alpha_blend &&
-                               (voodoo_arm64_jit_alpha_uses_aminuslookup(dest_alpha_afunc) ||
-                                voodoo_arm64_jit_alpha_uses_aminuslookup(src_alpha_afunc));
-        int need_x22         = dual_tmu_combine &&
+    dither_ptr_true_fallback = pred.dither_ptr_fallback_candidate;
+    if (pred.dither_ptr_fallback_candidate) {
+        int need_x19         = (pred.fetch_tmu0 && (params->textureMode[0] & 1)) ||
+                               (pred.fetch_tmu1 && (params->textureMode[1] & 1));
+        int need_x20         = pred.x20_lookup_live;
+        int need_x21         = pred.x21_lookup_live;
+        int need_x22         = pred.dual_tmu_combine &&
                                (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tc_sub_clocal_1) ||
                                 (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
-        int need_x23         = dual_tmu_combine &&
+        int need_x23         = pred.dual_tmu_combine &&
                                (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tca_sub_clocal_1) ||
                                 (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
         int need_x25         = (voodoo->bilinear_enabled &&
-                               ((fetch_tmu0 && (params->textureMode[0] & 6)) ||
-                                (fetch_tmu1 && (params->textureMode[1] & 6))));
+                               ((pred.fetch_tmu0 && (params->textureMode[0] & 6)) ||
+                                (pred.fetch_tmu1 && (params->textureMode[1] & 6))));
 
         dither_base_pinned = !need_x22 || !need_x23 || !need_x25 ||
                              !need_x19 || !need_x21 || !need_x20;
@@ -292,27 +261,27 @@ voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, 
 
     voodoo->arm64_jit_n5_spans++;
     voodoo->arm64_jit_n5_pixels += (uint64_t) pixels;
-    if (dither_enabled) {
+    if (pred.dither_enabled) {
         voodoo->arm64_jit_n5_dither_spans++;
         voodoo->arm64_jit_n5_dither_pixels += (uint64_t) pixels;
     }
-    if (params->fbzMode & FBZ_DITHER_2x2) {
+    if (pred.dither2x2_enabled) {
         voodoo->arm64_jit_n5_dither2x2_spans++;
         voodoo->arm64_jit_n5_dither2x2_pixels += (uint64_t) pixels;
     }
-    if (rgb_wmask) {
+    if (pred.rgb_wmask) {
         voodoo->arm64_jit_n5_rgb_wmask_spans++;
         voodoo->arm64_jit_n5_rgb_wmask_pixels += (uint64_t) pixels;
     }
-    if (alpha_blend) {
+    if (pred.alpha_blend) {
         voodoo->arm64_jit_n5_alpha_blend_spans++;
         voodoo->arm64_jit_n5_alpha_blend_pixels += (uint64_t) pixels;
     }
-    if (dither_base_in_x26) {
+    if (pred.dither_base_in_x26) {
         voodoo->arm64_jit_n5_dither_base_x26_spans++;
         voodoo->arm64_jit_n5_dither_base_x26_pixels += (uint64_t) pixels;
     }
-    if (dither_ptr_fallback) {
+    if (pred.dither_ptr_fallback_candidate) {
         voodoo->arm64_jit_n5_dither_ptr_fallback_spans++;
         voodoo->arm64_jit_n5_dither_ptr_fallback_pixels += (uint64_t) pixels;
     }
@@ -875,6 +844,10 @@ voodoo_validate_mode_accum(voodoo_t *voodoo, const voodoo_params_t *params, uint
 {
     voodoo_validate_mode_bucket_t *bucket  = NULL;
     voodoo_validate_mode_bucket_t *replace = &voodoo->validate_mode_buckets[0];
+    const voodoo_arm64_generator_predicates_t pred =
+        voodoo_arm64_generator_decode_predicates(params->fbzMode, params->fbzColorPath,
+                                                 params->alphaMode, params->fogMode,
+                                                 params->textureMode[0], voodoo->dual_tmus);
     const int                      rgb_mselect[2] = {
         (params->textureMode[0] >> 14) & 7,
         (params->textureMode[1] >> 14) & 7
@@ -890,6 +863,14 @@ voodoo_validate_mode_accum(voodoo_t *voodoo, const voodoo_params_t *params, uint
     const int alpha_sub_clocal[2] = {
         !!(params->textureMode[0] & (1 << 22)),
         !!(params->textureMode[1] & (1 << 22))
+    };
+    const int rgb_factor_active[2] = {
+        pred.dual_tmu_combine,
+        pred.dual_tmu_combine && rgb_sub_clocal[1]
+    };
+    const int alpha_factor_active[2] = {
+        pred.dual_tmu_combine,
+        pred.dual_tmu_combine && alpha_sub_clocal[1]
     };
 
     for (int c = 0; c < VOODOO_VALIDATE_MODE_BUCKETS; c++) {
@@ -939,13 +920,13 @@ voodoo_validate_mode_accum(voodoo_t *voodoo, const voodoo_params_t *params, uint
     bucket->aux_mismatches += aux_mismatches;
     bucket->state_mismatches += state_mismatches;
     for (int tmu = 0; tmu < 2; tmu++) {
-        if (rgb_sub_clocal[tmu] && rgb_mselect[tmu] == TC_MSELECT_DETAIL)
+        if (rgb_factor_active[tmu] && rgb_mselect[tmu] == TC_MSELECT_DETAIL)
             bucket->tmu_rgb_detail_spans[tmu] += spans;
-        if (rgb_sub_clocal[tmu] && rgb_mselect[tmu] == TC_MSELECT_LOD_FRAC)
+        if (rgb_factor_active[tmu] && rgb_mselect[tmu] == TC_MSELECT_LOD_FRAC)
             bucket->tmu_rgb_lod_frac_spans[tmu] += spans;
-        if (alpha_sub_clocal[tmu] && alpha_mselect[tmu] == TCA_MSELECT_DETAIL)
+        if (alpha_factor_active[tmu] && alpha_mselect[tmu] == TCA_MSELECT_DETAIL)
             bucket->tmu_alpha_detail_spans[tmu] += spans;
-        if (alpha_sub_clocal[tmu] && alpha_mselect[tmu] == TCA_MSELECT_LOD_FRAC)
+        if (alpha_factor_active[tmu] && alpha_mselect[tmu] == TCA_MSELECT_LOD_FRAC)
             bucket->tmu_alpha_lod_frac_spans[tmu] += spans;
     }
     if (fb_max_dr > bucket->fb_max_dr)
