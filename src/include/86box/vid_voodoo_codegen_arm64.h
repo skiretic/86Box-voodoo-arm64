@@ -4323,31 +4323,21 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
         if (need_blended_alpha_write) {
             /* Alpha blend for alpha channel:
-             * dest_aafunc and src_aafunc compute the final alpha.
-             * x86-64 ref: lines 3034-3057
-             * w4 = 0, accumulate dest_aa and src_aa contributions. */
-            addlong(ARM64_MOV_ZERO(4));  /* w4 = 0 (accumulator for blended alpha) */
-
-            if (dest_aafunc == 4) {
-                /* dest_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
-                 * destination alpha passes through to the blended output alpha.
-                 * w5 holds dst_alpha * 2 (doubled for table indexing), so
-                 * (w5 << 7) >> 8 = dst_alpha exactly. Matches x86-64 lines 3037-3042. */
-                addlong(ARM64_LSL_IMM(6, 5, 7));   /* w6 = (dst_alpha*2) << 7; >>8 later gives correct alpha */
-                addlong(ARM64_ADD_REG(4, 4, 6));
+             * Interpreter semantics:
+             *   (((dest_aafunc == AONE) ? dest_a * 256 : 0) +
+             *    ((src_aafunc == AONE) ? src_a * 256 : 0)) >> 8
+             * w12 and w5 are doubled for RGB blend table indices, so direct
+             * forms only need a final divide by two. */
+            if (dest_aafunc == AFUNC_AONE && src_aafunc == AFUNC_AONE) {
+                addlong(ARM64_ADD_REG(12, 12, 5));
+                addlong(ARM64_LSR_IMM(12, 12, 1));
+            } else if (dest_aafunc == AFUNC_AONE) {
+                addlong(ARM64_LSR_IMM(12, 5, 1));
+            } else if (src_aafunc == AFUNC_AONE) {
+                addlong(ARM64_LSR_IMM(12, 12, 1));
+            } else {
+                addlong(ARM64_MOV_ZERO(12));
             }
-
-            if (src_aafunc == 4) {
-                /* src_aafunc == AFUNC_AONE (4): factor is 1.0, so the full
-                 * source alpha passes through. w12 = src_alpha * 2, so (w12 << 7) >> 8 = src_alpha exactly. */
-                addlong(ARM64_LSL_IMM(6, 12, 7));  /* w6 = (src_alpha*2) << 7; >>8 later gives correct alpha */
-                addlong(ARM64_ADD_REG(4, 4, 6));
-            }
-
-            /* LSR w4, w4, #8 */
-            addlong(ARM64_LSR_IMM(4, 4, 8));
-            /* w12 = final blended alpha */
-            addlong(ARM64_MOV_REG(12, 4));
         }
     }
 

@@ -1119,3 +1119,62 @@ Notes:
 - Do not call Rank 7c optimization closed. The direct alpha-out forms still
   need a separate implementation and validation slice.
 - Rank 7 remains partial.
+
+## Rank 7c Alpha-Out Direct Forms
+
+Status: accepted as a narrow ARM64-local optimization after the aux
+destination-alpha `UXTB` blocker fix.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Replaced the generic alpha-out accumulator sequence for
+  `need_blended_alpha_write` with direct forms:
+  - neither `src_aafunc` nor `dest_aafunc` is `AFUNC_AONE`: `w12 = 0`
+  - destination only: `w12 = dest_a`
+  - source only: `w12 = src_a`
+  - both: `w12 = src_a + dest_a`
+- The implementation uses the existing doubled RGB blend factor registers:
+  `w12 = src_a * 2` and, when needed, `w5 = dest_a * 2`, then divides by two.
+
+Interpreter equivalence:
+
+- Matches the interpreter expression:
+  `(((dest_aafunc == 4) ? dest_a * 256 : 0) + ((src_aafunc == 4) ? src_a * 256 : 0)) >> 8`.
+- The both-`AONE` form intentionally does not clamp after adding two `uint8_t`
+  alpha inputs, matching the interpreter.
+
+Validation:
+
+```text
+Voodoo validate (type=4 verify=1): spans=7545427 jit=7545427 interp=0 verify=7545427 skipped=0 mismatch_spans=0 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=0 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=82430 scan_hits=124404 misses=20 compiles=20 rejects=0 code_bytes=23656 code_max=1768
+```
+
+Expanded Rank 7c target coverage:
+
+```text
+alphaMode=00001110 spans=383280 fb=0 aux=0 state=0
+alphaMode=00401110 spans=383280 fb=0 aux=0 state=0
+alphaMode=00041110 spans=383280 fb=0 aux=0 state=0
+alphaMode=00441110 spans=383280 fb=0 aux=0 state=0
+```
+
+Code-size delta from the blocker-fix baseline:
+
+```text
+code_bytes 23788 -> 23656 (-132)
+code_max   1768  -> 1768  (+0)
+```
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
+
+Risks:
+
+- Relies on `w12` and `w5` still being doubled before alpha-out.
+- Relies on the prior `UXTB w5, w5` fix for aux destination alpha.
+- Any future alpha-blend register reuse must preserve `w12`/`w5` through the
+  alpha-out block.
