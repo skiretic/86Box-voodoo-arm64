@@ -1152,3 +1152,62 @@ state_mismatches=0
   `compiles=9510`, `rejects=0`, `code_bytes=12062128`, `code_max=1868`.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-05-31: N5 alpha+dither dither-base x21/x20 candidates launched
+
+- Extended the alpha+dither dither-base pinned-register candidate list in
+  `src/include/86box/vid_voodoo_codegen_arm64.h`: after `x22`, `x23`, `x25`,
+  and `x19`, the generator now tries `x21` then `x20` when their original
+  lookup roles are not live.
+- Preserved `x20` for non-constant fog or alpha `alookup`, and preserved `x21`
+  for `aminuslookup`; the dither base is loaded there only when the matching
+  `need_x20` or `need_x21` predicate is false before candidate selection.
+- Updated callee-saved need bits and pointer loads so `x20`/`x21` receive
+  `dither_rb` or `dither_rb2x2` only when selected as the dither-base register.
+- Updated `src/video/vid_voodoo_render.c` N5 metrics so pinned-base and true
+  fallback predicates match the codegen candidate list, including the existing
+  true-fallback shape counters.
+- Preserved the metric-only true-fallback shape counter work already present in
+  `src/include/86box/vid_voodoo_common.h`, `src/video/vid_voodoo_render.c`, and
+  `src/video/vid_voodoo.c`.
+- `git diff --check` passed before build/sign.
+- `./scripts/build-and-sign.sh` passed; linker emitted the existing macOS
+  deployment-target dylib warnings and finished with `BUILD + SIGN OK`.
+- Launched short VM validation with metrics:
+  `./scripts/launch-voodoo-validate-vm.sh --limit 10240000 --log-limit 8 --metrics 1`.
+- Launch result: PID `29234`, `VOODOO_VALIDATE=verify`,
+  `VOODOO_VALIDATE_LIMIT=10240000`, `VOODOO_VALIDATE_LOG_LIMIT=8`,
+  `VOODOO_ARM64_JIT_METRICS=1`.
+- Per workflow, no log polling or validation-result inspection was done after
+  launch.
+
+### 2026-05-31: N5 alpha+dither x21/x20 validation result
+
+- Short VM validation passed after the `x21`/`x20` candidate slice:
+  `verify=10240000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`.
+- Short-run N5 metric split:
+  `dither_ptr_fallback_pixels=301723361`,
+  `dither_base_pinned_pixels=289821309`,
+  `dither_ptr_true_fallback_pixels=11902052`.
+- Compared with the pre-`x21`/`x20` short run
+  `dither_ptr_true_fallback_pixels=242303696`, the new candidates removed
+  about 95.1% of the remaining true fallback in that workload.
+- The only remaining short-run true fallback shape was shape `63`:
+  `need_x19=1`, `need_x20=1`, `need_x21=1`, `need_x22=1`,
+  `need_x23=1`, `need_x25=1`.
+- Longer VM validation passed cleanly before the configured cap:
+  `verify=215440463`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`.
+- Longer-run N5 metric split:
+  `dither_ptr_fallback_pixels=4171342558`,
+  `dither_base_pinned_pixels=4147282436`,
+  `dither_ptr_true_fallback_pixels=24060122`.
+- In the longer run, true fallback is now about 0.577% of alpha+dither
+  fallback pixels, and the only remaining true fallback shape is again shape
+  `63` with all candidate registers live.
+- Result: `x21`/`x20` candidate pinning is accepted. Remaining fallback is no
+  longer a small spare-register slice; it requires broad register/frame
+  redesign or should stay as the per-pixel fallback.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

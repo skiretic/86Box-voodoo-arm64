@@ -213,6 +213,18 @@ typedef struct voodoo_texture_state_t {
 } voodoo_texture_state_t;
 
 #if (defined __aarch64__ || defined _M_ARM64)
+static inline int
+voodoo_arm64_jit_alpha_uses_alookup(int afunc)
+{
+    return afunc == AFUNC_ASRC_ALPHA || afunc == AFUNC_ADST_ALPHA || afunc == AFUNC_ASATURATE;
+}
+
+static inline int
+voodoo_arm64_jit_alpha_uses_aminuslookup(int afunc)
+{
+    return afunc == AFUNC_AOMSRC_ALPHA || afunc == AFUNC_AOMDST_ALPHA;
+}
+
 static inline void
 voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, int pixels)
 {
@@ -241,8 +253,17 @@ voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, 
         int fetch_tmu0       = texture_enabled && (tmu0_local || !voodoo->dual_tmus || !tmu0_passthrough);
         int fetch_tmu1       = texture_enabled && voodoo->dual_tmus && !tmu0_local;
         int dual_tmu_combine = fetch_tmu0 && fetch_tmu1;
+        int src_alpha_afunc  = (params->alphaMode >> 8) & 0xf;
+        int dest_alpha_afunc = (params->alphaMode >> 12) & 0xf;
         int need_x19         = (fetch_tmu0 && (params->textureMode[0] & 1)) ||
                                (fetch_tmu1 && (params->textureMode[1] & 1));
+        int need_x20         = ((params->fogMode & FOG_ENABLE) && !(params->fogMode & FOG_CONSTANT)) ||
+                               (alpha_blend &&
+                                (voodoo_arm64_jit_alpha_uses_alookup(dest_alpha_afunc) ||
+                                 voodoo_arm64_jit_alpha_uses_alookup(src_alpha_afunc)));
+        int need_x21         = alpha_blend &&
+                               (voodoo_arm64_jit_alpha_uses_aminuslookup(dest_alpha_afunc) ||
+                                voodoo_arm64_jit_alpha_uses_aminuslookup(src_alpha_afunc));
         int need_x22         = dual_tmu_combine &&
                                (((params->textureMode[1] & TEXTUREMODE_TRILINEAR) && tc_sub_clocal_1) ||
                                 (params->textureMode[0] & TEXTUREMODE_TRILINEAR));
@@ -253,8 +274,20 @@ voodoo_arm64_jit_n5_count_span(voodoo_t *voodoo, const voodoo_params_t *params, 
                                ((fetch_tmu0 && (params->textureMode[0] & 6)) ||
                                 (fetch_tmu1 && (params->textureMode[1] & 6))));
 
-        dither_base_pinned = !need_x22 || !need_x23 || !need_x25 || !need_x19;
+        dither_base_pinned = !need_x22 || !need_x23 || !need_x25 ||
+                             !need_x19 || !need_x21 || !need_x20;
         dither_ptr_true_fallback = !dither_base_pinned;
+        if (dither_ptr_true_fallback) {
+            int shape = (need_x19 ? 1 : 0) |
+                        (need_x20 ? 2 : 0) |
+                        (need_x21 ? 4 : 0) |
+                        (need_x22 ? 8 : 0) |
+                        (need_x23 ? 16 : 0) |
+                        (need_x25 ? 32 : 0);
+
+            voodoo->arm64_jit_n5_dither_true_fallback_shape_spans[shape]++;
+            voodoo->arm64_jit_n5_dither_true_fallback_shape_pixels[shape] += (uint64_t) pixels;
+        }
     }
 
     voodoo->arm64_jit_n5_spans++;

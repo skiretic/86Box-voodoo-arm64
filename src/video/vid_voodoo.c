@@ -1796,6 +1796,21 @@ voodoo_card_close(voodoo_t *voodoo)
               voodoo->arm64_jit_n5_s_clamp_high_pixels[1],
               voodoo->arm64_jit_n5_t_edge_pixels[1],
               voodoo->arm64_jit_n5_st_edge_pixels[1]);
+        for (int c = 0; c < 64; c++) {
+            if (!voodoo->arm64_jit_n5_dither_true_fallback_shape_spans[c])
+                continue;
+            pclog("Voodoo ARM64 JIT true fallback shape[%d]: spans=%" PRIu64 " pixels=%" PRIu64
+                  " need_x19=%d need_x20=%d need_x21=%d need_x22=%d need_x23=%d need_x25=%d\n",
+                  c,
+                  voodoo->arm64_jit_n5_dither_true_fallback_shape_spans[c],
+                  voodoo->arm64_jit_n5_dither_true_fallback_shape_pixels[c],
+                  !!(c & 1),
+                  !!(c & 2),
+                  !!(c & 4),
+                  !!(c & 8),
+                  !!(c & 16),
+                  !!(c & 32));
+        }
     }
 #endif
 
