@@ -4122,19 +4122,30 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
         int packed_alpha_add = (src_afunc == AFUNC_AONE && dest_afunc == AFUNC_AONE);
         int need_blended_alpha_write =
             ((params->fbzMode & (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE)) == (FBZ_DEPTH_WMASK | FBZ_ALPHA_ENABLE));
+        int rgb_blend_needs_dst_alpha =
+            dest_afunc == AFUNC_ADST_ALPHA ||
+            dest_afunc == AFUNC_AOMDST_ALPHA ||
+            src_afunc == AFUNC_ADST_ALPHA ||
+            src_afunc == AFUNC_AOMDST_ALPHA ||
+            src_afunc == AFUNC_ASATURATE;
+        int alpha_out_needs_dst_alpha =
+            need_blended_alpha_write && dest_aafunc == AFUNC_AONE;
+        int need_dst_alpha = rgb_blend_needs_dst_alpha || alpha_out_needs_dst_alpha;
 
         /* Load dest alpha from aux buffer if alpha-buffer enabled */
-        if (params->fbzMode & FBZ_ALPHA_ENABLE) {
-            /* Load x coordinate for aux buffer (tiled or linear) */
-            if (params->aux_tiled)
-                addlong(ARM64_LDR_W(5, 0, STATE_x_tiled));
-            else
-                addlong(ARM64_MOV_REG(5, 28));  /* cached STATE_x */
-            /* LDRH w5, [x9, x5, LSL #1] -- load 16-bit aux value */
-            addlong(ARM64_LDRH_REG_LSL1(5, 9, 5));
-        } else {
-            /* No alpha buffer: dest_alpha = 0xFF */
-            addlong(ARM64_MOVZ_W(5, 0xFF));
+        if (need_dst_alpha) {
+            if (params->fbzMode & FBZ_ALPHA_ENABLE) {
+                /* Load x coordinate for aux buffer (tiled or linear) */
+                if (params->aux_tiled)
+                    addlong(ARM64_LDR_W(5, 0, STATE_x_tiled));
+                else
+                    addlong(ARM64_MOV_REG(5, 28));  /* cached STATE_x */
+                /* LDRH w5, [x9, x5, LSL #1] -- load 16-bit aux value */
+                addlong(ARM64_LDRH_REG_LSL1(5, 9, 5));
+            } else {
+                /* No alpha buffer: dest_alpha = 0xFF */
+                addlong(ARM64_MOVZ_W(5, 0xFF));
+            }
         }
 
         /* Load dest RGB from framebuffer */
@@ -4146,7 +4157,8 @@ voodoo_generate(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *params, 
 
         /* w12 *= 2, w5 *= 2 -- for table indexing (each entry is 16 bytes) */
         addlong(ARM64_ADD_REG(12, 12, 12));  /* w12 = src_alpha * 2 */
-        addlong(ARM64_ADD_REG(5, 5, 5));     /* w5 = dst_alpha * 2 */
+        if (need_dst_alpha)
+            addlong(ARM64_ADD_REG(5, 5, 5)); /* w5 = dst_alpha * 2 */
 
         /* Load 16-bit RGB565 pixel from fb_mem */
         /* LDRH w6, [x8, x4, LSL #1] */

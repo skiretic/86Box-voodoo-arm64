@@ -419,7 +419,8 @@ set_aux_alpha_write(AuxAlphaMode mode)
 }
 
 static void
-draw_alpha_case(FxI32 factor, const char *name, AuxAlphaMode aux_alpha_mode)
+draw_alpha_case_full(FxI32 factor, FxI32 src_alpha_factor, FxI32 dst_alpha_factor,
+                     const char *name, AuxAlphaMode aux_alpha_mode)
 {
     GrVertex v[3];
 
@@ -429,7 +430,7 @@ draw_alpha_case(FxI32 factor, const char *name, AuxAlphaMode aux_alpha_mode)
     out_text("\r\n");
     set_alpha_pair_state();
     set_aux_alpha_write(aux_alpha_mode);
-    grAlphaBlendFunction(factor, factor, GR_BLEND_ONE, GR_BLEND_ZERO);
+    grAlphaBlendFunction(factor, factor, src_alpha_factor, dst_alpha_factor);
 
     for (int frame = 0; frame < 80; frame++) {
         grBufferClear(0x00202020, 0, 0);
@@ -439,6 +440,12 @@ draw_alpha_case(FxI32 factor, const char *name, AuxAlphaMode aux_alpha_mode)
         }
         grBufferSwap(0);
     }
+}
+
+static void
+draw_alpha_case(FxI32 factor, const char *name, AuxAlphaMode aux_alpha_mode)
+{
+    draw_alpha_case_full(factor, GR_BLEND_ONE, GR_BLEND_ZERO, name, aux_alpha_mode);
 }
 
 static void
@@ -544,6 +551,8 @@ app_main(void)
     draw_alpha_case(GR_BLEND_ONE_MINUS_DST_ALPHA, "ONE_MINUS_DST_ALPHA/ONE_MINUS_DST_ALPHA", AUX_ALPHA_WBUFFER_COLOR_ALPHA);
     draw_alpha_case(GR_BLEND_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_Z_SRC_ALPHA/SRC_ALPHA", AUX_ALPHA_ZBUFFER_COLOR_ALPHA);
     draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_Z_ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_ZBUFFER_COLOR_ALPHA);
+    draw_alpha_case_full(GR_BLEND_SRC_ALPHA, GR_BLEND_ZERO, GR_BLEND_ONE,
+                         "AUX_ALPHA_ENABLE_ATTEMPT_NODEPTH_SRC_ALPHA/DST_ALPHA_OUT", AUX_ALPHA_NODEPTH_COLOR_ALPHA);
     draw_alpha_case(GR_BLEND_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_NODEPTH_SRC_ALPHA/SRC_ALPHA", AUX_ALPHA_NODEPTH_COLOR_ALPHA);
     draw_alpha_case(GR_BLEND_ONE_MINUS_SRC_ALPHA, "AUX_ALPHA_ENABLE_ATTEMPT_NODEPTH_ONE_MINUS_SRC_ALPHA/ONE_MINUS_SRC_ALPHA", AUX_ALPHA_NODEPTH_COLOR_ALPHA);
     draw_tmu_factor_case(GR_COMBINE_FACTOR_DETAIL_FACTOR, "TMU_DETAIL");

@@ -77,13 +77,11 @@ Status terms:
 
 Next code work should not start from the raw rank table. Start from this queue:
 
-1. Rank 7b audit-only: identify whether `w5` destination alpha load/double can
-   be skipped in buckets where RGB factors and alpha-out do not consume it.
-2. Rank 7c audit-only: direct alpha-out forms for alpha-buffer-write buckets
+1. Rank 7c audit-only: direct alpha-out forms for alpha-buffer-write buckets
    where one/both/neither `src_aafunc` / `dest_aafunc` are `AONE`.
-3. Rank 11 audit-only: prove whether `v13` color-before-fog and related
+2. Rank 11 audit-only: prove whether `v13` color-before-fog and related
    save/restore work can be gated by `dest_afunc == AFUNC_ACOLORBEFOREFOG`.
-4. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
+3. Rank 10 stays deferred until a perf run shows dither true-fallback dominates.
 
 Do not mark any future rank closed unless all sub-slices in the candidate are
 implemented, rejected with evidence, or explicitly deferred in this ledger.
@@ -955,3 +953,73 @@ Notes:
   `alpha_en=0`, preserved when `depth_w=1 alpha_en=1`.
 - This does not close all Rank 7 opportunities. Remaining Rank 7 work still
   needs explicit sub-slice names and coverage requirements.
+
+## Rank 7b Destination Alpha Prep Guard
+
+Status: accepted as a Rank 7 partial slice. This covers only the destination
+alpha load/double guard, not the full Rank 7 candidate family.
+
+Audit result:
+
+- `w5` destination alpha is needed by RGB blend only when `dest_afunc` or
+  `src_afunc` consumes destination alpha:
+  - `AFUNC_ADST_ALPHA`
+  - `AFUNC_AOMDST_ALPHA`
+  - `AFUNC_ASATURATE` on the source side
+- `w5` destination alpha is needed by alpha-out only when the alpha buffer is
+  writable and `dest_aafunc == AFUNC_AONE`.
+- `FBZ_ALPHA_ENABLE` alone is not enough reason to load old alpha; if neither
+  RGB blend nor alpha-out consumes it, the load and double are dead.
+
+Implemented in `src/include/86box/vid_voodoo_codegen_arm64.h`:
+
+- Added `need_dst_alpha` inside the ARM64 alpha-blend block.
+- Guarded the aux/default destination-alpha setup.
+- Guarded `w5 = dst_alpha * 2`.
+- Kept `w12 = src_alpha * 2` unconditional.
+
+Implemented in `tools/voodoo_alpha_probe/`:
+
+- Added a `NODEPTH_COLOR_ALPHA` alpha-out case with `src_aafunc=0` and
+  `dest_aafunc=4`.
+- Rebuilt `alphaprb.iso` and copied the updated image to the Desktop for the
+  guest run.
+
+Validation:
+
+```text
+Voodoo validate (type=4 verify=1): spans=7162147 jit=7162147 interp=0 verify=7162147 skipped=0 mismatch_spans=0 fb_mismatches=0 fb_within_tol=0 fb_over_tol=0 fb_zero_nonzero=0 fb_tol=5 fb_max_d565=(0,0,0) aux_mismatches=0 state_mismatches=0
+Voodoo ARM64 JIT metrics (type=4): mru_hits=81471 scan_hits=124404 misses=19 compiles=19 rejects=0 code_bytes=22652 code_max=1768
+```
+
+Rank 7b target coverage:
+
+```text
+alpha_blend=1
+depth_w=1
+alpha_en=1
+alphaMode=00401110
+src_afunc=1
+dest_afunc=1
+spans=383280
+fb=0
+aux=0
+state=0
+```
+
+Existing RGB destination-alpha consumer coverage remained clean:
+
+```text
+src_afunc=3 dest_afunc=3 spans=383280 fb=0 aux=0 state=0
+src_afunc=7 dest_afunc=7 spans=383280 fb=0 aux=0 state=0
+```
+
+Known guest noise appeared and was ignored by itself:
+
+```text
+[0147:0000B9BD] Illegal instruction 00008B55 (FF)
+```
+
+Notes:
+
+- Rank 7 remains partial; Rank 7c is still open.
