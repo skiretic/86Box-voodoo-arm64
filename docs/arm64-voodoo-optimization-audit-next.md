@@ -1358,3 +1358,39 @@ state_mismatches=0
   reduction with clean framebuffer, aux, state, and reject gates.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-06-01: B7 bilinear shift-narrow pack cleanup
+
+- Optimized the ARM64 bilinear weighted-sum pack in `codegen_texture_fetch()`
+  in `src/include/86box/vid_voodoo_codegen_arm64.h`.
+- Scope was limited to the vector pack after bilinear weights are loaded and
+  the two weighted texel rows are summed.
+- Previous emitted sequence normalized then packed with
+  `USHR v0.4H,v0.4H,#8` followed by `SQXTUN v0.8B,v0.8H`.
+- New sequence emits `SHRN v0.8B,v0.8H,#8`, combining the logical right shift
+  and byte narrow in one instruction.
+- This preserves exact math for the bilinear path: the weighted channel sum is
+  bounded by `255 * 256 = 0xff00`, so `sum >> 8` is already in unsigned byte
+  range and does not rely on saturation.
+- Local instruction map changed by one emitted instruction per bilinear fetch
+  site. No bilinear weights, sample addresses, edge handling, state stores, or
+  blend/fog/alpha paths changed. No x86 or x86-64 codegen files changed.
+- Worker validation passed: `git diff --check` and `./scripts/build-and-sign.sh`
+  both succeeded; build/sign ended with `BUILD + SIGN OK`.
+- Short VM validation passed:
+  `verify=10240000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=41292`, `code_max=1800`.
+- Compared with the B4 accepted short-run result `code_bytes=41548`,
+  `code_max=1812`, B7 reduced `code_bytes` by 256 and `code_max` by 12.
+- Extended near-unbounded-cap VM validation passed:
+  `verify=475175718`, `spans=475175718`, `skipped=0`, `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=9772780`, `code_max=1800`.
+- Long-run bilinear coverage was substantial:
+  `tmu0_bilinear_pixels=3363731886` and
+  `tmu1_bilinear_pixels=5195481086`.
+- Result: B7 is accepted. It is a metric-backed ARM64-local generated-code
+  reduction with clean framebuffer, aux, state, and reject gates.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.

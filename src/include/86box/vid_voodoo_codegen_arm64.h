@@ -366,6 +366,7 @@ arm64_codegen_check_emit_bounds(int block_pos, int emit_size)
 #define SHIFT_IMM_V2S(shift)      (((shift) | 0x20) << 16)
 #define SHIFT_IMM_V2D(shift)      (((shift) | 0x40) << 16)
 
+#define SHRN_SHIFT_IMM_V8H(shift) ((shift) << 16)
 #define SHRN_SHIFT_IMM_V4S(shift) (((shift) | 0x10) << 16)
 
 #define DUP_ELEMENT(element) ((element) << 19)
@@ -1090,7 +1091,8 @@ arm64_codegen_cold_queue_add_two_branches(arm64_codegen_cold_queue_t *queue,
 #define ARM64_SHL_V4S(d, n, imm)  (0x4F005400 | SHIFT_IMM_V2S(imm) | Rn(n) | Rd(d))
 
 /* Narrowing shift right */
-#define ARM64_SHRN_4H(d, n, imm)  (0x0F008400 | SHRN_SHIFT_IMM_V4S(16 - (imm)) | Rn(n) | Rd(d))
+#define ARM64_SHRN_8B_8H(d, n, imm) (0x0F008400 | SHRN_SHIFT_IMM_V8H(16 - (imm)) | Rn(n) | Rd(d))
+#define ARM64_SHRN_4H(d, n, imm)    (0x0F008400 | SHRN_SHIFT_IMM_V4S(16 - (imm)) | Rn(n) | Rd(d))
 
 /* Rounding shift right */
 #define ARM64_URSHR_V4H(d, n, imm) (0x2F002400 | SHIFT_IMM_V4H(16 - (imm)) | Rn(n) | Rd(d))
@@ -2100,11 +2102,8 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             addlong(ARM64_EXT_16B(1, 0, 0, 8));
             addlong(ARM64_ADD_V4H(0, 0, 1));
 
-            /* USHR v0.4H, v0.4H, #8  -- normalize (divide by 256) */
-            addlong(ARM64_USHR_V4H(0, 0, 8));
-
-            /* SQXTUN v0.8B, v0.8H -- pack to unsigned bytes with saturation */
-            addlong(ARM64_SQXTUN_8B_8H(0, 0));
+            /* SHRN v0.8B, v0.8H, #8 -- normalize (divide by 256) and pack */
+            addlong(ARM64_SHRN_8B_8H(0, 0, 8));
 
             /* Move packed texel to GPR: FMOV w4, s0 */
             addlong(ARM64_FMOV_W_S(4, 0));
