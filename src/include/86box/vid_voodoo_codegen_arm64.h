@@ -1916,39 +1916,24 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             addlong(ARM64_ASR_REG(5, 5, 16));
 
             /* Extract sub-texel fractions for bilinear weight lookup.
-             * frac_s = S & 0xF, frac_t = (T & 0xF) << 4
-             * bilinear_index = (frac_t << 4) | frac_s
+             * bilinear_index = ((T & 0xF) << 4) | (S & 0xF)
              * Then shift S and T to get integer texel coordinates.
+             * Keep index unscaled in w10; weight load uses ADD LSL #5.
              */
-            /* MOV w10, w4 */
-            addlong(ARM64_MOV_REG(10, 4));
-            /* MOV w11, w5 */
-            addlong(ARM64_MOV_REG(11, 5));
-            /* AND w10, w10, #0xF  (frac_s) */
-            addlong(ARM64_AND_MASK(10, 10, 4));
-            /* LSL w11, w11, #4 */
-            addlong(ARM64_LSL_IMM(11, 11, 4));
+            /* AND w10, w4, #0xF  (frac_s) */
+            addlong(ARM64_AND_MASK(10, 4, 4));
+            /* BFI w10, w5, #4, #4  (insert frac_t into bits [7:4]) */
+            addlong(ARM64_BFI(10, 5, 4, 4));
             /* ASR w4, w4, #4  (integer S) */
             addlong(ARM64_ASR_IMM(4, 4, 4));
-            /* AND w11, w11, #0xF0  (frac_t << 4) */
-            addlong(ARM64_AND_BITMASK(11, 11, 0, 28, 3));  /* N=0 immr=28 imms=3 -> mask 0xF0 */
             /* ASR w5, w5, #4  (integer T) */
             addlong(ARM64_ASR_IMM(5, 5, 4));
-            /* ORR w10, w10, w11  (bilinear_index = frac_s | (frac_t << 4)) */
-            addlong(ARM64_ORR_REG(10, 10, 11));
 
             /* w6 = LOD (still cached, no reload needed) */
 
-            /* LSL w10, w10, #5  (bilinear_index * 32 = offset into bilinear_lookup) */
-            addlong(ARM64_LSL_IMM(10, 10, 5));
-
             /* x86-64: LEA RSI, [RSI+RCX*4]  -- advance params by lod*4 for mask arrays
              * ARM64: We compute mask array base explicitly, no -0x10 hack.
-             *
-             * Keep bilinear_shift in w17 (IP1 scratch) to avoid memory
-             * round-trip through STATE_ebp_store.
              */
-            addlong(ARM64_MOV_REG(17, 10));
 
             /* Load texture base pointer: tex[tmu][lod]
              * x86-64: MOV RBP, state->tex[RDI+RCX*8]
@@ -2012,8 +1997,6 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
             if (state->clamp_s[tmu]) {
                 /* Load tex_w_mask[tmu][lod] */
                 ARM64_EMIT_TEX_PARAM_LOD_LOAD(15, 15, 6, PARAMS_tex_w_mask_n(tmu));
-
-                /* bilinear_shift is in w17 */
 
                 /* Test if S is negative */
                 addlong(ARM64_CMP_IMM(4, 0));
@@ -2083,15 +2066,15 @@ codegen_texture_fetch(uint8_t *code_block, voodoo_t *voodoo, voodoo_params_t *pa
 
             /* Load bilinear weights from lookup table.
              * x25 = bilinear_lookup pointer (pinned)
-             * w17 = bilinear_index * 32 (kept in IP1)
+             * w10 = bilinear_index
              *
              * bilinear_lookup[idx*2+0] = {d0, d0, d0, d0, d1, d1, d1, d1}
              * bilinear_lookup[idx*2+1] = {d2, d2, d2, d2, d3, d3, d3, d3}
              *
              * Each entry is 16 bytes (128 bits). Total = 32 bytes per index pair.
              */
-            /* ADD x11, x25, x17 -- base of weight pair */
-            addlong(ARM64_ADD_REG_X(11, 25, 17));
+            /* ADD x11, x25, x10, LSL #5 -- base of weight pair */
+            addlong(ARM64_ADD_REG_X_LSL(11, 25, 10, 5));
 
             /* LDR q16, [x11, #0]  -- weights for row0: d0|d1 */
             addlong(ARM64_LDR_Q(16, 11, 0));

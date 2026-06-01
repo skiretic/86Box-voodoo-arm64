@@ -1288,3 +1288,40 @@ state_mismatches=0
   live.
 - Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
   appeared and was ignored.
+
+### 2026-06-01: B3 bilinear weight-index lookup cleanup
+
+- Optimized the ARM64 bilinear weight-index setup in
+  `codegen_texture_fetch()` in `src/include/86box/vid_voodoo_codegen_arm64.h`.
+- Scope was limited to the hot `frac_s`/`frac_t` to `bilinear_lookup` address
+  setup. Interpreter-visible `STATE_tex_s`, `STATE_tex_t`, `STATE_lod`, and
+  `STATE_lod_frac_n(tmu)` behavior was unchanged.
+- Previous emitted sequence copied S/T fractions into two scratch registers,
+  masked and shifted them, ORed the scaled bilinear index, shifted it by 5, and
+  copied it to `w17` before the lookup-base add.
+- New sequence keeps the unscaled bilinear index in `w10`: `AND w10,w4,#0xf`,
+  `BFI w10,w5,#4,#4`, then later `ADD x11,x25,x10,LSL #5`.
+- Local instruction map changed from 11 emitted instructions to 5 emitted
+  instructions for the bilinear weight-index/lookup-base setup.
+- No sampling-address math, bilinear weights, bilinear blend arithmetic, or
+  T-edge cold tails changed. No x86 or x86-64 codegen files changed.
+- Worker validation passed: `git diff --check` and `./scripts/build-and-sign.sh`
+  both succeeded; build/sign ended with `BUILD + SIGN OK`.
+- Short VM validation passed:
+  `verify=10240000`, `skipped=0`, `mismatch_spans=0`, `fb_mismatches=0`,
+  `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=41724`, `code_max=1820`.
+- Compared with the current committed comparable short-run baseline
+  `code_bytes=42116`, `code_max=1840`, B3 reduced `code_bytes` by 392 and
+  `code_max` by 20.
+- Extended near-unbounded-cap VM validation passed:
+  `verify=484850615`, `spans=484850615`, `skipped=0`, `mismatch_spans=0`,
+  `fb_mismatches=0`, `aux_mismatches=0`, `state_mismatches=0`, `rejects=0`,
+  `code_bytes=9777472`, `code_max=1816`.
+- Long-run bilinear coverage was substantial:
+  `tmu0_bilinear_pixels=3492218775` and
+  `tmu1_bilinear_pixels=5368473521`.
+- Result: B3 is accepted. It is a metric-backed ARM64-local generated-code
+  reduction with clean framebuffer, aux, state, and reject gates.
+- Known guest noise `[0147:0000B9BD] Illegal instruction 00008B55 (FF)`
+  appeared and was ignored.
