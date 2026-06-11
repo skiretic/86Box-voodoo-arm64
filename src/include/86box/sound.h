@@ -26,7 +26,6 @@ extern char sound_output_device[512]; /* selected audio output device name, empt
 
 #define FREQ_44100  44100
 #define FREQ_48000  48000
-#define FREQ_48558  48558
 #define FREQ_49716  49716
 #define FREQ_55930  55930
 #define FREQ_88200  88200
@@ -40,10 +39,6 @@ extern char sound_output_device[512]; /* selected audio output device name, empt
 
 #define YM2151_FREQ  FREQ_55930
 #define YM2151BUFLEN (YM2151_FREQ / 70)
-
-/* Unfortunately, 48558 / 6 = 8093, which is a prime number. */
-#define CQM_FREQ     FREQ_48558
-#define CQMBUFLEN    (CQM_FREQ / 6)
 
 #define CD_FREQ      FREQ_44100
 #define CD_BUFLEN    (CD_FREQ / 10)
@@ -67,7 +62,6 @@ extern int midi_buf_size;
 extern int sound_pos_global;
 extern int music_pos_global;
 extern int ym2151_pos_global;
-extern int cqm_pos_global;
 extern int wavetable_pos_global;
 
 extern int sound_card_current[SOUND_CARD_MAX];
@@ -83,10 +77,6 @@ extern void music_add_handler(void (*get_buffer)(int32_t *buffer,
 extern void ym2151_add_handler(void (*get_buffer)(int32_t *buffer,
                                                   uint16_t len, void *priv),
                                void *priv);
-
-extern void cqm_add_handler(void (*get_buffer)(int32_t *buffer,
-                                               uint16_t len, void *priv),
-                            void *priv);
 
 extern void wavetable_add_handler(void (*get_buffer)(int32_t *buffer,
                                                      uint16_t len, void *priv),
@@ -146,7 +136,6 @@ extern void        inital(void);
 extern void givealbuffer(const void *buf);
 extern void givealbuffer_music(const void *buf);
 extern void givealbuffer_ym2151(const void *buf);
-extern void givealbuffer_cqm(const void *buf);
 extern void givealbuffer_wt(const void *buf);
 extern void givealbuffer_cd(const void *buf);
 extern void givealbuffer_fdd(const void *buf, const uint32_t size);
@@ -217,6 +206,7 @@ extern const device_t sb_goldfinch_device;
 extern const device_t sb_32_pnp_device;
 extern const device_t sb_awe32_device;
 extern const device_t sb_awe32_pnp_device;
+extern const device_t sb_awe32_ide_pnp_device;
 extern const device_t sb_awe64_value_device;
 extern const device_t sb_awe64_device;
 extern const device_t sb_awe64_ide_device;
@@ -238,11 +228,16 @@ extern const device_t ess_688_device;
 extern const device_t ess_ess0100_pnp_device;
 extern const device_t ess_ess0968_pnp_688_device;
 extern const device_t ess_1688_device;
+extern const device_t ess_1688_compaq_device;
 extern const device_t ess_ess0102_pnp_device;
 extern const device_t ess_ess0968_pnp_device;
 extern const device_t ess_soundpiper_16_mca_device;
 extern const device_t ess_soundpiper_32_mca_device;
 extern const device_t ess_chipchat_16_mca_device;
+extern const device_t ess_1788_device;
+extern const device_t ess_1888_device;
+extern const device_t ess_1888_compaq_device;
+extern const device_t ess_1887_device;
 
 /* Ensoniq AudioPCI */
 extern const device_t es1370_device;

@@ -1,7 +1,7 @@
 msgid ""
 msgstr ""
-"PO-Revision-Date: 2026-05-30 16:09+0000\n"
-"Last-Translator: OBattler <oubattler@gmail.com>\n"
+"PO-Revision-Date: 2026-06-09 01:33+0000\n"
+"Last-Translator: nguyen <barnacl437@disroot.org>\n"
 "Language-Team: Vietnamese <https://weblate.86box.net/projects/86box/86box/vi/"
 ">\n"
 "Language: vi-VN\n"
@@ -454,6 +454,9 @@ msgstr "Đồ họa XGA"
 msgid "IBM PS/55 Display Adapter Graphics"
 msgstr "Đồ họa adaptor xuất hình IBM PS/55"
 
+msgid "Voodoo:"
+msgstr "Voodoo:"
+
 msgid "Keyboard:"
 msgstr "Bàn phím:"
 
@@ -691,6 +694,9 @@ msgstr "Kiểm tra BPB"
 msgid "CD-ROM drives"
 msgstr "Ổ đĩa CD-ROM"
 
+msgid "CD-ROM:"
+msgstr "CD-ROM:"
+
 msgid "MO drives"
 msgstr "Ổ đĩa MO"
 
@@ -841,11 +847,35 @@ msgstr "Cổng serial"
 msgid "Serial ports:"
 msgstr "Cổng serial:"
 
+msgid "COM1:"
+msgstr "COM1:"
+
+msgid "COM2:"
+msgstr "COM2:"
+
+msgid "COM3:"
+msgstr "COM3:"
+
+msgid "COM4:"
+msgstr "COM4:"
+
 msgid "Parallel ports"
 msgstr "Cổng parallel"
 
 msgid "Parallel ports:"
 msgstr "Cổng parallel:"
+
+msgid "LPT1:"
+msgstr "LPT1:"
+
+msgid "LPT2:"
+msgstr "LPT2:"
+
+msgid "LPT3:"
+msgstr "LPT3:"
+
+msgid "LPT4:"
+msgstr "LPT4:"
 
 msgid "Storage controllers"
 msgstr "Vi điều khiển bộ nhớ ổ cứng"
@@ -2277,7 +2307,7 @@ msgid "Control PC speaker"
 msgstr "Kiểm soát loa PC"
 
 msgid "Control MIDI volume"
-msgstr ""
+msgstr "Điều khiển âm lượng MIDI"
 
 msgid "Memory size"
 msgstr "Kích thước bộ nhớ"
@@ -2975,6 +3005,9 @@ msgstr "Tạm dừng/tiếp tục"
 msgid "Toggle mute"
 msgstr "Bật/tắt tiếng"
 
+msgid "Toggle on-screen display"
+msgstr "Bật/tắt thông tin trên màn hình"
+
 msgid "Text files"
 msgstr "Tập tin văn bản"
 
@@ -3134,6 +3167,9 @@ msgstr "Xuất ra file…"
 
 msgid "Export EDID"
 msgstr "Xuất ra file EDID"
+
+msgid "EDID file \"%s\" is invalid."
+msgstr "Tập tin EDID \"%s\" không hợp lệ."
 
 msgid "EDID file \"%s\" is too large."
 msgstr "Tệp EDID \"%s\" quá lớn."
@@ -3347,4 +3383,4 @@ msgid "938 (Traditional Chinese)"
 msgstr "938 (Trung phồn thể)"
 
 msgid "Sample rate:"
-msgstr ""
+msgstr "Tần số lấy mẫu:"

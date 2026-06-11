@@ -1,6 +1,6 @@
 msgid ""
 msgstr ""
-"PO-Revision-Date: 2026-06-06 01:43+0000\n"
+"PO-Revision-Date: 2026-06-10 23:25+0000\n"
 "Last-Translator: bozoscum <bozoscum@users.noreply.weblate.86box.net>\n"
 "Language-Team: Chinese (Traditional Han script) <https://weblate.86box.net/"
 "projects/86box/86box/zh_Hant/>\n"
@@ -454,6 +454,9 @@ msgstr "XGA 圖形"
 msgid "IBM PS/55 Display Adapter Graphics"
 msgstr "IBM PS/55 顯示介面卡圖形"
 
+msgid "Voodoo:"
+msgstr "Voodoo:"
+
 msgid "Keyboard:"
 msgstr "鍵盤:"
 
@@ -691,6 +694,9 @@ msgstr "檢查 BPB"
 msgid "CD-ROM drives"
 msgstr "光碟機"
 
+msgid "CD-ROM:"
+msgstr "光碟:"
+
 msgid "MO drives"
 msgstr "磁光碟機"
 
@@ -846,11 +852,35 @@ msgstr "序列埠"
 msgid "Serial ports:"
 msgstr "序列埠:"
 
+msgid "COM1:"
+msgstr "COM1:"
+
+msgid "COM2:"
+msgstr "COM2:"
+
+msgid "COM3:"
+msgstr "COM3:"
+
+msgid "COM4:"
+msgstr "COM4:"
+
 msgid "Parallel ports"
 msgstr "並列埠"
 
 msgid "Parallel ports:"
 msgstr "並列埠:"
+
+msgid "LPT1:"
+msgstr "LPT1:"
+
+msgid "LPT2:"
+msgstr "LPT2:"
+
+msgid "LPT3:"
+msgstr "LPT3:"
+
+msgid "LPT4:"
+msgstr "LPT4:"
 
 msgid "Storage controllers"
 msgstr "儲存控制器"
@@ -2968,10 +2998,10 @@ msgid "This key combo is already in use."
 msgstr "此組合鍵已在使用中。"
 
 msgid "Send Control+Alt+Del"
-msgstr "傳送 Control+Alt+Del"
+msgstr "傳送 Ctrl+Alt+Del"
 
 msgid "Send Control+Alt+Escape"
-msgstr "傳送 Control+Alt+Escape"
+msgstr "傳送 Ctrl+Alt+Esc"
 
 msgid "Toggle fullscreen"
 msgstr "切換全螢幕"
@@ -2987,6 +3017,9 @@ msgstr "切換暫停"
 
 msgid "Toggle mute"
 msgstr "切換靜音"
+
+msgid "Toggle on-screen display"
+msgstr "切換 OSD"
 
 msgid "Text files"
 msgstr "文字檔案"
@@ -3152,6 +3185,9 @@ msgstr "匯出…"
 
 msgid "Export EDID"
 msgstr "匯出 EDID"
+
+msgid "EDID file \"%s\" is invalid."
+msgstr "EDID 檔案 \"%s\" 無效。"
 
 msgid "EDID file \"%s\" is too large."
 msgstr "EDID 檔案 \"%s\" 太大。"
